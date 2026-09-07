@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 
 import { scaffoldEntry } from "./scaffoldRegistry.mjs";
 
-export const SCAFFOLD_COMPOSITION_VERSION = 1;
+export const SCAFFOLD_COMPOSITION_VERSION = 2;
 export const SCAFFOLD_COMPOSED_ROOT = "src/lib/scaffolds/composed";
 export const SCAFFOLD_APP_PATH = `${SCAFFOLD_COMPOSED_ROOT}/ScaffoldApp.jsx`;
 export const SCAFFOLD_PRIMITIVES_PATH = `${SCAFFOLD_COMPOSED_ROOT}/primitives.jsx`;
@@ -101,6 +101,53 @@ export function useCanvasState(initialObjects = []) {
   return { objects, setObjects, selectedId, select, selected: objects.find((object) => object.id === selectedId) || null, updateObject };
 }
 
+// ── routing ─────────────────────────────────────────────────────────────────
+// The composed shell owns the router (ScaffoldApp.jsx). react-router-dom is NOT installed in this
+// application; screens read their route through these primitives instead. A live Medium build was
+// blocked for its whole correction allowance because three screens imported Link/useParams/
+// useNavigate from react-router-dom and nothing here offered the equivalent.
+function normalizeRoutePath(value) {
+  const path = String(value || "/").split(/[?#]/)[0] || "/";
+  return path.length > 1 ? path.replace(/\\/+$/, "") : path;
+}
+/** Params for the actual path under a pattern such as "/projects/:projectId", or null when it does not match. */
+export function matchRouteParams(pattern, actual) {
+  const wanted = normalizeRoutePath(pattern).split("/").filter(Boolean);
+  const seen = normalizeRoutePath(actual).split("/").filter(Boolean);
+  if (wanted.length !== seen.length) return null;
+  const params = {};
+  for (let index = 0; index < wanted.length; index += 1) {
+    const part = wanted[index];
+    if (part.startsWith(":")) {
+      try { params[part.slice(1)] = decodeURIComponent(seen[index]); } catch { params[part.slice(1)] = seen[index]; }
+    } else if (part !== "*" && part !== seen[index]) return null;
+  }
+  return params;
+}
+export const ScaffoldRouteContext = React.createContext({
+  path: "/", pattern: null, params: {},
+  navigate: (target) => { globalThis.location?.assign?.(String(target)); },
+});
+/** The matched route: { path, pattern, params, navigate }. */
+export function useRoute() { return React.useContext(ScaffoldRouteContext); }
+/** Route parameters of the mounted screen, e.g. { projectId } for "/projects/:projectId". */
+export function useRouteParams() { return useRoute().params; }
+/** navigate(path, { replace }) — client-side, no reload; state held in memory survives. */
+export function useNavigate() { return useRoute().navigate; }
+/** An anchor that navigates client-side. Modified clicks and preventDefault keep browser behaviour. */
+export function RouteLink({ to, replace = false, children, onClick, ...rest }) {
+  const { navigate } = useRoute();
+  return <a href={to} {...rest} onClick={(event) => {
+    onClick?.(event);
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    navigate(to, { replace });
+  }}>{children}</a>;
+}
+// The names the wider React ecosystem reaches for, so a screen written against them still binds
+// to the composed router instead of a package that is not installed.
+export { useRouteParams as useParams, RouteLink as Link };
+
 export function AppShell({ navigation = null, children, className = "" }) {
   return <div data-scaffold="app_shell" className={className}>{navigation}{children}</div>;
 }
@@ -157,8 +204,8 @@ function scaffoldAppSource(graph) {
   const imports = screens.map((screen, index) => `import ${importName(screen, index)} from ${quote(`../../../${screen.module.replace(/^src\//, "").replace(/\.(?:jsx?|tsx?)$/, "")}.jsx`)};`);
   // The protected module lives at src/lib/scaffolds/composed, so ../../../screens/... is stable.
   const routes = screens.map((screen, index) => `  { path: ${quote(screen.routePath)}, name: ${quote(screen.routeName)}, screenId: ${quote(screen.screenId)}, Screen: ${importName(screen, index)} },`);
-  return `${banner("mounted route authority")}import React, { Suspense, useEffect, useState } from "react";
-import { AppShell, NavigationShell, ScaffoldErrorBoundary, ScaffoldLoadingBoundary } from "./primitives.jsx";
+  return `${banner("mounted route authority")}import React, { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { AppShell, NavigationShell, ScaffoldErrorBoundary, ScaffoldLoadingBoundary, ScaffoldRouteContext, matchRouteParams } from "./primitives.jsx";
 ${imports.join("\n")}
 
 export const SCAFFOLD_ROUTES = Object.freeze([
@@ -176,10 +223,11 @@ function routeMatches(pattern, actual) {
   return wanted.every((part, index) => part.startsWith(":") || part === "*" || part === seen[index]);
 }
 function currentPath() { return normalizePath(globalThis.location?.pathname || "/"); }
-function go(path, setPath) {
+function go(path, setPath, { replace = false } = {}) {
   const target = normalizePath(path);
   if (target === currentPath()) return;
-  globalThis.history?.pushState?.({}, "", target);
+  if (replace) globalThis.history?.replaceState?.({}, "", target);
+  else globalThis.history?.pushState?.({}, "", target);
   setPath(target);
 }
 
@@ -196,9 +244,14 @@ export default function ScaffoldApp() {
   useEffect(() => { const onPop = () => setPath(currentPath()); globalThis.addEventListener?.("popstate", onPop); return () => globalThis.removeEventListener?.("popstate", onPop); }, []);
   const route = SCAFFOLD_ROUTES.find((candidate) => routeMatches(candidate.path, path)) || SCAFFOLD_ROUTES[0];
   const Screen = route?.Screen;
+  const params = useMemo(() => matchRouteParams(route?.path || "/", path) || {}, [route, path]);
+  const navigate = useCallback((target, options) => go(target, setPath, options), []);
+  const routeValue = useMemo(() => ({ path, pattern: route?.path || null, params, navigate }), [path, route, params, navigate]);
   return <ScaffoldErrorBoundary><AppShell navigation={<ScaffoldNavigation path={path} setPath={setPath} />}>
     <Suspense fallback={<ScaffoldLoadingBoundary />}><main data-scaffold-screen={route?.screenId || "missing"} data-scaffold-route={route?.path || path}>
-      {Screen ? <Screen /> : <div role="alert">No mounted screen is available.</div>}
+      <ScaffoldRouteContext.Provider value={routeValue}>
+        {Screen ? <Screen /> : <div role="alert">No mounted screen is available.</div>}
+      </ScaffoldRouteContext.Provider>
     </main></Suspense>
   </AppShell></ScaffoldErrorBoundary>;
 }
@@ -344,6 +397,10 @@ export function scaffoldCompositionBrief(graph, plan = scaffoldCompositionPlan(g
     "The protected router already mounts every screen above. Implement visual/domain composition inside",
     "those existing screen slots and only the declared custom extension files. Do not write App.jsx,",
     "the composed scaffold root, a competing router, or a free-form replacement application shell.",
+    "ROUTING: react-router-dom is NOT installed and must not be imported. Read route parameters with",
+    "useRouteParams() (alias useParams), navigate with useNavigate() or <RouteLink to=\"/path\"> (alias Link),",
+    "all from ../../lib/scaffolds/composed/primitives.jsx; parameterised routes such as /projects/:projectId",
+    "are already mounted and their params arrive through useRouteParams().",
     "Select each custom-extension operation with a literal second-argument context such as",
     "{ operation: \"<operationId>\" }. The explicit legacy key operationId is also supported.",
     "At every custom-extension call site, pass the selected operation's declared inputKeys as explicit",
