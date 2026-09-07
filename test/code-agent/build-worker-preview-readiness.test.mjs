@@ -190,10 +190,17 @@ test("an expired local proof removes builder work even if a delayed timer has no
 test("active jobs keep node liveness while the independent readiness controller refreshes", async () => {
   const worker = await readFile(new URL("../../build-worker/index.mjs", import.meta.url), "utf8");
   const readiness = await readFile(new URL("../../build-worker/previewIsolationReadiness.mjs", import.meta.url), "utf8");
-  const jobHeartbeat = worker.slice(worker.indexOf("const heartbeat = setInterval"),
-    worker.indexOf("heartbeat.unref", worker.indexOf("const heartbeat = setInterval")));
-  assert.match(jobHeartbeat, /queue\.heartbeat\(job/);
-  assert.match(jobHeartbeat, /publishWorkerNode\(\)/,
+  // Lease renewal and node liveness are two independent mechanisms: a retrying lease heartbeat
+  // (so a transient transport blip cannot drop the job) and a plain interval that keeps publishing
+  // this node while that job runs. They were one setInterval until the lease heartbeat gained
+  // retries. This test used to slice the source between two literals and assert inside the slice —
+  // when the first literal stopped existing, indexOf returned -1 and the slice silently became
+  // meaningless rather than failing, so the assertions below anchor on each mechanism directly.
+  assert.match(worker, /renew:\s*\(\{\s*signal\s*\}\)\s*=>\s*queue\.heartbeat\(job/,
+    "the job lease must still be renewed against the queue");
+  const nodeHeartbeat = worker.match(/const nodeHeartbeat = setInterval\([\s\S]*?nodeHeartbeat\.unref/);
+  assert.ok(nodeHeartbeat, "the worker-node heartbeat interval must still exist");
+  assert.match(nodeHeartbeat[0], /publishWorkerNode\(\)/,
     "a long-running job must not let its worker-node heartbeat go stale");
   assert.doesNotMatch(readiness, /currentJob|current_job/,
     "readiness refresh must not be blocked by an active customer job");

@@ -75,7 +75,8 @@ export function toCodexLeadMessages(input = []) {
   });
 }
 
-function codexLeadAdapter(provider) {
+// Exported so the adapter is provable with an injected provider (no ChatGPT login on the box).
+export function codexLeadAdapter(provider) {
   return {
     id: "codex", model: provider.model,
     async turn({ instructions, input = [], tools = [], maxOutputTokens = null }) {

@@ -47,8 +47,13 @@ test("builder pipeline worker requires encrypted owner credential access", () =>
       PREVIEW_MODE: "vps", PROVISIOND_URL: "http://127.0.0.1:8790", PROVISIOND_TOKEN: "present" }),
     (error) => error.code === "worker_credential_key_required",
   );
+  // Builder V2 repair now also needs the platform's own connected-Codex identity, so a pipeline
+  // worker without THRALLO_BV2_RECOVERY_OWNER_ID is refused at startup. That selector is proven
+  // in builder-v2-worker-connected-recovery-authority.test.mjs; here it is simply part of a
+  // fully-authorised environment, so this case keeps testing the credential-key rule above it.
   assert.doesNotThrow(() => assertWorkerCredentialAuthority(["builder_pipeline"], {
     CODE_AGENT_STORE: "supabase", PLATFORM_ENC_KEY: "present", PREVIEW_MODE: "vps",
     PROVISIOND_URL: "http://127.0.0.1:8790", PROVISIOND_TOKEN: "present",
+    THRALLO_BV2_RECOVERY_OWNER_ID: "00000000-0000-4000-8000-000000000123",
   }));
 });

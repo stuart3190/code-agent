@@ -23,6 +23,7 @@ import {
   verificationFixtureFields,
 } from "../../../shared/implementationContract.mjs";
 import { isKeyboardFocusOnlyStep } from "./interactionSemantics.mjs";
+import { operationReadEntityNames } from "./entityScope.mjs";
 
 export const INTERACTION_CONTRACT_VERSION = 2;
 
@@ -432,12 +433,18 @@ function fieldCandidates(contract, text, kind) {
   // described three ways, and `guestName` beside a generic `name` is still one control — those
   // must not multiply. But `guestName` and `leadName` are two different boxes, and collapsing
   // them by concept alone dropped one of every such pair before it ever reached the contract.
+  // A SEMANTIC candidate is a generic synonym inferred from the prose ("guest count" also reads
+  // as a party size). It is never a second box: once the contract's own field of that concept is
+  // kept, the synonym is dropped whatever its qualifier - otherwise a form of six declared counts
+  // and names grew a seventh, undeclared "partySize" control that no generated app renders.
+  const declaredSet = new Set(declared);
   const kept = [];
   for (const name of candidates) {
     const key = semanticKey(name);
     const qualifier = semanticQualifier(name);
     const sameControl = kept.some((existing) => {
       if (semanticKey(existing) !== key) return false;
+      if (!declaredSet.has(name) && declaredSet.has(existing)) return true;
       const other = semanticQualifier(existing);
       return !other || !qualifier || other === qualifier;
     });
@@ -609,7 +616,15 @@ export function buildInteractionContract(contract, {
   bindings = bindCapabilities(contract),
 } = {}) {
   const durableContract = contractUsesDurablePersistence(contract);
-  const durableOwner = durableContract ? durableOperationOwner(bindings) : null;
+  // An undeclared contract has not said it is local - it has said nothing, and
+  // contractUsesDurablePersistence can only report false for it. Withholding the durable
+  // owner in that case left every cancellation flow without a capability, which the contract
+  // validator rejects outright. The owner comes from the capability BINDINGS, not from the
+  // operations, so it is derivable here; only a contract that declares operations and keeps
+  // them all local genuinely has no durable owner.
+  const contractDeclaresOperations = (contract?.operations || []).length > 0;
+  const durableOwner = durableContract || !contractDeclaresOperations
+    ? durableOperationOwner(bindings) : null;
   const configuredDurableEntity = durableOwner?.capability
     ? (bindings || []).find((binding) => binding.name === durableOwner.capability
       && binding.configuration?.entity)?.configuration?.entity || null
@@ -734,11 +749,27 @@ export function buildInteractionContract(contract, {
       const localOperationOnly = declaredOperationObjects.length > 0
         && !declaredOperationObjects.some((operation) => operationUsesDurablePersistence(contract, operation));
       const durableKinds = new Set(["mutation", "cancellation", "lookup", "recovery"]);
+      // Only a contract that DECLARES its operations can say it is purely local. An empty
+      // operations list is not that statement - it is the absence of one, and
+      // contractUsesDurablePersistence necessarily reports false for it because it has nothing to
+      // read. Downgrading durable kinds on `!durableContract` therefore stripped mutation,
+      // recovery and lookup from every undeclared contract, so no flow carried a durable path, no
+      // journey touched a lifecycle, and the data-flow fallback below classified all of them as
+      // independent - the exact disagreement between the two layers that the lifecycle tests
+      // exist to prevent. Known-local (declared, none durable) still downgrades.
+      // Contract-level, because declaredOperationObjects is per-STEP: a step that names no
+      // operation inside an otherwise declared, wholly-local contract must still downgrade.
+      const knownLocalContract = contractDeclaresOperations && !durableContract;
+      // A step that declares the values it operates and names no operation is a value-entry
+      // step, so the verb must not also invent a durable lookup beside those controls. This
+      // is a STEP-level rule and stays as it was; the ownership downgrade below is the
+      // contract-level one that must not fire merely because nothing was declared.
       const inferredLocalValueOnly = !durableContract && valueOperands?.length
         && declaredOperationObjects.length === 0;
       const ownershipKinds = kinds
         .filter((kind) => !(inferredLocalValueOnly && durableKinds.has(kind)))
-        .map((kind) => (!durableContract || localOperationOnly) && durableKinds.has(kind) ? "action" : kind);
+        .map((kind) => (knownLocalContract || localOperationOnly) && durableKinds.has(kind)
+          ? "action" : kind);
       const effectiveKinds = unique([
         ...ownershipKinds,
         ...(valueOperands ? [...mixedValueKinds.values()] : []),
@@ -1473,6 +1504,18 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
       const responsibleModules = unique([...(flow.responsibleModules || []), semanticModule, persistenceModule]);
       Object.assign(flow, {
         operationId: operation.operationId,
+        entity: operation.entity || null,
+        durableOperation: persistence ? persistence.capabilityMethod : null,
+        durableLifecycle: persistence
+          ? `${persistence.capabilityId || "crud"}:${operation.entity}` : flow.durableLifecycle,
+        // Record inputs are not all instances of the first entity in the app.
+        // Keep exact schema identities for isolated multi-entity setup replay.
+        requiredProducerEntities: operationReadEntityNames(contract,
+          (contract?.operations || []).find((candidate) => (candidate.id || candidate.name) === operation.operationId) || {})
+          .filter((entity) => entityPersistencePolicy(contract, entity) !== "transient"
+            && (contract?.operations || []).some((candidate) => candidate.entity === entity
+              && operationUsesDurablePersistence(contract, candidate)))
+          .filter((entity) => entity !== operation.entity || persistence?.capabilityMethod !== "create"),
         responsibilityIds: responsibilities.map((responsibility) => responsibility.id),
         semanticResponsibilityTypes: responsibilities.map((responsibility) => responsibility.type),
         actionIdentity: {
@@ -1548,6 +1591,32 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
     operationCoverage: coverage,
     capabilityGraphVersion: graph?.version || null,
   };
+  // Graph-created operations did not exist when the prose pass assigned scenario roles, so
+  // roles are reconciled from the actual bound persistence operations - with the contract's
+  // DECLARED operations always winning:
+  //   - a role the prose pass resolved through declared operations is final;
+  //   - where the prose pass already named a lifecycle, only bound operations on THAT lifecycle
+  //     may speak - an operation on a different entity never reclassifies this one;
+  //   - a journey the prose pass could not place at all (independent, no lifecycle) takes its
+  //     role from whatever the graph bound, which is the case this pass exists for.
+  // Undeclared contracts keep the plain graph-derived reconcile.
+  composedBeforeNormalization.scenarios = { ...(plan.scenarios || {}) };
+  const contractDeclaresOperations = (contract?.operations || []).length > 0;
+  for (const [id] of journeys) {
+    const existing = composedBeforeNormalization.scenarios[id] || null;
+    if (contractDeclaresOperations && existing?.basis === "declared-operation") continue;
+    const durable = flows.filter((flow) => flow.journeyId === id && flow.durableOperation
+      && (!contractDeclaresOperations || !existing?.lifecycle || flow.durableLifecycle === existing.lifecycle));
+    if (!durable.length) continue;
+    const lifecycles = unique(durable.map((flow) => flow.durableLifecycle));
+    const produces = durable.some((flow) => flow.durableOperation === "create");
+    composedBeforeNormalization.scenarios[id] = {
+      ...composedBeforeNormalization.scenarios[id],
+      role: produces ? "produces" : "consumes", startState: produces ? "fresh" : "inherits",
+      lifecycle: lifecycles.length === 1 ? lifecycles[0] : null,
+      lifecycles, basis: "bound-persistence-operation",
+    };
+  }
   const { plan: composed } = normalizeInteractionStateDependencies(composedBeforeNormalization);
   const verdict = validateInteractionContract(composed, { capabilityGraph: graph, operations: contract?.operations || [] });
   return { ...composed, valid: verdict.ok, problems: verdict.problems, issues: verdict.issues };

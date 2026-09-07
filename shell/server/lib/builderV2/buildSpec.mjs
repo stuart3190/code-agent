@@ -30,6 +30,7 @@ import {
   validateScaffoldGraph,
 } from "./scaffoldGraph.mjs";
 import { scaffoldCompositionPlan } from "./scaffoldComposer.mjs";
+import { entitiesForOperations } from "./entityScope.mjs";
 import {
   adoptBuildProfile, resolveBuildProfile, validateBuildProfileContract,
 } from "../../../shared/buildProfile.mjs";
@@ -134,12 +135,11 @@ export function scopeBuildSpec(spec, journeys = []) {
   const operations = (spec.contract?.operations || []).filter((operation) => (
     !operation?.journey || ids.has(operation.journey)
   ));
-  const entityNames = new Set(operations.map((operation) => operation?.entity).filter(Boolean));
   const structuredOwnership = (spec.contract?.operations || []).some((operation) => (
     operation?.journey || operation?.entity
   ));
   const entities = structuredOwnership
-    ? (spec.contract?.entities || []).filter((entity) => entityNames.has(entity.name))
+    ? entitiesForOperations(spec.contract, operations)
     : (spec.contract?.entities || []);
   const scopedBaseInteraction = scopeInteractionContract(spec.interactionContract, scopedJourneys);
   const bindings = bindingsForJourneys(spec.contract, spec.bindings, scopedJourneys);
@@ -188,14 +188,24 @@ export function journeysInMountedScreenUnit(spec, seedJourneys = []) {
   if (!seeds.size) return [];
   const ownership = spec?.scaffoldGraph?.journeyRouteOwnership
     || spec?.scaffoldGraph?.journeyOwnership || [];
-  const mountedModules = new Set(ownership
-    .filter((owner) => seeds.has(owner.journeyId))
-    .map((owner) => owner.mountedModule).filter(Boolean));
-  const included = new Set([
-    ...seeds,
-    ...ownership.filter((owner) => mountedModules.has(owner.mountedModule))
-      .map((owner) => owner.journeyId),
-  ]);
+  const included = new Set(seeds);
+  const mountedModules = new Set();
+  // A journey can bridge two screens, each shared with another journey. Stop only
+  // at the connected write-unit boundary, not after the first shared screen.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const owner of ownership) {
+      if (included.has(owner.journeyId) && owner.mountedModule && !mountedModules.has(owner.mountedModule)) {
+        mountedModules.add(owner.mountedModule);
+        changed = true;
+      }
+      if (mountedModules.has(owner.mountedModule) && !included.has(owner.journeyId)) {
+        included.add(owner.journeyId);
+        changed = true;
+      }
+    }
+  }
   return (spec?.contract?.journeys || spec?.journeys || [])
     .filter((journey) => included.has(journey?.id));
 }

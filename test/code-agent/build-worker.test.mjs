@@ -168,6 +168,10 @@ test("C7 service and sandbox enforce one-job cgroup and per-job Docker isolation
 });
 
 test("C7 transient heartbeat transport failure retries within the durable lease", async () => {
+  // The heartbeat timer is unref()ed by design (it must never keep a worker alive), so this
+  // test holds the event loop open itself; otherwise CI exits the loop with the promise pending.
+  const keepAlive = setInterval(() => {}, 1_000);
+  try {
   let attempts = 0;
   const transient = [];
   const state = await new Promise((resolve, reject) => {
@@ -192,9 +196,16 @@ test("C7 transient heartbeat transport failure retries within the durable lease"
   assert.equal(attempts, 2);
   assert.deepEqual(transient, ["upstream request timeout"]);
   assert.equal(state.state, "running");
+  } finally {
+    clearInterval(keepAlive);
+  }
 });
 
 test("C7 heartbeat fails closed when the last confirmed lease expires", async () => {
+  // The heartbeat timer is unref()ed by design (it must never keep a worker alive), so this
+  // test holds the event loop open itself; otherwise CI exits the loop with the promise pending.
+  const keepAlive = setInterval(() => {}, 1_000);
+  try {
   let attempts = 0;
   const error = await new Promise((resolve) => {
     startWorkerLeaseHeartbeat({
@@ -213,6 +224,9 @@ test("C7 heartbeat fails closed when the last confirmed lease expires", async ()
   });
   assert.equal(error.code, "lease_lost");
   assert.ok(attempts >= 2, "a timed-out transport is retried before the lease deadline");
+  } finally {
+    clearInterval(keepAlive);
+  }
 });
 
 test("C7 heartbeat passes its bounded request signal to Supabase", async () => {

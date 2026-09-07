@@ -217,6 +217,7 @@ test("14R failed verification resumes the exact non-promotable candidate without
   let contractCalls = 0;
   let coreCalls = 0;
   let repairCalls = 0;
+  const repairSteps = [];
   let repairProblems = [];
   let browserCalls = 0;
   const snapshotStore = createSnapshotStore();
@@ -230,9 +231,14 @@ test("14R failed verification resumes the exact non-promotable candidate without
           { newFile: "src/routes/Checkpoint.jsx", content: "export default function Checkpoint(){ return <h1>Checkpoint fixture</h1>; }" },
           { replaceFile: "src/routes/HomePage.jsx", content: `import Checkpoint from "./Checkpoint.jsx";
 export default function HomePage(){ return <Checkpoint />; }` },
+          // The mounted scaffold screen is what the live application renders, so the
+          // contracted headline has to reach it or the scaffold gate blocks the build.
+          { replaceFile: "src/screens/scaffold/HomeScreen.jsx", content: `import Checkpoint from "../../routes/Checkpoint.jsx";
+export default function HomeScreen(){ return <Checkpoint />; }` },
         ];
       }
       repairCalls += 1;
+      repairSteps.push(step);
       repairProblems = problems;
       return [{ file: "src/routes/Checkpoint.jsx", ops: [{ op: "replace_symbol", symbol: "Checkpoint",
         content: "export default function Checkpoint(){ return <main><h1>Checkpoint fixture</h1><p>Repaired</p></main>; }" }] }];
@@ -274,7 +280,13 @@ export default function HomePage(){ return <Checkpoint />; }` },
   assert.equal(repaired.state, "green", JSON.stringify(repaired));
   assert.equal(contractCalls, 1, "persisted contract is reused");
   assert.equal(coreCalls, 1, "core generation is never replayed");
-  assert.equal(repairCalls, 1);
+  // A pre-compile correction dispatches under its OWN step precisely so it cannot consume the
+  // single browser-informed repair slot, so counting every non-core dispatch as a repair no
+  // longer states the rule. Exactly one browser-informed repair is what must hold.
+  assert.equal(repairSteps.filter((step) => step === "repair").length, 1,
+    `exactly one browser-informed repair: ${repairSteps.join(" -> ")}`);
+  assert.ok(repairSteps.every((step) => step === "repair" || step === "correction"),
+    `core generation is never replayed: ${repairSteps.join(" -> ")}`);
   assert.ok(repairProblems.some((problem) => problem.includes(
     'journey headline · step "open home" FAILED in a real browser: the contracted headline control was missing')),
   "resume passes the retained browser's exact causal step instead of an eligibility summary");

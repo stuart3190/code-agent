@@ -5,6 +5,7 @@
 // (creditsForUsage is the ONE pricing function; nothing here invents a second).
 
 import { generateContract } from "../appBuild/contractAgent.mjs";
+import { entitiesForOperations } from "./entityScope.mjs";
 import { contractBrief } from "../../../shared/implementationContract.mjs";
 import { managedUsageGuard } from "../buildJobs.mjs";
 import { expectationKeywords } from "../appBuild/journeyVerifier.mjs";
@@ -726,10 +727,9 @@ export function renderPatchPrompt({
   const scopedOperations = (contract.operations || []).filter((operation) => (
     !operation?.journey || scopedJourneyIds.has(operation.journey)
   ));
-  const scopedEntityNames = new Set([
-    ...scopedOperations.map((operation) => operation.entity).filter(Boolean),
-    ...(step === "core" && !headroomScope ? tiers.essential.entities : []),
-  ]);
+  const scopedEntities = entitiesForOperations(contract, scopedOperations, {
+    include: step === "core" && !headroomScope ? tiers.essential.entities : [],
+  });
   const scopedCapabilityGraph = capabilityGraph
     ? scopeCapabilityGraph(capabilityGraph, scopedJourneys) : null;
   const scopedScaffoldGraph = scaffoldGraph
@@ -738,7 +738,7 @@ export function renderPatchPrompt({
     ...contract,
     journeys: scopedJourneys,
     operations: scopedOperations,
-    entities: (contract.entities || []).filter((entity) => scopedEntityNames.has(entity.name)),
+    entities: scopedEntities,
     dependencyPlan: scopeDependencyPlan(contract.dependencyPlan, scopedJourneys),
     capabilityGraph: scopedCapabilityGraph, scaffoldGraph: scopedScaffoldGraph,
   };

@@ -89,7 +89,9 @@ function routeTransitionsForJourney(contract, journey) {
     const routePath = explicit && routes.some((route) => route.path === explicit)
       ? explicit
       : semanticNavigation
-        ? semanticRoute(routes, `${step?.action || ""} ${target} ${step?.expect || ""}`)?.path || null
+        // Expectations describe evidence, not navigation. A breakdown that "lists"
+        // counts must not move its controller to a route named "Task List".
+        ? semanticRoute(routes, `${step?.action || ""} ${target}`)?.path || null
         : null;
     if (routePath && transitions.at(-1)?.routePath !== routePath) transitions.push({ routePath, stepIndex });
   }
@@ -274,6 +276,19 @@ export function deriveScaffoldGraph(contract, capabilityGraph, { modulePlan = []
         mountedModule: screen.module, stepIndex };
     });
   });
+  // One journey has ONE mounted owner. The screens that CLAIM a journey are derived from its
+  // steps; the journey's own mountedModule was derived from its id and title alone. A journey
+  // whose steps bind to a different route than its name suggests was therefore briefed to
+  // implement one screen while the composition gate validated another, and no generation could
+  // ever satisfy both - the build simply ran out of rounds "changing nothing". The step-derived
+  // binding is the one the gate enforces, so it is the one that decides here too.
+  for (const owner of journeyOwnership) {
+    const bound = journeyRouteOwnership.find((row) => row.journeyId === owner.journeyId);
+    if (!bound) continue;
+    owner.routePath = bound.routePath;
+    owner.screenId = bound.screenId;
+    owner.mountedModule = bound.mountedModule;
+  }
   const dependencyOrder = families.slice().sort((a, b) => {
     if (a === "app_shell") return -1;
     if (b === "app_shell") return 1;
