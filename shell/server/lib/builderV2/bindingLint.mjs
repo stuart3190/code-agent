@@ -138,8 +138,13 @@ function bindingOf(opening, fileSource, raw) {
       : "";
     const factory = (declaration.match(/\b(useSemanticField|useSemanticSelection|useSemanticAction|useFlowAdvance)\s*\(/)
       || [])[1] || null;
+    // `scope` qualifies the identity exactly as the runtime helper does (scope.name), so a task
+    // form's `{ name: "status", scope: "task" }` claims task.status and nothing else.
+    const factoryName = factory ? (declaration.match(/name\s*:\s*["'`]([^"'`]+)["'`]/) || [])[1] || null : null;
+    const factoryScope = factory && factory !== "useFlowAdvance"
+      ? (declaration.match(/\bscope\s*:\s*["'`]([^"'`]+)["'`]/) || [])[1] || null : null;
     const boundName = factory === "useFlowAdvance" ? ADVANCE_ACTION_NAME
-      : factory ? (declaration.match(/name\s*:\s*["'`]([^"'`]+)["'`]/) || [])[1] || null
+      : factoryName ? (factoryScope ? `${factoryScope}.${factoryName}` : factoryName)
       : null;
     const actionName = factory === "useSemanticSelection"
       ? (declaration.match(/actionName\s*:\s*["'`]([^"'`]+)["'`]/) || [])[1] || null
@@ -311,6 +316,8 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
       return {
         helper,
         name,
+        // A scoped control is bound as { name, scope }: the identity is scope.name.
+        ...(flow.control?.scope ? { scope: flow.control.scope, identity: flow.control.qualifiedName } : {}),
         attribute: "data-thrallo-control",
         machineId: flow.control?.machineId || controlIdFor(name),
         spread: flow.kind === "selection" ? "groupProps + optionProps(option)" : "inputProps",
@@ -367,7 +374,9 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
     ];
     const claims = (row) => {
       if (row.actionName && actionFlow) return semanticKey(row.actionName) === semanticKey(expectedActionName);
-      if (row.boundName) return [key, expectedBindingName]
+      // A scoped control is claimed only by the scoped binding; an unscoped binding of the same
+      // field name is another entity's control (or an unaddressable one), never this one.
+      if (row.boundName) return (flow.control?.qualifiedName && !actionFlow ? [flow.control.qualifiedName] : [key, expectedBindingName])
         .some((candidate) => semanticKey(row.boundName) === semanticKey(candidate));
       if (row.machineId) return [flow.control?.machineId, controlIdFor(key), actionIdFor(key), controlIdFor(flow.control.accessibleName || key),
         actionIdFor(flow.control.accessibleName || key)].includes(row.machineId);

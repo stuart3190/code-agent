@@ -119,9 +119,12 @@ export function deriveVerificationManifest(spec) {
     const expected = EXPECTATION_BY_PRIMITIVE[primitive] || "state_or_route_changed";
 
     if (primitive === "textbox" || primitive === "selection") {
-      const id = controlIdFor(logical);
+      // The flow's identity is authoritative: a shared field name is qualified by its entity
+      // (control.scope), so re-hashing the bare logical name here would name the wrong control.
+      const id = flow.control.machineId || controlIdFor(logical);
       mapping[id] = {
         logicalField: logical, journeyId: flow.journeyId, flowId: flow.id,
+        ...(flow.control.scope ? { scope: flow.control.scope, qualifiedName: flow.control.qualifiedName } : {}),
         stateOwner: flow.stateOwner || null,
         responsibleModules: [...new Set((flow.responsibleModules || []).filter(Boolean))],
       };

@@ -178,8 +178,13 @@ export function useSemanticField({
  */
 export function useSemanticSelection({
   name, value = null, onSelect = null, label = null, actionName = null,
+  // Same rule as useSemanticField: two entities' `status` choosers on one screen are two controls.
+  // `scope` makes the identity scope.name, exactly as the contract derives it.
+  scope = null,
 } = {}) {
   const groupName = String(name || "selection");
+  const identityName = scope ? `${scope}.${groupName}` : groupName;
+  const domName = scope ? `${scope}-${groupName}` : groupName;
   const accessibleName = label || titled(groupName);
 
   const optionProps = useCallback((option, optionLabel = null) => {
@@ -191,12 +196,12 @@ export function useSemanticSelection({
     return {
       type: "button",
       // No `role` override: the element keeps its native role so the verifier can find it.
-      id: `${slug(groupName)}-${slug(optionValue)}`,
-      name: groupName,
+      id: `${slug(domName)}-${slug(optionValue)}`,
+      name: domName,
       value: String(optionValue ?? ""),
       // Every option of a group carries the GROUP's identity, so the group is addressable as one
       // thing however its options are labelled, ordered or re-rendered.
-      "data-thrallo-control": controlId(groupName),
+      "data-thrallo-control": controlId(identityName),
       // A selection can also be the contracted action that enters a flow (for example, choosing
       // one card from a catalogue opens its detail flow). Keep the value-selection identity and
       // add the independently-derived action identity; funding, verification and repair can then
@@ -208,11 +213,11 @@ export function useSemanticSelection({
       "data-selected": selected ? "true" : "false",
       onClick: () => onSelect?.(optionValue),
     };
-  }, [groupName, value, onSelect, actionName]);
+  }, [groupName, identityName, domName, value, onSelect, actionName]);
 
   return {
     // `group` keeps the set announced without changing what its children are.
-    groupProps: { role: "group", "aria-label": accessibleName, "data-thrallo-control": controlId(groupName) },
+    groupProps: { role: "group", "aria-label": accessibleName, "data-thrallo-control": controlId(identityName) },
     optionProps,
     selected: value,
     accessibleName,

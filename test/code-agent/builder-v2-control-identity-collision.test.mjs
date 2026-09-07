@@ -8,16 +8,20 @@
 // twice ("ambiguous_identity"), matched the task's contracted "To Do" against the project's status
 // select, and the build stopped as a VERIFIER fixture defect with zero repair.
 //
-// Two rules pin that: the interaction-contract gate rejects a journey that operates one field name
-// for more than one entity (the contract repair round renames it for free), and a fixture the
-// CONTRACT supplied that a located control does not offer is an application failure — the verifier
-// only answers for fixtures it generated itself.
+// Two rules pin that. A field name BOTH entities declare now derives two QUALIFIED identities
+// (project.status / task.status - the runtime's { name, scope }), so both forms are addressable and
+// the contract passes the gate. A field operated for an entity that never declared it still shares
+// one identity with the entity that did, and that residual clash is rejected at the gate (the
+// contract repair round names it for free). And a fixture the CONTRACT supplied that a located
+// control does not offer is an application failure — the verifier only answers for fixtures it
+// generated itself.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
+import { controlIdFor } from "../../shell/server/lib/builderV2/verificationManifest.mjs";
 import { applyMinimalStepClassification } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 import { VERIFICATION_RESULT_CLASS } from "../../shell/server/lib/appBuild/verifierPolicy.mjs";
 
@@ -58,18 +62,38 @@ const workModel = ({ taskFields }) => ({
   acceptance: [], states: [], deferred: [], imageIntents: [], integrations: [],
 });
 
-test("a journey that operates one field name for two entities is rejected at the gate", () => {
+test("a field name two entities declare derives two qualified identities and passes the gate", () => {
   const spec = deriveBuildSpec(workModel({ taskFields: ["description", "status", "dueDate"] }));
-  const { valid, problems, issues } = spec.contract.interactionContract;
+  const { valid, problems, flows } = spec.contract.interactionContract;
+  assert.equal(valid, true, JSON.stringify(problems));
+  const statusControls = flows.filter((flow) => flow.journeyId === "create-work" && flow.control?.logicalField === "status"
+    && ["input", "selection"].includes(flow.kind));
+  const project = statusControls.find((flow) => flow.stepIndex === 1);
+  const task = statusControls.find((flow) => flow.stepIndex === 2);
+  const again = statusControls.find((flow) => flow.stepIndex === 3);
+  assert.ok(project && task && again, JSON.stringify(statusControls.map((flow) => flow.id)));
+  assert.deepEqual([project.control.scope, project.control.qualifiedName, project.control.machineId],
+    ["project", "project.status", controlIdFor("project.status")]);
+  assert.deepEqual([task.control.scope, task.control.qualifiedName, task.control.machineId],
+    ["task", "task.status", controlIdFor("task.status")]);
+  assert.equal(again.control.machineId, task.control.machineId, "re-driving the task's status is the same control");
+  assert.notEqual(project.control.machineId, task.control.machineId);
+  // A field only one entity declares is not qualified: existing applications keep their identities.
+  const client = flows.find((flow) => flow.journeyId === "create-work" && flow.control?.logicalField === "clientName");
+  assert.equal(client.control.scope, undefined);
+  assert.equal(client.control.machineId, controlIdFor("clientName"));
+});
+
+test("a field operated for an entity that never declared it still collides, and the gate rejects it", () => {
+  const model = workModel({ taskFields: ["taskDescription", "taskStatus", "taskDueDate"] });
+  // The task step operates `description`, which only the PROJECT declares: one identity, two entities.
+  model.journeys[0].steps[2].operates = ["title", "description", "taskStatus", "taskDueDate", "create-task"];
+  const { valid, problems, issues } = deriveBuildSpec(model).contract.interactionContract;
   assert.equal(valid, false, JSON.stringify(problems));
-  for (const name of ["description", "status", "dueDate"]) {
-    assert.ok(problems.some((problem) => problem.includes(`operates field "${name}" for more than one entity`)
-      && problem.includes("project via create-project at step 2") && problem.includes("task via create-task at step 3")),
-    `${name} collision named with both entities and steps\n${problems.join("\n")}`);
-  }
-  const collision = issues.find((issue) => issue.code === "interaction_control_identity_collision" && issue.field === "status");
+  const collision = issues.find((issue) => issue.code === "interaction_control_identity_collision" && issue.field === "description");
   assert.ok(collision, JSON.stringify(issues));
-  assert.deepEqual(collision.uses.map((use) => use.entity), ["project", "task", "task"]);
+  assert.deepEqual(collision.uses.map((use) => use.entity), ["project", "task"]);
+  assert.ok(problems.some((problem) => problem.includes('operates field "description" for more than one entity')));
 });
 
 test("re-operating the SAME entity's field later in the journey is not a collision", () => {

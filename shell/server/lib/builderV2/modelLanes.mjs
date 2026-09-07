@@ -555,6 +555,8 @@ function renderHeadroomFragmentPrompt({
     "- To bind a field: declare `const <name>Field = useSemanticField({ name: \"<control>\", label: ... })` beside",
     "  the other useSemantic* declarations (excerpt shown) AND spread `{...<name>Field.inputProps}` on the",
     "  journey-facing element, both in this same patch. Import useSemanticField if the file does not yet.",
+    "- When the required binding carries a scope, pass it: useSemanticField({ name, scope }) / useSemanticSelection({ name, scope }).",
+    "  The identity is scope.name; the same name without the scope is a different entity's control.",
     "- To bind an action: useSemanticAction({ name }) with `{...action.buttonProps}` and its data-thrallo-action.",
     "- If the element only duplicates a control that is already machine-bound elsewhere, remove the duplicate",
     "  instead of binding the same control twice.",

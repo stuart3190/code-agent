@@ -9,6 +9,11 @@
 // The scope now carries the collision (journey, operations, entities, the colliding fields), the
 // instruction says how to close it (rename on the non-primary entity, everywhere), the merge drops
 // the field the reply renamed away, and every repair attempt is judged by the canonical derivation.
+//
+// A field BOTH entities declare no longer collides at all: its identity is qualified by entity
+// (project.dueDate / task.dueDate). The collision this lane repairs is the residual one - the task
+// step operates dueDate/priority/ownerId that only the PROJECT declares - so the fixture below
+// declares those fields on the project alone.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -30,7 +35,7 @@ const collidingContract = () => ({
   routes: [{ path: "/projects", name: "Projects", auth: false, purpose: "projects and their tasks" }],
   entities: [
     { name: "project", owned: false, fields: ["projectId", "name", "clientName", "dueDate", "priority", "ownerId"].map((name) => field(name, name === "dueDate" ? "date" : "string")) },
-    { name: "task", owned: false, fields: ["taskId", "projectId", "title", "dueDate", "priority", "ownerId"].map((name) => field(name, name === "dueDate" ? "date" : "string")) },
+    { name: "task", owned: false, fields: ["taskId", "projectId", "title"].map((name) => field(name, "string")) },
   ],
   operations: [
     { id: "create-project", kind: "create", entity: "project", journey: "create-work",
@@ -66,7 +71,9 @@ const renamedReply = (scope) => ({ contractPatch: {
       ...responsibility, reads: responsibility.reads.map(rename), writes: responsibility.writes.map(rename) })) }
     : operation)),
   entities: scope.entities.map((entity) => (entity.name === "task"
-    ? { ...entity, fields: entity.fields.map((entry) => ({ ...entry, name: rename(entry.name) })) } : entity)),
+    ? { ...entity, fields: [...entity.fields.map((entry) => ({ ...entry, name: rename(entry.name) })),
+      ...["dueDate", "priority", "ownerId"].filter((name) => !entity.fields.some((entry) => entry.name === name))
+        .map((name) => field(rename(name), name === "dueDate" ? "date" : "string"))] } : entity)),
 } });
 
 test("the repair scope carries a control-identity collision with its journey, operations and entities", () => {

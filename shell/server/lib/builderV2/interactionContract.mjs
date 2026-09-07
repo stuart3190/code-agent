@@ -481,8 +481,17 @@ function ownerModules(modulePlan, kind, { durableOwner = null, draftOwner = null
  * registry and without the model being told an id. Accessible names remain, but as a FALLBACK for
  * controls that carry no machine identity — never as the primary way to recognise meaning.
  */
-function controlRequirement(kind, field, step, declaredField = null, operationId = null) {
+function controlRequirement(kind, field, step, declaredField = null, operationId = null, scope = null) {
   const name = field || String(step?.target || step?.action || "control");
+  // QUALIFIED IDENTITY. A field name two entities both declare (project.status, task.status) is one
+  // name for two controls. The identity is then entity.field - exactly what the runtime helper
+  // derives from `{ name, scope }` - so both forms are addressable on one screen and neither the
+  // contract nor the browser has to guess which one a step means. The logical field keeps its
+  // declared name; only the machine identity is qualified. (Retained: bv2 medium d6a2ab65, where
+  // both forms carried one identity and the verifier matched the task's status against the
+  // project's select.)
+  const qualifiedName = scope && field ? `${scope}.${field}` : null;
+  const qualification = qualifiedName ? { scope, qualifiedName } : {};
   if (kind === "input") {
     const aliases = fieldAliases(name);
     const valueType = String(declaredField?.type || "").toLowerCase() || null;
@@ -494,12 +503,14 @@ function controlRequirement(kind, field, step, declaredField = null, operationId
     // but wrongly typed native control and report `invalid_control_type`. `inputTypes` is the
     // authoritative type requirement; checkboxes need their distinct native role.
     const roles = valueType === "boolean" ? ["checkbox"] : ["textbox", "spinbutton", "combobox"];
-    return { purpose: name, logicalField: field || name, machineId: controlIdFor(field || name),
+    return { purpose: name, logicalField: field || name, machineId: controlIdFor(qualifiedName || field || name),
+      ...qualification,
       roles, inputTypes, valueType, required: declaredField?.required === true,
       accessibleName: aliases[0], accessibleNames: aliases, editable: true };
   }
   if (kind === "selection") return { purpose: name, roles: ["button", "radio", "option", "combobox"],
-    logicalField: field || name, machineId: controlIdFor(field || name),
+    logicalField: field || name, machineId: controlIdFor(qualifiedName || field || name),
+    ...qualification,
     accessibleName: fieldAliases(name)[0], accessibleNames: fieldAliases(name), selectedState: true };
   if (kind === "flow_start") {
     return { purpose: name, roles: ["button", "link"], flowEntry: true,
@@ -646,6 +657,18 @@ export function buildInteractionContract(contract, {
   const declaredOperations = new Map((contract?.operations || [])
     .map((operation) => [normalized(operation?.id || operation?.name), operation])
     .filter(([identity]) => identity));
+  // Which entities declare each field name. A name declared on more than one entity needs its
+  // control identity qualified by the entity the step's declared operation acts on.
+  const fieldOwnersByKey = new Map();
+  for (const entity of contract?.entities || []) {
+    for (const field of entity?.fields || []) {
+      const key = normalized(field?.name ?? field);
+      if (!key || !entity?.name) continue;
+      if (!fieldOwnersByKey.has(key)) fieldOwnersByKey.set(key, new Set());
+      fieldOwnersByKey.get(key).add(entity.name);
+    }
+  }
+  const sharedFieldKeys = new Set([...fieldOwnersByKey].filter(([, owners]) => owners.size > 1).map(([key]) => key));
   const flows = [];
   for (const journey of contract?.journeys || []) {
     const draftWrites = [];
@@ -706,6 +729,14 @@ export function buildInteractionContract(contract, {
       ].filter(Boolean));
       const declaredOperationObjects = declaredOperationIds
         .map((identity) => declaredOperations.get(normalized(identity))).filter(Boolean);
+      // The entity this step's declared operation acts on scopes every shared-name control it
+      // operates. A step naming operations on several entities scopes nothing (the identity
+      // collision rule below still catches a genuine clash).
+      const stepOperationEntities = unique(declaredOperationObjects.map((operation) => operation?.entity).filter(Boolean)
+        .map((name) => (contract?.entities || []).find((entity) => normalized(entity?.name) === normalized(name))?.name || name));
+      const controlScope = stepOperationEntities.length === 1 ? stepOperationEntities[0] : null;
+      const scopeFor = (field) => (controlScope && field && sharedFieldKeys.has(normalized(field))
+        && fieldOwnersByKey.get(normalized(field))?.has(controlScope) ? controlScope : null);
       const operands = declaredOperands?.length
         ? declaredOperands.filter((name) => operableFields.has(normalized(name)))
         : null;
@@ -875,7 +906,7 @@ export function buildInteractionContract(contract, {
           const owners = ownerModules(modulePlan, kind, { durableOwner, draftOwner });
           const stateOwner = owners[0] || `journey:${journey.id}`;
           const control = controlRequirement(kind, field, step,
-            field ? declaredFields.get(normalized(field)) || null : null);
+            field ? declaredFields.get(normalized(field)) || null : null, null, scopeFor(field));
           if (control) Object.assign(control, {
             stateOwner,
             statePath: controlStatePath || writes[0] || null,
@@ -2067,6 +2098,7 @@ export function interactionContractBrief(plan) {
     JSON.stringify({ version: plan.version, flows: plan.flows }, null, 2),
     "Every contracted control must be present, editable when it accepts input, semantically identifiable through standard HTML/ARIA, connected to its declared state owner, and propagated to downstream review/confirmation consumers.",
     "Every non-null control.machineId is also mandatory runtime identity: emit it through the matching platform semantic helper, or as data-thrallo-control for input/selection controls and data-thrallo-action for action/flow-entry controls. An accessible label does not replace this identity.",
+    "When a control carries control.scope, its identity is scope.logicalField (control.qualifiedName): bind it with useSemanticField({ name: logicalField, scope }) or useSemanticSelection({ name: logicalField, scope }). The same field name without that scope is a DIFFERENT control (another entity's), never a substitute.",
     "Use label/htmlFor, a wrapping label, aria-label, or aria-labelledby for accessible names; name/id/placeholder may assist location but do not replace an accessible name.",
     "Visual design remains unrestricted.",
   ].join("\n");
