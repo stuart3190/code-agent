@@ -15,6 +15,7 @@
 
 import { createRequire } from "node:module";
 import { executionProvenance, executionProvenanceValid } from "../builderV2/executionProvenance.mjs";
+import { entityPersistencePolicy } from "../../../shared/implementationContract.mjs";
 import {
   appAuthRateLimitDefect,
   seedVerificationVisitorStorage,
@@ -5158,16 +5159,29 @@ export async function verifyJourneys({
           ...(minimal ? { classification: VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE } : {}) });
         continue;
       }
-      // Keep browser state and durable evidence under the same lifecycle authority.
-      // Independent journeys still get a fresh visitor. An explicit inheriting
-      // consumer must retain its producer's session, not just evidence of a record
-      // which a new browser context can no longer access.
+      // Scenario isolation. Every journey gets a fresh browser context so authentication and
+      // other browser-persisted terminal state from one journey cannot hide the next journey's
+      // contracted entry controls. A consumer that depends only on an authenticated START
+      // re-establishes it through its contracted prerequisites in that fresh context - the
+      // backend identity is shared, the browser state is not.
+      //
+      // A consumer that depends on a durable RECORD its producer created keeps the producer's
+      // page. The verifier cannot know where a generated app keeps that record (many keep it in
+      // browser storage until a backend exists), and a fresh context would destroy the very state
+      // the journey exists to consume. The same holds for lifecycles the contract declares to
+      // live in the browser (client_session-style entities).
       const scenario = contract?.interactionContract?.scenarios?.[journey.id]
         || { role: "independent", startState: "fresh" };
       const isolatedJourneyContract = Boolean(contract?.prerequisiteInteractionContract)
         && (contract?.journeys || []).length === 1;
-      const inheritedPage = scenario.startState === "inherits" && scenario.lifecycle
-        ? lifecyclePages.get(scenario.lifecycle) : null;
+      const lifecycleEntity = (lifecycle) => String(lifecycle || "").split(":").at(-1);
+      const consumesDurableRecord = (contract?.interactionContract?.flows || []).some((flow) => (
+        flow.journeyId === journey.id && (flow.reads || []).some((path) => /\.durable\./.test(String(path)))
+      ));
+      const inheritsProducerPage = scenario.startState === "inherits" && scenario.lifecycle
+        && (consumesDurableRecord
+          || entityPersistencePolicy(contract, lifecycleEntity(scenario.lifecycle)) === "transient");
+      const inheritedPage = inheritsProducerPage ? lifecyclePages.get(scenario.lifecycle) : null;
       const previousPage = page;
       if (inheritedPage && !inheritedPage.isClosed()) {
         page = inheritedPage;
