@@ -118,3 +118,42 @@ test("stale contract browser evidence cannot authorize repair against a new cont
   assert.deepEqual(verificationDefects({ contract: spec.contract,
     journeyResults: { journeys: [], executionProvenance: execution.executionProvenance } }), []);
 });
+
+// The runtime drives a verification pass one sandbox job per journey (runtimeComposition.mjs), each
+// carrying one journey and the interactions scoped to it. Medium on fb95ecd (2026-09-07) blocked at
+// the browser with execution_contract_provenance_mismatch on every multi-journey pass because the
+// whole-scope execution digest was compared against a one-journey job. A per-journey job IS the
+// bound scope; tampering with it still has to be caught.
+import { scopeInteractionContract } from "../../shell/server/lib/builderV2/interactionContract.mjs";
+
+const perJourneyJob = (execution, journey) => JSON.parse(JSON.stringify({
+  ...execution, journeys: [journey],
+  allJourneys: execution.allJourneys || execution.journeys,
+  prerequisiteInteractionContract: execution.prerequisiteInteractionContract || execution.interactionContract,
+  interactionContract: scopeInteractionContract(execution.interactionContract, [journey]),
+}));
+
+test("a multi-journey pass split into per-journey sandbox jobs keeps its bound provenance", () => {
+  const driven = retained.journeys.slice(0, 2);
+  const execution = verificationExecutionContract(spec.contract, driven, driven);
+  assert.equal(executionProvenanceValid(JSON.parse(JSON.stringify(execution))), true, "whole scope");
+  for (const journey of driven) {
+    assert.equal(executionProvenanceValid(perJourneyJob(execution, journey)), true, `per-journey job ${journey.id}`);
+  }
+});
+
+test("a per-journey job that drifts from its bound source is still refused", () => {
+  const driven = retained.journeys.slice(0, 2);
+  const execution = verificationExecutionContract(spec.contract, driven, driven);
+  const tamperedFlow = perJourneyJob(execution, driven[0]);
+  tamperedFlow.interactionContract.flows[0].action = "a different action";
+  assert.equal(executionProvenanceValid(tamperedFlow), false, "changed flow");
+  const tamperedJourney = perJourneyJob(execution, driven[0]);
+  tamperedJourney.journeys[0].steps[0].expect = "something else";
+  assert.equal(executionProvenanceValid(tamperedJourney), false, "changed journey step");
+  const foreign = perJourneyJob(execution, retained.journeys[2]);
+  assert.equal(executionProvenanceValid(foreign), false, "a journey outside the bound scope");
+  const tamperedSource = perJourneyJob(execution, driven[0]);
+  tamperedSource.entities[0].fields.push({ name: "newField", type: "string" });
+  assert.equal(executionProvenanceValid(tamperedSource), false, "changed source contract");
+});
