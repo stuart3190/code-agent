@@ -1845,17 +1845,37 @@ export function assemblyNeeds(plan, bindings = []) {
   };
 }
 
+/**
+ * The interaction contract seen through one set of journeys.
+ *
+ * A projection, not a summary: every execution-relevant fact the full plan states about the kept
+ * journeys survives. Scenarios (role / start state / lifecycle / basis), the declared start-state
+ * authorities (initialState, durableState, externalState, capabilityOutputs), operation coverage
+ * and the plan's own validity travel with the flows. Dropping the scenarios here once left the
+ * verifier and the prerequisite planner with two different views of the same journey - one knew
+ * a consumer inherited its producer's record, the other did not.
+ */
 export function scopeInteractionContract(plan, journeys = []) {
   const ids = new Set((journeys || []).map((journey) => journey?.id).filter(Boolean));
+  const scenarios = Object.fromEntries(Object.entries(plan?.scenarios || {})
+    .filter(([journeyId]) => ids.has(journeyId)));
   return {
     version: plan?.version || INTERACTION_CONTRACT_VERSION,
     flows: (plan?.flows || []).filter((flow) => ids.has(flow.journeyId)),
+    scenarios,
+    initialState: plan?.initialState ?? null,
+    durableState: plan?.durableState ?? null,
+    externalState: plan?.externalState ?? null,
+    capabilityOutputs: plan?.capabilityOutputs ?? null,
     operationCoverage: (plan?.operationCoverage || []).filter((operation) => (
       ids.has(operation.journeyId) && (plan?.flows || []).some((flow) => (
         flow.operationId === operation.operationId && flow.journeyId === operation.journeyId
       ))
     )),
     capabilityGraphVersion: plan?.capabilityGraphVersion || null,
+    ...(plan?.valid !== undefined ? { valid: plan.valid } : {}),
+    ...(plan?.problems !== undefined ? { problems: plan.problems } : {}),
+    scopedJourneyIds: [...ids],
   };
 }
 

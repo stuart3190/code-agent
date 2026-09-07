@@ -21,6 +21,7 @@ import { createDiagSession } from "../appBuild/buildDiagnostics.mjs";
 import { createVerificationIdentity } from "../appBuild/verificationIdentity.mjs";
 import { MINIMAL_CONTRACT_VERIFIER_POLICY } from "../appBuild/verifierPolicy.mjs";
 import { proveGeneratedRuntimeBackend, proveGeneratedRuntimeConfig, withRuntimeEnv } from "../runtimeEnv.mjs";
+import { projectExecutionJourneys } from "./executionProvenance.mjs";
 import { previewProvider } from "../../preview/index.mjs";
 import { serviceClient } from "../supabase.mjs";
 import { runSandboxJob } from "../../../../build-worker/sandboxRunner.mjs";
@@ -799,11 +800,11 @@ export function createBuilderV2Runtime({
             job_type: "browser_verify", attempts: workJob.attempts || 1,
             payload: { previewUrl: previewResult.url,
               usesBackend,
-              contract: { ...journeyContract, journeys: [journey],
-                allJourneys: journeyContract?.allJourneys || journeyContract?.journeys || [],
-                prerequisiteInteractionContract: journeyContract?.prerequisiteInteractionContract
-                  || journeyContract?.interactionContract || null,
-                interactionContract: scopeInteractionContract(journeyContract?.interactionContract, [journey]) },
+              // ONE projection operation (executionProvenance.projectExecutionJourneys) turns the
+              // bound pass into this job: the journey, its exact bound flows, scenario and coverage,
+              // the full prerequisite authority, and the binding itself. The verifier judges the
+              // result for completeness against that binding before it opens a browser.
+              contract: projectExecutionJourneys(journeyContract, [journey]),
               // Stable only within this project/journey. The sandbox restores deterministic test
               // credentials, then the app still obtains a real app-auth/RLS session normally.
               verificationIdentity,

@@ -14,7 +14,7 @@
 // driver can identify before browser verification begins.
 
 import { createRequire } from "node:module";
-import { executionProvenance, executionProvenanceValid } from "../builderV2/executionProvenance.mjs";
+import { executionProvenance, executionProvenanceReport } from "../builderV2/executionProvenance.mjs";
 import { entityPersistencePolicy } from "../../../shared/implementationContract.mjs";
 import {
   appAuthRateLimitDefect,
@@ -5030,10 +5030,13 @@ export async function verifyJourneys({
   verifierPolicy = LEGACY_RICH_VERIFIER_POLICY,
 }) {
   const minimal = isMinimalContractVerifier(verifierPolicy);
-  if (!executionProvenanceValid(contract)) return {
+  const provenanceReport = executionProvenanceReport(contract);
+  if (!provenanceReport.ok) return {
     pass: false, verifierPolicy, journeys: [], failures: [], undriveable: [],
     verifierDefects: [{ code: "execution_contract_provenance_mismatch",
-      detail: "the execution contract changed after its source and driven scope were bound" }],
+      detail: "the execution contract is not an exact projection of its binding: "
+        + provenanceReport.reasons.slice(0, 6).join("; "),
+      reasons: provenanceReport.reasons }],
   };
   const provenance = executionProvenance(contract);
   const results = [];

@@ -73,12 +73,10 @@ test("V2 runtime requires app-scoped row evidence and persists it with cached ve
   assert.match(runtime, /\.in\("owner", userIds\)/);
   assert.match(runtime, /browser journey passed without a corresponding app-scoped database mutation/);
   assert.match(runtime, /preview\.mode !== "vps"/);
-  assert.match(runtime, /contract: \{ \.\.\.journeyContract, journeys: \[journey\]/,
-    "the browser worker receives the machine-readable contract rather than English journeys alone");
-  assert.match(runtime, /scopeInteractionContract\(journeyContract\?\.interactionContract, \[journey\]\)/);
-  assert.match(runtime, /prerequisiteInteractionContract: journeyContract\?\.prerequisiteInteractionContract/,
-    "isolated journey verification preserves the full prerequisite contract across differential cache scoping");
-  assert.match(runtime, /allJourneys: journeyContract\?\.allJourneys/);
+  assert.match(runtime, /contract: projectExecutionJourneys\(journeyContract, \[journey\]\)/,
+    "the browser worker receives the ONE per-journey projection of the bound execution contract");
+  assert.doesNotMatch(runtime, /contract: \{ \.\.\.journeyContract, journeys: \[journey\]/,
+    "no hand-assembled per-journey contract may compete with the shared projection");
   assert.match(runtime, /createVerificationIdentity\(\{/,
     "every repeat verification recovers a server-sealed project/journey test identity");
   assert.match(runtime, /secret: process\.env\.SUPABASE_SERVICE_ROLE_KEY \|\| process\.env\.SUPABASE_SERVICE_ROLE/);
