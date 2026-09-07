@@ -6,6 +6,7 @@
 
 import { scaffoldEntry, SCAFFOLD_REGISTRY_VERSION, SCAFFOLDS } from "./scaffoldRegistry.mjs";
 import { MAX_JOURNEYS_PER_FILE } from "../appBuild/modularity.mjs";
+import { resolveContractRoutes } from "./routeResolution.mjs";
 
 export const SCAFFOLD_GRAPH_VERSION = 3;
 
@@ -25,10 +26,6 @@ const relativeImport = (from, to) => {
   return specifier.startsWith(".") ? specifier : `./${specifier}`;
 };
 const normalized = (value) => String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-const semanticTokens = (value) => new Set(String(value || "").toLowerCase().split(/[^a-z0-9]+/)
-  .filter((part) => part.length > 2)
-  .map((part) => part.replace(/(?:ing|ed|es|s)$/, ""))
-  .filter(Boolean));
 const textOf = (journey) => `${journey?.title || ""} ${(journey?.steps || [])
   .map((step) => `${step?.action || ""} ${step?.target || ""} ${step?.expect || ""}`).join(" ")}`.toLowerCase();
 
@@ -49,58 +46,24 @@ function operationMethods(graph) {
   )).map((responsibility) => responsibility.capabilityMethod || responsibility.semanticOperation).filter(Boolean));
 }
 
-function semanticRoute(routes, value) {
-  const words = normalized(value);
-  const tokens = semanticTokens(value);
-  const ranked = (routes || []).map((route, index) => {
-    const identity = `${route?.name || ""} ${String(route?.path || "").split("/").at(-1) || ""}`;
-    const routeIdentity = normalized(identity);
-    const routeTokens = semanticTokens(identity);
-    const overlap = [...routeTokens].filter((token) => tokens.has(token)).length;
-    const containment = routeIdentity && (words.includes(routeIdentity) || routeIdentity.includes(words)) ? 2 : 0;
-    return { route, index, score: overlap * 3 + containment };
-  }).sort((a, b) => b.score - a.score || a.index - b.index);
-  if (!(ranked[0]?.score > 0) || ranked[1]?.score === ranked[0].score) return null;
-  return ranked[0].route;
+// WHERE a journey and each of its steps happen is decided by routeResolution.mjs - a fixed ladder
+// of exact relations the contract itself states (declared route, path target, route name, entity
+// relation) - never by scoring route names against prose. An unresolved navigation step is a
+// contract defect carried on the graph (`routeResolution.issues`) for the contract repair round.
+function routeForJourney(contract, journey, resolution) {
+  if (!(contract?.routes || []).length) return "/";
+  return resolution?.journeys?.[journey?.id]?.initialRoute || contract.routes[0]?.path || "/";
 }
 
-function routeForJourney(contract, journey) {
-  const routes = contract?.routes || [];
-  if (!routes.length) return "/";
-  const explicit = (journey?.steps || []).map((step) => String(step?.target || "").trim())
-    .find((target) => target.startsWith("/") && routes.some((route) => route.path === target.split(/[?#]/)[0]));
-  if (explicit) return explicit.split(/[?#]/)[0] || "/";
-  return semanticRoute(routes, `${journey?.id || ""} ${journey?.title || ""}`)?.path || routes[0]?.path || "/";
-}
-
-function routeTransitionsForJourney(contract, journey) {
-  const routes = contract?.routes || [];
+function routeTransitionsForJourney(contract, journey, resolution) {
+  const resolved = resolution?.journeys?.[journey?.id];
+  if (!resolved) return [{ routePath: routeForJourney(contract, journey, resolution), stepIndex: 0 }];
   const transitions = [];
-  for (const [stepIndex, step] of (journey?.steps || []).entries()) {
-    const target = String(step?.target || "").trim();
-    const explicit = target.startsWith("/") ? target.split(/[?#]/)[0] || "/" : null;
-    // A semantic control/region target is not a route transition. The browser stays on the
-    // current page unless the contract names a route or the step is a pure navigation step. A
-    // live qualification was otherwise planned as if an edit form had teleported to a different
-    // screen, so generation and every repair correctly wrote an off-screen controller that the
-    // sequential browser journey could never reach.
-    const semanticNavigation = stepIndex === 0 || (!(step?.operates || []).length
-      && /\b(?:open|visit|navigate|go|return|reload|refresh)\b/i.test(String(step?.action || "")));
-    const routePath = explicit && routes.some((route) => route.path === explicit)
-      ? explicit
-      : semanticNavigation
-        // Expectations describe evidence, not navigation. A breakdown that "lists"
-        // counts must not move its controller to a route named "Task List".
-        ? semanticRoute(routes, `${step?.action || ""} ${target}`)?.path || null
-        : null;
-    if (routePath && transitions.at(-1)?.routePath !== routePath) transitions.push({ routePath, stepIndex });
+  for (const row of resolved.transitions) {
+    if (row.reload) continue;
+    if (transitions.at(-1)?.routePath !== row.routePath) transitions.push({ routePath: row.routePath, stepIndex: row.stepIndex });
   }
-  if (!transitions.length) return [{ routePath: routeForJourney(contract, journey), stepIndex: 0 }];
-  if (transitions[0].stepIndex > 0) {
-    const initial = routeForJourney(contract, journey);
-    if (initial !== transitions[0].routePath) transitions.unshift({ routePath: initial, stepIndex: 0 });
-  }
-  return transitions;
+  return transitions.length ? transitions : [{ routePath: resolved.initialRoute, stepIndex: 0 }];
 }
 
 function screensFor(contract) {
@@ -223,7 +186,8 @@ function extensionContracts(contract, capabilityGraph) {
   return [...new Map([...graphExtensions, ...signalExtensions].map((row) => [row.extensionId, row])).values()];
 }
 
-export function deriveScaffoldGraph(contract, capabilityGraph, { modulePlan = [] } = {}) {
+export function deriveScaffoldGraph(contract, capabilityGraph, { modulePlan = [], routeResolution = null } = {}) {
+  const resolution = routeResolution || resolveContractRoutes(contract);
   const screens = screensFor(contract);
   const families = selectedFamilies(contract, capabilityGraph);
   const familyNodes = families.map((scaffoldId) => {
@@ -236,7 +200,7 @@ export function deriveScaffoldGraph(contract, capabilityGraph, { modulePlan = []
     };
   });
   const journeyOwnership = (contract?.journeys || []).map((journey) => {
-    const routePath = routeForJourney(contract, journey);
+    const routePath = routeForJourney(contract, journey, resolution);
     const screen = screens.find((candidate) => candidate.routePath === routePath) || screens[0];
     const body = textOf(journey);
     const ownedFamilies = families.filter((id) => {
@@ -270,7 +234,7 @@ export function deriveScaffoldGraph(contract, capabilityGraph, { modulePlan = []
   // can bind each step to the screen that is actually mounted at that point in the journey.
   const journeyRouteOwnership = journeyOwnership.flatMap((owner) => {
     const journey = (contract?.journeys || []).find((candidate) => candidate.id === owner.journeyId);
-    return routeTransitionsForJourney(contract, journey).map(({ routePath, stepIndex }) => {
+    return routeTransitionsForJourney(contract, journey, resolution).map(({ routePath, stepIndex }) => {
       const screen = screens.find((candidate) => candidate.routePath === routePath) || screens[0];
       return { ...owner, routePath: screen.routePath, screenId: screen.screenId,
         mountedModule: screen.module, stepIndex };
@@ -336,11 +300,21 @@ export function deriveScaffoldGraph(contract, capabilityGraph, { modulePlan = []
       ownership: scaffoldEntry(node.scaffoldId).persistenceOwnership })),
     journeyOwnership, journeyRouteOwnership, extensions, edges, crossScaffoldInterfaces, expectedModuleSurface,
     protectedFiles: unique(familyNodes.flatMap((node) => scaffoldEntry(node.scaffoldId).protectedModules)),
+    // The route resolution the ownership above was derived from: every transition with the exact
+    // relation that decided it, and every navigation step the contract left unresolved.
+    routeResolution: resolution,
   };
 }
 
 export function validateScaffoldGraph(graph, contract, capabilityGraph) {
   const problems = [];
+  const issues = [];
+  // A navigation step that binds to no declared route is a contract defect, reported with the
+  // step, its target and the routes it could have named so the repair round can name one.
+  for (const issue of graph?.routeResolution?.issues || []) {
+    issues.push(issue);
+    problems.push(issue.message);
+  }
   if (graph?.version !== SCAFFOLD_GRAPH_VERSION) problems.push("unsupported scaffold graph version");
   if (!(graph?.families || []).some((node) => node.scaffoldId === "app_shell")) problems.push("app_shell is required");
   const capabilities = capabilityIds(capabilityGraph);
@@ -373,7 +347,7 @@ export function validateScaffoldGraph(graph, contract, capabilityGraph) {
       problems.push(`extension ${extension.extensionId} is not bounded to a declared module/export`);
     }
   }
-  return { ok: problems.length === 0, problems };
+  return { ok: problems.length === 0, problems, issues };
 }
 
 export function scaffoldModulePlan(graph, existingPlan = []) {

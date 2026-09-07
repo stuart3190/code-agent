@@ -1209,7 +1209,9 @@ export function createOrchestrator({
           log(`contract gate rejected the contract (${failingGates(spec.verdict).join(", ")}): `
             + `${(spec.verdict.problems || []).join(" | ")}`);
           try {
-            const dependencyIssuesBefore = spec.verdict.interaction?.issues || [];
+            const dependencyIssuesBefore = [
+              ...(spec.verdict.interaction?.issues || []), ...(spec.verdict.scaffoldGraph?.issues || []),
+            ];
             const repairedContract = await contractFn({
               owner, projectId, buildId, request, profile, buildProfile, signal,
               priorContract: rawContract, problems: spec.verdict.problems || [],
@@ -1220,7 +1222,8 @@ export function createOrchestrator({
             spec = deriveBuildSpec(repairedContract, { userCritical });
             contractRepairUsed = true;
             const dependencyProgress = interactionDependencyProgress(
-              dependencyIssuesBefore, spec.verdict.interaction?.issues || [],
+              dependencyIssuesBefore,
+              [...(spec.verdict.interaction?.issues || []), ...(spec.verdict.scaffoldGraph?.issues || [])],
             );
             if (dependencyProgress.equivalent) {
               log("contract repair made no dependency progress; the same missing producer remains");

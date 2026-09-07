@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 
 import { scaffoldEntry } from "./scaffoldRegistry.mjs";
 
-export const SCAFFOLD_COMPOSITION_VERSION = 2;
+export const SCAFFOLD_COMPOSITION_VERSION = 3;
 export const SCAFFOLD_COMPOSED_ROOT = "src/lib/scaffolds/composed";
 export const SCAFFOLD_APP_PATH = `${SCAFFOLD_COMPOSED_ROOT}/ScaffoldApp.jsx`;
 export const SCAFFOLD_PRIMITIVES_PATH = `${SCAFFOLD_COMPOSED_ROOT}/primitives.jsx`;
@@ -144,8 +144,29 @@ export function RouteLink({ to, replace = false, children, onClick, ...rest }) {
     navigate(to, { replace });
   }}>{children}</a>;
 }
+/** A RouteLink that knows when it is active: className/style may be functions of { isActive }. */
+export function NavLink({ to, end = false, className, style, children, ...rest }) {
+  const { path } = useRoute();
+  const target = normalizeRoutePath(to);
+  const isActive = end ? path === target : (path === target || path.startsWith((target === "/" ? "" : target) + "/"));
+  return <RouteLink to={to} aria-current={isActive ? "page" : undefined}
+    className={typeof className === "function" ? className({ isActive }) : className}
+    style={typeof style === "function" ? style({ isActive }) : style} {...rest}>{children}</RouteLink>;
+}
+/** The current location in the shape the wider ecosystem expects. */
+export function useLocation() {
+  const { path } = useRoute();
+  return { pathname: path, search: "", hash: "", state: null, key: path };
+}
+/** A declarative redirect: navigates once on mount. */
+export function Navigate({ to, replace = false }) {
+  const { navigate } = useRoute();
+  React.useEffect(() => { navigate(to, { replace }); }, [to, replace, navigate]);
+  return null;
+}
 // The names the wider React ecosystem reaches for, so a screen written against them still binds
-// to the composed router instead of a package that is not installed.
+// to the composed router instead of a package that is not installed. Any import of react-router-dom
+// naming these is rewritten to this module before compilation (appBuild/importPreflight.mjs).
 export { useRouteParams as useParams, RouteLink as Link };
 
 export function AppShell({ navigation = null, children, className = "" }) {
@@ -399,8 +420,10 @@ export function scaffoldCompositionBrief(graph, plan = scaffoldCompositionPlan(g
     "the composed scaffold root, a competing router, or a free-form replacement application shell.",
     "ROUTING: react-router-dom is NOT installed and must not be imported. Read route parameters with",
     "useRouteParams() (alias useParams), navigate with useNavigate() or <RouteLink to=\"/path\"> (alias Link),",
-    "all from ../../lib/scaffolds/composed/primitives.jsx; parameterised routes such as /projects/:projectId",
-    "are already mounted and their params arrive through useRouteParams().",
+    "NavLink, useLocation() and <Navigate to> are also provided - all from",
+    "../../lib/scaffolds/composed/primitives.jsx; parameterised routes such as /projects/:projectId",
+    "are already mounted and their params arrive through useRouteParams(). Never declare Routes/Route/",
+    "BrowserRouter or any nested router inside a screen: the composed shell owns the router.",
     "Select each custom-extension operation with a literal second-argument context such as",
     "{ operation: \"<operationId>\" }. The explicit legacy key operationId is also supported.",
     "At every custom-extension call site, pass the selected operation's declared inputKeys as explicit",

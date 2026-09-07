@@ -316,6 +316,16 @@ export function validateContract(contract) {
       continue;
     }
     for (const [stepIndex, step] of journey.steps.entries()) {
+      // `route` is the declared route a navigation step opens. It must be a declared route path
+      // (parameterised patterns included): the platform navigates by it, never by prose.
+      if (step?.route !== undefined && step?.route !== null && step?.route !== "") {
+        const declaredPaths = new Set((c.routes || []).map((route) => String(route?.path || "").split(/[?#]/)[0]));
+        if (typeof step.route !== "string" || !step.route.startsWith("/")) {
+          problems.push(`${where} step ${stepIndex + 1} route must be a declared route path such as "/projects"`);
+        } else if (declaredPaths.size && !declaredPaths.has(step.route.split(/[?#]/)[0])) {
+          problems.push(`${where} step ${stepIndex + 1} route "${step.route}" is not a declared route`);
+        }
+      }
       // `expect` is the whole point: a step with no expectation cannot fail, so it cannot verify.
       if (!step?.expect || isVague(step.expect)) {
         problems.push(`${where} step ${stepIndex + 1} has no observable expectation ("${String(step?.expect || step?.action || "").slice(0, 60)}")`);

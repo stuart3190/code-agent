@@ -25,7 +25,7 @@ const CONTRACT = {
   auth: { required: false },
   journeys: [
     { id: "book-a-visit", title: "Book a farm visit", priority: "primary",
-      steps: [{ action: "submit the booking form", expect: "booking confirmed" }] },
+      steps: [{ action: "submit the booking form", target: "/book", expect: "booking confirmed" }] },
     { id: "newsletter-signup", title: "Newsletter signup", priority: "secondary",
       steps: [{ action: "enter an email", expect: "newsletter subscribed" }] },
     { id: "browse-info", title: "Browse farm information", priority: "secondary",
@@ -491,7 +491,7 @@ test("C2 — an unattributed essential failure blocks, is recorded separately, a
     ...CONTRACT,
     journeys: [{
       id: "zzqx-ghost-flow", title: "Qqzy unowned workflow", priority: "primary",
-      steps: [{ action: "submit the booking form", expect: "booking confirmed" }],
+      steps: [{ action: "submit the booking form", target: "/book", expect: "booking confirmed" }],
     }],
   };
   let repairProblems = [];

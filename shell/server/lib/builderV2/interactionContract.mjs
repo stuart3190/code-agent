@@ -899,7 +899,7 @@ export function buildInteractionContract(contract, {
             // Keep an explicit route as structured execution data. Secondary-journey setup may
             // need to replay this navigation before a primary control is reachable; prose is not
             // a safe substitute for the contract's own target.
-            target: structuredRouteTarget(step.target),
+            target: structuredRouteTarget(step.route) || structuredRouteTarget(step.target),
             valueWritten: field || null,
             producedValues: !keyboardFocusOnly && field === valuePlan.controls[0]
               ? [...valuePlan.produces] : [],

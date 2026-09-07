@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
 import { actionIdFor, deriveVerificationManifest } from "../../shell/server/lib/builderV2/verificationManifest.mjs";
 
-const makeContract = ({ entity = "record", fields, operations, steps, title = "Capability interaction" }) => ({
+const makeContract = ({ entity = "record", fields, operations, steps, title = "Capability interaction",
+  routes = [{ path: "/", name: "Workspace" }] }) => ({
   summary: `${title} contract`, projectType: "tool",
   entities: [{ name: entity, fields: fields.map((name) => ({ name, type: "string", required: true })) }],
   // A single journey that edits or reads an existing record must say where that record comes from;
@@ -12,7 +13,7 @@ const makeContract = ({ entity = "record", fields, operations, steps, title = "C
   sampleData: { [entity]: [Object.fromEntries(fields.map((name) => [name, `seed ${name}`]))] },
   operations,
   journeys: [{ id: "primary-flow", title, priority: "primary", stage: "primary_journey", steps }],
-  routes: [{ path: "/", name: "Workspace" }],
+  routes,
   auth: { required: false, rules: [] }, integrations: [], states: [], acceptance: [], deferred: [],
 });
 
@@ -361,6 +362,7 @@ test("a routed combined auth step retains its explicitly declared input controls
         reads: ["authEmail", "authPassword"], writes: [],
       }],
     }],
+    routes: [{ path: "/", name: "Workspace" }, { path: "/login", name: "Sign in" }],
     steps: [{
       action: "sign in as a standard user", target: "/login",
       operates: ["authEmail", "authPassword", "sign-in"], primitive: "textbox",

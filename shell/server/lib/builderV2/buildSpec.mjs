@@ -30,6 +30,7 @@ import {
   validateScaffoldGraph,
 } from "./scaffoldGraph.mjs";
 import { scaffoldCompositionPlan } from "./scaffoldComposer.mjs";
+import { resolveContractRoutes, stampResolvedRoutes } from "./routeResolution.mjs";
 import { entitiesForOperations } from "./entityScope.mjs";
 import {
   adoptBuildProfile, resolveBuildProfile, validateBuildProfileContract,
@@ -51,7 +52,11 @@ export function deriveBuildSpec(contract, { userCritical = [], journeys = contra
   // carries no profile at all is inferred for, and that one stays legacy (obligation-free).
   const buildProfile = adoptBuildProfile(contract?.buildProfile)
     || resolveBuildProfile({ prompt: contract?.summary || "", input: null, legacy: true });
-  const plannedContract = { ...contract, buildProfile };
+  // Routing is resolved ONCE, from the contract's own declarations, and stamped onto the steps as
+  // `route` so the interaction contract, the scaffold graph, the verifier and prerequisite replay
+  // all navigate by the same declared path. Unresolved navigation steps surface as contract issues.
+  const routeResolution = resolveContractRoutes({ ...contract, buildProfile });
+  const plannedContract = stampResolvedRoutes({ ...contract, buildProfile }, routeResolution);
   const bindings = bindCapabilities(plannedContract);
   const dependencyPlan = deriveDependencyPlan(plannedContract, journeys);
   // The existing planner supplies route/screen responsibility. Capability adapters are then
@@ -77,7 +82,7 @@ export function deriveBuildSpec(contract, { userCritical = [], journeys = contra
     graphBoundInteraction, capabilityGraph, plannedContract,
   );
   const compositionPlan = capabilityCompositionPlan(capabilityGraph);
-  const scaffoldGraph = deriveScaffoldGraph(plannedContract, capabilityGraph, { modulePlan });
+  const scaffoldGraph = deriveScaffoldGraph(plannedContract, capabilityGraph, { modulePlan, routeResolution });
   const finalModulePlan = scaffoldModulePlan(scaffoldGraph, modulePlan);
   const finalInteractionContract = bindInteractionModulePlan(interactionContract, finalModulePlan);
   const scaffoldPlan = scaffoldCompositionPlan(scaffoldGraph);

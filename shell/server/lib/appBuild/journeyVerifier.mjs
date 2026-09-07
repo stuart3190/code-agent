@@ -2973,7 +2973,8 @@ async function runStep(page, step, {
   // prose to repeat one of a small set of navigation verbs left the browser on the previous
   // mounted screen even though the contract named the next route exactly.
   const actionRoute = action.match(/(?:^|\s)(\/[^\s,;]+)/)?.[1] || null;
-  const route = concreteRouteTarget(step.target) || concreteRouteTarget(actionRoute);
+  // `step.route` is the resolved declared route (routeResolution.mjs); it outranks the prose target.
+  const route = concreteRouteTarget(step.route) || concreteRouteTarget(step.target) || concreteRouteTarget(actionRoute);
   let routeNavigated = false;
   if (route) {
     await page.goto(new URL(route, previewUrl).href, { waitUntil: "domcontentloaded" }).catch(() => {});

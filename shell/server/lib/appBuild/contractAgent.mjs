@@ -97,6 +97,9 @@ Rules:
   user-operated identity in "operates" and put the derived fields in "produces". For example, one
   product choice may operate productId and produce productTitle and unitPrice; those outputs are
   state written by the same action, not additional controls the visitor must drive.
+- A step that opens a screen names the declared route path it opens as its "target" ("/projects",
+  "/projects/:projectId") or in "route". Prose such as "open the board" names no screen; a step that
+  operates controls stays on the screen it is already on. Reload steps say "reload" and name no route.
 - Add "primitive": "selection" or "textbox" only when the verb leaves it ambiguous.
 - A keyboard-focus or tab-navigation step is a control interaction, not a passive observation. It
   MUST name the focused entity field(s) in "operates" and declare "primitive". Split text-entry
@@ -305,6 +308,15 @@ export const COLLISION_REPAIR_INSTRUCTION = "A field name listed under invalidCo
   + "writes it, and in every journey step's operates, reads, produces and verificationValues that refer to it. "
   + "Leave the other entity's field name unchanged. Do not add, remove or reorder steps, operations or entities.";
 
+// A navigation step the platform could not bind to a declared route (routeResolution.mjs). The
+// repair names the route: a declared path in the step's target/route, or a new declared route.
+const ROUTE_ISSUE = "journey_route_unresolved";
+export const ROUTE_REPAIR_INSTRUCTION = "Each entry under unresolvedRoutes names a journey step that opens a "
+  + "screen the contract does not identify: its target is neither a declared route path, nor exactly a declared "
+  + "route's name, nor the collection/detail route of the entity the step operates. Set that step's \"route\" (or its "
+  + "\"target\") to the exact declared route path it opens, choosing from declaredRoutes; declare a new route only "
+  + "when the screen genuinely does not exist yet. Prose cannot name a screen. Do not change any other step.";
+
 export const DEPENDENCY_REPAIR_INSTRUCTION = "Correct only the supplied invalid dependency or semantic subset. "
   + "Do not invent user actions, operations, entities, fields, or business behavior. You may mark an existing "
   + "step or operation as producing an already-declared field only when its existing observable result already "
@@ -327,7 +339,9 @@ export function contractDependencyRepairScope(contract, issues = []) {
   const semantics = (issues || []).filter((issue) => issue?.code === SEMANTICS_ISSUE);
   const collisions = (issues || []).filter((issue) => issue?.code === COLLISION_ISSUE);
   const provenance = (issues || []).filter((issue) => PROVENANCE_ISSUES.has(issue?.code));
-  if (!contract || (!dependencies.length && !semantics.length && !collisions.length && !provenance.length)) return null;
+  const unresolvedRoutes = (issues || []).filter((issue) => issue?.code === ROUTE_ISSUE);
+  if (!contract || (!dependencies.length && !semantics.length && !collisions.length && !provenance.length
+    && !unresolvedRoutes.length)) return null;
   const semanticOperationIds = new Set(semantics.map((issue) => issue.operationId).filter(Boolean));
   const semanticOperations = (contract.operations || []).filter((operation) => (
     semanticOperationIds.has(operation?.id || operation?.name)
@@ -342,6 +356,7 @@ export function contractDependencyRepairScope(contract, issues = []) {
     ...semanticOperations.map((operation) => operation?.journey),
     ...collisions.map((issue) => issue.journeyId),
     ...provenance.flatMap((issue) => [issue.journeyId, ...(issue.candidateProducers || []), ...(issue.cycle || [])]),
+    ...unresolvedRoutes.map((issue) => issue.journeyId),
   ].filter(Boolean));
   const journeys = (contract.journeys || []).filter((journey) => journeyIds.has(journey.id));
   const operationByIdentity = new Map((contract.operations || []).map((operation) => (
@@ -398,7 +413,16 @@ export function contractDependencyRepairScope(contract, issues = []) {
       fields: (entity.fields || []).filter((field) => usedFields.has(String(field?.name || field))),
     }));
   return {
-    mode: semantics.length || collisions.length || provenance.length ? "interaction_contract_repair" : "interaction_state_dependency_repair",
+    mode: semantics.length || collisions.length || provenance.length || unresolvedRoutes.length
+      ? "interaction_contract_repair" : "interaction_state_dependency_repair",
+    ...(unresolvedRoutes.length ? {
+      unresolvedRoutes: unresolvedRoutes.map((issue) => ({
+        journeyId: issue.journeyId, stepIndex: issue.stepIndex, target: issue.target || null,
+        candidates: issue.candidates || [], declaredRoutes: issue.declaredRoutes || [],
+      })),
+      declaredRoutes: (contract.routes || []).map((route) => route.path),
+      routes: contract.routes || [],
+    } : {}),
     ...(provenance.length ? { invalidProvenance: provenance.map((issue) => ({
       code: issue.code, journeyId: issue.journeyId, entity: issue.entity || null,
       consumerStepId: issue.consumerStepId || null, consumerOperationId: issue.consumerOperationId || null,
@@ -515,8 +539,17 @@ export function mergeContractDependencyRepair(contract, reply, scope) {
     .map((entity) => (renamedAway.has(entity?.name)
       ? { ...entity, fields: (entity.fields || []).filter((field) => !renamedAway.get(entity.name).has(String(field?.name ?? field))) }
       : entity));
+  // Routes may only change when the scope asked for a route repair: existing routes keep their
+  // identity by path, a corrected route replaces its path, and a genuinely new route is appended.
+  const routes = scope.unresolvedRoutes?.length && Array.isArray(patch.routes)
+    ? [
+      ...(contract.routes || []).map((route) => patch.routes.find((candidate) => candidate?.path === route?.path) || route),
+      ...patch.routes.filter((candidate) => candidate?.path && !(contract.routes || []).some((route) => route?.path === candidate.path)),
+    ]
+    : contract.routes;
   return {
     ...contract,
+    ...(routes !== contract.routes ? { routes } : {}),
     journeys: mergeScoped(contract.journeys, repairedJourneys, journeyIds, (journey) => journey?.id),
     operations: mergeScoped(contract.operations, patch.operations, operationIds,
       (operation) => operation?.id || operation?.name),
@@ -566,8 +599,9 @@ export async function generateContract({
     const dependencyAsk = dependencyRepairScope
       ? `${profileGuidance}\n\nSCOPED INTERACTION CONTRACT REPAIR MODE. ${DEPENDENCY_REPAIR_INSTRUCTION} `
         + `${dependencyRepairScope.invalidControlIdentities?.length ? `${COLLISION_REPAIR_INSTRUCTION} ` : ""}`
+        + `${dependencyRepairScope.unresolvedRoutes?.length ? `${ROUTE_REPAIR_INSTRUCTION} ` : ""}`
         + `Return one JSON object containing only corrected `
-        + `journeys, operations, and entities from this subset; unlisted contract sections are preserved `
+        + `journeys, operations, entities${dependencyRepairScope.unresolvedRoutes?.length ? " and routes" : ""} from this subset; unlisted contract sections are preserved `
         + `server-side.\n\nINVALID DEPENDENCY SUBSET:\n${JSON.stringify(dependencyRepairScope)}\n\n`
         + `REJECTION DETAILS:\n${lastProblems.map((problem) => `- ${problem}`).join("\n")}`
       : null;

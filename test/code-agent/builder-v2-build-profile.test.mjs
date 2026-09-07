@@ -29,6 +29,7 @@ function contract({
   auth = { required: false, model: null, rules: [] },
   integrations = [],
   sampleData = null,
+  routes = [{ path: "/", name: "Home", purpose: summary, auth: false }],
 } = {}) {
   return {
     summary,
@@ -39,7 +40,7 @@ function contract({
       id: "primary-flow", title: "Primary flow", priority: "primary", stage: "primary_journey",
       steps, acceptance: ["the requested outcome is visible"],
     }],
-    routes: [{ path: "/", name: "Home", purpose: summary, auth: false }],
+    routes,
     entities,
     operations,
     auth,
@@ -229,6 +230,7 @@ test("explicit Website remains website-oriented while requested forms and integr
         reads: ["name", "email", "body"], writes: ["id"],
       }],
     }],
+    routes: [{ path: "/", name: "Home", auth: false }, { path: "/contact", name: "Contact", auth: false }],
     steps: [
       { action: "open the contact page", target: "/contact", expect: "the contact form is visible" },
       { action: "enter and submit a message", target: "contact form", operates: ["name", "email", "body"], expect: "a success message is visible" },

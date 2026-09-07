@@ -134,7 +134,7 @@ const perJourneyJob = (execution, journey) => JSON.parse(JSON.stringify({
 }));
 
 test("a multi-journey pass split into per-journey sandbox jobs keeps its bound provenance", () => {
-  const driven = retained.journeys.slice(0, 2);
+  const driven = spec.contract.journeys.slice(0, 2); // the DERIVED journeys: the build spec stamps resolved routes onto them
   const execution = verificationExecutionContract(spec.contract, driven, driven);
   assert.equal(executionProvenanceValid(JSON.parse(JSON.stringify(execution))), true, "whole scope");
   for (const journey of driven) {
@@ -143,7 +143,7 @@ test("a multi-journey pass split into per-journey sandbox jobs keeps its bound p
 });
 
 test("a per-journey job that drifts from its bound source is still refused", () => {
-  const driven = retained.journeys.slice(0, 2);
+  const driven = spec.contract.journeys.slice(0, 2); // the DERIVED journeys: the build spec stamps resolved routes onto them
   const execution = verificationExecutionContract(spec.contract, driven, driven);
   const tamperedFlow = perJourneyJob(execution, driven[0]);
   tamperedFlow.interactionContract.flows[0].action = "a different action";
@@ -151,7 +151,7 @@ test("a per-journey job that drifts from its bound source is still refused", () 
   const tamperedJourney = perJourneyJob(execution, driven[0]);
   tamperedJourney.journeys[0].steps[0].expect = "something else";
   assert.equal(executionProvenanceValid(tamperedJourney), false, "changed journey step");
-  const foreign = perJourneyJob(execution, retained.journeys[2]);
+  const foreign = perJourneyJob(execution, spec.contract.journeys[2]);
   assert.equal(executionProvenanceValid(foreign), false, "a journey outside the bound scope");
   const tamperedSource = perJourneyJob(execution, driven[0]);
   tamperedSource.entities[0].fields.push({ name: "newField", type: "string" });
