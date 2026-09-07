@@ -3,7 +3,8 @@ import test from "node:test";
 import {
   createAnthropicCodingProvider, toNeutralMessages,
 } from "../../shell/server/lib/anthropicCodingProvider.mjs";
-import { createCodingModelForCredential, resolveModelSelection, toCodexLeadMessages } from "../../shell/server/lib/modelGateway.mjs";
+import { codexLeadAdapter, createCodingModelForCredential, resolveModelSelection, toCodexLeadMessages } from "../../shell/server/lib/modelGateway.mjs";
+import { createCodexProvider } from "../../src/providers/codexProvider.mjs";
 
 test("model gateway resolves explicit commercial providers", () => {
   assert.deepEqual(resolveModelSelection("managed:openai:gpt-5.6-sol"), { provider: "openai", model: "gpt-5.6-sol" });
@@ -25,7 +26,13 @@ test("Codex Lead adapter preserves tool calls, usage, and request identity", asy
       'data: {"type":"response.completed","response":{"id":"resp_1","usage":{"input_tokens":10,"input_tokens_details":{"cached_tokens":4},"output_tokens":3,"output_tokens_details":{"reasoning_tokens":1},"total_tokens":13}}}',
       "",
     ].join("\n\n"), { status: 200, headers: { "content-type": "text/event-stream" } });
-    const model = createCodingModelForCredential({ provider: "codex" });
+    // The credential route must yield the Codex lead adapter, but the turn itself is driven
+    // through an injected token provider: reading ~/.codex/auth.json is a property of the
+    // developer machine, not of the adapter under test, and CI has no ChatGPT login.
+    assert.equal(typeof createCodingModelForCredential({ provider: "codex" }).turn, "function");
+    const model = codexLeadAdapter(createCodexProvider({
+      tokenProvider: async () => ({ accessToken: "test-token", accountId: "test-account" }),
+    }));
     const result = await model.turn({
       instructions: "Use tools", input: [{ role: "user", content: "Build" }],
       tools: [{ name: "app_build", description: "Build", parameters: { type: "object" } }],
