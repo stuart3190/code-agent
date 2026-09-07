@@ -2048,14 +2048,27 @@ async function waitForAutoAdvanceEvidence(page, nextControl, expect, textBefore,
   let nextControlVisible = false;
   let expectationEvidence = await expectationBecameVisible(page, expect, textBefore);
   if (!nextControl) return { nextControlVisible, expectationEvidence };
+  // Selection state is proved structurally (the option transition, the contracted next control
+  // appearing), so "selected", "highlighted" and the like are not keywords. An expectation such as
+  // "the account details step is shown for the selected account type" therefore reduces to words
+  // that were already on screen, and could never be FRESH. Once the contract's own next control
+  // is visible, the outcome words being visible is sufficient; freshness stays required when the
+  // advance cannot be proved by the next control. Unrelated or wrong screens still fail: they do
+  // not show the contracted next control, or they do not show the outcome's words.
+  const settle = (evidence) => ({
+    ...evidence,
+    met: evidence.met || (nextControlVisible && (evidence.wanted?.length || 0) > 0
+      && evidence.found.length / evidence.wanted.length >= 0.5),
+  });
   for (;;) {
     nextControlVisible = await semanticControlVisible(page, nextControl);
+    expectationEvidence = settle(expectationEvidence);
     if (nextControlVisible && expectationEvidence.met) break;
     if (Date.now() >= deadline) break;
     await page.waitForTimeout(200);
     expectationEvidence = await expectationBecameVisible(page, expect, textBefore);
   }
-  return { nextControlVisible, expectationEvidence };
+  return { nextControlVisible, expectationEvidence: settle(expectationEvidence) };
 }
 
 /**
