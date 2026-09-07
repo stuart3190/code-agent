@@ -22,7 +22,7 @@ const creditAmount = (value) => Number(value || 0).toLocaleString("en-GB", { max
 
 export default function UsageTab({ data, onUpgrade, onOpenTab, onChanged, showToast }) {
   const [detail, setDetail] = useState(false);
-  const { plan, budgets, period, capabilities, counts, unlimited, ownerAccount, pastDue, credits = null } = data;
+  const { plan, budgets, period, capabilities, counts, unlimited, ownerAccount, previewPlan, pastDue, credits = null } = data;
   const resets = formatBillingDate(period?.end);
   const anyAtLimit = !unlimited && Object.values(budgets || {}).some((b) => b.remaining <= 0);
 
@@ -30,12 +30,14 @@ export default function UsageTab({ data, onUpgrade, onOpenTab, onChanged, showTo
     <div className="st-tab">
       <div className="st-headline">
         <div>
-          <div className="st-headline-plan">{plan.name} plan</div>
+          <div className="st-headline-plan">
+            {ownerAccount && !previewPlan ? "Owner account" : `${plan.name} plan`}
+          </div>
           <div className="ct-hint">
             {resets ? <>This period ends {resets}, when every allowance below resets.</> : "Allowances reset monthly."}
           </div>
         </div>
-        {plan.id === "free" && <button className="ct-btn" onClick={onUpgrade}>See plans</button>}
+        {plan.id === "free" && !ownerAccount && <button className="ct-btn" onClick={onUpgrade}>See plans</button>}
       </div>
 
       {pastDue && (

@@ -53,11 +53,16 @@ export function usePlanState() {
   }, []);
 
   const subscription = billing?.subscription || null;
+  // Owner accounts (Thrallo staff, THRALLO_OWNER_EMAILS) sit on the free subscription row by
+  // design — nothing is ever enforced against them, so "You're on the Free plan, upgrade" is a
+  // false statement to them. They only count as free while deliberately previewing the Free view.
+  const ownerAccount = !!billing?.ownerAccount;
   return {
     billing,
     subscription,
+    ownerAccount,
     plan: subscription?.plan || null,
-    isFree: subscription?.plan === "free",
+    isFree: ownerAccount ? billing?.previewPlan === "free" : subscription?.plan === "free",
     pendingPlan: subscription?.pendingPlan || null,
     busy,
     error,
