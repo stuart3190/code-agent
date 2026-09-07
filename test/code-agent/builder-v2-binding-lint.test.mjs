@@ -629,3 +629,69 @@ test("a fully readable tree is NOT marked undetermined", () => {
   assert.equal(result.coverageUndetermined, false,
     `a readable tree was marked undetermined: ${JSON.stringify(result.undeterminedReasons)}`);
 });
+
+// ── a field is never a hand-wired duplicate of the action that submits it ───────────────────────
+//
+// Medium on cf5c4f7 (2026-09-07): the sign-in step operated the email textbox inside a "sign-in
+// form" action, so the derived action control carried logicalField "email" on a button. The button
+// was bound correctly; the plain <input aria-label="email"> it submits was reported as a
+// contract_control_binding_conflict, and three corrections could not satisfy a demand that made no
+// sense (spreading an undeclared field hook, then removing it again).
+
+const AUTH_CONTRACT = {
+  summary: "Team operations dashboard", projectType: "web app", version: 1,
+  auth: { required: true }, routes: [{ path: "/", name: "Home" }, { path: "/projects", name: "Projects" }],
+  entities: [{ name: "memberProfile", fields: [{ name: "email", type: "string" }, { name: "displayName", type: "string" }] }],
+  operations: [{ id: "create-member-profile", entity: "memberProfile", kind: "create", journey: "work" }],
+  journeys: [{ id: "work", title: "A member signs in", priority: "primary", steps: [
+    { action: "open the app while signed out", target: "/", expect: "the sign-in screen is visible" },
+    { action: "sign in with platform authentication as a team member", target: "sign-in form",
+      operates: ["email"], primitive: "textbox", verificationValues: { email: "member@alderstudio.test" },
+      expect: "the Projects dashboard route opens and shows the signed-in team member name" },
+  ] }],
+  acceptance: [], states: [], deferred: [], imageIntents: [], integrations: [],
+};
+const AUTH_SPEC = deriveBuildSpec(AUTH_CONTRACT);
+const authAction = AUTH_SPEC.interactionContract.flows.find((flow) => flow.kind === "action" && flow.control?.machineId);
+
+test("LIVE-SHAPED — the email field an action submits is not a duplicate of the action button", () => {
+  assert.equal(authAction?.control?.logicalField, "email", "the live derivation shape: an action control keyed by the operated field");
+  const tree = {
+    "src/screens/scaffold/SignInScreen.jsx": `
+      import { useState } from "react";
+      import { useSemanticAction } from "../../lib/capabilities/composed/interaction-primitives.js";
+      export default function SignInScreen() {
+        const [auth, setAuth] = useState({ email: "", password: "" });
+        const signInAction = useSemanticAction({ name: "sign-in form", label: "Sign in", onActivate: () => {} });
+        return <form aria-label="sign-in form" onSubmit={(event) => event.preventDefault()}>
+          <label>Email<input aria-label="email" name="email" type="email" value={auth.email}
+            onChange={(event) => setAuth((current) => ({ ...current, email: event.target.value }))} /></label>
+          <label>Password<input aria-label="password" name="password" type="password" value={auth.password}
+            onChange={(event) => setAuth((current) => ({ ...current, password: event.target.value }))} /></label>
+          <button {...signInAction.buttonProps} data-thrallo-action=${JSON.stringify(authAction.control.machineId)} type="button">Sign in</button>
+        </form>;
+      }`,
+  };
+  const result = lintControlBindings(tree, { interactionContract: AUTH_SPEC.interactionContract });
+  assert.equal(failing(result).some((row) => row.code === "contract_control_binding_conflict"), false,
+    JSON.stringify(failing(result)));
+});
+
+test("a second hand-wired BUTTON for the same action is still a conflict", () => {
+  const tree = {
+    "src/screens/scaffold/SignInScreen.jsx": `
+      import { useSemanticAction } from "../../lib/capabilities/composed/interaction-primitives.js";
+      export default function SignInScreen() {
+        const signInAction = useSemanticAction({ name: "sign-in form", label: "Sign in", onActivate: () => {} });
+        return <form aria-label="sign-in form">
+          <input aria-label="email" name="email" type="email" />
+          <button {...signInAction.buttonProps} data-thrallo-action=${JSON.stringify(authAction.control.machineId)} type="button">Sign in</button>
+          <button type="button" aria-label="email" onClick={() => {}}>Sign in form</button>
+        </form>;
+      }`,
+  };
+  const result = lintControlBindings(tree, { interactionContract: AUTH_SPEC.interactionContract });
+  const conflict = failing(result).find((row) => row.code === "contract_control_binding_conflict");
+  assert.ok(conflict, JSON.stringify(result.findings));
+  assert.deepEqual(conflict.elements.map((row) => row.element), ["<button>"]);
+});

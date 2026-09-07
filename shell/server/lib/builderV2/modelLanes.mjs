@@ -549,6 +549,18 @@ function renderHeadroomFragmentPrompt({
   const escalated = [...new Set((regenerateFiles || []).filter((path) => (
     headroomScope?.allowedFiles?.includes(path)
   )))];
+  const bindingRule = (problems || []).some(isBindingProblem) ? [
+    "",
+    "BINDING RULE (this failure is about a contracted control's binding):",
+    "- To bind a field: declare `const <name>Field = useSemanticField({ name: \"<control>\", label: ... })` beside",
+    "  the other useSemantic* declarations (excerpt shown) AND spread `{...<name>Field.inputProps}` on the",
+    "  journey-facing element, both in this same patch. Import useSemanticField if the file does not yet.",
+    "- To bind an action: useSemanticAction({ name }) with `{...action.buttonProps}` and its data-thrallo-action.",
+    "- If the element only duplicates a control that is already machine-bound elsewhere, remove the duplicate",
+    "  instead of binding the same control twice.",
+    "- An identifier a previous correction introduced must be DECLARED, never deleted, when the binding needs it.",
+    "- Never reference an identifier the file does not declare.",
+  ] : [];
   return [
     "RETAINED CANDIDATE MICRO-REPAIR",
     "The full candidate is retained. Fix only the named transition below. Deterministic structure,",
@@ -557,6 +569,7 @@ function renderHeadroomFragmentPrompt({
     `Allowed file: ${headroomScope.allowedFiles[0]}`,
     "Failure evidence:",
     ...failures.map((failure) => `- ${failure}`),
+    ...bindingRule,
     ...(rejected.length ? [
       "",
       "PREVIOUS EXACT-SOURCE PATCH REJECTIONS (authoritative):",
@@ -1060,7 +1073,27 @@ function sourceWords(value) {
 }
 
 /** Exact, bounded excerpts around the controls/state named by live verifier evidence. */
+// Pre-compile findings about a control's BINDING. Their fix lives in two places at once — a hook
+// declared beside the other useSemantic* calls and a spread on the element — and a correction that
+// can see only the element writes `{...emailField.inputProps}` against a hook it never declared,
+// then deletes it again when the next round reports the undefined identifier. Medium on cf5c4f7
+// (2026-09-07) spent its whole correction allowance in exactly that loop.
+const BINDING_PROBLEM = /contract_control_(?:binding_conflict|missing|wrong_binding)|references undefined identifier/;
+export function isBindingProblem(problem) {
+  return BINDING_PROBLEM.test(String(problem || ""));
+}
+function bindingAnchorLines(lines) {
+  const anchors = [];
+  const importLine = lines.findIndex((line) => /^\s*import\b.*(?:interaction-primitives|capabilities\/react|useSemantic)/.test(line));
+  if (importLine >= 0) anchors.push(importLine);
+  const hookLine = lines.findIndex((line) => /\buseSemantic(?:Field|Action|Selection)\s*\(/.test(line));
+  if (hookLine >= 0) anchors.push(hookLine);
+  return anchors;
+}
+
 export function headroomSourceFragments(source, problems = [], { maxFragments = 2, radius = 7 } = {}) {
+  const bindingProblems = (problems || []).filter(isBindingProblem);
+  if (bindingProblems.length) maxFragments = Math.max(maxFragments, 4);
   const firstCausal = (problems || []).filter((problem) => !isDownstreamFailureEvidence(problem)).slice(0, 1);
   const evidence = firstCausal.flatMap((problem) => {
     const structured = structuredFailure(problem);
@@ -1083,8 +1116,9 @@ export function headroomSourceFragments(source, problems = [], { maxFragments = 
     return [...words.slice(0, -1).map((word, index) => `${word} ${words[index + 1]}`),
       ...words.slice(0, -2).map((word, index) => `${word} ${words[index + 1]} ${words[index + 2]}`)];
   }))];
-  if (!terms.length) return [];
   const lines = String(source || "").split("\n");
+  const anchorCentres = bindingProblems.length ? bindingAnchorLines(lines) : [];
+  if (!terms.length && !anchorCentres.length) return [];
   const scored = lines.map((line, index) => {
     const normalized = line.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
     const hits = terms.reduce((sum, term) => sum + (normalized.includes(term) ? 1 : 0), 0);
@@ -1093,6 +1127,11 @@ export function headroomSourceFragments(source, problems = [], { maxFragments = 
   }).filter((row) => row.hits > 0)
     .sort((a, b) => b.score - a.score || b.hits - a.hits || a.index - b.index);
   const centres = [];
+  // Binding anchors come first: without the import and hook region the correction cannot bind.
+  for (const index of anchorCentres) {
+    if (centres.some((existing) => Math.abs(existing - index) <= radius)) continue;
+    centres.push(index);
+  }
   for (const row of scored) {
     if (centres.some((index) => Math.abs(index - row.index) <= radius)) continue;
     centres.push(row.index);

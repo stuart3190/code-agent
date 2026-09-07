@@ -1475,3 +1475,61 @@ test("a recovery provider rejection before source exists is platform-classified,
   assert.equal(reservations.rows()[0].fundingPool, "thrallo_recovery");
   assert.equal(reservations.rows()[0].state, "released");
 });
+
+// A binding finding's fix lives in two places — a hook declared beside the other useSemantic*
+// calls and a spread on the element. Medium on cf5c4f7 (2026-09-07) burned its correction allowance
+// because the fragment excerpt showed only the JSX: the model spread `{...emailField.inputProps}`
+// against a hook it could not declare, then deleted the spread when the next round reported the
+// undefined identifier. The excerpt must carry the import and hook region, and the prompt must say so.
+test("binding findings pull the import and hook-declaration region into the micro-repair excerpt", () => {
+  const filePath = "src/screens/scaffold/SignInScreen.jsx";
+  const filler = Array.from({ length: 220 }, (_, index) => `  // unrelated retained line ${index}`).join("\n");
+  const source = [
+    'import { useState } from "react";',
+    'import { useSemanticAction } from "../../lib/capabilities/composed/interaction-primitives.js";',
+    "export default function SignInScreen() {",
+    '  const [taskDraft, setTaskDraft] = useState({ taskStatus: "" });',
+    '  const createTaskAction = useSemanticAction({ name: "create-task", label: "Create task", onActivate: () => {} });',
+    filler,
+    '  return <form><label>Task Status<select aria-label="task Status" value={taskDraft.taskStatus}',
+    "    onChange={(event) => setTaskDraft({ ...taskDraft, taskStatus: event.target.value })} /></label>",
+    '    <button {...createTaskAction.buttonProps} data-thrallo-action="act_0bd63ca5" type="button">Create task</button></form>;',
+    "}",
+  ].join("\n");
+  const problem = JSON.stringify({
+    code: "contract_control_binding_conflict", fails: true, control: "taskStatus", inferredKey: "taskstatus",
+    requiredBinding: { helper: "useSemanticField", name: "taskStatus", attribute: "data-thrallo-control", machineId: "ctl_eb8d94b6", spread: "inputProps" },
+    elements: [{ file: filePath, line: 227, element: "<select>", via: "native", identities: ["task Status", "Task Status"] }],
+    message: `the contracted control "taskStatus" has a machine-bound implementation, but ${filePath}:227 also implements that exact control without machine identity; bind the journey-facing implementation`,
+    file: filePath, line: 227, severity: "blocking",
+  });
+  const fragments = headroomSourceFragments(source, [problem]);
+  const excerpt = fragments.map((fragment) => fragment.content).join("\n");
+  assert.match(excerpt, /import \{ useSemanticAction \}/, "the import line is in the excerpt");
+  assert.match(excerpt, /useSemanticAction\(\{ name: "create-task"/, "the hook-declaration region is in the excerpt");
+  assert.match(excerpt, /aria-label="task Status"/, "the flagged element is in the excerpt");
+  assert.ok(excerpt.length < source.length / 2, "unrelated retained source is not resent");
+  const prompt = renderPatchPrompt({
+    step: "repair", contract: CONTRACT, tiers: TIERS, tree: { [filePath]: source }, problems: [problem],
+    headroomScope: { kind: "headroom_fragment_continuation", fragmented: true, allowedFiles: [filePath],
+      fragments: fragments.map((fragment) => ({ path: filePath, ...fragment })) },
+  });
+  assert.match(prompt, /BINDING RULE/);
+  assert.match(prompt, /useSemanticField\(\{ name: "<control>"/);
+  assert.match(prompt, /must be DECLARED, never deleted/);
+});
+
+test("an undefined-identifier finding left by a binding correction is treated as a binding problem", () => {
+  const source = [
+    'import { useSemanticAction } from "../../lib/capabilities/composed/interaction-primitives.js";',
+    "export default function Screen() {",
+    '  const action = useSemanticAction({ name: "save", label: "Save", onActivate: () => {} });',
+    ...Array.from({ length: 120 }, (_, index) => `  // retained ${index}`),
+    '  return <input {...emailField.inputProps} aria-label="email" />;',
+    "}",
+  ].join("\n");
+  const fragments = headroomSourceFragments(source, ["src/screens/Screen.jsx:124 references undefined identifier emailField"]);
+  const excerpt = fragments.map((fragment) => fragment.content).join("\n");
+  assert.match(excerpt, /useSemanticAction\(\{ name: "save"/);
+  assert.match(excerpt, /emailField\.inputProps/);
+});

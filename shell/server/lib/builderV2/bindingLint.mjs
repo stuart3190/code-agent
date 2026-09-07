@@ -415,7 +415,20 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
     // unbound element must itself carry the contracted semantic identity, and another element must
     // prove the platform binding exists elsewhere. That exact mixed state is internally
     // inconsistent and is safe to correct before a paid browser pass.
+    // A duplicate must be the same KIND of control. An action control is a button; the fields the
+    // action submits are not hand-wired copies of it. A live sign-in step operated the email
+    // textbox inside a "sign-in form" action, so the derived action control carried
+    // logicalField "email" — and the correctly bound button plus the plain <input aria-label="email">
+    // it submits were reported as a binding conflict, which no correction could satisfy.
+    const fieldElement = (row) => /^<(?:input|select|textarea)\b/i.test(String(row.element || ""));
+    const actionElement = (row) => /^<(?:button|a)\b/i.test(String(row.element || ""))
+      || /\brole="(?:button|link|menuitem)"/i.test(String(row.element || ""));
+    // Selection options ARE buttons, so a hand-wired chooser button remains a duplicate of a
+    // selection control; only a typed input flow rules buttons and links out.
+    const sameKindOfControl = (row) => (actionFlow ? !fieldElement(row)
+      : flow.kind === "input" ? !actionElement(row) : true);
     const shadowedUnbound = matches.filter((row) => row.binding === BINDING.UNBOUND && !row.coversOnly
+      && sameKindOfControl(row)
       && textualIdentities(row)
         .some((identity) => semanticKey(identity) === semanticKey(key)
           && semanticQualifier(identity) === semanticQualifier(key)));
