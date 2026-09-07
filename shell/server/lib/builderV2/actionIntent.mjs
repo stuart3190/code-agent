@@ -118,6 +118,17 @@ const FAMILIES = [
   phrase: phrasePattern(family.phrases || []),
 }));
 
+// A past-participle form ("created", "selected", "submitted") standing before another word inside
+// a noun phrase modifies that word. Only an explicit verb preceder ("and", "to", …) makes it a verb.
+const PARTICIPLE = /^[a-z]{3,}(?:ed|d)$/;
+function isAttributiveParticiple(tokens, index) {
+  const token = tokens[index];
+  if (!PARTICIPLE.test(token) || token.endsWith("eed")) return false;
+  if (index + 1 >= tokens.length) return false;
+  if (index > 0 && VERB_PRECEDERS.has(tokens[index - 1])) return false;
+  return true;
+}
+
 // A word after one of these is being used as a verb: "and submit", "choose to cancel".
 const VERB_PRECEDERS = new Set(["and", "then", "to", "or", "also", "please", "now", "finally", "afterwards"]);
 // Transparent between a commit verb and what it commits: "confirm the cancellation".
@@ -156,6 +167,12 @@ export function phraseIntentMatches(phrase, mode = "clause") {
     let families = matchesAt(tokens, index, mode);
     if (!families.length) continue;
     const previous = tokens[index - 1];
+    // In a NOUN PHRASE a past participle in front of another word is an attribute of that word,
+    // not something the visitor does: "created project row", "selected member row", "submitted
+    // order card" name the record a control shows. Reading "created" there as a finite commit verb
+    // derived a MUTATION for "open the created project detail" (target "created project row") and a
+    // live Medium build spent six repair rounds looking for a commit control no app should have.
+    if (mode === "noun_phrase" && isAttributiveParticiple(tokens, index)) continue;
     let position = null;
     if (index === 0) position = "verb";
     else if (VERB_PRECEDERS.has(previous)) position = "verb";
