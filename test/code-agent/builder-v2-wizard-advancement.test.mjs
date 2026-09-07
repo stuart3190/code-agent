@@ -188,15 +188,17 @@ test("DISPROVED — step gating is NOT what blocks the later journey steps", { .
 test("REPRODUCED — the freshness rule is what stops the flow: outcome copy must be NEW per step",
   { ...needsBrowser }, async () => {
     const gated = await walk(gatedUrl);
-    // Both fixtures render one status line whose wording is reused across steps. The first
-    // selection passes because its words appear newly; the next fails even though the app
-    // works, because ≥half the expectation keywords were ALREADY on screen and none is new.
+    // Both fixtures render one status line whose wording is reused across steps, and the
+    // contract's expectations are written in selection-state language ("the selected date is
+    // highlighted"). Selection state is proved structurally, so "selected" and "highlighted" are
+    // not keywords: the expectation reduces to "date", a word the wizard shows before anything is
+    // chosen. Nothing can be NEW, and the very first selection is where the walk stops.
     //
-    // This is verbatim the live run-4 failure at "review the booking":
-    //   "nothing changed — 'selected, date, slot' was already on the page before this step"
+    // This is the live run-4 failure shape ("nothing changed — '…' was already on the page
+    // before this step"), now reached one step earlier than when the words still counted.
     assert.match(gated.detail, /nothing changed/,
       `the freshness rule must be the observed blocker:\n${gated.detail}`);
-    assert.match(gated.detail, /was already on the page before this step/);
-    // The step BEFORE it passed on newly-visible words, proving the app itself is driveable.
-    assert.match(gated.detail, /pass: select a dinner date .*new:/);
+    assert.match(gated.detail, /fail: select a dinner date — nothing changed — "date" was already on the page before this step/);
+    // The step BEFORE it passed, proving the app itself mounts and is driveable.
+    assert.match(gated.detail, /pass: open the home page/);
   });
