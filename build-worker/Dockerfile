@@ -4,6 +4,9 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY src ./src
 COPY shell/server ./shell/server
+# shell/server modules import shared contract vocabulary from shell/shared; without it the
+# sandbox fails at import time (browser_verify exited 1 with ERR_MODULE_NOT_FOUND, 2026-09-07).
+COPY shell/shared ./shell/shared
 COPY harness ./harness
 COPY build-worker ./build-worker
 RUN mkdir -p /opt/scaffold \
