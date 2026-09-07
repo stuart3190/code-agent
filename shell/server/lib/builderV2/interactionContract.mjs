@@ -1586,9 +1586,15 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
     capabilityGraphVersion: graph?.version || null,
   };
   // Graph-created operations did not exist when the prose pass assigned scenario
-  // roles. Reconcile roles from the actual bound persistence operations.
+  // roles. Reconcile roles from the actual bound persistence operations - but ONLY where the
+  // contract left the graph to invent them. A contract that DECLARES its operations has already
+  // said which journey creates, edits or reads each lifecycle, and that declaration wins: a
+  // bound operation on a different entity never speaks for this lifecycle, and a declared
+  // "existing" role is not overturned because the graph bound a create somewhere in the journey.
   composedBeforeNormalization.scenarios = { ...(plan.scenarios || {}) };
+  const contractDeclaresOperations = (contract?.operations || []).length > 0;
   for (const [id] of journeys) {
+    if (contractDeclaresOperations) break;
     const durable = flows.filter((flow) => flow.journeyId === id && flow.durableOperation);
     if (!durable.length) continue;
     const lifecycles = unique(durable.map((flow) => flow.durableLifecycle));
