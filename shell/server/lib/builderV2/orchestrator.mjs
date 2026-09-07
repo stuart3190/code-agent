@@ -11,6 +11,7 @@
 // gates via the verification facade, the real asset service, the real snapshot protocol.
 
 import crypto from "node:crypto";
+import { executionProvenance } from "./executionProvenance.mjs";
 import path from "node:path";
 
 import { indexTree } from "./indexer.mjs";
@@ -52,7 +53,7 @@ import { MINIMAL_CONTRACT_VERIFIER_POLICY } from "../appBuild/verifierPolicy.mjs
  * secondary journey and must never be scoped away with the cached verdicts.
  */
 export function verificationExecutionContract(contract, scopedJourneys, drivenJourneys) {
-  return {
+  const execution = {
     ...contract,
     journeys: scopedJourneys,
     allJourneys: contract?.journeys || scopedJourneys,
@@ -62,6 +63,8 @@ export function verificationExecutionContract(contract, scopedJourneys, drivenJo
       (drivenJourneys || []).map((row) => row.journey || row),
     ),
   };
+  execution.executionProvenance = executionProvenance(execution);
+  return execution;
 }
 
 /**
@@ -462,6 +465,7 @@ export function createOrchestrator({
       }),
     ];
     return { journeys: merged, plan: { ...plan, drive, reused }, platformDefects, blockingErrors,
+      executionProvenance: driven.executionProvenance || null,
       unavailable: driven.unavailable === true,
       verifierError: driven.error || null,
       verifierDefects: driven.verifierDefects || [],

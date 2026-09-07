@@ -89,7 +89,9 @@ function routeTransitionsForJourney(contract, journey) {
     const routePath = explicit && routes.some((route) => route.path === explicit)
       ? explicit
       : semanticNavigation
-        ? semanticRoute(routes, `${step?.action || ""} ${target} ${step?.expect || ""}`)?.path || null
+        // Expectations describe evidence, not navigation. A breakdown that "lists"
+        // counts must not move its controller to a route named "Task List".
+        ? semanticRoute(routes, `${step?.action || ""} ${target}`)?.path || null
         : null;
     if (routePath && transitions.at(-1)?.routePath !== routePath) transitions.push({ routePath, stepIndex });
   }

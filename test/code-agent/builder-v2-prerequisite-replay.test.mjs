@@ -73,7 +73,10 @@ const prerequisiteChain = () => {
  * so only the contracted collection can prove the record. `broken` keeps every identity and label
  * but never adds the card.
  */
-const appFor = ({ broken }) => ({
+const taskFlows = contract.interactionContract.flows.filter((flow) => flow.journeyId === PRIMARY && flow.stepIndex === 3);
+const taskInputs = taskFlows.filter((flow) => flow.kind === "input").map((flow) => flow.control);
+const taskCommit = taskFlows.find((flow) => flow.durableOperation === "create");
+const appFor = ({ broken, brokenTask = false }) => ({
   "src/App.jsx": `import { useState } from "react";
 
 const EMPTY = { projectTitle: "", projectDescription: "", clientName: "", projectStatus: "", projectOwnerId: "", projectDueDate: "" };
@@ -135,13 +138,39 @@ function ProjectsScreen() {
 
 function BoardScreen() {
   const projects = load();
+  const [tasks, setTasks] = useState(() => JSON.parse(localStorage.getItem("tasks") || "[]"));
+  const [draft, setDraft] = useState({});
+  const fields = ${JSON.stringify(taskInputs)};
+  function createTask(event) {
+    event.preventDefault();
+    if (${JSON.stringify(brokenTask)}) return;
+    const next = [...tasks, { ...draft, taskId: "task-" + (tasks.length + 1) }];
+    localStorage.setItem("tasks", JSON.stringify(next));
+    setTasks(next);
+    setDraft({});
+  }
   return (
     <main>
       <h1>Task board</h1>
       <p>The board shows task cards and filter controls for every saved project.</p>
       <section aria-label="board filter controls"><h2>Filter controls</h2><p>No filters applied.</p></section>
+      <form aria-label="new task form" onSubmit={createTask}>
+        {fields.map((field) => <label key={field.machineId}>{field.logicalField}
+          <input data-thrallo-control={field.machineId} value={draft[field.logicalField] || ""}
+            onChange={(event) => setDraft({ ...draft, [field.logicalField]: event.target.value })} />
+        </label>)}
+        <button data-thrallo-action=${JSON.stringify(taskCommit.control.machineId)} type="submit">new task form</button>
+      </form>
       <section aria-label="task cards"><h2>Task cards</h2>
         {projects.map((project) => <article key={project.projectId}>{project.projectTitle}</article>)}
+        {tasks.map((task) => <section key={task.taskId} aria-label={task.taskStatus + " status column"}>
+          <h2>{task.taskStatus} status column</h2>
+          <article aria-label="task card"><h3>{task.taskTitle}</h3>
+            <p>Project: {task.projectId}</p><p>Owner: {task.taskOwnerId}</p>
+            <p>Priority: {task.taskPriority}</p><p>Due date: {task.taskDueDate}</p>
+            <p>{task.taskDescription}</p>
+          </article>
+        </section>)}
       </section>
       <a href="/projects">Projects</a>
     </main>
@@ -156,7 +185,7 @@ export default function App() {
 `,
 });
 
-const CASES = { working: { broken: false }, broken: { broken: true } };
+const CASES = { working: { broken: false }, broken: { broken: true }, brokenTask: { broken: false, brokenTask: true } };
 const servers = new Map();
 const results = new Map();
 const builds = new Map();
@@ -201,14 +230,16 @@ after(async () => {
 const transcriptOf = (journey) => (journey.steps || [])
   .map((step) => `${String(step.status).padEnd(12)} | ${step.action} | ${step.detail}`).join("\n");
 
-test("the live contract shape replays the primary through its durable create mutation", () => {
+test("the live contract shape replays both required durable create mutations", () => {
   const chain = prerequisiteChain().controls;
   const kinds = chain.map((flow) => flow.kind);
-  assert.deepEqual(kinds, ["navigation", "input", "input", "input", "input", "input", "input", "mutation"], kinds.join(","));
+  assert.deepEqual(kinds.slice(0, 8), ["navigation", "input", "input", "input", "input", "input", "input", "mutation"], kinds.join(","));
+  assert.deepEqual(chain.filter((flow) => flow.durableOperation === "create").map((flow) => flow.entity), ["project", "task"]);
   const mutation = chain.at(-1);
-  assert.equal(mutation.control.machineId, identities.createProject);
+  assert.equal(chain[7].control.machineId, identities.createProject);
+  assert.equal(mutation.control.machineId, taskCommit.control.machineId);
   assert.ok(mutation.durableLifecycle, "the replayed commit is a durable mutation");
-  assert.match(mutation.observable, /appears in the projects list/);
+  assert.match(chain[7].observable, /appears in the projects list/);
   for (const key of Object.keys(identities)) assert.ok(identities[key], `${key} identity derived`);
 });
 
@@ -221,6 +252,13 @@ test("setup accepts the contracted collection containing the entered title, exac
     assert.equal(journey.steps[0]?.status, "pass", `the consumer's first step runs\n${transcript}`);
     assert.doesNotMatch(journey.steps[0]?.detail || "", /required starting state/, transcript);
   });
+
+test("a working project commit cannot conceal a failed task prerequisite", needsBrowser, () => {
+  assert.equal(builds.get("brokenTask").ok, true, builds.get("brokenTask")?.stderr);
+  const journey = results.get("brokenTask").journeys.find((row) => row.id === CONSUMER);
+  assert.equal(journey.setup?.ok, false, JSON.stringify(journey.setup));
+  assert.equal(journey.setup.failure.producerInteractionId, taskCommit.id);
+});
 
 test("setup still fails when the replayed commit persists nothing — the rule is not weakened",
   { ...needsBrowser, timeout: 300_000 }, () => {

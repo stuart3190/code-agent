@@ -23,6 +23,7 @@ import {
   verificationFixtureFields,
 } from "../../../shared/implementationContract.mjs";
 import { isKeyboardFocusOnlyStep } from "./interactionSemantics.mjs";
+import { operationReadEntityNames } from "./entityScope.mjs";
 
 export const INTERACTION_CONTRACT_VERSION = 2;
 
@@ -1497,6 +1498,18 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
       const responsibleModules = unique([...(flow.responsibleModules || []), semanticModule, persistenceModule]);
       Object.assign(flow, {
         operationId: operation.operationId,
+        entity: operation.entity || null,
+        durableOperation: persistence ? persistence.capabilityMethod : null,
+        durableLifecycle: persistence
+          ? `${persistence.capabilityId || "crud"}:${operation.entity}` : flow.durableLifecycle,
+        // Record inputs are not all instances of the first entity in the app.
+        // Keep exact schema identities for isolated multi-entity setup replay.
+        requiredProducerEntities: operationReadEntityNames(contract,
+          (contract?.operations || []).find((candidate) => (candidate.id || candidate.name) === operation.operationId) || {})
+          .filter((entity) => entityPersistencePolicy(contract, entity) !== "transient"
+            && (contract?.operations || []).some((candidate) => candidate.entity === entity
+              && operationUsesDurablePersistence(contract, candidate)))
+          .filter((entity) => entity !== operation.entity || persistence?.capabilityMethod !== "create"),
         responsibilityIds: responsibilities.map((responsibility) => responsibility.id),
         semanticResponsibilityTypes: responsibilities.map((responsibility) => responsibility.type),
         actionIdentity: {
@@ -1572,6 +1585,21 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
     operationCoverage: coverage,
     capabilityGraphVersion: graph?.version || null,
   };
+  // Graph-created operations did not exist when the prose pass assigned scenario
+  // roles. Reconcile roles from the actual bound persistence operations.
+  composedBeforeNormalization.scenarios = { ...(plan.scenarios || {}) };
+  for (const [id] of journeys) {
+    const durable = flows.filter((flow) => flow.journeyId === id && flow.durableOperation);
+    if (!durable.length) continue;
+    const lifecycles = unique(durable.map((flow) => flow.durableLifecycle));
+    const produces = durable.some((flow) => flow.durableOperation === "create");
+    composedBeforeNormalization.scenarios[id] = {
+      ...composedBeforeNormalization.scenarios[id],
+      role: produces ? "produces" : "consumes", startState: produces ? "fresh" : "inherits",
+      lifecycle: lifecycles.length === 1 ? lifecycles[0] : null,
+      lifecycles, basis: "bound-persistence-operation",
+    };
+  }
   const { plan: composed } = normalizeInteractionStateDependencies(composedBeforeNormalization);
   const verdict = validateInteractionContract(composed, { capabilityGraph: graph, operations: contract?.operations || [] });
   return { ...composed, valid: verdict.ok, problems: verdict.problems, issues: verdict.issues };

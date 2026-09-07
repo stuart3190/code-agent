@@ -29,6 +29,7 @@
 // this decides only how to describe it.
 
 import crypto from "node:crypto";
+import { sourceContractDigest } from "./executionProvenance.mjs";
 
 import { interactionFailureDiagnostics } from "./interactionContract.mjs";
 import { PROTECTED_PATHS } from "./patchEngine.mjs";
@@ -210,6 +211,13 @@ export function verificationDefects({
   tree = null, backendRowFailures = [], manifest = null,
 } = {}) {
   const verdicts = journeyResults || { journeys: [] };
+  if (verdicts.executionProvenance?.sourceContractDigest
+      && verdicts.executionProvenance.sourceContractDigest !== sourceContractDigest(contract)) return [{
+    code: "verification_evidence_contract_mismatch", defectClass: DEFECT_CLASS.CONTRACT,
+    owner: DEFECT_OWNER.PLATFORM, tier: REPAIR_TIER.NONE,
+    journeyId: null, stepIndex: null, action: null, control: null, modules: [],
+    evidence: { observed: "retained browser evidence belongs to a different execution contract; fresh verification is required" },
+  }];
   const minimal = verdicts.verifierPolicy === MINIMAL_CONTRACT_VERIFIER_POLICY;
   const journeysById = new Map((verdicts.journeys || []).map((journey) => [journey.id, journey]));
   const mechanics = verdicts.mechanics || null;
@@ -280,16 +288,27 @@ export function verificationDefects({
   // ownership is not a reason to leave it unrepaired.
   for (const journey of verdicts.journeys || []) {
     if (journey.setup?.ok !== false) continue;
+    if (journey.setup.planningIssues?.length) {
+      defects.push({ code: "prerequisite_contract_invalid", defectClass: DEFECT_CLASS.CONTRACT,
+        owner: DEFECT_OWNER.PLATFORM, tier: REPAIR_TIER.NONE,
+        journeyId: journey.id, stepIndex: null, action: null, control: null, modules: [],
+        evidence: { observed: journey.setup.failure?.reason, planningIssues: journey.setup.planningIssues } });
+      continue;
+    }
     const named = journey.setup.failure?.control || null;
     const setupReason = String(journey.setup.failure?.reason || "");
-    const producer = prerequisiteProducerFlow(contract, interactionContract, named);
+    const producer = journey.setup.failure?.producerInteractionId
+      ? (contract?.prerequisiteInteractionContract || interactionContract)?.flows?.find((flow) =>
+        flow.id === journey.setup.failure.producerInteractionId)
+      : prerequisiteProducerFlow(contract, interactionContract, named);
     // This reason is emitted only after setup found and activated the exact durable mutation.
     // It is concrete application evidence and belongs to the producing control's modules, not
     // to the secondary journey that was waiting for that record.
-    const activatedDurableMutation = minimal && producer?.kind === "mutation"
+    const activatedDurableMutation = minimal && (producer?.kind === "mutation"
+      || ["create", "update", "remove"].includes(producer?.durableOperation))
       && /durable mutation did not reach its contracted observable state|no entered value or new durable reference was committed/i
         .test(setupReason);
-    const producerModules = activatedDurableMutation ? unique([
+    const producerModules = producer ? unique([
       producer.stateOwner,
       producer.control?.stateOwner,
       ...(producer.responsibleModules || []),
@@ -307,17 +326,17 @@ export function verificationDefects({
         : minimal ? REPAIR_TIER.NONE : (named ? REPAIR_TIER.REPAIR : REPAIR_TIER.NONE),
       uncertain: activatedDurableMutation ? undefined : true, downstream: !named,
       prerequisite: true,
-      blockedJourneyId: activatedDurableMutation ? journey.id : undefined,
-      journeyId: activatedDurableMutation ? producer.journeyId : journey.id,
-      stepIndex: activatedDurableMutation ? producer.stepIndex : null,
-      action: activatedDurableMutation ? producer.action : null,
-      control: activatedDurableMutation
+      blockedJourneyId: producer ? journey.id : undefined,
+      journeyId: producer ? producer.journeyId : journey.id,
+      stepIndex: producer ? producer.stepIndex : null,
+      action: producer ? producer.action : null,
+      control: producer
         ? { id: producer.control?.machineId || null,
           logicalField: producer.control?.logicalField || producer.control?.accessibleName || named }
         : named ? { id: null, logicalField: named } : null,
-      modules: activatedDurableMutation
+      modules: producer
         ? producerModules : unique((journey.owners || []).filter(generatedSource)),
-      failureRefs: activatedDurableMutation ? producerModules
+      failureRefs: producer ? producerModules
         : unique([...(journey.owners || []), ...(journey.fallbackRefs || [])]),
       evidence: {
         expected: activatedDurableMutation ? producer.observable || null : null,

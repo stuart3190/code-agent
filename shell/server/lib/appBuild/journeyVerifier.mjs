@@ -14,6 +14,7 @@
 // driver can identify before browser verification begins.
 
 import { createRequire } from "node:module";
+import { executionProvenance, executionProvenanceValid } from "../builderV2/executionProvenance.mjs";
 import {
   appAuthRateLimitDefect,
   seedVerificationVisitorStorage,
@@ -4289,11 +4290,75 @@ export function journeyPrerequisites(flows, journeyId, primaryId, {
   const mine = ordered(journeyId);
   const requiresDurableRecord = flows.some((flow) => flow.journeyId === journeyId
     && (flow.reads || []).some((path) => /\.durable\./.test(path)));
-  if (journeyId === primaryId || (!mine.length && !reconstructIsolated)) {
+  if (!mine.length && !reconstructIsolated) {
     return { controls: [], requiresDurableRecord };
   }
 
   const chain = ordered(primaryId);
+  // Structured multi-entity consumers need all required commits, not just the
+  // primary journey's first mutation. A project commit alone cannot seed task
+  // filtering or analytics. Retain the legacy path for untyped contracts.
+  if (reconstructIsolated) {
+    const required = new Set(flows.filter((flow) => flow.journeyId === journeyId && flow.stepIndex >= 0)
+      .flatMap((flow) => (flow.requiredProducerEntities || []).filter((entity) => !flows.some((prior) =>
+        prior.journeyId === journeyId && prior.entity === entity && prior.durableOperation === "create"
+        && prior.stepIndex >= 0 && prior.stepIndex < flow.stepIndex))));
+    const producerOrder = [];
+    const visiting = new Set();
+    const resolved = new Set();
+    const issues = [];
+    const includeProducer = (entity) => {
+      if (resolved.has(entity)) return;
+      if (visiting.has(entity)) {
+        issues.push({ code: "prerequisite_producer_cycle", entity });
+        return;
+      }
+      visiting.add(entity);
+      const candidates = flows.filter((flow) => flow.journeyId !== journeyId
+        && flow.entity === entity && flow.durableOperation === "create" && flow.control && flow.stepIndex >= 0);
+      // Do not guess between alternative creation journeys.
+      const producers = new Set(candidates.map((flow) => flow.journeyId));
+      if (producers.size > 1) {
+        issues.push({ code: "prerequisite_producer_ambiguous", entity });
+        visiting.delete(entity);
+        return;
+      }
+      // Entities with no contracted creator may be external account/seed data;
+      // never manufacture a creator by replaying an unrelated primary mutation.
+      if (!producers.size) { visiting.delete(entity); return; }
+      const producer = candidates.sort((a, b) => a.stepIndex - b.stepIndex)[0];
+      for (const prior of flows.filter((flow) => flow.journeyId === producer.journeyId
+        && flow.stepIndex >= 0 && flow.stepIndex <= producer.stepIndex)) {
+        for (const dependency of prior.requiredProducerEntities || []) {
+          const locallyCreated = flows.some((flow) => flow.journeyId === prior.journeyId
+            && flow.entity === dependency && flow.durableOperation === "create"
+            && flow.stepIndex < prior.stepIndex);
+          if (!locallyCreated) includeProducer(dependency);
+        }
+      }
+      producerOrder.push(producer);
+      visiting.delete(entity);
+      resolved.add(entity);
+    };
+    for (const entity of required) includeProducer(entity);
+    if (issues.length) return { controls: [], requiresDurableRecord: true,
+      planningIssues: issues };
+    if (producerOrder.length) {
+      const emitted = new Set();
+      const controls = producerOrder.flatMap((producer) => ordered(producer.journeyId)
+        .filter((flow) => flow.stepIndex >= 0 && flow.stepIndex <= producer.stepIndex)
+        .filter((flow) => {
+          if (emitted.has(flow.id)) return false;
+          emitted.add(flow.id);
+          return true;
+        }));
+      return { controls, requiresDurableRecord: true };
+    }
+    if (required.size && !requiresAuthenticatedStart) {
+      return { controls: [], requiresDurableRecord: true, externalEntities: [...required] };
+    }
+  }
+  if (journeyId === primaryId) return { controls: [], requiresDurableRecord };
   // Some isolated secondary journeys explicitly begin in an authenticated state. Reconstruct
   // only the primary's contracted authentication step, not the unrelated durable work that comes
   // after it. This is derived from the primary's machine contract: route, credential inputs, then
@@ -4356,8 +4421,17 @@ export function journeyPrerequisites(flows, journeyId, primaryId, {
  * themselves use. Nothing is guessed: a prerequisite that cannot be established is reported as a
  * machine-readable setup failure, and the journey is NOT_REACHED rather than failed.
  */
-async function establishPrerequisites(page, controls, {
+async function establishPrerequisites(page, controls, options) {
+  let active = null;
+  const result = await drivePrerequisites(page, controls, { ...options, onFlow: (flow) => { active = flow; } });
+  if (!result.ok && active) result.failure = { ...result.failure,
+    producerInteractionId: active.id, producerJourneyId: active.journeyId, producerStepIndex: active.stepIndex };
+  return result;
+}
+
+async function drivePrerequisites(page, controls, {
   marker, authMarker = marker, journeyFlows, verifierPolicy = LEGACY_RICH_VERIFIER_POLICY,
+  onFlow,
 }) {
   const performed = [];
   // Exact values entered while reconstructing the producing journey. They are not satisfied by
@@ -4370,6 +4444,7 @@ async function establishPrerequisites(page, controls, {
   const enteredFields = [];
   let durableCommitted = false;
   for (const flow of controls) {
+    onFlow?.(flow);
     const structuredRoute = flow.kind === "navigation" ? verifierStructuredRouteTarget(flow.target) : null;
     const route = concreteRouteTarget(structuredRoute);
     const label = structuredRoute || flow.control?.logicalField || flow.control?.accessibleName || flow.kind;
@@ -4490,7 +4565,8 @@ async function establishPrerequisites(page, controls, {
       }
       performed.push({ control: label, kind: "authentication", detail: `authenticated ${authentication.email}` });
     }
-    if (flow.kind === "mutation" && flow.durableLifecycle && flow.observable) {
+    if ((flow.kind === "mutation" || ["create", "update", "remove"].includes(flow.durableOperation))
+        && flow.durableLifecycle && flow.observable) {
       const deadline = Date.now() + 12_000;
       // The observable is judged by the SAME rules the journey driver applies to this very step.
       // Keyword freshness alone failed a committed record live (bv2 medium, build a708c296): "the
@@ -4535,6 +4611,10 @@ async function establishPrerequisites(page, controls, {
           ? `contracted collection contains ${visible.membership.present.join(", ")}`
           : visible.found.join(", ")}) and `
           + `${durableValue ? `retained ${durableValue}` : `created ${durableReference}`}` });
+      // A later entity commit must prove its own entered values, not reuse a
+      // project's already-visible title as evidence that a task was created.
+      enteredValues.length = 0;
+      enteredFields.length = 0;
     }
     performed.push({ control: label, kind: flow.kind, detail: `activated ${label}` });
   }
@@ -4545,6 +4625,7 @@ async function establishPrerequisites(page, controls, {
     ? (journeyFlows || []).find((flow) => flow.stepIndex === 0 && flow.kind === "flow_start" && flow.control)
     : null;
   if (entry) {
+    onFlow?.(entry);
     const deadline = Date.now() + 5_000;
     while (!(await semanticControlVisible(page, entry.control)) && Date.now() < deadline) {
       await page.waitForTimeout(200);
@@ -4935,6 +5016,12 @@ export async function verifyJourneys({
   verifierPolicy = LEGACY_RICH_VERIFIER_POLICY,
 }) {
   const minimal = isMinimalContractVerifier(verifierPolicy);
+  if (!executionProvenanceValid(contract)) return {
+    pass: false, verifierPolicy, journeys: [], failures: [], undriveable: [],
+    verifierDefects: [{ code: "execution_contract_provenance_mismatch",
+      detail: "the execution contract changed after its source and driven scope were bound" }],
+  };
+  const provenance = executionProvenance(contract);
   const results = [];
   const consoleErrors = [];
   const failedRequests = [];
@@ -5058,6 +5145,7 @@ export async function verifyJourneys({
     // Durable evidence for the WHOLE run: what each contracted journey created, so a later
     // journey that depends on that record can prove it survived.
     const runEvidence = new Map();
+    const lifecyclePages = new Map();
     // Primary first: if the run is going to time out, it should time out having proved the thing
     // that actually gates the preview.
     const ordered = [...(contract?.journeys || [])]
@@ -5070,18 +5158,29 @@ export async function verifyJourneys({
           ...(minimal ? { classification: VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE } : {}) });
         continue;
       }
-      // Scenario isolation. Every journey gets a fresh browser context so authentication and
-      // other browser-persisted terminal state from one journey cannot hide the next journey's
-      // contracted entry controls. Durable dependencies still resolve through the stable
-      // verification visitor/account identity and the app's real backend; they do not require
-      // reusing browser storage.
+      // Keep browser state and durable evidence under the same lifecycle authority.
+      // Independent journeys still get a fresh visitor. An explicit inheriting
+      // consumer must retain its producer's session, not just evidence of a record
+      // which a new browser context can no longer access.
       const scenario = contract?.interactionContract?.scenarios?.[journey.id]
         || { role: "independent", startState: "fresh" };
       const isolatedJourneyContract = Boolean(contract?.prerequisiteInteractionContract)
         && (contract?.journeys || []).length === 1;
-      if (journeyIndex > 0) {
-        await page.context().close().catch(() => {});
+      const inheritedPage = scenario.startState === "inherits" && scenario.lifecycle
+        ? lifecyclePages.get(scenario.lifecycle) : null;
+      const previousPage = page;
+      if (inheritedPage && !inheritedPage.isClosed()) {
+        page = inheritedPage;
+      } else if (journeyIndex > 0) {
         page = await openContext();
+      }
+      if (page !== previousPage && ![...lifecyclePages.values()].includes(previousPage)) {
+        await previousPage.context().close().catch(() => {});
+      }
+      if (scenario.role === "produces") {
+        for (const lifecycle of scenario.lifecycles || [scenario.lifecycle].filter(Boolean)) {
+          lifecyclePages.set(lifecycle, page);
+        }
       }
       // Include fatal errors raised while the contracted surface mounts in the first step's
       // evidence. Once a step passes, those errors are consumed as non-blocking diagnostics so an
@@ -5138,6 +5237,14 @@ export async function verifyJourneys({
           primaryProducesDurableRecord, requiresAuthenticatedStart,
         });
       let setup = null;
+      if (prerequisites.planningIssues?.length) {
+        results.push({ id: journey.id, title: journey.title, priority: journey.priority,
+          status: "not_reached", steps: [], failedSteps: 0, undriveableSteps: 0,
+          setup: { ok: false, code: "prerequisite_contract_invalid",
+            planningIssues: prerequisites.planningIssues,
+            failure: { reason: "the contracted producer chain is ambiguous or cyclic" } } });
+        continue;
+      }
       if (prerequisites.controls.length) {
         const directValueEntry = journeyFlows.find((flow) => (
           ["input", "selection"].includes(flow.kind) && flow.control
@@ -5263,6 +5370,7 @@ export async function verifyJourneys({
 
   const primary = results.find((j) => j.priority === "primary") || results[0];
   return {
+    executionProvenance: provenance,
     pass: minimal
       ? (results.length ? results.every((journey) => journey.status === "pass") : null)
       : (primary ? primary.status === "pass" : null),
