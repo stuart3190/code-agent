@@ -8,6 +8,27 @@ const CUSTOMER_MESSAGES = Object.freeze({
 
 const CLASSIFICATIONS = new Set(Object.keys(CUSTOMER_MESSAGES));
 
+// An AggregateError or a cause chain hides the failure that mattered behind the one that wrapped
+// it. On 2026-09-16 the advanced qualification recorded only "Builder V2 failed and terminal
+// accounting could not be completed" while the provider rejection underneath it was never
+// persisted anywhere. Every member and cause is flattened here, outermost first, so the record
+// and the log carry the whole chain.
+export function describeErrorChain(error, { limit = 6 } = {}) {
+  const seen = new Set();
+  const lines = [];
+  const visit = (value, depth) => {
+    if (value == null || lines.length >= limit || seen.has(value)) return;
+    seen.add(value);
+    const message = typeof value?.message === "string" && value.message.trim() ? value.message.trim() : String(value);
+    const code = value?.code ? ` [${value.code}]` : "";
+    lines.push(`${"  ".repeat(depth)}${message}${code}`);
+    for (const member of Array.isArray(value?.errors) ? value.errors : []) visit(member, depth + 1);
+    if (value?.cause) visit(value.cause, depth + 1);
+  };
+  visit(error, 0);
+  return lines.join("\n");
+}
+
 export function structuredBuildFailure(error, overrides = {}) {
   const classification = CLASSIFICATIONS.has(overrides.classification || error?.classification)
     ? (overrides.classification || error.classification)
@@ -30,7 +51,7 @@ export function structuredBuildFailure(error, overrides = {}) {
     checkpointId: overrides.checkpointId || error?.checkpointId || null,
     customerActionRequired: overrides.customerActionRequired
       ?? (classification === "provider_customer" || classification === "contract"),
-    internalDetail: String(overrides.internalDetail || error?.message || error || "Builder failure").slice(0, 4_000),
+    internalDetail: String(overrides.internalDetail || describeErrorChain(error) || "Builder failure").slice(0, 4_000),
     customerMessageKey: overrides.customerMessageKey || error?.customerMessageKey
       || CUSTOMER_MESSAGES[classification],
   };

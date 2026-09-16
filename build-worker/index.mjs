@@ -10,6 +10,7 @@ import { executeBuildPipelineWork } from "../shell/server/lib/buildJobs.mjs";
 import { createOptimiser } from "../shell/server/lib/builderV2/assets/optimiser.mjs";
 import { resolveWorkerReleaseIdentity } from "../shell/server/lib/builderV2/workerReleaseIdentity.mjs";
 import { createWorkerQueue, serialiseWorkerFailure } from "./queue.mjs";
+import { describeErrorChain } from "../shell/server/lib/builderV2/buildFailure.mjs";
 import { startWorkerLeaseHeartbeat } from "./leaseHeartbeat.mjs";
 import { proveWorkerPreviewIsolation, resolvePreviewIsolationRunId } from "./previewIsolationPreflight.mjs";
 import { resolvePreviewIsolationRefreshPolicy } from "./previewIsolationPolicy.mjs";
@@ -312,7 +313,7 @@ async function runJob(job) {
           });
       }
     }
-    console.error(`[build-worker] ${classification} ${job.id}: ${error.message}`);
+    console.error(`[build-worker] ${classification} ${job.id}: ${describeErrorChain(error).replace(/\n/g, " <- ")}`);
   } finally {
     heartbeat.stop();
     clearInterval(nodeHeartbeat);

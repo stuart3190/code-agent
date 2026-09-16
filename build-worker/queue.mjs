@@ -1,3 +1,5 @@
+import { describeErrorChain } from "../shell/server/lib/builderV2/buildFailure.mjs";
+
 export function serialiseWorkerFailure(error, classification) {
   const message = typeof error?.message === "string" && error.message.trim()
     ? error.message
@@ -15,7 +17,7 @@ export function serialiseWorkerFailure(error, classification) {
     checkpointId: error?.checkpointId || null,
     customerActionRequired: error?.customerActionRequired === true,
     customerMessageKey: error?.customerMessageKey || null,
-    internalDetail: message,
+    internalDetail: describeErrorChain(error) || message,
   };
 }
 
