@@ -48,13 +48,14 @@ const WORKSPACE = `<!doctype html><html><body>
 </script>
 </body></html>`;
 
+const routes = { workspace: WORKSPACE };
 let server = null;
 let baseUrl = "";
 
 before(async () => {
   server = http.createServer((req, res) => {
     res.writeHead(200, { "content-type": "text/html" });
-    res.end(req.url.startsWith("/workspace") ? WORKSPACE : HOME);
+    res.end(req.url.startsWith("/workspace") ? routes.workspace : HOME);
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}/`;
@@ -86,4 +87,51 @@ test("an explicit sign-up step drives the sign-in panel the contracted route alr
   const authentication = signUp.authentication || signUp.controlEvidence?.authentication || null;
   assert.equal(authentication?.authenticated ?? signUp.drove, true, JSON.stringify(signUp));
   assert.match(JSON.stringify(signUp), /contracted_surface|the workspace shell/i);
+});
+
+// A sign-in panel whose submit is a plain button named "Sign in", outside any <form>. The
+// contracted primary journey drives it by identity; a dependent journey's prerequisite replay
+// goes through the generic account-form driver, which must recognise it as the submit.
+const WORKSPACE_SIGN_IN_BUTTON = `<!doctype html><html><body>
+<nav><a href="/">Home</a> <a href="/workspace">Workspace</a></nav>
+<section id="panel">
+  <h1>Lumen Layouts</h1>
+  <p>Sign in to open the workspace</p>
+  <label for="email">auth Email</label><input id="email" type="email" />
+  <label for="password">auth Password</label><input id="password" type="password" />
+  <button type="button" id="go">Sign in</button>
+</section>
+<script>
+  document.getElementById("go").addEventListener("click", () => {
+    document.getElementById("panel").innerHTML = "<h1>Workspace</h1><p>Workspace shell ready: the plan list panel, SVG canvas, fixture library and inspector are visible.</p>";
+    history.pushState({}, "", "/workspace/app");
+  });
+</script>
+</body></html>`;
+
+test("a plain 'Sign in' button outside a form is the account form's submit control", needsBrowser, async () => {
+  const previous = routes.workspace;
+  routes.workspace = WORKSPACE_SIGN_IN_BUTTON;
+  try {
+    const contract = {
+      routes: [{ path: "/", name: "Home" }, { path: "/workspace", name: "Workspace", auth: true }],
+      auth: { required: true },
+      journeys: [{
+        id: "create-plan", title: "A user signs in and opens the workspace", priority: "primary",
+        steps: [
+          { action: "open the workspace route", target: "/workspace",
+            expect: "the Lumen Layouts sign in panel with email and password fields is visible" },
+          { action: "sign up or sign in with email and password", target: "authentication form",
+            expect: "the workspace shell with the plan list panel and SVG canvas is visible" },
+        ],
+      }],
+    };
+    const result = await verifyJourneys({ previewUrl: baseUrl, contract, timeoutMs: 120_000 });
+    const journey = result.journeys.find((row) => row.id === "create-plan");
+    const signUp = journey.steps[1];
+    assert.notEqual(signUp.detail, "the account form exposed no submit control", JSON.stringify(signUp));
+    assert.equal(signUp.status, "pass", JSON.stringify(signUp));
+  } finally {
+    routes.workspace = previous;
+  }
 });

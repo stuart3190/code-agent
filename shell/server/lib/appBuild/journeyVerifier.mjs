@@ -2707,7 +2707,11 @@ async function driveAuthenticationForm(page, marker, { mode = "create", credenti
   }
   const before = page.url();
   const formSubmit = page.locator('form button[type="submit"], form input[type="submit"]').first();
-  const namedSubmit = page.getByRole("button", { name: /create account|sign ?up|register|continue|open .*workspace/i }).first();
+  // A sign-in panel's own submit is named "Sign in" more often than not, and it is not always a
+  // <form> submit. The 2026-09-16 Lumen advanced build drove exactly that control by contracted
+  // identity in its primary journey and passed, while every dependent journey's prerequisite
+  // replay of the same panel reported "the account form exposed no submit control".
+  const namedSubmit = page.getByRole("button", { name: /create account|sign ?up|register|continue|open .*workspace|sign ?in|log ?in|authenticate/i }).first();
   const submit = await formSubmit.isVisible().catch(() => false) ? formSubmit : namedSubmit;
   if (!await submit.isVisible().catch(() => false)) {
     return { attempted: true, submitted: false, email: submittedEmail, reason: "the account form exposed no submit control" };
