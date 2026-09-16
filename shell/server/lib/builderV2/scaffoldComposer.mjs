@@ -5,6 +5,7 @@
 // and connect declared capability/extension interfaces, but cannot replace the router/shell.
 
 import { createHash } from "node:crypto";
+import { SCAFFOLD_COMPOSITION_RULES } from "./executionSpecRules.mjs";
 
 import { scaffoldEntry } from "./scaffoldRegistry.mjs";
 
@@ -415,18 +416,6 @@ export function scaffoldCompositionBrief(graph, plan = scaffoldCompositionPlan(g
         requiredExports: extension.requiredExports, integrationPoints: extension.integrationPoints,
         operationContracts: extension.operationContracts,
         verificationSemantics: extension.verificationSemantics })) }, null, 2),
-    "The protected router already mounts every screen above. Implement visual/domain composition inside",
-    "those existing screen slots and only the declared custom extension files. Do not write App.jsx,",
-    "the composed scaffold root, a competing router, or a free-form replacement application shell.",
-    "ROUTING: react-router-dom is NOT installed and must not be imported. Read route parameters with",
-    "useRouteParams() (alias useParams), navigate with useNavigate() or <RouteLink to=\"/path\"> (alias Link),",
-    "NavLink, useLocation() and <Navigate to> are also provided - all from",
-    "../../lib/scaffolds/composed/primitives.jsx; parameterised routes such as /projects/:projectId",
-    "are already mounted and their params arrive through useRouteParams(). Never declare Routes/Route/",
-    "BrowserRouter or any nested router inside a screen: the composed shell owns the router.",
-    "Select each custom-extension operation with a literal second-argument context such as",
-    "{ operation: \"<operationId>\" }. The explicit legacy key operationId is also supported.",
-    "At every custom-extension call site, pass the selected operation's declared inputKeys as explicit",
-    "object properties. An object spread is not proof that a differently named domain field satisfies the interface.",
+    ...SCAFFOLD_COMPOSITION_RULES,
   ].join("\n");
 }

@@ -6,6 +6,7 @@
 // extension modules.
 
 import { CAPABILITIES } from "./capabilityRegistry.mjs";
+import { CAPABILITY_COMPOSITION_RULES } from "./executionSpecRules.mjs";
 
 
 export const CAPABILITY_COMPOSITION_VERSION = 1;
@@ -210,8 +211,7 @@ export function capabilityCompositionBrief(graph, plan = capabilityCompositionPl
       configurationModule: plan.configurationModule,
       extensionPoints: plan.extensionPoints,
     }, null, 2),
-    "Known behavior is already implemented behind these interfaces. Build unique UI, layout, copy,",
-    "domain configuration, integrations, and only the explicit custom_behavior extension modules.",
+    ...CAPABILITY_COMPOSITION_RULES,
   ].join("\n");
 }
 

@@ -5,6 +5,7 @@
 // planned module honours capability ownership, interaction identity, or downstream data flow.
 
 import { CAPABILITIES } from "./capabilityRegistry.mjs";
+import { MODULE_CONTRACT_RULES } from "./executionSpecRules.mjs";
 import {
   aggregateCapabilityFacts, lintCapabilitySafety, lintRequiredCapabilityBindings, lintRequiredModulePlan,
 } from "./capabilityLint.mjs";
@@ -224,15 +225,7 @@ export function moduleGenerationContractsBrief(moduleContracts) {
   return [
     "PER-MODULE GENERATION CONTRACTS (the intended responsibilities for this build):",
     JSON.stringify(moduleContracts, null, 2),
-    "ENFORCED: capability-owned operations may not be reimplemented through a lower-level persistence API,",
-    "and contracted durable state may not live in browser or process-local storage. These are checked before compilation.",
-    "GUIDANCE: module paths, where a capability is instantiated, and how a required method is reached",
-    "(called directly or passed as a reference, e.g. useSyncExternalStore) are yours to decide — the browser",
-    "journeys decide whether the result is correct.",
-    "Semantic controls may use any standards-compliant accessible HTML/ARIA shape; visual design is unrestricted.",
-    "A sharedCustomOperations group is ONE runtime action projected into several contracted journeys, not a pipeline of independent fallbacks.",
-    "Delegate to one implementation, or pass the same canonical source data explicitly through every implementation's declared runtime inputs; never recreate controller-owned domain collections independently inside extensions.",
-    "Declared runtime inputs are authoritative. Collection add/remove/toggle operations must transform the passed collection using the passed identifier and must not reject that identifier against private module-local records unless those records are themselves a declared input. Merge equivalent outputs without allowing an empty/default result from a missing input to overwrite a valid result.",
+    ...MODULE_CONTRACT_RULES,
   ].join("\n");
 }
 

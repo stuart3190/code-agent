@@ -35,6 +35,7 @@ import { dependencyPlanBrief, scopeDependencyPlan } from "./dependencyPlan.mjs";
 import { journeySurfaceBrief, journeySurfaceContext } from "./surfaceIntegration.mjs";
 import { scopeScaffoldGraph } from "./scaffoldGraph.mjs";
 import { scaffoldCompositionBrief } from "./scaffoldComposer.mjs";
+import { buildExecutionSpec, compactInteractionFlow, renderExecutionSpecSection } from "./executionSpec.mjs";
 
 /** Same shape as buildJobs' private bucket: one accumulator for the whole job. */
 export function jobUsageBucket() {
@@ -790,40 +791,7 @@ export function renderPatchPrompt({
     : repairFlows;
   const repairInteractionPlan = browserRepair || headroomScope ? {
     version: scopedInteractions.version,
-    flows: promptInteractionFlows.map((flow) => {
-      const compact = {
-        id: flow.id, journeyId: flow.journeyId, stepIndex: flow.stepIndex, kind: flow.kind,
-        action: flow.action, target: flow.target || null,
-        reads: flow.reads || [], writes: flow.writes || [],
-        control: flow.control ? {
-        machineId: flow.control.machineId || null,
-        roles: flow.control.roles || [], logicalField: flow.control.logicalField || null,
-        inputTypes: flow.control.inputTypes || [], accessibleNames: flow.control.accessibleNames || [],
-        verificationValue: flow.control.verificationValue ?? null,
-        editable: flow.control.editable === true, selectedState: flow.control.selectedState === true,
-        stateOwner: flow.control.stateOwner || null, statePath: flow.control.statePath || null,
-        downstream: flow.control.downstream || [],
-        } : null,
-        capability: flow.capability || null, observable: flow.observable || null,
-        stateOwner: flow.stateOwner || null, responsibleModules: flow.responsibleModules || [],
-        operationId: flow.operationId || null,
-        responsibilityIds: flow.responsibilityIds || [],
-        semanticResponsibilityTypes: flow.semanticResponsibilityTypes || [],
-        actionIdentity: flow.actionIdentity || null,
-        expectedStateTransition: flow.expectedStateTransition || null,
-        downstreamConsumers: flow.downstreamConsumers || [],
-        capabilityId: flow.capabilityId || null,
-        capabilityMethod: flow.capabilityMethod || null,
-        customBehavior: flow.customBehavior || null,
-        customBehaviorModule: flow.customBehaviorModule || null,
-        customBehaviorExports: flow.customBehaviorExports || [],
-        persistenceHandoff: flow.persistenceHandoff || null,
-        verificationObservation: flow.verificationObservation || null,
-      };
-      return Object.fromEntries(Object.entries(compact).filter(([, value]) => (
-        value !== null && value !== undefined && (!Array.isArray(value) || value.length)
-      )));
-    }),
+    flows: promptInteractionFlows.map((flow) => compactInteractionFlow(flow)),
   } : scopedInteractions;
   const repairFocusPaths = browserRepair ? [...new Set(repairFlows.flatMap((flow) => [
     ...(flow.responsibleModules || []), flow.stateOwner, flow.control?.stateOwner,
@@ -867,6 +835,15 @@ export function renderPatchPrompt({
     routes: scopedContract.routes || [],
     dependencyPlan: scopedContract.dependencyPlan || null,
   }, null, 2) : null;
+  // FULL GENERATION (core, increment, edit) receives ONE canonical execution specification in
+  // which every module, responsibility, control and state path is stated once. Bounded repair,
+  // correction and headroom dispatches keep their focused briefs: they already carry a retained
+  // tree plus an exact write boundary, and the same validators re-run after every patch.
+  const executionSpec = !activeScope && !isRepair ? buildExecutionSpec({
+    capabilityGraph: scopedCapabilityGraph, scaffoldGraph: scopedScaffoldGraph,
+    modulePlan: promptModulePlan, moduleContracts, interactionContract: repairInteractionPlan,
+    persistencePlan: compactPersistencePlan,
+  }) : null;
   const capabilityPaths = bindCapabilities(contract)
     .map((binding) => CAPABILITIES[binding.name]?.package).filter(Boolean);
   const advisoryNotes = (advisory || []).length ? [
@@ -899,14 +876,16 @@ export function renderPatchPrompt({
     headroomScope
       ? "CAPABILITY REQUIREMENTS: the focused per-module summary below is the dispatch brief; full bindings remain machine-enforced after the patch."
       : capabilityRequirementsBrief(scopedContract),
-    scopedCapabilityGraph ? [
+    executionSpec ? renderExecutionSpecSection(executionSpec, "capabilityGraph") : scopedCapabilityGraph ? [
       "CAPABILITY GRAPH (authoritative behavior/state/data-flow ownership for this scope):",
       JSON.stringify(headroomScope
         ? headroomCapabilityGraphBrief(scopedCapabilityGraph)
         : scopedCapabilityGraph, null, 2),
     ].join("\n") : "CAPABILITY GRAPH: none.",
-    scopedCapabilityGraph ? capabilityCompositionBrief(scopedCapabilityGraph) : "",
-    scopedScaffoldGraph ? scaffoldCompositionBrief(scopedScaffoldGraph) : "",
+    executionSpec ? renderExecutionSpecSection(executionSpec, "composition")
+      : scopedCapabilityGraph ? capabilityCompositionBrief(scopedCapabilityGraph) : "",
+    executionSpec ? renderExecutionSpecSection(executionSpec, "scaffold")
+      : scopedScaffoldGraph ? scaffoldCompositionBrief(scopedScaffoldGraph) : "",
     dependencyPlanBrief(scopedContract.dependencyPlan),
     promptModulePlan.length ? [
       "SUGGESTED MODULE PLAN (responsibilities matter; exact paths are guidance, not a gate — a working"
@@ -944,13 +923,15 @@ export function renderPatchPrompt({
           focusPaths: activeScopePaths.length ? activeScopePaths : repairFocusPaths,
           focusControls: repairControlFocus,
         })
+      : executionSpec ? renderExecutionSpecSection(executionSpec, "modules")
       : moduleGenerationContractsBrief(moduleCorrectionScope?.moduleContracts || moduleContracts),
     "",
-    compactPersistencePlan
+    executionSpec ? renderExecutionSpecSection(executionSpec, "persistence")
+      : compactPersistencePlan
       ? `PERSISTENCE OWNERSHIP CONTRACT (machine-enforced JSON; hard constraints, not advice):\n${JSON.stringify(compactPersistencePlan, null, 2)}`
       : "PERSISTENCE OWNERSHIP CONTRACT: no durable journey in this scope.",
     "",
-    interactionContractBrief(repairInteractionPlan),
+    executionSpec ? renderExecutionSpecSection(executionSpec, "interactions") : interactionContractBrief(repairInteractionPlan),
     headroomScope ? "" : preferredAssemblyBrief(assemblyNeeds(repairInteractionPlan, bindCapabilities(contract))),
     "",
     repairScope && !headroomScope ? [

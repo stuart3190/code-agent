@@ -20,6 +20,7 @@ import { memoryGraph } from "./graphStore.mjs";
 import { applyPatches, escalationPlan, patchOutcomes, REJECTION } from "./patchEngine.mjs";
 import { completionEligibility } from "./contractTiering.mjs";
 import { deriveBuildSpec, journeysInMountedScreenUnit, scopeBuildSpec } from "./buildSpec.mjs";
+import { coreGenerationScope, staticCandidateVerdict } from "./preRepairPipeline.mjs";
 import { deriveVerificationManifest } from "./verificationManifest.mjs";
 import { advisoryMessages, partitionFindings } from "./validationSeverity.mjs";
 import {
@@ -950,12 +951,8 @@ export function createOrchestrator({
 
       // Shape analysis now RECORDS rather than rejects. Only genuine safety/integrity findings
       // (see validationSeverity) can stop a candidate that is otherwise runnable.
-      const conformance = validateModuleConformance(applied.tree, {
-        contract, modulePlan, moduleContracts, interactionContract: scopedInteractionContract, bindings: scopedBindings,
-        capabilityGraph: scoped.capabilityGraph,
-      });
-      const persistence = lintDurablePersistence(applied.tree, { contract, journeys, modulePlan });
-      const persistenceVerdict = partitionFindings(persistence.findings || []);
+      const candidateVerdict = staticCandidateVerdict(applied.tree, { contract, journeys, scoped, stepId: step });
+      const { conformance, persistence, persistenceVerdict } = candidateVerdict;
       advisory = [...(conformance.advisory || []), ...persistenceVerdict.advisory];
       const blocking = [...(conformance.blocking || []), ...persistenceVerdict.blocking];
       if (advisory.length) {
@@ -1322,18 +1319,15 @@ export function createOrchestrator({
         abortIfRequested(signal);
         log(`assets: ${resolved.length} slot(s), ${providerCalls} provider call(s)`);
 
-        const journeysById = new Map((contract.journeys || []).map((j) => [j.id, j]));
-        const essentialJourneys = tiers.essential.journeys.map((id) => journeysById.get(id)).filter(Boolean);
-        const secondaryJourneys = tiers.secondary.journeys.map((id) => journeysById.get(id)).filter(Boolean);
-        const coreJourneys = journeysInMountedScreenUnit(spec, essentialJourneys);
-        const coreJourneyIds = new Set(coreJourneys.map((journey) => journey.id));
-        const incrementJourneys = secondaryJourneys.filter((journey) => !coreJourneyIds.has(journey.id));
+        // ONE scoping authority (preRepairPipeline.coreGenerationScope): the same journeys, spec
+        // projection and tier override that zero-model validation of a retained tree uses.
+        const coreScope = coreGenerationScope(spec, contract, { tiers });
+        const coreJourneys = coreScope.journeys;
+        const coreJourneyIds = new Set(coreScope.journeyIds);
+        const incrementJourneys = coreScope.incrementJourneys;
         // This override is local to generation scope. It does not alter the persisted product tier:
         // it tells the model that every journey writing the core's mounted screen is in this batch.
-        const coreGenerationTiers = {
-          ...tiers,
-          essential: { ...tiers.essential, journeys: [...coreJourneyIds] },
-        };
+        const coreGenerationTiers = coreScope.generationTiers;
         const evaluateCore = (nextVerdicts, rows = []) => completionEligibility({
           contract: { ...contract, journeys: coreJourneys }, gates: { ok: true },
           journeyResults: { journeys: nextVerdicts.journeys }, backendRowFailures: rows,

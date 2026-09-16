@@ -105,13 +105,17 @@ function oversizedModuleFixture({ source = null } = {}) {
   const moduleContracts = {
     version: 1,
     specifications: modulePlan.map((module) => ({
-      path: module.path, role: module.role, ownedJourneys: ["send-message"],
+      path: module.path,
+      role: module.role, ownedJourneys: ["send-message"],
       requiredImports: [], requiredCapabilities: [], forbiddenCapabilityBypasses: [],
-      state: { owns: "presentation" }, semanticInteractions: [], downstream: { consumes: [], produces: [] },
+      state: { owns: "presentation" }, semanticInteractions: [],
+      // The canonical execution specification states only contract facts, so the oversize has
+      // to live in one that full generation states and a bounded continuation does not: the
+      // downstream consumer list of three unrelated modules, far larger than any real build's.
+      // This reproduces the live failure class (a correction re-sending every unrelated contract).
+      downstream: { consumes: [], produces: [], consumers: module.path.endsWith("/A.jsx")
+        ? [] : [`send-message:${"x".repeat(65_000)}`] },
       persistence: { owner: null }, requiredExports: [], moduleSizeBoundary: 6_000,
-      // Models never see this synthetic field in a scoped continuation. It reproduces the live
-      // failure class: a full correction re-sent tens of thousands of irrelevant contract bytes.
-      diagnosticPadding: "x".repeat(55_000),
     })),
   };
   const tree = {

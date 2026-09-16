@@ -4,6 +4,7 @@
 // the implementation contract. It does not render JSX or prescribe a booking visual template.
 
 import { parse } from "@babel/parser";
+import { INTERACTION_CONTRACT_RULES } from "./executionSpecRules.mjs";
 
 import {
   ACTION_INTENT, actionIntents, commencesSomething, phraseIntentMatches, progressesSomething,
@@ -2185,11 +2186,7 @@ export function interactionContractBrief(plan) {
   return [
     "INTERACTION CONTRACT (machine-enforced JSON; implement these state/data-flow edges before styling):",
     JSON.stringify({ version: plan.version, flows: plan.flows }, null, 2),
-    "Every contracted control must be present, editable when it accepts input, semantically identifiable through standard HTML/ARIA, connected to its declared state owner, and propagated to downstream review/confirmation consumers.",
-    "Every non-null control.machineId is also mandatory runtime identity: emit it through the matching platform semantic helper, or as data-thrallo-control for input/selection controls and data-thrallo-action for action/flow-entry controls. An accessible label does not replace this identity.",
-    "When a control carries control.scope, its identity is scope.logicalField (control.qualifiedName): bind it with useSemanticField({ name: logicalField, scope }) or useSemanticSelection({ name: logicalField, scope }). The same field name without that scope is a DIFFERENT control (another entity's), never a substitute.",
-    "Use label/htmlFor, a wrapping label, aria-label, or aria-labelledby for accessible names; name/id/placeholder may assist location but do not replace an accessible name.",
-    "Visual design remains unrestricted.",
+    ...INTERACTION_CONTRACT_RULES,
   ].join("\n");
 }
 

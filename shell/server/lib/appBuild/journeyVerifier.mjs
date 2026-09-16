@@ -2493,8 +2493,22 @@ const TRANSIENT_OPERATION_WORDS = new Set([
   "increases", "reapplies", "redo", "restores", "undo",
 ]);
 
+// The KIND of indicator is not its value. "a visible Saved status appears" promises the state
+// Saved, never the noun "status": the 2026-09-16 advanced attempt ca48824 persisted its plan
+// correctly (name, fixture values and "Saved at <time>" all survived the reload) and failed the
+// recovery check only because the reloaded screen no longer contained the word "status". These
+// nouns name a piece of UI that carries a state; the lifecycle states themselves (Saved, Confirmed,
+// Cancelled, Archived, ...) stay load-bearing exactly as the adversarial matrix requires.
+const INDICATOR_KIND_WORDS = new Set([
+  "status", "statuses", "state", "states", "indicator", "indicators", "message", "messages",
+  "badge", "badges", "label", "labels", "toast", "toasts", "notification", "notifications",
+  "banner", "banners", "chip", "chips", "pill", "pills", "marker", "markers", "notice", "alert",
+  "alerts", "stamp", "timestamp",
+]);
+
 export function durableStatusWords(expect, text) {
   return keywords(expect, 5).filter((word) => !TRANSIENT_OPERATION_WORDS.has(word.toLowerCase())
+    && !INDICATOR_KIND_WORDS.has(word.toLowerCase())
     && new RegExp(word, "i").test(String(text || "")));
 }
 
