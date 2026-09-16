@@ -29,26 +29,43 @@ async function removeSandboxContainer(name) {
   }).catch(() => null);
 }
 
-export async function reconcileOrphanSandboxes(client) {
+const DURABLE_JOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+async function listLabelledSandboxes() {
   const listed = await runProcess("docker", [
     "ps", "-a", "--filter", "label=thrallo.build-worker=1",
     "--format", "{{.Names}}|{{.Label \"thrallo.durable-job-id\"}}",
   ], { env: safeChildEnvironment(), wallMs: 10_000, outputBytes: 1024 * 1024 });
-  if (!listed.ok || !listed.stdout.trim()) return { inspected: 0, removed: 0 };
-  const containers = listed.stdout.trim().split(/\r?\n/).map((line) => {
+  if (!listed.ok || !listed.stdout.trim()) return [];
+  return listed.stdout.trim().split(/\r?\n/).map((line) => {
     const [name, jobId] = line.split("|"); return { name, jobId };
   }).filter((row) => row.name && row.jobId);
-  const jobIds = [...new Set(containers.map((row) => row.jobId))];
-  const { data, error } = await client.from("build_work_jobs")
-    .select("id,state,lease_expires_at").in("id", jobIds);
-  if (error) throw new Error(`sandbox reconciliation: ${error.message}`);
-  const jobs = new Map((data || []).map((row) => [row.id, row]));
+}
+
+// A container labelled with something that is not a durable job id (the sandbox proof leaves
+// `thrallo-job-browser-cancel` behind in the Created state) can never belong to a live lease.
+// Passing that label to the uuid column made every tick throw "invalid input syntax for type
+// uuid", so from 2026-09-07 to 2026-09-16 no orphan was reconciled at all. Such containers are
+// orphans by definition and are removed without consulting the queue.
+export async function reconcileOrphanSandboxes(client, {
+  list = listLabelledSandboxes, remove = removeSandboxContainer, now = () => Date.now(),
+} = {}) {
+  const containers = await list();
+  if (!containers.length) return { inspected: 0, removed: 0 };
+  const jobIds = [...new Set(containers.map((row) => row.jobId).filter((id) => DURABLE_JOB_ID.test(id)))];
+  let jobs = new Map();
+  if (jobIds.length) {
+    const { data, error } = await client.from("build_work_jobs")
+      .select("id,state,lease_expires_at").in("id", jobIds);
+    if (error) throw new Error(`sandbox reconciliation: ${error.message}`);
+    jobs = new Map((data || []).map((row) => [row.id, row]));
+  }
   let removed = 0;
   for (const container of containers) {
     const job = jobs.get(container.jobId);
-    const leaseAlive = job?.lease_expires_at && new Date(job.lease_expires_at).getTime() > Date.now();
+    const leaseAlive = job?.lease_expires_at && new Date(job.lease_expires_at).getTime() > now();
     if (job && ["leased", "running", "cancel_requested"].includes(job.state) && leaseAlive) continue;
-    const result = await removeSandboxContainer(container.name);
+    const result = await remove(container.name);
     if (result?.ok) removed += 1;
   }
   return { inspected: containers.length, removed };

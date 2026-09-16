@@ -7,6 +7,7 @@ import { test } from "node:test";
 
 import { buildWorkerEnabled, limitsFor, workIdempotencyKey } from "../../shell/server/lib/buildWorkQueue.mjs";
 import { runProcess } from "../../build-worker/processTree.mjs";
+import { reconcileOrphanSandboxes } from "../../build-worker/sandboxRunner.mjs";
 import { safeChildEnvironment, sandboxTmpfsMb } from "../../build-worker/sandboxRunner.mjs";
 import { createWorkerQueue } from "../../build-worker/queue.mjs";
 import { startWorkerLeaseHeartbeat } from "../../build-worker/leaseHeartbeat.mjs";
@@ -263,4 +264,43 @@ test("a pre-dispatch platform failure is not reported to the customer as a worke
   assert.doesNotMatch(worker,
     /classification === "cancelled" \? "Cancelled by user\." : "The isolated build worker stopped/,
     "the fixed two-way message must not come back");
+});
+
+test("sandbox reconciliation removes a non-uuid-labelled container without querying the uuid column", async () => {
+  const live = "5f0b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d";
+  const stale = "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d";
+  const queried = [];
+  const removed = [];
+  const client = { from: () => ({ select: () => ({ in: async (_field, ids) => {
+    queried.push(...ids);
+    for (const id of ids) if (!/^[0-9a-f-]{36}$/i.test(id)) return { error: { message: `invalid input syntax for type uuid: "${id}"` } };
+    return { data: [
+      { id: live, state: "running", lease_expires_at: new Date(Date.now() + 60_000).toISOString() },
+      { id: stale, state: "running", lease_expires_at: new Date(Date.now() - 60_000).toISOString() },
+    ] };
+  } }) }) };
+  const result = await reconcileOrphanSandboxes(client, {
+    list: async () => [
+      { name: "thrallo-job-browser-cancel", jobId: "browser-cancel" },
+      { name: `thrallo-job-${live}`, jobId: live },
+      { name: `thrallo-job-${stale}`, jobId: stale },
+    ],
+    remove: async (name) => { removed.push(name); return { ok: true }; },
+  });
+  assert.deepEqual(queried, [live, stale], "only durable job ids reach the uuid column");
+  assert.deepEqual(removed, ["thrallo-job-browser-cancel", `thrallo-job-${stale}`]);
+  assert.deepEqual(result, { inspected: 3, removed: 2 });
+});
+
+test("sandbox reconciliation with only probe containers never touches the queue", async () => {
+  let queries = 0;
+  const client = { from: () => { queries += 1; throw new Error("must not query"); } };
+  const removed = [];
+  const result = await reconcileOrphanSandboxes(client, {
+    list: async () => [{ name: "thrallo-job-browser-cancel", jobId: "browser-cancel" }],
+    remove: async (name) => { removed.push(name); return { ok: true }; },
+  });
+  assert.equal(queries, 0);
+  assert.deepEqual(removed, ["thrallo-job-browser-cancel"]);
+  assert.deepEqual(result, { inspected: 1, removed: 1 });
 });
