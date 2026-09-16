@@ -2836,10 +2836,19 @@ async function driveExplicitAuthenticationAction(page, action, { marker, preview
     if (signOut) { await signOut.click({ timeout: 5_000 }); await page.waitForTimeout(600); }
     authState.active = null;
   }
-  if (!(await openAuthenticationEntry(page, previewUrl, mode))) {
+  // THE CONTRACT ALREADY OPENED THE FORM. An explicit "sign up or sign in" step follows a step
+  // that opened the contracted surface ("/workspace shows a sign-in panel when no session
+  // exists"). Leaving that page to hunt for a create-account link on the site root judged the
+  // wrong screen: the 2026-09-16 Lumen advanced build stood on an empty composed Home placeholder,
+  // reported "the create account entry was not offered", and six repair rounds were spent on a
+  // journey controller that could never have answered it. A visible account form on the current
+  // surface is driven where it is; navigation is only the fallback when no form is on screen.
+  const formAlreadyOffered = Boolean(await visibleAuthenticationCredentials(page));
+  if (!formAlreadyOffered && !(await openAuthenticationEntry(page, previewUrl, mode))) {
     return missingAuthenticationEntryOutcome(mode);
   }
   const authentication = await driveAuthenticationForm(page, `${marker}-${authState.accounts.length + 1}`, { mode, credentials });
+  if (formAlreadyOffered) authentication.via = authentication.via || "contracted_surface";
   if (!authentication.authenticated) {
     // The form was there and a contracted control refused input: the app failed, the browser did not.
     return { handled: true, drove: authentication.inputFailure ? true : undefined,

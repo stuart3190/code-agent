@@ -1018,6 +1018,42 @@ test("WP11/V2-20 — an identical full strategy cycle never restarts through cor
   assert.equal(result.stopReason, "repair_strategies_exhausted");
 });
 
+test("WP11/V2-20 — a no-progress cycle stops even when the defect signature churns", async () => {
+  // The 2026-09-16 Lumen advanced build (5f670fc9): the primary journey failed at the same step
+  // every round while downstream defects appeared and disappeared, so the cycle signature never
+  // matched its baseline and the ladder restarted twice - six rounds, 20 credits, no movement.
+  let repairCalls = 0;
+  let drives = 0;
+  const h = harness({
+    maxJourneyRepairs: 10,
+    patchPlan: {
+      core: () => CORE_PATCH,
+      repair: () => { repairCalls += 1; return [{ file: "src/screens/scaffold/BookingScreen.jsx",
+        ops: [{ op: "append", content: `\n// churned production-shape repair ${repairCalls}\n` }] }]; },
+      "increment:newsletter-signup": () => NEWSLETTER_PATCH,
+      "increment:browse-info": () => BROWSE_PATCH,
+    },
+    journeysFn: async ({ journeys }) => {
+      drives += 1;
+      return { journeys: journeys.map((j) => (j.id === "book-a-visit"
+        ? { id: j.id, title: j.title, priority: j.priority, status: "fail",
+          steps: [
+            { action: "submit the booking form", status: "fail", drove: true, detail: "the confirmation never appeared" },
+            // A downstream defect that is present on every other drive: the frontier never moves.
+            ...(drives % 2 === 0
+              ? [{ action: "see the booking in the list", status: "fail", drove: true, detail: "the list did not include it" }]
+              : []),
+          ] }
+        : { id: j.id, title: j.title, priority: j.priority, status: "pass" })) };
+    },
+  });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "proj-churn", request: "booking site" });
+  assert.equal(result.state, "blocked", JSON.stringify(result));
+  assert.equal(repairCalls, 3, "one strategy cycle without progress ends the tier; signature churn buys nothing");
+  assert.equal(result.stopReason, "repair_strategies_exhausted", JSON.stringify({ stop: result.stopReason, progress: result.repairProgressStop }));
+});
+
+
 test("WP11/V2-20 — rejected repair candidates stop before an undefined strategy is persisted", async () => {
   const started = [];
   const finished = [];

@@ -1783,20 +1783,20 @@ export function createOrchestrator({
                 ? ` — escalating to [${REPAIR_STRATEGIES[strategy]}]`
                 : " — every strategy tried this cycle"));
             if (strategy >= REPAIR_STRATEGIES.length) {
-              // EVERY STRATEGY TRIED. That ends the tier only if the cycle taught us nothing: a
-              // second pass over a DIFFERENT tree is a different attempt, and stopping with
-              // rounds and credits in hand is what left a 100-credit build blocked at 14.56 with
-              // one control left to fix. If the defect set has moved at all since this cycle
-              // began, the ladder resets and keeps going.
+              // EVERY STRATEGY TRIED WITHOUT PROGRESS. A round that moves the frontier resets the
+              // ladder above, so reaching this point means three consecutive strategies each left
+              // the earliest actionable frontier where it was. That ends the tier. The old rule
+              // restarted the ladder whenever the defect SIGNATURE differed from the cycle's
+              // baseline - and it always differed, because the no-progress branch merges retained
+              // attribution into the defect set. The 2026-09-16 Lumen advanced build (5f670fc9)
+              // spent six rounds and 20 credits on two identical cycles, each strategy recorded
+              // "no_progress" with the same primary-journey defect unmoved, before it was cancelled
+              // by hand. Signature churn is logged as evidence; it no longer buys another cycle.
               const signature = signatureOf(currentDefects);
-              if (signature === cycleBaseline) {
-                log(`${label}: a full strategy cycle left the defect set identical — stopping`);
-                break;
-              }
-              cycleBaseline = signature;
-              strategy = 0;
-              log(`${label}: the defect set moved during the cycle — restarting the ladder `
-                + `(${rounds}/${maxRounds} rounds used)`);
+              log(`${label}: a full strategy cycle made no progress — stopping `
+                + `(${signature === cycleBaseline ? "defect set identical" : "defect signature churned without progress"}, `
+                + `${rounds}/${maxRounds} rounds used)`);
+              break;
             }
           }
           return done();
