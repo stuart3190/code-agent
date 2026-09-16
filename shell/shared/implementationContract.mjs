@@ -311,6 +311,16 @@ export function validateContract(contract) {
         if (String(producerId) === journey.id) problems.push(`${where} cannot depend on itself`);
       }
     }
+    // A durableState producer declaration ({ entity, sourceJourney }) is the other way a contract
+    // names its producer chain; it is held to the same rule as dependsOn.
+    for (const row of Array.isArray(journey?.durableState) ? journey.durableState : []) {
+      if (!row || typeof row !== "object" || Array.isArray(row) || row.sourceJourney === undefined) continue;
+      const declaredJourneyIds = new Set((c.journeys || []).map((entry) => entry?.id).filter(Boolean));
+      if (!declaredJourneyIds.has(String(row.sourceJourney))) {
+        problems.push(`${where} durableState names an undeclared source journey "${row.sourceJourney}"`);
+      }
+      if (String(row.sourceJourney) === journey.id) problems.push(`${where} cannot source its records from itself`);
+    }
     if (!Array.isArray(journey?.steps) || journey.steps.length < 2) {
       problems.push(`${where} has fewer than two steps — a journey is a sequence, not a label`);
       continue;

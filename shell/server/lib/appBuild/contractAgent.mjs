@@ -46,6 +46,9 @@ Shape:
       "title": "A visitor books an available slot",
       "priority": "primary",             // EXACTLY ONE journey is "primary" — the one that must
       "stage": "primary_journey",        // work before the preview may be shown. Others: "secondary".
+      "dependsOn": ["make-project"],     // OPTIONAL: ids of the journeys whose stored records this
+                                         // journey uses. REQUIRED when two journeys each create that
+                                         // record's entity - the verifier replays exactly the named one.
       "steps": [
         { "action": "open the booking page", "target": "/book", "expect": "the list of services is visible" },
         { "action": "select a service and an available slot", "target": "service picker", "operates": ["serviceId", "slotId"], "expect": "the chosen slot is highlighted and the continue control becomes enabled" },
@@ -119,6 +122,9 @@ Rules:
   value. Keep the sentinel in a compound filter step where another field genuinely changes, choose
   a non-default option, or first change this field so the browser has a real transition to verify.
 - EXACTLY ONE journey has priority "primary".
+- A journey that starts from records another journey created names that journey in "dependsOn".
+  When two journeys could each be the creator, "dependsOn" names exactly one of them; the
+  platform never guesses between creators.
 - At least three acceptance entries, each an observable outcome.
 - Stages must be one of: ${STAGES.join(", ")}.
 - If the request implies stored data, declare the entities and the operations that write them.
@@ -298,8 +304,10 @@ export const PROVENANCE_REPAIR_INSTRUCTION = "Each entry under invalidProvenance
   + "consumes without a proven source. Fix the SOURCE, not the label: either connect the consuming step to an "
   + "operation an earlier journey already declares that creates that entity, add a persistence read (loader) step "
   + "before the consumer, declare the seed rows the app starts with under sampleData for that entity, or name the "
-  + "external source of that data in externalState. When two journeys both create the same entity, make exactly one "
-  + "of them its producer. Never satisfy a dependency by listing a path in durableState alone; durableState only "
+  + "external source of that data in externalState. When two journeys both create the same entity "
+  + "(interaction_state_provenance_ambiguous, candidateProducers lists them), set the consuming journey's "
+  + "\"dependsOn\" to exactly one of those journey ids - primaryJourneyId when the primary journey is among them - "
+  + "so the platform replays that creator. Never satisfy a dependency by listing a path in durableState alone; durableState only "
   + "restates a source declared elsewhere. Do not invent user actions or business behavior.";
 export const COLLISION_REPAIR_INSTRUCTION = "A field name listed under invalidControlIdentities is operated "
   + "for two different entities inside one journey, so both controls share one identity. Rename that field on "
@@ -427,6 +435,7 @@ export function contractDependencyRepairScope(contract, issues = []) {
       code: issue.code, journeyId: issue.journeyId, entity: issue.entity || null,
       consumerStepId: issue.consumerStepId || null, consumerOperationId: issue.consumerOperationId || null,
       declaredPath: issue.declaredPath || null, candidateProducers: issue.candidateProducers || [],
+      primaryJourneyId: issue.primaryJourneyId || null,
       cycle: issue.cycle || null, expectedProvenanceSources: issue.expectedProvenanceSources || [],
     })), sampleData: Object.fromEntries(Object.entries(contract.sampleData || {})
       .filter(([key]) => provenance.some((issue) => key.toLowerCase().startsWith(String(issue.entity || "").toLowerCase().slice(0, 4))))) } : {}),

@@ -1307,14 +1307,49 @@ const moduleForNode = (node) => node?.type === "custom_behavior"
   ? node.extension?.module || null
   : node?.compositionModule || null;
 
+// A durableState entry is either a state PATH ("open-created-project.draft.projectId") or a
+// producer DECLARATION ({ entity, sourceJourney, sourceOperation }). Only the former is a path;
+// stringifying the latter produced the consumption path "[object Object]" on the 2026-09-16
+// Lumen advanced contract.
 const statePaths = (value, journeyId) => {
-  if (Array.isArray(value)) return value.map(String).filter(Boolean);
+  const strings = (rows) => list(rows).filter((row) => typeof row === "string").map((row) => row.trim()).filter(Boolean);
+  if (Array.isArray(value)) return strings(value);
   if (!value || typeof value !== "object") return [];
-  return [
-    ...list(value[journeyId]).map(String),
-    ...list(value.paths).map(String),
-  ].filter(Boolean);
+  return [...strings(value[journeyId]), ...strings(value.paths)];
 };
+
+/**
+ * The journeys a consumer DECLARES as the source of an entity's records: its dependsOn list plus
+ * every durableState declaration naming a sourceJourney for that entity. Both are explicit
+ * statements by the contract; neither is inferred. With no entity every declaration counts.
+ */
+export function declaredProducerJourneys(journey, entity = null) {
+  const wanted = entity == null ? null : normalized(entity);
+  const declarations = list(journey?.durableState)
+    .filter((row) => row && typeof row === "object" && !Array.isArray(row) && row.sourceJourney)
+    .filter((row) => wanted == null || normalized(row.entity) === wanted)
+    .map((row) => String(row.sourceJourney));
+  return unique([...list(journey?.dependsOn).map(String), ...declarations]).filter(Boolean);
+}
+
+/**
+ * Lift durableState producer declarations into dependsOn so every consumer of the contract (this
+ * gate, prerequisite replay in the verifier, the execution specification) reads ONE declared
+ * producer chain. The Lumen advanced contract declared its producers exactly this way and was
+ * blocked as ambiguous because only dependsOn was consulted.
+ */
+export function withDeclaredProducerDependencies(contract) {
+  if (!Array.isArray(contract?.journeys)) return contract;
+  let changed = false;
+  const journeys = contract.journeys.map((journey) => {
+    const declared = declaredProducerJourneys(journey).filter((id) => id !== journey?.id);
+    const current = list(journey?.dependsOn).map(String);
+    if (!declared.length || (declared.length === current.length && declared.every((id) => current.includes(id)))) return journey;
+    changed = true;
+    return { ...journey, dependsOn: declared };
+  });
+  return changed ? { ...contract, journeys } : contract;
+}
 
 function journeyStartState(plan, journeyId) {
   const scenario = plan?.scenarios?.[journeyId] || {};
@@ -1859,9 +1894,12 @@ export function stateProvenanceIssues(plan, contract) {
   // a declaration the named creator is the producer; without one, a single creator is the producer
   // and two creators are ambiguity - the contract has to say which. (`primaryId` is reported with the
   // issue so the repair can name the obvious candidate.)
-  const resolveProducers = (journey, producers) => {
-    const declared = list(journey?.dependsOn).map(String);
-    return declared.length ? producers.filter((id) => declared.includes(id)) : producers;
+  const resolveProducers = (journey, producers, entity = null) => {
+    const declared = declaredProducerJourneys(journey, entity);
+    const chosen = declared.length ? producers.filter((id) => declared.includes(id)) : producers;
+    // An entity-specific declaration that names no actual creator of that entity falls back to
+    // the journey-wide list, never to silence: two creators stay ambiguous until one is named.
+    return chosen.length || !declared.length ? chosen : producers;
   };
   const issues = [];
   const producerEdges = new Map(); // journeyId -> Set(producer journeyIds)
@@ -1918,7 +1956,7 @@ export function stateProvenanceIssues(plan, contract) {
       const key = `${entity}|${flow.id}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      const producers = resolveProducers(journey, producerJourneys(entity).filter((journeyId) => journeyId !== journey.id));
+      const producers = resolveProducers(journey, producerJourneys(entity).filter((journeyId) => journeyId !== journey.id), entity);
       const loader = loadedBefore(entity, flow.stepIndex ?? 0);
       const external = seeded(entity) || externalEntity(entity) || externalDeclared(journey.id, entity);
       const base = {

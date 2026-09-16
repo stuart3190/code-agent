@@ -18,6 +18,7 @@ import {
 import {
   bindInteractionModulePlan, buildInteractionContract, composeCapabilityGraphInteractions, scopeInteractionContract,
   validateInteractionContract,
+  withDeclaredProducerDependencies,
 } from "./interactionContract.mjs";
 import { buildModuleGenerationContracts } from "./moduleContracts.mjs";
 import { deriveDependencyPlan, scopeDependencyPlan } from "./dependencyPlan.mjs";
@@ -45,7 +46,12 @@ export const BUILD_SPEC_VERSION = 3;
  * feeds interaction ownership, and both feed the per-module contracts. Computing any of them
  * out of band reproduces the drift this replaces.
  */
-export function deriveBuildSpec(contract, { userCritical = [], journeys = contract?.journeys || [] } = {}) {
+export function deriveBuildSpec(rawContract, { userCritical = [], journeys = null } = {}) {
+  // Producer declarations made under durableState become dependsOn here, once, so the gate, the
+  // verifier's prerequisite replay and the execution specification all see one declared chain.
+  const contract = withDeclaredProducerDependencies(rawContract);
+  const declaredById = new Map((contract?.journeys || []).map((journey) => [journey?.id, journey]));
+  journeys = (journeys || contract?.journeys || []).map((journey) => declaredById.get(journey?.id) || journey);
   // The profile the contract was GENERATED and validated against is authoritative here. Inferring
   // a second one from the model's own summary let this gate demand obligations the contract agent
   // never saw, and no attempt it could make would have satisfied them. Only a contract that

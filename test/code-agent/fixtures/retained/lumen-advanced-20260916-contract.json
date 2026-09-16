@@ -1,0 +1,1106 @@
+{
+  "summary": "An authenticated Lumen Layouts SVG floor-planning workspace where users create durable plans, place and edit fixtures, undo and redo changes, switch saved plans, export CSV summaries, and print report views.",
+  "projectType": "tool",
+  "journeys": [
+    {
+      "id": "create-edit-and-save-plan",
+      "title": "A signed-in user creates, edits, saves, and reloads a floor plan",
+      "priority": "primary",
+      "stage": "primary_journey",
+      "steps": [
+        {
+          "action": "open the workspace route while signed out",
+          "target": "/workspace",
+          "expect": "a platform sign-in form is visible instead of the workspace canvas"
+        },
+        {
+          "action": "sign in with platform email and password",
+          "target": "sign-in form",
+          "expect": "the workspace canvas, plan sidebar, fixture library panel, inspector panel, undo control, redo control, save control, and route navigation are visible"
+        },
+        {
+          "action": "create a new named plan",
+          "target": "new plan form",
+          "operates": [
+            "name",
+            "create-plan"
+          ],
+          "expect": "the new plan name is shown as the active plan and an empty SVG canvas is visible"
+        },
+        {
+          "action": "pan and zoom the canvas",
+          "target": "canvas viewport controls",
+          "operates": [
+            "viewportX",
+            "viewportY",
+            "zoom",
+            "update-plan-viewport"
+          ],
+          "expect": "the canvas view shifts and the displayed zoom percentage changes"
+        },
+        {
+          "action": "drag a fixture from the library onto the canvas",
+          "target": "fixture library",
+          "operates": [
+            "fixtureType",
+            "add-fixture"
+          ],
+          "produces": [
+            "id",
+            "label",
+            "fixtureCategory",
+            "x",
+            "y",
+            "rotation",
+            "brightness"
+          ],
+          "expect": "a new fixture appears on the SVG canvas and the fixture is listed in the plan fixture list"
+        },
+        {
+          "action": "select the placed fixture",
+          "target": "SVG canvas fixture",
+          "operates": [
+            "selectedFixtureId",
+            "select-fixture"
+          ],
+          "reads": [
+            "id"
+          ],
+          "expect": "the fixture shows a visible selected outline and the inspector shows editable position, rotation, and brightness fields"
+        },
+        {
+          "action": "edit the selected fixture position, rotation, and brightness",
+          "target": "inspector panel",
+          "operates": [
+            "x",
+            "y",
+            "rotation",
+            "brightness",
+            "update-fixture"
+          ],
+          "reads": [
+            "selectedFixtureId"
+          ],
+          "expect": "the fixture moves or rotates on the canvas and the displayed brightness value changes"
+        },
+        {
+          "action": "save the active plan",
+          "target": "save control",
+          "operates": [
+            "save-plan"
+          ],
+          "reads": [
+            "id",
+            "name"
+          ],
+          "expect": "a visible saved status with a save timestamp is shown"
+        },
+        {
+          "action": "reload",
+          "expect": "the signed-in workspace reloads with the saved plan name, edited fixture, fixture position, rotation, brightness, and zoom still visible"
+        }
+      ],
+      "acceptance": [
+        "a named plan created in the workspace remains visible after a full page reload",
+        "a fixture edited in the inspector remains in the same position with the same rotation and brightness after reload",
+        "the save status visibly changes after the user activates the save control"
+      ]
+    },
+    {
+      "id": "undo-redo-edits",
+      "title": "A user reverses and reapplies fixture edits",
+      "priority": "secondary",
+      "stage": "supporting",
+      "durableState": [
+        {
+          "entity": "plan",
+          "sourceJourney": "create-edit-and-save-plan",
+          "sourceOperation": "create-plan"
+        },
+        {
+          "entity": "fixture",
+          "sourceJourney": "create-edit-and-save-plan",
+          "sourceOperation": "add-fixture"
+        }
+      ],
+      "steps": [
+        {
+          "action": "open the workspace route",
+          "target": "/workspace",
+          "expect": "the active plan canvas and fixture list are visible"
+        },
+        {
+          "action": "select an existing fixture",
+          "target": "fixture list",
+          "operates": [
+            "selectedFixtureId",
+            "select-fixture"
+          ],
+          "expect": "the selected fixture is highlighted on the canvas and its values are visible in the inspector"
+        },
+        {
+          "action": "change the fixture rotation",
+          "target": "inspector rotation control",
+          "operates": [
+            "rotation",
+            "update-fixture"
+          ],
+          "reads": [
+            "selectedFixtureId"
+          ],
+          "expect": "the fixture visibly rotates and the undo control becomes enabled"
+        },
+        {
+          "action": "activate undo",
+          "target": "undo control",
+          "operates": [
+            "undo-fixture-change"
+          ],
+          "reads": [
+            "selectedFixtureId"
+          ],
+          "expect": "the fixture returns to its previous rotation and the redo control becomes enabled"
+        },
+        {
+          "action": "activate redo",
+          "target": "redo control",
+          "operates": [
+            "redo-fixture-change"
+          ],
+          "reads": [
+            "selectedFixtureId"
+          ],
+          "expect": "the fixture rotation changes back to the redone value"
+        }
+      ],
+      "acceptance": [
+        "undo visibly restores the fixture value that was displayed before the edit",
+        "redo visibly restores the fixture value that was displayed after the edit"
+      ]
+    },
+    {
+      "id": "keyboard-accessible-canvas-actions",
+      "title": "A keyboard user performs canvas actions without dragging",
+      "priority": "secondary",
+      "stage": "supporting",
+      "durableState": [
+        {
+          "entity": "plan",
+          "sourceJourney": "create-edit-and-save-plan",
+          "sourceOperation": "create-plan"
+        }
+      ],
+      "steps": [
+        {
+          "action": "open the workspace route",
+          "target": "/workspace",
+          "expect": "the canvas, fixture library, fixture list, and inspector are visible"
+        },
+        {
+          "action": "focus the fixture library with the keyboard and choose a fixture type",
+          "target": "keyboard fixture library",
+          "operates": [
+            "fixtureType"
+          ],
+          "primitive": "selection",
+          "expect": "the chosen fixture type has a visible keyboard focus and selection state"
+        },
+        {
+          "action": "add the chosen fixture with the keyboard add control",
+          "target": "keyboard add fixture control",
+          "operates": [
+            "add-fixture"
+          ],
+          "reads": [
+            "fixtureType"
+          ],
+          "produces": [
+            "id",
+            "label",
+            "fixtureCategory",
+            "x",
+            "y",
+            "rotation",
+            "brightness",
+            "selectedFixtureId"
+          ],
+          "expect": "a new fixture appears on the canvas and receives a visible selected outline"
+        },
+        {
+          "action": "nudge the selected fixture using keyboard move controls",
+          "target": "keyboard nudge controls",
+          "operates": [
+            "x",
+            "y",
+            "update-fixture"
+          ],
+          "primitive": "selection",
+          "reads": [
+            "selectedFixtureId"
+          ],
+          "expect": "the selected fixture visibly moves and the inspector position values change"
+        },
+        {
+          "action": "adjust canvas zoom using keyboard zoom controls",
+          "target": "keyboard zoom controls",
+          "operates": [
+            "zoom",
+            "update-plan-viewport"
+          ],
+          "primitive": "selection",
+          "expect": "the displayed zoom percentage changes and focus remains visible"
+        }
+      ],
+      "acceptance": [
+        "a fixture can be added without mouse dragging",
+        "the selected fixture can be moved using keyboard-accessible controls",
+        "canvas zoom can be changed using keyboard-accessible controls"
+      ]
+    },
+    {
+      "id": "switch-between-plans",
+      "title": "A user switches between durable saved plans",
+      "priority": "secondary",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the workspace route",
+          "target": "/workspace",
+          "expect": "the plan switcher is visible"
+        },
+        {
+          "action": "create a second named plan",
+          "target": "new plan form",
+          "operates": [
+            "name",
+            "create-plan"
+          ],
+          "expect": "the second plan becomes active and its empty canvas is visible"
+        },
+        {
+          "action": "select a different plan in the plan switcher",
+          "target": "plan switcher",
+          "operates": [
+            "id",
+            "open-plan"
+          ],
+          "primitive": "selection",
+          "expect": "the selected plan name becomes active and that plan's saved fixtures are shown"
+        },
+        {
+          "action": "switch back to the second plan",
+          "target": "plan switcher",
+          "operates": [
+            "id",
+            "open-plan"
+          ],
+          "primitive": "selection",
+          "expect": "the second plan name becomes active and its own canvas state is shown"
+        }
+      ],
+      "acceptance": [
+        "each plan selection shows the selected plan name",
+        "fixtures from one plan are not shown as fixtures belonging to another plan"
+      ]
+    },
+    {
+      "id": "browse-library-route",
+      "title": "A user reviews the fixture library route",
+      "priority": "secondary",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the library route",
+          "target": "/library",
+          "expect": "the Lumen Layouts fixture library page is visible"
+        },
+        {
+          "action": "choose a fixture category",
+          "target": "library category filter",
+          "operates": [
+            "fixtureCategory"
+          ],
+          "primitive": "selection",
+          "verificationValues": {
+            "fixtureCategory": "Lighting"
+          },
+          "expect": "lighting fixtures such as ceiling light and wall sconce are visible"
+        }
+      ],
+      "acceptance": [
+        "the library route shows reusable fixture types",
+        "choosing the Lighting category visibly filters the fixture list"
+      ]
+    },
+    {
+      "id": "export-and-print-report",
+      "title": "A user exports and prints a plan summary",
+      "priority": "secondary",
+      "stage": "polish",
+      "durableState": [
+        {
+          "entity": "plan",
+          "sourceJourney": "create-edit-and-save-plan",
+          "sourceOperation": "create-plan"
+        },
+        {
+          "entity": "fixture",
+          "sourceJourney": "create-edit-and-save-plan",
+          "sourceOperation": "add-fixture"
+        }
+      ],
+      "steps": [
+        {
+          "action": "open the reports route",
+          "target": "/reports",
+          "expect": "the reports page shows a plan selector and summary preview area"
+        },
+        {
+          "action": "select a saved plan for reporting",
+          "target": "report plan selector",
+          "operates": [
+            "id"
+          ],
+          "primitive": "selection",
+          "produces": [
+            "name"
+          ],
+          "expect": "the summary preview shows the selected plan name and a table of fixture counts and brightness values"
+        },
+        {
+          "action": "export the selected plan summary",
+          "target": "export CSV control",
+          "operates": [
+            "export-plan-summary"
+          ],
+          "reads": [
+            "id",
+            "name"
+          ],
+          "expect": "a downloadable CSV file is produced with the selected plan name and fixture summary rows"
+        },
+        {
+          "action": "print the selected plan summary",
+          "target": "print control",
+          "operates": [
+            "print-plan-summary"
+          ],
+          "reads": [
+            "id",
+            "name"
+          ],
+          "expect": "a print-ready summary view is visible and a print requested status message is shown"
+        }
+      ],
+      "acceptance": [
+        "the exported file contains the selected plan name",
+        "the exported file contains fixture summary rows",
+        "printing shows a print-ready summary for the selected plan"
+      ]
+    },
+    {
+      "id": "settings-and-account-boundary",
+      "title": "A signed-in user views settings and account ownership boundaries",
+      "priority": "secondary",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the settings route",
+          "target": "/settings",
+          "expect": "the settings page shows the signed-in account email and sign-out control"
+        },
+        {
+          "action": "sign out",
+          "target": "sign-out control",
+          "expect": "the signed-out state is visible and workspace navigation requires sign-in again"
+        }
+      ],
+      "acceptance": [
+        "settings shows the current signed-in account email",
+        "after sign-out the workspace is not visible until sign-in"
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "path": "/",
+      "name": "Home",
+      "purpose": "public Lumen Layouts landing page with navigation to sign in and enter the workspace",
+      "auth": false
+    },
+    {
+      "path": "/workspace",
+      "name": "Workspace",
+      "purpose": "authenticated SVG canvas for creating, editing, saving, undoing, redoing, panning, zooming, and switching floor plans",
+      "auth": true
+    },
+    {
+      "path": "/library",
+      "name": "Library",
+      "purpose": "authenticated fixture library reference with visible categories and reusable fixture types",
+      "auth": true
+    },
+    {
+      "path": "/reports",
+      "name": "Reports",
+      "purpose": "authenticated plan summary preview with export and print controls",
+      "auth": true
+    },
+    {
+      "path": "/settings",
+      "name": "Settings",
+      "purpose": "authenticated account settings page showing the signed-in user and sign-out control",
+      "auth": true
+    }
+  ],
+  "entities": [
+    {
+      "name": "plan",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "viewportX",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "viewportY",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "zoom",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "selectedFixtureId",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "undoStack",
+          "type": "array",
+          "required": true
+        },
+        {
+          "name": "redoStack",
+          "type": "array",
+          "required": true
+        },
+        {
+          "name": "lastSavedAt",
+          "type": "string",
+          "required": false
+        }
+      ],
+      "owned": true,
+      "relationships": [
+        "a plan belongs to one signed-in user",
+        "a plan has many fixtures"
+      ]
+    },
+    {
+      "name": "fixture",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "planId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "fixtureType",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "fixtureCategory",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "x",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "y",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "rotation",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "brightness",
+          "type": "number",
+          "required": true
+        }
+      ],
+      "owned": true,
+      "relationships": [
+        "a fixture belongs to one plan"
+      ]
+    }
+  ],
+  "auth": {
+    "required": true,
+    "model": "email + password via the backend SDK",
+    "rules": [
+      "a signed-out visitor can view the public home route but cannot see workspace, library, reports, or settings content",
+      "a signed-in user can only see and modify plans and fixtures they own",
+      "signing out hides the workspace and requires platform sign-in before protected routes are visible again"
+    ]
+  },
+  "operations": [
+    {
+      "id": "create-plan",
+      "entity": "plan",
+      "kind": "create",
+      "description": "create a durable user-owned floor plan via db.entity('plan').create",
+      "journey": "create-edit-and-save-plan",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "behavior": "initialize a new plan with a generated id, default viewport, empty selection, and empty undo and redo stacks",
+          "reads": [
+            "name"
+          ],
+          "writes": [
+            "id",
+            "viewportX",
+            "viewportY",
+            "zoom",
+            "selectedFixtureId",
+            "undoStack",
+            "redoStack",
+            "lastSavedAt"
+          ]
+        },
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "create",
+          "reads": [
+            "id",
+            "name",
+            "viewportX",
+            "viewportY",
+            "zoom",
+            "selectedFixtureId",
+            "undoStack",
+            "redoStack",
+            "lastSavedAt"
+          ],
+          "writes": [
+            "id",
+            "name",
+            "viewportX",
+            "viewportY",
+            "zoom",
+            "selectedFixtureId",
+            "undoStack",
+            "redoStack",
+            "lastSavedAt"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "list-plans",
+      "entity": "plan",
+      "kind": "list",
+      "description": "list the signed-in user's plans via db.entity('plan').list",
+      "journey": "switch-between-plans",
+      "responsibilities": [
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "read",
+          "reads": [],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "id": "open-plan",
+      "entity": "plan",
+      "kind": "get",
+      "description": "load one user-owned plan and its fixtures for display",
+      "journey": "switch-between-plans",
+      "responsibilities": [
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "read",
+          "reads": [
+            "id"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "id": "update-plan-viewport",
+      "entity": "plan",
+      "kind": "update",
+      "description": "persist pan and zoom values on the active plan via db.entity('plan').update",
+      "journey": "create-edit-and-save-plan",
+      "responsibilities": [
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "update",
+          "reads": [
+            "id",
+            "viewportX",
+            "viewportY",
+            "zoom"
+          ],
+          "writes": [
+            "viewportX",
+            "viewportY",
+            "zoom"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "select-fixture",
+      "entity": "plan",
+      "kind": "update",
+      "description": "store the active fixture selection for the current plan",
+      "journey": "create-edit-and-save-plan",
+      "responsibilities": [
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "update",
+          "reads": [
+            "id",
+            "selectedFixtureId"
+          ],
+          "writes": [
+            "selectedFixtureId"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "add-fixture",
+      "entity": "fixture",
+      "kind": "create",
+      "description": "create a durable fixture from a library fixture type via db.entity('fixture').create",
+      "journey": "create-edit-and-save-plan",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "behavior": "derive a new fixture id, category, label, initial canvas coordinates, zero rotation, and full brightness from the chosen fixture type and active plan",
+          "reads": [
+            "planId",
+            "fixtureType"
+          ],
+          "writes": [
+            "id",
+            "fixtureCategory",
+            "label",
+            "x",
+            "y",
+            "rotation",
+            "brightness"
+          ]
+        },
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "create",
+          "reads": [
+            "id",
+            "planId",
+            "fixtureType",
+            "fixtureCategory",
+            "label",
+            "x",
+            "y",
+            "rotation",
+            "brightness"
+          ],
+          "writes": [
+            "id",
+            "planId",
+            "fixtureType",
+            "fixtureCategory",
+            "label",
+            "x",
+            "y",
+            "rotation",
+            "brightness"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "update-fixture",
+      "entity": "fixture",
+      "kind": "update",
+      "description": "persist edited fixture position, rotation, and brightness via db.entity('fixture').update",
+      "journey": "create-edit-and-save-plan",
+      "responsibilities": [
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "update",
+          "reads": [
+            "id",
+            "x",
+            "y",
+            "rotation",
+            "brightness"
+          ],
+          "writes": [
+            "x",
+            "y",
+            "rotation",
+            "brightness"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "undo-fixture-change",
+      "entity": "fixture",
+      "kind": "update",
+      "description": "apply the previous fixture value from the in-session undo history and persist the restored fixture fields",
+      "journey": "undo-redo-edits",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "behavior": "restore the selected fixture's previous position, rotation, or brightness from undo history",
+          "reads": [
+            "id"
+          ],
+          "writes": [
+            "x",
+            "y",
+            "rotation",
+            "brightness"
+          ]
+        },
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "update",
+          "reads": [
+            "id",
+            "x",
+            "y",
+            "rotation",
+            "brightness"
+          ],
+          "writes": [
+            "x",
+            "y",
+            "rotation",
+            "brightness"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "redo-fixture-change",
+      "entity": "fixture",
+      "kind": "update",
+      "description": "reapply the next fixture value from the in-session redo history and persist the restored fixture fields",
+      "journey": "undo-redo-edits",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "behavior": "reapply the selected fixture's next position, rotation, or brightness from redo history",
+          "reads": [
+            "id"
+          ],
+          "writes": [
+            "x",
+            "y",
+            "rotation",
+            "brightness"
+          ]
+        },
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "update",
+          "reads": [
+            "id",
+            "x",
+            "y",
+            "rotation",
+            "brightness"
+          ],
+          "writes": [
+            "x",
+            "y",
+            "rotation",
+            "brightness"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "save-plan",
+      "entity": "plan",
+      "kind": "update",
+      "description": "mark the active plan as saved and persist the visible save timestamp via db.entity('plan').update",
+      "journey": "create-edit-and-save-plan",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "behavior": "generate a visible save timestamp for the active plan",
+          "reads": [
+            "id"
+          ],
+          "writes": [
+            "lastSavedAt"
+          ]
+        },
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "update",
+          "reads": [
+            "id",
+            "lastSavedAt"
+          ],
+          "writes": [
+            "lastSavedAt"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "export-plan-summary",
+      "entity": "plan",
+      "kind": "export",
+      "description": "export a CSV summary for the selected plan and its fixtures",
+      "journey": "export-and-print-report",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "behavior": "produce a downloadable CSV summary containing the plan name, fixture labels, fixture types, positions, rotations, and brightness values",
+          "reads": [
+            "id",
+            "name"
+          ],
+          "writes": [],
+          "outputEffect": {
+            "type": "transient_result",
+            "effect": "artifact",
+            "operationKind": "export",
+            "durable": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "print-plan-summary",
+      "entity": "plan",
+      "kind": "print",
+      "description": "show a print-ready summary and request browser printing",
+      "journey": "export-and-print-report",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "behavior": "render a print-ready plan summary view containing the plan name and fixture table and set a visible print requested status",
+          "reads": [
+            "id",
+            "name"
+          ],
+          "writes": [],
+          "outputEffect": {
+            "type": "transient_result",
+            "effect": "rendered_output",
+            "operationKind": "print",
+            "durable": false
+          }
+        }
+      ]
+    }
+  ],
+  "integrations": [
+    {
+      "name": "none",
+      "purpose": "",
+      "required": false
+    }
+  ],
+  "states": [
+    {
+      "surface": "protected routes",
+      "loading": "checking sign-in status",
+      "empty": "no account session is active",
+      "validation": "email and password are required by the platform sign-in form",
+      "error": "sign-in failed, try again",
+      "success": "workspace navigation is visible"
+    },
+    {
+      "surface": "workspace",
+      "loading": "loading saved plans and fixtures",
+      "empty": "no plans yet; create your first plan",
+      "validation": "plan name is required before creating a plan",
+      "error": "plan could not be saved, try again",
+      "success": "saved status with timestamp is visible"
+    },
+    {
+      "surface": "SVG canvas",
+      "loading": "loading canvas state",
+      "empty": "the active plan has no fixtures yet",
+      "validation": "zoom must remain within the visible minimum and maximum zoom controls",
+      "error": "canvas change could not be applied",
+      "success": "fixture selection outline and updated canvas values are visible"
+    },
+    {
+      "surface": "inspector",
+      "loading": "loading selected fixture",
+      "empty": "select a fixture to edit",
+      "validation": "brightness must stay between 0 and 100",
+      "error": "fixture update failed, try again",
+      "success": "fixture values updated"
+    },
+    {
+      "surface": "library route",
+      "loading": "loading fixture library",
+      "empty": "no fixtures match this category",
+      "validation": "choose a valid fixture category",
+      "error": "library could not be displayed",
+      "success": "fixture cards are visible"
+    },
+    {
+      "surface": "reports route",
+      "loading": "loading report data",
+      "empty": "choose a saved plan to preview a report",
+      "validation": "a plan must be selected before export or print",
+      "error": "report could not be generated",
+      "success": "summary preview, export result, or print-ready view is visible"
+    },
+    {
+      "surface": "settings route",
+      "loading": "loading account settings",
+      "empty": "no signed-in account",
+      "validation": "signed-in account is required",
+      "error": "settings could not be loaded",
+      "success": "account email and sign-out control are visible"
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "a1",
+      "statement": "a signed-out visitor opening /workspace sees a sign-in form instead of the SVG floor-planning workspace",
+      "journey": "create-edit-and-save-plan",
+      "kind": "auth"
+    },
+    {
+      "id": "a2",
+      "statement": "a submitted plan name is shown as the active plan after creation",
+      "journey": "create-edit-and-save-plan",
+      "kind": "ui"
+    },
+    {
+      "id": "a3",
+      "statement": "a placed fixture appears on the SVG canvas and in the fixture list",
+      "journey": "create-edit-and-save-plan",
+      "kind": "ui"
+    },
+    {
+      "id": "a4",
+      "statement": "an edited fixture position, rotation, and brightness are still visible after a full page reload",
+      "journey": "create-edit-and-save-plan",
+      "kind": "persistence"
+    },
+    {
+      "id": "a5",
+      "statement": "undo and redo controls visibly change the selected fixture back and forward between edited values",
+      "journey": "undo-redo-edits",
+      "kind": "functional"
+    },
+    {
+      "id": "a6",
+      "statement": "keyboard controls can add a fixture, move it, and change canvas zoom without mouse dragging",
+      "journey": "keyboard-accessible-canvas-actions",
+      "kind": "accessibility"
+    },
+    {
+      "id": "a7",
+      "statement": "switching plans shows the selected plan's own name and fixtures",
+      "journey": "switch-between-plans",
+      "kind": "persistence"
+    },
+    {
+      "id": "a8",
+      "statement": "exporting a plan summary produces a downloadable CSV containing the selected plan name",
+      "journey": "export-and-print-report",
+      "kind": "export"
+    },
+    {
+      "id": "a9",
+      "statement": "printing a plan summary shows a print-ready view and a visible print requested status",
+      "journey": "export-and-print-report",
+      "kind": "print"
+    },
+    {
+      "id": "a10",
+      "statement": "after signing out from settings, opening /workspace shows the sign-in form instead of saved plans",
+      "journey": "settings-and-account-boundary",
+      "kind": "auth"
+    }
+  ],
+  "deferred": [
+    {
+      "item": "collaborative multi-user editing in the same plan",
+      "reason": "the request requires user-owned durable plans but does not require real-time collaboration"
+    },
+    {
+      "item": "custom uploaded SVG fixture assets",
+      "reason": "the request asks for dragging fixtures from a library, not uploading new fixture artwork"
+    },
+    {
+      "item": "PDF generation service",
+      "reason": "the request requires export and print; a browser-downloadable CSV summary and print-ready browser view satisfy those observable outputs without an external integration"
+    }
+  ],
+  "version": 2,
+  "buildProfile": {
+    "version": 1,
+    "requestedBuildType": "auto",
+    "resolvedBuildType": "application",
+    "applicationSubtype": "auto",
+    "requirementSignals": [
+      "user_accounts",
+      "saved_data",
+      "interactive_workspace",
+      "export"
+    ],
+    "inferenceSource": "auto",
+    "confidence": 0.96
+  }
+}
