@@ -2643,6 +2643,26 @@ export function shouldSubmitContractedForm(action = "") {
     .test(String(action));
 }
 
+const ACCOUNT_FORM_INPUT_TIMEOUT_MS = 8_000;
+
+/**
+ * Why a resolved account-form control did not take the value, in the words the repair lane
+ * needs: a control that re-mounts while being typed into, one that is hidden, disabled or
+ * read-only, or one that simply never became ready. Playwright's call log is the evidence.
+ */
+export function describeInputFailure(label, error) {
+  const log = String(error?.message || error || "");
+  const cause = /detached from the DOM/i.test(log)
+    ? "the control re-mounted (was detached from the DOM) while the value was being typed"
+    : /not editable|readonly|read-only/i.test(log) ? "the control is not editable"
+      : /disabled/i.test(log) ? "the control is disabled"
+        : /not visible|hidden/i.test(log) ? "the control is not visible"
+          : /Timeout \d+ms exceeded/i.test(log) ? "the control never became ready for input"
+            : log.split("\n")[0].slice(0, 120) || "the control rejected the value";
+  return { control: label, cause,
+    reason: `the account form's ${label} control could not accept input: ${cause}`,
+    log: log.split("\n").slice(0, 8).join("\n").slice(0, 600) };
+}
 /** Drive a real visible account form; never inject or fabricate a session. */
 async function driveAuthenticationForm(page, marker, { mode = "create", credentials = null } = {}) {
   const deadline = Date.now() + 20_000;
@@ -2671,8 +2691,20 @@ async function driveAuthenticationForm(page, marker, { mode = "create", credenti
   const submittedEmail = credentials?.email
     || `journey+${marker}@thrallo.dev`;
   const submittedPassword = credentials?.password || `Jv-${marker}!9a`;
-  await email.fill(submittedEmail);
-  await password.fill(submittedPassword);
+  // Every other control write in this file is bounded and caught; these two were Playwright's
+  // 30-second default with nothing around them. The 2026-09-16 Lumen advanced build rendered a
+  // sign-in form that re-mounted its inputs on every keystroke, fill() retried until the timeout
+  // and the exception climbed out of prerequisite setup into the verifier's outer catch - which
+  // reported the WHOLE verifier unavailable, a platform stop that skipped repair for an app
+  // defect the browser had just proven. A control that cannot accept input is an app finding.
+  for (const [label, control, value] of [["email", email, submittedEmail], ["password", password, submittedPassword]]) {
+    const inputFailure = await control.fill(value, { timeout: ACCOUNT_FORM_INPUT_TIMEOUT_MS })
+      .then(() => null).catch((error) => describeInputFailure(label, error));
+    if (inputFailure) {
+      return { attempted: true, submitted: false, authenticated: false, email: submittedEmail,
+        reason: inputFailure.reason, inputFailure };
+    }
+  }
   const before = page.url();
   const formSubmit = page.locator('form button[type="submit"], form input[type="submit"]').first();
   const namedSubmit = page.getByRole("button", { name: /create account|sign ?up|register|continue|open .*workspace/i }).first();
@@ -2809,7 +2841,10 @@ async function driveExplicitAuthenticationAction(page, action, { marker, preview
   }
   const authentication = await driveAuthenticationForm(page, `${marker}-${authState.accounts.length + 1}`, { mode, credentials });
   if (!authentication.authenticated) {
-    return { handled: true, status: "undriveable", detail: authentication.reason || "authentication did not complete", authentication };
+    // The form was there and a contracted control refused input: the app failed, the browser did not.
+    return { handled: true, drove: authentication.inputFailure ? true : undefined,
+      status: authentication.inputFailure ? "fail" : "undriveable",
+      detail: authentication.reason || "authentication did not complete", authentication };
   }
   const account = authentication.credentials;
   if (mode === "create" && !authState.accounts.some((row) => row.email === account.email)) authState.accounts.push(account);
@@ -3244,7 +3279,8 @@ async function runStep(page, step, {
       controlEvidence = { ...(controlEvidence || {}), authentication };
       drove = drove || authentication.authenticated === true;
       if (!authentication.authenticated) {
-        return { drove, status: visibleAuthBefore ? "fail" : "undriveable",
+        return { drove: drove || Boolean(authentication.inputFailure),
+          status: visibleAuthBefore || authentication.inputFailure ? "fail" : "undriveable",
           detail: authentication.reason || "authentication did not complete",
           controlEvidence };
       }
@@ -5296,6 +5332,14 @@ export async function verifyJourneys({
             || directValueEntry.control.accessibleName }
           : await establishPrerequisites(page, prerequisites.controls, {
             marker, authMarker, journeyFlows, verifierPolicy,
+          }).catch((error) => {
+            // A driver exception while establishing one journey's start state is that journey's
+            // evidence. Letting it climb to the outer catch marked the whole verifier unavailable
+            // and turned four driven journeys into a platform stop.
+            verifierDefects.push({ code: "journey_driver_error", journeyId: journey.id, stepIndex: null,
+              action: "establish prerequisites", detail: String(error?.message || error).slice(0, 200) });
+            return { ok: false, performed: [], failure: { control: "prerequisite setup",
+              reason: `driver error: ${String(error?.message || error).split("\n")[0].slice(0, 120)}` } };
           });
         if (!setup.ok) {
           results.push({
