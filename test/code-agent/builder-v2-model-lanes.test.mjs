@@ -11,8 +11,9 @@ import {
   causalRepairProblems, COMPILE_CORRECTION_SYSTEM_PROMPT, createModelLanes, estimatePromptTokens,
   HEADROOM_FRAGMENT_SYSTEM_PROMPT, headroomDispatchScope,
   headroomSourceFragments, jobUsageBucket, planCallReservation, renderPatchPrompt,
-  repairFailureOwnedPaths, repairFailureReferences, runReservedDispatch,
+  repairFailureOwnedPaths, repairFailureReferences, runReservedDispatch, isTransportInterruption,
 } from "../../shell/server/lib/builderV2/modelLanes.mjs";
+import { providerFailure } from "../../shell/server/lib/providerOutcome.mjs";
 import { EMIT_PATCHES_SCHEMA } from "../../shell/server/lib/builderV2/patchEngine.mjs";
 import { memoryKnowledgeStore } from "../../shell/server/lib/builderV2/knowledge.mjs";
 import { memoryModelReservations } from "../../shell/server/lib/builderV2/modelReservations.mjs";
@@ -1532,4 +1533,83 @@ test("an undefined-identifier finding left by a binding correction is treated as
   const excerpt = fragments.map((fragment) => fragment.content).join("\n");
   assert.match(excerpt, /useSemanticAction\(\{ name: "save"/);
   assert.match(excerpt, /emailField\.inputProps/);
+});
+
+// ── transport interruption: one honest retry ──────────────────────────────────────────────────
+//
+// 2026-09-16: the Codex backend closed the socket mid-stream on two consecutive advanced builds
+// ("terminated <- other side closed [UND_ERR_SOCKET]"), before any usage event, and each ended
+// the whole build under the fail-closed replay rule. That rule still holds for any failure that
+// carried usage, and for a second interruption; a first interruption with no usage is retried
+// once as a new durable reservation while the original hold is absorbed by the platform.
+
+const socketClosed = (requestId) => {
+  const inner = Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" });
+  const outer = new TypeError("terminated", { cause: inner });
+  return providerFailure(outer, { state: "provider_dispatch_ambiguous", providerRequestId: requestId });
+};
+
+test("isTransportInterruption recognises undici socket closures through the cause chain and nothing else", () => {
+  assert.equal(isTransportInterruption(socketClosed("codex:request:1")), true);
+  assert.equal(isTransportInterruption(Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" })), true);
+  assert.equal(isTransportInterruption(new Error("Codex responses HTTP 502: bad gateway")), false);
+  assert.equal(isTransportInterruption(new Error("the model did not call emit_patches")), false);
+  assert.equal(isTransportInterruption(null), false);
+});
+
+test("a stream dropped before any usage is retried once as a new reservation; the first hold is absorbed", async () => {
+  const reservations = memoryModelReservations();
+  let calls = 0;
+  const provider = { model: "gpt-5.5", providerId: "codex", provider: "codex", runTurn: async () => {
+    calls += 1;
+    if (calls === 1) throw socketClosed("codex:request:dropped");
+    return { text: "ok", toolCalls: [], usage: { input: 100, output: 20, total: 120, providerRequestId: "codex:request:good" } };
+  } };
+  const turn = await runReservedDispatch({
+    reservations, owner: "o", projectId: "p", buildId: "b", step: "contract", sequence: 1, provider,
+    decision: { provider: "codex", billingLane: "connected_allowance", estimatedCredits: 0.5, callCeilingCredits: 3, maxOutputTokens: 6_000 },
+    options: { systemPrompt: "system", messages: [{ role: "user", content: "contract" }] },
+    ceilingCredits: 10,
+  });
+  assert.equal(turn.text, "ok");
+  assert.equal(calls, 2);
+  const rows = reservations.rows();
+  assert.equal(rows.length, 2, "the retry is its own durable call");
+  assert.notEqual(rows[0].callKey, rows[1].callKey);
+  assert.equal(rows[0].reconciliationState, "platform_assumed", "the dropped call is absorbed by the platform, not silently released");
+  assert.match(rows[0].reconciliationReason, /transport interrupted before any usage \(terminated\); retried once as /);
+  assert.deepEqual(rows[0].providerRequestIds, ["codex:request:dropped"], "the dropped call keeps its provider identity");
+  assert.equal(rows[1].state, "settled");
+  assert.equal(rows[1].actualCredits > 0, true);
+});
+
+test("a second interruption, or an interruption that carried usage, still fails closed", async () => {
+  const twice = memoryModelReservations();
+  let calls = 0;
+  await assert.rejects(runReservedDispatch({
+    reservations: twice, owner: "o", projectId: "p", buildId: "b2", step: "contract", sequence: 1,
+    provider: { model: "gpt-5.5", providerId: "codex", provider: "codex", runTurn: async () => { calls += 1; throw socketClosed(`codex:request:${calls}`); } },
+    decision: { provider: "codex", billingLane: "connected_allowance", estimatedCredits: 0.5, callCeilingCredits: 3, maxOutputTokens: 6_000 },
+    options: { systemPrompt: "system", messages: [{ role: "user", content: "contract" }] },
+    ceilingCredits: 10,
+  }), (error) => error.code === "provider_replay_unsafe");
+  assert.equal(calls, 2, "exactly one retry");
+  assert.equal(twice.rows().length, 2);
+
+  const withUsage = memoryModelReservations();
+  let usageCalls = 0;
+  await assert.rejects(runReservedDispatch({
+    reservations: withUsage, owner: "o", projectId: "p", buildId: "b3", step: "contract", sequence: 1,
+    provider: { model: "gpt-5.5", providerId: "codex", provider: "codex", runTurn: async () => {
+      usageCalls += 1;
+      const failure = socketClosed("codex:request:partial");
+      failure.usage = { input: 50, output: 10, total: 60, providerRequestId: "codex:request:partial" };
+      throw failure;
+    } },
+    decision: { provider: "codex", billingLane: "connected_allowance", estimatedCredits: 0.5, callCeilingCredits: 3, maxOutputTokens: 6_000 },
+    options: { systemPrompt: "system", messages: [{ role: "user", content: "contract" }] },
+    ceilingCredits: 10,
+  }), (error) => error.code === "provider_replay_unsafe");
+  assert.equal(usageCalls, 1, "usage means the turn happened: no replay");
+  assert.equal(withUsage.rows()[0].state, "settled", "the usage that was reported is settled, not discarded");
 });

@@ -1435,6 +1435,33 @@ const providerRequestIds = (usage, extras = []) => [...new Set([
   usage?.providerRequestId, ...extras,
 ].filter(Boolean).map(String))].sort();
 
+// ONE retry for a stream the transport dropped before the provider reported any usage.
+//
+// The fail-closed replay rule exists so a call whose usage is unknown is never dispatched twice
+// on the customer's account. On 2026-09-16 the Codex backend closed the socket mid-stream on two
+// consecutive advanced builds ("terminated <- other side closed [UND_ERR_SOCKET]"), one of them
+// on the very first contract call, and each ended the whole build. A transport interruption
+// with no usage event is the narrow case where the retry is honest: the original hold is
+// transferred to the platform as an ambiguous call (absorbAmbiguous keeps it on the ledger with
+// its provider request id), and the retry is a NEW durable reservation with its own call key.
+// A second interruption, or any failure that carried usage, still fails closed.
+const TRANSPORT_RETRY_LIMIT = 1;
+const TRANSPORT_INTERRUPTION_CODES = new Set([
+  "UND_ERR_SOCKET", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "ECONNRESET", "EPIPE", "ETIMEDOUT",
+]);
+const TRANSPORT_INTERRUPTION_MESSAGE = /other side closed|socket hang up|terminated|ECONNRESET|stream (?:was )?(?:aborted|destroyed)/i;
+
+export function isTransportInterruption(error) {
+  const seen = new Set();
+  let current = error;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    if (TRANSPORT_INTERRUPTION_CODES.has(String(current.code || ""))) return true;
+    if (TRANSPORT_INTERRUPTION_MESSAGE.test(String(current.message || ""))) return true;
+    current = current.cause;
+  }
+  return false;
+}
 /**
  * The sole network-dispatch authority for Builder V2. Contract planning, contract repair,
  * generation, corrections, browser-informed repair and continuations all enter here with an
@@ -1449,7 +1476,9 @@ export async function runReservedDispatch({
   scopedDispatch = false, affectedModules = 1, retrievalTokens = 0, problems = [],
   expectedPatchTokens = null, maxOutputTokens = 16_000, beforeDispatch = null,
   signal = null, causalFiles = [], checkpointId = null, completionReserveCredits = 0,
+  transportRetries = 0,
 } = {}) {
+  const dispatchArguments = arguments[0];
   if (!reservations?.reserve || !reservations?.settle || !provider?.runTurn || !provider?.model) {
     throw new Error("runReservedDispatch needs reservation and executable provider authorities");
   }
@@ -1498,7 +1527,8 @@ export async function runReservedDispatch({
     || `${buildId}:${logicalStep}:${Number(sequence)}:logical`;
   const callKey = modelCallKey({
     buildId, step: reservationStep, sequence,
-    purpose: `dispatch:${logicalDispatchId}:${Number(continuationIndex || 0)}`,
+    purpose: `dispatch:${logicalDispatchId}:${Number(continuationIndex || 0)}`
+      + (Number(transportRetries) > 0 ? `:transport-retry-${Number(transportRetries)}` : ""),
   });
   let accountBalance = (decision?.billingLane || "managed") === "managed"
     && usageResponsibility === "customer_request"
@@ -1584,6 +1614,19 @@ export async function runReservedDispatch({
       throw replayUnsafe(accountingError, { reservationId: hold.id, providerRequestId: ids[0] || null });
     }
     if (failure.state === "before_dispatch" || failure.state === "provider_rejected") throw error;
+    if (!failure.hasUsage && isTransportInterruption(error)
+      && Number(transportRetries) < TRANSPORT_RETRY_LIMIT && typeof reservations.absorbAmbiguous === "function") {
+      const reason = `transport interrupted before any usage (${String(error?.message || error).split("\n")[0].slice(0, 120)}); `
+        + `retried once as ${callKey}:transport-retry-${Number(transportRetries) + 1}`;
+      try {
+        await reservations.absorbAmbiguous(owner, hold.id, reason);
+      } catch (absorbError) {
+        throw replayUnsafe(Object.assign(new AggregateError([error, absorbError],
+          `transport interruption could not be absorbed: ${absorbError.message}`), { code: "billing_settlement_failed" }),
+        { reservationId: hold.id, providerRequestId: error?.providerRequestId || null });
+      }
+      return runReservedDispatch({ ...dispatchArguments, transportRetries: Number(transportRetries) + 1 });
+    }
     throw replayUnsafe(error, { reservationId: hold.id, providerRequestId: error?.providerRequestId || null });
   }
   const actualCredits = creditsForUsage({ usage: turn.usage || {}, model: provider.model });
