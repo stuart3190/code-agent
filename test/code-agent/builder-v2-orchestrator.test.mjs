@@ -1054,6 +1054,33 @@ test("WP11/V2-20 — a no-progress cycle stops even when the defect signature ch
 });
 
 
+test("a provider failure that stops the build keeps its cause chain and its own failure class", async () => {
+  // The 2026-09-16 Lumen advanced build (5ee9a5ef): a correction call died mid-stream, the lane
+  // threw replayUnsafe(cause), and the build row recorded only the outer sentence under the
+  // generated_app class. The transport error underneath is the evidence; it must survive.
+  const transport = Object.assign(new Error("Codex responses HTTP 502 (codex:request:abc): upstream connect error"),
+    { code: "provider_failed", providerRequestId: "codex:request:abc" });
+  const replay = Object.assign(new Error(
+    "Provider dispatch may have occurred. Automatic replay is blocked until durable provider evidence is reconciled.",
+    { cause: transport },
+  ), { code: "provider_replay_unsafe", retryable: false });
+  const h = harness({
+    patchPlan: {
+      core: () => { throw replay; },
+      "increment:newsletter-signup": () => NEWSLETTER_PATCH,
+      "increment:browse-info": () => BROWSE_PATCH,
+    },
+  });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "proj-provider-cause", request: "booking site" });
+  assert.equal(result.state, "failed");
+  assert.equal(result.failureClassification, "provider_replay_unsafe");
+  assert.match(result.error, /Provider dispatch may have occurred/);
+  assert.match(result.error, /<- Codex responses HTTP 502 \(codex:request:abc\): upstream connect error \[provider_failed\]/);
+  const build = await h.buildStore.get(result.buildId);
+  assert.match(build.error, /HTTP 502/);
+});
+
+
 test("WP11/V2-20 — rejected repair candidates stop before an undefined strategy is persisted", async () => {
   const started = [];
   const finished = [];

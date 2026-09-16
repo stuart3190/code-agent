@@ -12,6 +12,7 @@
 
 import crypto from "node:crypto";
 import { executionProvenance } from "./executionProvenance.mjs";
+import { describeErrorChain } from "./buildFailure.mjs";
 import path from "node:path";
 
 import { indexTree } from "./indexer.mjs";
@@ -2166,8 +2167,16 @@ export function createOrchestrator({
           try { await snapshotStore.discardWorking(owner, projectId, buildId); }
           catch (cleanupError) { log(`cancelled checkpoint cleanup failed: ${cleanupError.message}`); }
         }
+        // The message alone lost the cause. The 2026-09-16 Lumen advanced build (5ee9a5ef) died in
+        // a correction call with "Provider dispatch may have occurred. Automatic replay is
+        // blocked" and nothing else durable: the provider error underneath - the only thing that
+        // says whether the transport, the backend or the model failed - was on error.cause and was
+        // dropped here. The whole chain is persisted, and the error's own code names the failure
+        // class so a provider stop is not recorded as a generated-app failure.
         return finish(cancelled ? "cancelled" : "failed", {
-          error: error.message, workingSnapshotId: workingSnapshot?.id || null,
+          error: describeErrorChain(error).replace(/\n\s*/g, " <- "),
+          ...(!cancelled && error?.code && error.code !== "failed" ? { failureClassification: String(error.code) } : {}),
+          workingSnapshotId: workingSnapshot?.id || null,
         });
       }
     },
