@@ -703,6 +703,17 @@ export function buildInteractionContract(contract, {
       return ["selection", "textbox", "input"].includes(primitive)
         || intents.has(ACTION_INTENT.SELECTION) || intents.has(ACTION_INTENT.INPUT);
     });
+    // The durable entities this journey inherits from the producers it declares (dependsOn or a
+    // durableState sourceJourney): the fields of every entity a declared producer creates.
+    const inheritedEntityFields = new Set();
+    for (const producerId of declaredProducerJourneys(journey)) {
+      for (const operation of contract?.operations || []) {
+        if (String(operation?.journey || "") !== String(producerId)) continue;
+        if (canonicalOperationKind(operation?.kind || operation?.action || operation?.method) !== "create") continue;
+        const owner = (contract?.entities || []).find((entity) => normalized(entity?.name) === normalized(operation?.entity));
+        for (const field of owner?.fields || []) if (field?.name) inheritedEntityFields.add(normalized(field.name));
+      }
+    }
     for (const [stepIndex, step] of stepsList.entries()) {
       const fixtureRequired = new Set(verificationFixtureFields(step, contract).map(normalized));
       const stepFlowStart = flows.length;
@@ -1129,6 +1140,14 @@ export function buildInteractionContract(contract, {
                 && OPERATES_ON_EXISTING_RECORD.includes(consumerKind)) {
               return `${journey.id}.durable.${field}`;
             }
+            // A JOURNEY THAT DECLARES ITS PRODUCERS READS THEIR RECORDS. An export/report journey
+            // with dependsOn: [create-edit-save-plan] reads the plan's name and fixtures: those values
+            // exist because the producer made them, not because this journey drafted them. Mapping
+            // them to draft paths asked for an in-journey producer that can never exist, and every
+            // 2026-09-16 advanced contract with an export journey was rejected on it ("reads state
+            // before it is produced"). The inherited record is start-state authority for a journey
+            // that inherits (stateAvailableAtJourneyStart), so the read names the durable record.
+            if (inheritedEntityFields.has(normalized(field))) return `${journey.id}.durable.${field}`;
             // A first-step read is the journey's declared external starting input. Reads introduced
             // later remain draft dependencies and require an earlier producer or explicit start
             // authority.
@@ -1290,12 +1309,26 @@ export function buildInteractionContract(contract, {
       capabilityOutputs: list(journey.capabilityOutputs),
       availableState: list(journey.availableState),
     };
+    // A journey that declares its producers and reads their records inherits their lifecycle
+    // even when it commits nothing itself (export, print, report). Classifying it as independent
+    // made its inherited reads unproducible; the declaration is the contract's own statement.
+    const inheritedLifecycle = !produces && !consumes && declaredProducerJourneys(journey).length
+      && own.some((flow) => (flow.reads || []).some((path) => String(path).startsWith(`${journey.id}.durable.`)))
+      ? (() => {
+        const producerEntity = (contract?.operations || []).find((operation) => (
+          declaredProducerJourneys(journey).includes(String(operation?.journey || ""))
+          && canonicalOperationKind(operation?.kind || operation?.action || operation?.method) === "create"
+          && operation?.entity))?.entity || null;
+        return producerEntity ? `${lifecycleOwner}:${producerEntity}` : null;
+      })() : null;
     const scenario = produces
       ? { scenario: lifecycle, role: "produces", startState: "fresh", lifecycle, basis }
       : consumes
         ? { scenario: lifecycle, role: "consumes", startState: "inherits", lifecycle, basis }
-        : { scenario: `independent:${journey.id}`, role: "independent", startState: "fresh", lifecycle: null,
-          basis: touchesDurable ? basis : "data-flow" };
+        : inheritedLifecycle
+          ? { scenario: inheritedLifecycle, role: "consumes", startState: "inherits", lifecycle: inheritedLifecycle, basis: "declared-producer" }
+          : { scenario: `independent:${journey.id}`, role: "independent", startState: "fresh", lifecycle: null,
+            basis: touchesDurable ? basis : "data-flow" };
     scenarios[journey.id] = { ...scenario, ...declaredStartAuthority };
   }
 

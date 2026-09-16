@@ -485,6 +485,25 @@ export function validateContract(contract) {
   // Neither failure announces itself; both are one comparison to catch.
   const declaredJourneys = new Set((c.journeys || []).map((journey) => journey?.id).filter(Boolean));
   const declaredEntities = entityNames(c);
+  // A RECORD THAT IS ONLY EVER UPDATED HAS NO SOURCE. The 2026-09-16 advanced contract 46aab6c
+  // declared a workspacePreference entity with two update operations and no create, no sampleData
+  // and no external source; the interaction gate rejected it a paid call later. The validator is
+  // free and runs first, so the same fact is named here in the contract's own terms.
+  const seededEntity = (name) => Object.keys(c.sampleData || {}).some((key) => {
+    const k = normaliseReference(key); const e = normaliseReference(name);
+    return (k === e || k === `${e}s` || `${k}s` === e)
+      && (Array.isArray(c.sampleData[key]) ? c.sampleData[key].length > 0 : Boolean(c.sampleData[key]));
+  });
+  for (const entity of c.entities || []) {
+    if (!entity?.name || entityPersistencePolicy(c, entity.name) === "transient") continue;
+    const ops = (c.operations || []).filter((operation) => normaliseReference(operation?.entity) === normaliseReference(entity.name));
+    const kinds = new Set(ops.map((operation) => operationKind(operation)));
+    const mutatesExisting = [...kinds].some((kind) => ["update", "delete"].includes(kind));
+    if (mutatesExisting && !kinds.has("create") && !seededEntity(entity.name) && !entity.external && !entity.source) {
+      problems.push(`entity "${entity.name}" is updated or deleted by ${ops.map((operation) => operation.id || operation.name).join(", ")} `
+        + "but never created: declare the create operation in the journey that makes the record, or seed rows under sampleData");
+    }
+  }
   for (const [index, operation] of (c.operations || []).entries()) {
     const where = operation?.id || `operation ${index + 1}`;
     const operationEntityFields = new Set((c.entities || [])

@@ -128,6 +128,8 @@ Rules:
 - At least three acceptance entries, each an observable outcome.
 - Stages must be one of: ${STAGES.join(", ")}.
 - If the request implies stored data, declare the entities and the operations that write them.
+- Every durable entity that an operation updates or deletes must be created by a declared create operation
+  in some journey, or seeded under sampleData. A record that is only ever updated has no source.
 - Every operation declares \`responsibilities\`. Persistence and functional transformation are
   separate responsibilities even when they happen behind one button. CRUD may create/read/update/
   delete values supplied by its caller; it never calculates, generates, optimises, allocates or
