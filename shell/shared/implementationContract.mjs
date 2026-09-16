@@ -253,8 +253,38 @@ export function verificationFixtureFields(step = {}, contract = {}) {
   return scored.filter((row) => row.score === best).map((row) => row.field);
 }
 
+// PLATFORM AUTHENTICATION IS CONTRACT VOCABULARY, NOT AN ENTITY.
+//
+// Six advanced contracts on 2026-09-16 each expressed sign-in differently: an invented
+// authSession/session entity holding authEmail/authPassword, an operation "sign-in:create:authSession"
+// (bound to CRUD, so a durable row was expected for a sign-in), "sign-in:read:plan", or bare
+// credential names the validator rejected as undeclared - after which the model declared the
+// entity anyway. The session capability owns identity; the contract only needs to name the two
+// credential controls and a session operation. These names are reserved for that purpose.
+export const AUTH_CREDENTIAL_FIELDS = Object.freeze([
+  { name: "authEmail", type: "email", required: true },
+  { name: "authPassword", type: "password", required: true },
+]);
+const SESSION_OPERATION_KIND = /^(?:sign ?in|sign ?up|sign ?out|log ?in|log ?out|authenticate|register)$/i;
+
+export function isSessionOperation(operation) {
+  if (!operation || typeof operation !== "object") return false;
+  if (SESSION_OPERATION_KIND.test(String(operation.kind || operation.action || operation.method || "").trim())) return true;
+  return (Array.isArray(operation.responsibilities) ? operation.responsibilities : [])
+    .some((responsibility) => String(responsibility?.capability || responsibility?.capabilityId || "").toLowerCase() === "session");
+}
+
+/** True when the contract relies on the platform session: auth.required, or a session operation. */
+export function contractUsesPlatformAuthentication(contract) {
+  if (contract?.auth?.required === true) return true;
+  return (contract?.operations || []).some(isSessionOperation);
+}
+
 export function contractReferences(contract) {
   const references = new Set();
+  if (contractUsesPlatformAuthentication(contract)) {
+    for (const field of AUTH_CREDENTIAL_FIELDS) references.add(normaliseReference(field.name));
+  }
   for (const entity of contract?.entities || []) {
     if (entity?.name) references.add(normaliseReference(entity.name));
     for (const field of entity?.fields || []) {
@@ -499,7 +529,8 @@ export function validateContract(contract) {
           problems.push(`${label} does not name the functional behavior`);
         }
         if (!responsibility.reads?.length) problems.push(`${label} has no declared functional inputs`);
-        if (!responsibility.writes?.length && !functionalOutputEffect(operation, responsibility)) {
+        if (!responsibility.writes?.length && !functionalOutputEffect(operation, responsibility)
+            && !isSessionOperation(operation)) {
           problems.push(`${label} has no declared functional outputs`);
         }
       }

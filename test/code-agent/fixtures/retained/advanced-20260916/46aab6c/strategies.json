@@ -1,0 +1,29 @@
+[
+  {
+    "sequence": 1,
+    "strategy_id": "exact_owning_file_repair",
+    "outcome": "no_progress",
+    "reason": "unchanged",
+    "targeted_files": [
+      "src/screens/scaffold/SignInScreen.jsx"
+    ],
+    "created_at": "2026-09-16T13:37:57.975253+00:00",
+    "completed_at": "2026-09-16T13:39:17.231+00:00"
+  },
+  {
+    "sequence": 2,
+    "strategy_id": "causal_dependency_repair",
+    "outcome": "no_progress",
+    "reason": "unchanged",
+    "targeted_files": [
+      "src/extensions/custom/create-edit-save-plan.js",
+      "src/lib/capabilities/composed/crud.js",
+      "src/lib/capabilities/composed/session.js",
+      "src/lib/scaffolds/composed/ScaffoldApp.jsx",
+      "src/lib/scaffolds/composed/primitives.jsx",
+      "src/screens/scaffold/SignInScreen.jsx"
+    ],
+    "created_at": "2026-09-16T13:39:17.94762+00:00",
+    "completed_at": "2026-09-16T13:40:35.187+00:00"
+  }
+]

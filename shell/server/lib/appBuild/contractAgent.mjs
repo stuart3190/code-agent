@@ -151,6 +151,16 @@ Rules:
 - Do not add reload, recovery, lookup-by-reference, history, authentication, persistence, or backend
   operations unless the REQUEST explicitly requires that behavior. A visible confirmation does not
   imply that it can be recovered later.
+- AUTHENTICATION, when the request requires accounts: set auth.required to true. A sign-in or
+  sign-up step operates the RESERVED credential controls "authEmail" and "authPassword" (they are
+  not entity fields; declare no session, account or authSession entity and never pre-fill demo
+  credentials) plus ONE session operation declared like
+  { "id": "sign-in", "kind": "signIn", "journey": "<journey id>", "description": "sign in or create the account",
+    "responsibilities": [{ "type": "functional", "capability": "session", "capabilityMethod": "signIn",
+      "behavior": "establish the platform session", "reads": ["authEmail", "authPassword"], "writes": [] }] }
+  Use capabilityMethod "signUp" for a step that only creates accounts and "signOut" (reads: [])
+  for a sign-out step. The session operation has no "entity". Its step's "expect" names the
+  signed-in surface that appears (the protected route's content or the account indicator).
 - Demo, mock, prototype, placeholder, or simulated submissions are client-only transient state
   unless the REQUEST separately requires saved data, backend storage, reload, history, or recovery.
   Mark their entity storage as transient and use functional responsibilities; do not copy the

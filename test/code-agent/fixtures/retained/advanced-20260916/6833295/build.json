@@ -1,0 +1,39 @@
+{
+  "id": "7739f39e-cbf8-4037-904b-10ae9f50519e",
+  "owner": "7fc93b1e-7dc6-48c0-ae05-38ce4ee3050f",
+  "project_id": "0c39d317-64ca-4ae4-9dc0-ad102eb03b74",
+  "profile": "advanced",
+  "request": "Build an interactive SVG floor-planning workspace for Lumen Layouts. Users sign in,\ncreate and name plans, pan and zoom the canvas, drag fixtures from a library, select fixtures, edit\nposition, rotation, and brightness in an inspector, undo and redo changes, switch plans, save and\nreload durable state, export a plan summary, and print it. Include accessible keyboard alternatives\nfor canvas actions and separate workspace, library, reports, and settings routes. Use platform\nauthentication and durable capabilities.\n\nQualification instance 1; create a fresh implementation.",
+  "state": "blocked",
+  "budget_credits": 60,
+  "spent_credits": 14.09366,
+  "contract_id": "81614b62-6b97-45ef-896e-0945ced220de",
+  "final_snapshot": null,
+  "error": "Builder V2 verification platform failure: journey_verifier_unavailable: locator.fill: Timeout 30000ms exceeded.\nCall log:\n  - waiting for getByLabel(/password/i).first()\n    - locator resolved to <input id=\"password\" type=\"password\" value=\"lumen-layouts-demo\" class=\"mt-1 w-full rounded-xl border px-3 py-2\"/>\n    - fill(\"Jv-319f53e43e0a4e24374de240-setup!9a\")\n  - attempting fill action\n    - waiting for element to be visible, enabled and editable\n  - element was detached from the DOM, retrying\n",
+  "started_at": "2026-09-16T09:17:19.633+00:00",
+  "finished_at": "2026-09-16T09:28:24.359+00:00",
+  "project_id_text": "0c39d317-64ca-4ae4-9dc0-ad102eb03b74",
+  "max_repair_dispatches": 1000,
+  "envelope_version": 2,
+  "customer_state": "failed",
+  "spent_breakdown": {
+    "thrallo_recovery:thrallo_repair:connected_allowance": 5.516,
+    "customer_generation:customer_request:connected_allowance": 8.57766
+  },
+  "failure": {
+    "code": "verification_platform_defect",
+    "action": "stop",
+    "retryable": false,
+    "checkpointId": "2beb0d3e-2b1d-4281-af05-f30681a09710",
+    "classification": "platform",
+    "internalDetail": "Builder V2 verification platform failure: journey_verifier_unavailable: locator.fill: Timeout 30000ms exceeded.\nCall log:\n  - waiting for getByLabel(/password/i).first()\n    - locator resolved to <input id=\"password\" type=\"password\" value=\"lumen-layouts-demo\" class=\"mt-1 w-full rounded-xl border px-3 py-2\"/>\n    - fill(\"Jv-319f53e43e0a4e24374de240-setup!9a\")\n  - attempting fill action\n    - waiting for element to be visible, enabled and editable\n  - element was detached from the DOM, retrying [verification_platform_defect]",
+    "providerCallMade": null,
+    "reservationState": "not_created",
+    "customerMessageKey": "build_platform_retrying",
+    "customerActionRequired": false
+  },
+  "last_durable_progress_at": "2026-09-16T09:26:12.017+00:00",
+  "expected_duration_ms": 1622000,
+  "hard_safety_duration_ms": 4866000,
+  "verifier_policy": "minimal_contract_v1"
+}

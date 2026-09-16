@@ -5,6 +5,7 @@
 // proven registry capability or is explicitly assigned to one bounded custom_behavior module.
 
 import { CAPABILITIES, canonicalCapabilityId } from "./capabilityRegistry.mjs";
+import { AUTH_CREDENTIAL_FIELDS, contractUsesPlatformAuthentication } from "../../../shared/implementationContract.mjs";
 import { validateBuildProfileGraph } from "../../../shared/buildProfile.mjs";
 import {
   functionalOutputEffect, operationUsesDurablePersistence,
@@ -50,6 +51,11 @@ function persistenceCapabilityMethod(operation, responsibility, declaredReads, c
 
 function fieldCatalog(contract, entityName = null) {
   const fields = new Map();
+  // The reserved credential controls are readable inputs of a session operation; they belong to
+  // no entity, so an entity-scoped catalogue (declared writes) never includes them.
+  if (!entityName && contractUsesPlatformAuthentication(contract)) {
+    for (const field of AUTH_CREDENTIAL_FIELDS) fields.set(normalized(field.name), { entity: null, field: field.name });
+  }
   for (const entity of contract?.entities || []) {
     if (entityName && entity.name !== entityName) continue;
     for (const field of entity.fields || []) {

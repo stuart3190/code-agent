@@ -1,0 +1,1601 @@
+[
+  {
+    "journey_id": "create-edit-save-plan",
+    "verdict": {
+      "steps": [
+        {
+          "drove": true,
+          "action": "open the sign-in page",
+          "detail": "contracted result visible: email, password, sign, create, account",
+          "expect": "email, password, sign in, and create account controls are visible",
+          "status": "pass",
+          "advisories": [],
+          "classification": "PASS"
+        },
+        {
+          "drove": true,
+          "action": "create or sign in to an account with platform authentication",
+          "detail": "the contracted authentication action ran but did not produce the required signed-in state",
+          "expect": "the workspace route opens and the signed-in account indicator is visible",
+          "status": "fail",
+          "observation": {
+            "text": "Sign InWorkspaceLibraryReportsSettingsHome Redirect LUMEN LAYOUTS Sign In Access the authenticated SVG floor-planning workspace, create durable plans, place lighting fixtures, save updates, and confirm that saved layouts reload with their exact position, rotation, and brightness. Workspace route opens after authentication Ready to authenticate. Authentication form Email, password, sign in, and create account controls are visible. Signed-in account indicator auth Email auth Password Start authentication form Sign in Create account New plan form Create a named durable plan and show the title abo",
+            "consoleSince": [],
+            "requestsSince": []
+          },
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "controlEvidence": {
+            "fields": [
+              {
+                "facts": {
+                  "id": "auth-email",
+                  "max": null,
+                  "min": null,
+                  "tag": "input",
+                  "name": "authEmail",
+                  "step": null,
+                  "type": "email",
+                  "labels": [
+                    "auth Email"
+                  ],
+                  "pattern": null,
+                  "disabled": false,
+                  "readOnly": false,
+                  "required": false,
+                  "ariaLabel": "auth Email",
+                  "maxLength": null,
+                  "minLength": null,
+                  "placeholder": null
+                },
+                "field": "authEmail",
+                "status": "filled",
+                "matchedBy": "machine=ctl_9f12d5bd",
+                "expectedValue": "journey+851939@thrallo.dev",
+                "observedValue": "journey+851939@thrallo.dev",
+                "previousValue": "",
+                "accessibleNames": [
+                  "auth Email",
+                  "email"
+                ],
+                "validityMessage": null,
+                "fixtureAuthority": "native_or_generated",
+                "expectedStateOwner": "src/lib/capabilities/composed/crud.js"
+              },
+              {
+                "facts": {
+                  "id": "auth-password",
+                  "max": null,
+                  "min": null,
+                  "tag": "input",
+                  "name": "authPassword",
+                  "step": null,
+                  "type": "text",
+                  "labels": [
+                    "auth Password"
+                  ],
+                  "pattern": null,
+                  "disabled": false,
+                  "readOnly": false,
+                  "required": false,
+                  "ariaLabel": "auth Password",
+                  "maxLength": null,
+                  "minLength": null,
+                  "placeholder": null
+                },
+                "field": "authPassword",
+                "status": "filled",
+                "matchedBy": "machine=ctl_d20ad486",
+                "expectedValue": "Jv-851939!9a",
+                "observedValue": "Jv-851939!9a",
+                "previousValue": "",
+                "accessibleNames": [
+                  "auth Password"
+                ],
+                "validityMessage": null,
+                "fixtureAuthority": "native_or_generated",
+                "expectedStateOwner": "src/lib/capabilities/composed/crud.js"
+              }
+            ],
+            "activation": {
+              "matchedBy": "machine_identity",
+              "requiredAtFlowEntry": true
+            },
+            "authentication": {
+              "via": "contracted_flow_entry",
+              "email": "journey+851939@thrallo.dev",
+              "reason": "the contracted authentication action ran but did not produce the required signed-in state",
+              "attempted": true,
+              "submitted": true,
+              "credentials": {
+                "email": "journey+851939@thrallo.dev",
+                "password": "Jv-851939!9a"
+              },
+              "authenticated": false,
+              "expectationEvidence": {
+                "met": false,
+                "found": [
+                  "workspace",
+                  "route",
+                  "signed-in",
+                  "account",
+                  "indicator"
+                ],
+                "fresh": [],
+                "wanted": [
+                  "workspace",
+                  "route",
+                  "signed-in",
+                  "account",
+                  "indicator"
+                ]
+              }
+            },
+            "renderedControls": [
+              {
+                "id": "auth-email",
+                "tag": "input",
+                "name": "authEmail",
+                "role": null,
+                "type": "email",
+                "value": "",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "auth Email",
+                "placeholder": null,
+                "accessibleName": "auth Email"
+              },
+              {
+                "id": "auth-password",
+                "tag": "input",
+                "name": "authPassword",
+                "role": null,
+                "type": "text",
+                "value": "",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "auth Password",
+                "placeholder": null,
+                "accessibleName": "auth Password"
+              },
+              {
+                "id": "plan-name",
+                "tag": "input",
+                "name": "name",
+                "role": null,
+                "type": "input",
+                "value": "Main Gallery Lighting Plan",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "new plan form",
+                "placeholder": null,
+                "accessibleName": "new plan form"
+              },
+              {
+                "id": "fixture-x",
+                "tag": "input",
+                "name": "fixtureX",
+                "role": null,
+                "type": "number",
+                "value": "280",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "fixture X",
+                "placeholder": null,
+                "accessibleName": "fixture X"
+              },
+              {
+                "id": "fixture-y",
+                "tag": "input",
+                "name": "fixtureY",
+                "role": null,
+                "type": "number",
+                "value": "165",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "fixture Y",
+                "placeholder": null,
+                "accessibleName": "fixture Y"
+              },
+              {
+                "id": "fixture-rotation",
+                "tag": "input",
+                "name": "fixtureRotation",
+                "role": null,
+                "type": "number",
+                "value": "25",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "fixture Rotation",
+                "placeholder": null,
+                "accessibleName": "fixture Rotation"
+              },
+              {
+                "id": "fixture-brightness",
+                "tag": "input",
+                "name": "fixtureBrightness",
+                "role": null,
+                "type": "number",
+                "value": "80",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "fixture Brightness",
+                "placeholder": null,
+                "accessibleName": "fixture Brightness"
+              }
+            ],
+            "attemptedLocators": [
+              "authEmail:machine=ctl_9f12d5bd",
+              "authEmail:role=textbox name=auth Email",
+              "authEmail:role=spinbutton name=auth Email",
+              "authEmail:role=combobox name=auth Email",
+              "authEmail:label=auth Email",
+              "authEmail:name=auth Email",
+              "authEmail:id=auth Email",
+              "authEmail:placeholder=auth Email",
+              "authEmail:role=textbox name=email",
+              "authEmail:role=spinbutton name=email",
+              "authEmail:role=combobox name=email",
+              "authEmail:label=email",
+              "authEmail:name=email",
+              "authEmail:id=email",
+              "authEmail:placeholder=email",
+              "authEmail:role=textbox name=authEmail",
+              "authEmail:role=spinbutton name=authEmail",
+              "authEmail:role=combobox name=authEmail",
+              "authEmail:label=authEmail",
+              "authEmail:name=authEmail",
+              "authEmail:id=authEmail",
+              "authEmail:placeholder=authEmail",
+              "authEmail:role=textbox name~auth Email",
+              "authEmail:role=spinbutton name~auth Email",
+              "authEmail:role=combobox name~auth Email",
+              "authEmail:label~auth Email",
+              "authEmail:placeholder~auth Email",
+              "authEmail:role=textbox name~email",
+              "authEmail:role=spinbutton name~email",
+              "authEmail:role=combobox name~email",
+              "authEmail:label~email",
+              "authEmail:placeholder~email",
+              "authEmail:role=textbox name~authEmail",
+              "authEmail:role=spinbutton name~authEmail",
+              "authEmail:role=combobox name~authEmail",
+              "authEmail:label~authEmail",
+              "authEmail:placeholder~authEmail",
+              "authPassword:machine=ctl_d20ad486",
+              "authPassword:role=textbox name=auth Password",
+              "authPassword:role=spinbutton name=auth Password",
+              "authPassword:role=combobox name=auth Password",
+              "authPassword:label=auth Password",
+              "authPassword:name=auth Password",
+              "authPassword:id=auth Password",
+              "authPassword:placeholder=auth Password",
+              "authPassword:role=textbox name=authPassword",
+              "authPassword:role=spinbutton name=authPassword",
+              "authPassword:role=combobox name=authPassword",
+              "authPassword:label=authPassword",
+              "authPassword:name=authPassword",
+              "authPassword:id=authPassword",
+              "authPassword:placeholder=authPassword",
+              "authPassword:role=textbox name~auth Password",
+              "authPassword:role=spinbutton name~auth Password",
+              "authPassword:role=combobox name~auth Password",
+              "authPassword:label~auth Password",
+              "authPassword:placeholder~auth Password",
+              "authPassword:role=textbox name~authPassword",
+              "authPassword:role=spinbutton name~authPassword",
+              "authPassword:role=combobox name~authPassword",
+              "authPassword:label~authPassword",
+              "authPassword:placeholder~authPassword"
+            ]
+          }
+        },
+        {
+          "action": "create a new named plan",
+          "detail": "not reached because step 2 was fail",
+          "expect": "the plan title Main Gallery Lighting Plan is shown above an empty SVG canvas",
+          "status": "not_reached",
+          "blockedBy": 1
+        },
+        {
+          "action": "drag a fixture from the library onto the SVG canvas",
+          "detail": "not reached because step 2 was fail",
+          "expect": "a visible fixture appears on the canvas and the inspector shows it as selected",
+          "status": "not_reached",
+          "blockedBy": 1
+        },
+        {
+          "action": "edit the selected fixture position, rotation, and brightness in the inspector",
+          "detail": "not reached because step 2 was fail",
+          "expect": "the SVG fixture moves, rotates, and displays the updated brightness value in the inspector",
+          "status": "not_reached",
+          "blockedBy": 1
+        },
+        {
+          "action": "save the plan",
+          "detail": "not reached because step 2 was fail",
+          "expect": "a Saved status is visible with the plan title still shown",
+          "status": "not_reached",
+          "blockedBy": 1
+        },
+        {
+          "action": "reload",
+          "detail": "not reached because step 2 was fail",
+          "expect": "the saved plan title, fixture location, rotation, and brightness are still visible after the page reload",
+          "status": "not_reached",
+          "blockedBy": 1
+        }
+      ],
+      "status": "fail",
+      "failedSteps": 1,
+      "cacheIdentity": {
+        "journeyId": "create-edit-save-plan",
+        "contractHash": "c7e3e5e86aff83c6f5407270520d28570e9b621d68e2e8d9e7f94c20aff9bd28",
+        "runtimeFiles": [
+          {
+            "path": "src/lib/backend/index.js",
+            "contentHash": "2cf40421f9c5a61b1effca24bfc25b7d220df019bb2988ac8ed50b60ac062bde"
+          },
+          {
+            "path": "src/lib/backend/supabaseBackend.js",
+            "contentHash": "64be4069be90d6c6a487e10998c0c880f2dd86e35d48275855bb8819ec84ef87"
+          },
+          {
+            "path": "src/lib/capabilities/booking.js",
+            "contentHash": "f46e1936767afa4e56f2cfc82b8e97a153735479bc3e4e3aefb83bad459ccf7e"
+          },
+          {
+            "path": "src/lib/capabilities/composed/crud.js",
+            "contentHash": "ef5374d81782d674cddd151880c2d0b1842b57032a078b3976c43f29f9e5ee06"
+          },
+          {
+            "path": "src/lib/capabilities/composed/index.js",
+            "contentHash": "8b8957a6e7415a293982c6fa0d8ef4f48c86e9aa88fbd726c84fdeadcadf51cc"
+          },
+          {
+            "path": "src/lib/capabilities/composed/interaction-primitives.js",
+            "contentHash": "12fdbf5582bdf6ce8880902dee8165301b8f079f4d1f20fcb2941745d1845399"
+          },
+          {
+            "path": "src/lib/capabilities/composed/manifest.js",
+            "contentHash": "afb8d5630cf7581d0e16cc2976db29cc84eaa37ad4994fa301655e20a89f10c9"
+          },
+          {
+            "path": "src/lib/capabilities/composed/roles.js",
+            "contentHash": "b79770b4855c3ca22e7c823c03a07a8f264d6c46a94114281ab0905fd32b2e5b"
+          },
+          {
+            "path": "src/lib/capabilities/composed/session.js",
+            "contentHash": "6bed24733467c54aa2913e4601c0f50b0e68c6e70b9a99f85a56eef00f7593f4"
+          },
+          {
+            "path": "src/lib/capabilities/crud.js",
+            "contentHash": "29b1a44b19f87d166fdc81bf95307280fb3cb26a4a40a6278a15576ea2f88ffe"
+          },
+          {
+            "path": "src/lib/capabilities/forms.js",
+            "contentHash": "ab7fc440318caf8b6d8ef86f560652b18aad58ffdced460b845a68e760c3f173"
+          },
+          {
+            "path": "src/lib/capabilities/index.js",
+            "contentHash": "2ba27fb4b08aefacf7eb0b225a474ed30e7a1470cefcc1ecc7fc7d159845aa96"
+          },
+          {
+            "path": "src/lib/capabilities/react.js",
+            "contentHash": "23a95713b35715d6242c5923cb46c357848d962ecac84050a0102a4c0f392bfb"
+          },
+          {
+            "path": "src/lib/capabilities/roles.js",
+            "contentHash": "475d542802b975675e06b230bb867ff6027ea94ce6176904e9ebdde2d2cf9d4c"
+          },
+          {
+            "path": "src/lib/capabilities/session.js",
+            "contentHash": "958879b69f94e2912358dd40ad25acaaac645da9341bb5833b50ca4576f3ebd0"
+          },
+          {
+            "path": "src/lib/capabilities/wizard.js",
+            "contentHash": "b6edb2d72717db75924bfe08e099b950ff4957c9b6f4aa4ddd5a828bb8189cc4"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/ScaffoldApp.jsx",
+            "contentHash": "b32fce2ad1768288ad987c6a1ec8d8ead9db4752d0a964b5453db192dc2fe816"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/manifest.js",
+            "contentHash": "c25f20d63f8425ae96d6d029787e97b7874ef16ce0fb0e04e4bcc2012ac2a268"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/primitives.jsx",
+            "contentHash": "49e06dfeb79bcd8f8edbc2541fc41b275c55f88fd965b5f7ae768b53ddf07230"
+          },
+          {
+            "path": "src/lib/visitorSession.js",
+            "contentHash": "c298160a4b044c597fc10ce7f158dc924f3ef1b3c8cafe0c3e9ecb636e19d5a1"
+          }
+        ],
+        "configVersion": "journey-verification-config/1",
+        "owningModules": [
+          {
+            "path": "src/extensions/custom/create-edit-save-plan.js",
+            "contentHash": "f26d1a1d6679f815d2397a4e719abb768e7400757ed94dfd2b8849b239fcabc7"
+          },
+          {
+            "path": "src/screens/scaffold/SignInScreen.jsx",
+            "contentHash": "01998ff7d463911e852b097b32fd0dc21397a68cb4ec312ad43f1e05873033a4"
+          }
+        ],
+        "backendVersion": "generated-backend/1",
+        "runtimeVersion": "react-vite-runtime/1",
+        "verifierVersion": "8ffbfa1ea2715cde53d27fc4187e2872703549f984491bb0c2e2be7d1890e33c:46aab6cdeff4c35c3fdfe86ae253ec6584d098f1",
+        "capabilityVersions": [
+          {
+            "name": "crud",
+            "version": "1.0.0"
+          },
+          {
+            "name": "roles",
+            "version": "1.0.0"
+          },
+          {
+            "name": "session",
+            "version": "1.1.0"
+          }
+        ],
+        "environmentVersion": "unknown",
+        "journeyDefinitionHash": "ae0648d1e5a7e2c6f5a69de32b9bdf324ab7432a7354c0c015832f4e18d000ac",
+        "transitiveDependencyClosure": [
+          {
+            "path": "src/lib/backend/index.js",
+            "contentHash": "2cf40421f9c5a61b1effca24bfc25b7d220df019bb2988ac8ed50b60ac062bde"
+          },
+          {
+            "path": "src/lib/backend/supabaseBackend.js",
+            "contentHash": "64be4069be90d6c6a487e10998c0c880f2dd86e35d48275855bb8819ec84ef87"
+          },
+          {
+            "path": "src/lib/capabilities/composed/crud.js",
+            "contentHash": "ef5374d81782d674cddd151880c2d0b1842b57032a078b3976c43f29f9e5ee06"
+          },
+          {
+            "path": "src/lib/capabilities/composed/session.js",
+            "contentHash": "6bed24733467c54aa2913e4601c0f50b0e68c6e70b9a99f85a56eef00f7593f4"
+          },
+          {
+            "path": "src/lib/capabilities/crud.js",
+            "contentHash": "29b1a44b19f87d166fdc81bf95307280fb3cb26a4a40a6278a15576ea2f88ffe"
+          },
+          {
+            "path": "src/lib/capabilities/session.js",
+            "contentHash": "958879b69f94e2912358dd40ad25acaaac645da9341bb5833b50ca4576f3ebd0"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/primitives.jsx",
+            "contentHash": "49e06dfeb79bcd8f8edbc2541fc41b275c55f88fd965b5f7ae768b53ddf07230"
+          },
+          {
+            "path": "src/lib/visitorSession.js",
+            "contentHash": "c298160a4b044c597fc10ce7f158dc924f3ef1b3c8cafe0c3e9ecb636e19d5a1"
+          }
+        ]
+      },
+      "backendEvidence": {
+        "after": {
+          "hash": "5678a9b2960a4b11199d62f53d22c9dade25e5fbfeaf3e3eb340e5e1aa0767ba",
+          "appUsers": [
+            {
+              "id": "2781e4eb-296b-40fb-a002-b2b4f9f2f628",
+              "createdAt": "2026-09-16T13:37:35.317395+00:00",
+              "authUserHash": "7ee940a843d6f579d470"
+            }
+          ],
+          "entities": [],
+          "entityCount": 0,
+          "appUserCount": 1
+        },
+        "before": {
+          "hash": "5582668908f242213bb151fbe90ebbfdcbd1588e9b478fc2a1a6c36e13fdc949",
+          "appUsers": [],
+          "entities": [],
+          "entityCount": 0,
+          "appUserCount": 0
+        },
+        "changed": true,
+        "required": true,
+        "entityDiff": {
+          "changed": [],
+          "created": [],
+          "deleted": []
+        }
+      }
+    },
+    "snapshot_id": null,
+    "created_at": "2026-09-16T13:37:56.977+00:00"
+  },
+  {
+    "journey_id": "create-edit-save-plan",
+    "verdict": {
+      "steps": [
+        {
+          "drove": true,
+          "action": "open the sign-in page",
+          "detail": "contracted result visible: email, password, sign, create, account",
+          "expect": "email, password, sign in, and create account controls are visible",
+          "status": "pass",
+          "advisories": [],
+          "classification": "PASS"
+        },
+        {
+          "drove": true,
+          "action": "create or sign in to an account with platform authentication",
+          "detail": "the contracted authentication action ran but did not produce the required signed-in state",
+          "expect": "the workspace route opens and the signed-in account indicator is visible",
+          "status": "fail",
+          "observation": {
+            "text": "Sign InWorkspaceLibraryReportsSettingsHome Redirect Workspace Application screen ready for composition.",
+            "consoleSince": [],
+            "requestsSince": [
+              "401 POST https://zczgvcsokfafuyognvwx.supabase.co/functions/v1/app-auth"
+            ]
+          },
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "controlEvidence": {
+            "fields": [
+              {
+                "facts": {
+                  "id": "auth-email",
+                  "max": null,
+                  "min": null,
+                  "tag": "input",
+                  "name": "authEmail",
+                  "step": null,
+                  "type": "email",
+                  "labels": [
+                    "auth Email"
+                  ],
+                  "pattern": null,
+                  "disabled": false,
+                  "readOnly": false,
+                  "required": false,
+                  "ariaLabel": "auth Email",
+                  "maxLength": null,
+                  "minLength": null,
+                  "placeholder": null
+                },
+                "field": "authEmail",
+                "status": "filled",
+                "matchedBy": "machine=ctl_9f12d5bd",
+                "expectedValue": "journey+931239@thrallo.dev",
+                "observedValue": "journey+931239@thrallo.dev",
+                "previousValue": "planner@example.com",
+                "accessibleNames": [
+                  "auth Email",
+                  "email"
+                ],
+                "validityMessage": null,
+                "fixtureAuthority": "native_or_generated",
+                "expectedStateOwner": "src/lib/capabilities/composed/crud.js"
+              },
+              {
+                "facts": {
+                  "id": "auth-password",
+                  "max": null,
+                  "min": null,
+                  "tag": "input",
+                  "name": "authPassword",
+                  "step": null,
+                  "type": "text",
+                  "labels": [
+                    "auth Password"
+                  ],
+                  "pattern": null,
+                  "disabled": false,
+                  "readOnly": false,
+                  "required": false,
+                  "ariaLabel": "auth Password",
+                  "maxLength": null,
+                  "minLength": null,
+                  "placeholder": null
+                },
+                "field": "authPassword",
+                "status": "filled",
+                "matchedBy": "machine=ctl_d20ad486",
+                "expectedValue": "Jv-931239!9a",
+                "observedValue": "Jv-931239!9a",
+                "previousValue": "PlannerPass123!",
+                "accessibleNames": [
+                  "auth Password"
+                ],
+                "validityMessage": null,
+                "fixtureAuthority": "native_or_generated",
+                "expectedStateOwner": "src/lib/capabilities/composed/crud.js"
+              }
+            ],
+            "activation": {
+              "matchedBy": "machine_identity",
+              "requiredAtFlowEntry": true
+            },
+            "authentication": {
+              "via": "contracted_flow_entry",
+              "email": "journey+931239@thrallo.dev",
+              "reason": "the contracted authentication action ran but did not produce the required signed-in state",
+              "attempted": true,
+              "submitted": true,
+              "credentials": {
+                "email": "journey+931239@thrallo.dev",
+                "password": "Jv-931239!9a"
+              },
+              "authenticated": false,
+              "expectationEvidence": {
+                "met": false,
+                "found": [
+                  "workspace"
+                ],
+                "fresh": [],
+                "wanted": [
+                  "workspace",
+                  "route",
+                  "signed-in",
+                  "account",
+                  "indicator"
+                ]
+              }
+            },
+            "renderedControls": [
+              {
+                "id": "auth-email",
+                "tag": "input",
+                "name": "authEmail",
+                "role": null,
+                "type": "email",
+                "value": "planner@example.com",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "auth Email",
+                "placeholder": null,
+                "accessibleName": "auth Email"
+              },
+              {
+                "id": "auth-password",
+                "tag": "input",
+                "name": "authPassword",
+                "role": null,
+                "type": "text",
+                "value": "PlannerPass123!",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "auth Password",
+                "placeholder": null,
+                "accessibleName": "auth Password"
+              },
+              {
+                "id": "plan-name",
+                "tag": "input",
+                "name": "name",
+                "role": null,
+                "type": "input",
+                "value": "Main Gallery Lighting Plan",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "new plan form",
+                "placeholder": null,
+                "accessibleName": "new plan form"
+              },
+              {
+                "id": "fixture-x",
+                "tag": "input",
+                "name": "fixtureX",
+                "role": null,
+                "type": "number",
+                "value": "280",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "fixture X",
+                "placeholder": null,
+                "accessibleName": "fixture X"
+              },
+              {
+                "id": "fixture-y",
+                "tag": "input",
+                "name": "fixtureY",
+                "role": null,
+                "type": "number",
+                "value": "165",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "fixture Y",
+                "placeholder": null,
+                "accessibleName": "fixture Y"
+              },
+              {
+                "id": "fixture-rotation",
+                "tag": "input",
+                "name": "fixtureRotation",
+                "role": null,
+                "type": "number",
+                "value": "25",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "fixture Rotation",
+                "placeholder": null,
+                "accessibleName": "fixture Rotation"
+              },
+              {
+                "id": "fixture-brightness",
+                "tag": "input",
+                "name": "fixtureBrightness",
+                "role": null,
+                "type": "number",
+                "value": "80",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "fixture Brightness",
+                "placeholder": null,
+                "accessibleName": "fixture Brightness"
+              }
+            ],
+            "attemptedLocators": [
+              "authEmail:machine=ctl_9f12d5bd",
+              "authEmail:role=textbox name=auth Email",
+              "authEmail:role=spinbutton name=auth Email",
+              "authEmail:role=combobox name=auth Email",
+              "authEmail:label=auth Email",
+              "authEmail:name=auth Email",
+              "authEmail:id=auth Email",
+              "authEmail:placeholder=auth Email",
+              "authEmail:role=textbox name=email",
+              "authEmail:role=spinbutton name=email",
+              "authEmail:role=combobox name=email",
+              "authEmail:label=email",
+              "authEmail:name=email",
+              "authEmail:id=email",
+              "authEmail:placeholder=email",
+              "authEmail:role=textbox name=authEmail",
+              "authEmail:role=spinbutton name=authEmail",
+              "authEmail:role=combobox name=authEmail",
+              "authEmail:label=authEmail",
+              "authEmail:name=authEmail",
+              "authEmail:id=authEmail",
+              "authEmail:placeholder=authEmail",
+              "authEmail:role=textbox name~auth Email",
+              "authEmail:role=spinbutton name~auth Email",
+              "authEmail:role=combobox name~auth Email",
+              "authEmail:label~auth Email",
+              "authEmail:placeholder~auth Email",
+              "authEmail:role=textbox name~email",
+              "authEmail:role=spinbutton name~email",
+              "authEmail:role=combobox name~email",
+              "authEmail:label~email",
+              "authEmail:placeholder~email",
+              "authEmail:role=textbox name~authEmail",
+              "authEmail:role=spinbutton name~authEmail",
+              "authEmail:role=combobox name~authEmail",
+              "authEmail:label~authEmail",
+              "authEmail:placeholder~authEmail",
+              "authPassword:machine=ctl_d20ad486",
+              "authPassword:role=textbox name=auth Password",
+              "authPassword:role=spinbutton name=auth Password",
+              "authPassword:role=combobox name=auth Password",
+              "authPassword:label=auth Password",
+              "authPassword:name=auth Password",
+              "authPassword:id=auth Password",
+              "authPassword:placeholder=auth Password",
+              "authPassword:role=textbox name=authPassword",
+              "authPassword:role=spinbutton name=authPassword",
+              "authPassword:role=combobox name=authPassword",
+              "authPassword:label=authPassword",
+              "authPassword:name=authPassword",
+              "authPassword:id=authPassword",
+              "authPassword:placeholder=authPassword",
+              "authPassword:role=textbox name~auth Password",
+              "authPassword:role=spinbutton name~auth Password",
+              "authPassword:role=combobox name~auth Password",
+              "authPassword:label~auth Password",
+              "authPassword:placeholder~auth Password",
+              "authPassword:role=textbox name~authPassword",
+              "authPassword:role=spinbutton name~authPassword",
+              "authPassword:role=combobox name~authPassword",
+              "authPassword:label~authPassword",
+              "authPassword:placeholder~authPassword"
+            ]
+          }
+        },
+        {
+          "action": "create a new named plan",
+          "detail": "not reached because step 2 was fail",
+          "expect": "the plan title Main Gallery Lighting Plan is shown above an empty SVG canvas",
+          "status": "not_reached",
+          "blockedBy": 1
+        },
+        {
+          "action": "drag a fixture from the library onto the SVG canvas",
+          "detail": "not reached because step 2 was fail",
+          "expect": "a visible fixture appears on the canvas and the inspector shows it as selected",
+          "status": "not_reached",
+          "blockedBy": 1
+        },
+        {
+          "action": "edit the selected fixture position, rotation, and brightness in the inspector",
+          "detail": "not reached because step 2 was fail",
+          "expect": "the SVG fixture moves, rotates, and displays the updated brightness value in the inspector",
+          "status": "not_reached",
+          "blockedBy": 1
+        },
+        {
+          "action": "save the plan",
+          "detail": "not reached because step 2 was fail",
+          "expect": "a Saved status is visible with the plan title still shown",
+          "status": "not_reached",
+          "blockedBy": 1
+        },
+        {
+          "action": "reload",
+          "detail": "not reached because step 2 was fail",
+          "expect": "the saved plan title, fixture location, rotation, and brightness are still visible after the page reload",
+          "status": "not_reached",
+          "blockedBy": 1
+        }
+      ],
+      "status": "fail",
+      "failedSteps": 1,
+      "cacheIdentity": {
+        "journeyId": "create-edit-save-plan",
+        "contractHash": "c7e3e5e86aff83c6f5407270520d28570e9b621d68e2e8d9e7f94c20aff9bd28",
+        "runtimeFiles": [
+          {
+            "path": "src/lib/backend/index.js",
+            "contentHash": "2cf40421f9c5a61b1effca24bfc25b7d220df019bb2988ac8ed50b60ac062bde"
+          },
+          {
+            "path": "src/lib/backend/supabaseBackend.js",
+            "contentHash": "64be4069be90d6c6a487e10998c0c880f2dd86e35d48275855bb8819ec84ef87"
+          },
+          {
+            "path": "src/lib/capabilities/booking.js",
+            "contentHash": "f46e1936767afa4e56f2cfc82b8e97a153735479bc3e4e3aefb83bad459ccf7e"
+          },
+          {
+            "path": "src/lib/capabilities/composed/crud.js",
+            "contentHash": "ef5374d81782d674cddd151880c2d0b1842b57032a078b3976c43f29f9e5ee06"
+          },
+          {
+            "path": "src/lib/capabilities/composed/index.js",
+            "contentHash": "8b8957a6e7415a293982c6fa0d8ef4f48c86e9aa88fbd726c84fdeadcadf51cc"
+          },
+          {
+            "path": "src/lib/capabilities/composed/interaction-primitives.js",
+            "contentHash": "12fdbf5582bdf6ce8880902dee8165301b8f079f4d1f20fcb2941745d1845399"
+          },
+          {
+            "path": "src/lib/capabilities/composed/manifest.js",
+            "contentHash": "afb8d5630cf7581d0e16cc2976db29cc84eaa37ad4994fa301655e20a89f10c9"
+          },
+          {
+            "path": "src/lib/capabilities/composed/roles.js",
+            "contentHash": "b79770b4855c3ca22e7c823c03a07a8f264d6c46a94114281ab0905fd32b2e5b"
+          },
+          {
+            "path": "src/lib/capabilities/composed/session.js",
+            "contentHash": "6bed24733467c54aa2913e4601c0f50b0e68c6e70b9a99f85a56eef00f7593f4"
+          },
+          {
+            "path": "src/lib/capabilities/crud.js",
+            "contentHash": "29b1a44b19f87d166fdc81bf95307280fb3cb26a4a40a6278a15576ea2f88ffe"
+          },
+          {
+            "path": "src/lib/capabilities/forms.js",
+            "contentHash": "ab7fc440318caf8b6d8ef86f560652b18aad58ffdced460b845a68e760c3f173"
+          },
+          {
+            "path": "src/lib/capabilities/index.js",
+            "contentHash": "2ba27fb4b08aefacf7eb0b225a474ed30e7a1470cefcc1ecc7fc7d159845aa96"
+          },
+          {
+            "path": "src/lib/capabilities/react.js",
+            "contentHash": "23a95713b35715d6242c5923cb46c357848d962ecac84050a0102a4c0f392bfb"
+          },
+          {
+            "path": "src/lib/capabilities/roles.js",
+            "contentHash": "475d542802b975675e06b230bb867ff6027ea94ce6176904e9ebdde2d2cf9d4c"
+          },
+          {
+            "path": "src/lib/capabilities/session.js",
+            "contentHash": "958879b69f94e2912358dd40ad25acaaac645da9341bb5833b50ca4576f3ebd0"
+          },
+          {
+            "path": "src/lib/capabilities/wizard.js",
+            "contentHash": "b6edb2d72717db75924bfe08e099b950ff4957c9b6f4aa4ddd5a828bb8189cc4"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/ScaffoldApp.jsx",
+            "contentHash": "b32fce2ad1768288ad987c6a1ec8d8ead9db4752d0a964b5453db192dc2fe816"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/manifest.js",
+            "contentHash": "c25f20d63f8425ae96d6d029787e97b7874ef16ce0fb0e04e4bcc2012ac2a268"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/primitives.jsx",
+            "contentHash": "49e06dfeb79bcd8f8edbc2541fc41b275c55f88fd965b5f7ae768b53ddf07230"
+          },
+          {
+            "path": "src/lib/visitorSession.js",
+            "contentHash": "c298160a4b044c597fc10ce7f158dc924f3ef1b3c8cafe0c3e9ecb636e19d5a1"
+          }
+        ],
+        "configVersion": "journey-verification-config/1",
+        "owningModules": [
+          {
+            "path": "src/extensions/custom/create-edit-save-plan.js",
+            "contentHash": "f26d1a1d6679f815d2397a4e719abb768e7400757ed94dfd2b8849b239fcabc7"
+          },
+          {
+            "path": "src/screens/scaffold/SignInScreen.jsx",
+            "contentHash": "e3a9e26c197dbabe6a2905b7434f0b08c9364ebc8cdda4eaf6b053bea8ddf122"
+          }
+        ],
+        "backendVersion": "generated-backend/1",
+        "runtimeVersion": "react-vite-runtime/1",
+        "verifierVersion": "8ffbfa1ea2715cde53d27fc4187e2872703549f984491bb0c2e2be7d1890e33c:46aab6cdeff4c35c3fdfe86ae253ec6584d098f1",
+        "capabilityVersions": [
+          {
+            "name": "crud",
+            "version": "1.0.0"
+          },
+          {
+            "name": "roles",
+            "version": "1.0.0"
+          },
+          {
+            "name": "session",
+            "version": "1.1.0"
+          }
+        ],
+        "environmentVersion": "unknown",
+        "journeyDefinitionHash": "ae0648d1e5a7e2c6f5a69de32b9bdf324ab7432a7354c0c015832f4e18d000ac",
+        "transitiveDependencyClosure": [
+          {
+            "path": "src/lib/backend/index.js",
+            "contentHash": "2cf40421f9c5a61b1effca24bfc25b7d220df019bb2988ac8ed50b60ac062bde"
+          },
+          {
+            "path": "src/lib/backend/supabaseBackend.js",
+            "contentHash": "64be4069be90d6c6a487e10998c0c880f2dd86e35d48275855bb8819ec84ef87"
+          },
+          {
+            "path": "src/lib/capabilities/composed/crud.js",
+            "contentHash": "ef5374d81782d674cddd151880c2d0b1842b57032a078b3976c43f29f9e5ee06"
+          },
+          {
+            "path": "src/lib/capabilities/composed/session.js",
+            "contentHash": "6bed24733467c54aa2913e4601c0f50b0e68c6e70b9a99f85a56eef00f7593f4"
+          },
+          {
+            "path": "src/lib/capabilities/crud.js",
+            "contentHash": "29b1a44b19f87d166fdc81bf95307280fb3cb26a4a40a6278a15576ea2f88ffe"
+          },
+          {
+            "path": "src/lib/capabilities/session.js",
+            "contentHash": "958879b69f94e2912358dd40ad25acaaac645da9341bb5833b50ca4576f3ebd0"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/primitives.jsx",
+            "contentHash": "49e06dfeb79bcd8f8edbc2541fc41b275c55f88fd965b5f7ae768b53ddf07230"
+          },
+          {
+            "path": "src/lib/visitorSession.js",
+            "contentHash": "c298160a4b044c597fc10ce7f158dc924f3ef1b3c8cafe0c3e9ecb636e19d5a1"
+          }
+        ]
+      },
+      "backendEvidence": {
+        "after": {
+          "hash": "5ae2de5ba8ef4c97596ac82d16c51cee3df18ad1d96db160ce4b99ae8702f14d",
+          "appUsers": [
+            {
+              "id": "2781e4eb-296b-40fb-a002-b2b4f9f2f628",
+              "createdAt": "2026-09-16T13:37:35.317395+00:00",
+              "authUserHash": "7ee940a843d6f579d470"
+            },
+            {
+              "id": "75d876bf-0611-4969-b26d-b798be0cbb5a",
+              "createdAt": "2026-09-16T13:38:54.753081+00:00",
+              "authUserHash": "9009f9e784ad13b28195"
+            },
+            {
+              "id": "cc85ee50-0911-44ec-9140-3c9d239bccf5",
+              "createdAt": "2026-09-16T13:38:56.116174+00:00",
+              "authUserHash": "f49011155e03f7e2b6ee"
+            }
+          ],
+          "entities": [],
+          "entityCount": 0,
+          "appUserCount": 3
+        },
+        "before": {
+          "hash": "5678a9b2960a4b11199d62f53d22c9dade25e5fbfeaf3e3eb340e5e1aa0767ba",
+          "appUsers": [
+            {
+              "id": "2781e4eb-296b-40fb-a002-b2b4f9f2f628",
+              "createdAt": "2026-09-16T13:37:35.317395+00:00",
+              "authUserHash": "7ee940a843d6f579d470"
+            }
+          ],
+          "entities": [],
+          "entityCount": 0,
+          "appUserCount": 1
+        },
+        "changed": true,
+        "required": true,
+        "entityDiff": {
+          "changed": [],
+          "created": [],
+          "deleted": []
+        }
+      }
+    },
+    "snapshot_id": null,
+    "created_at": "2026-09-16T13:39:16.764+00:00"
+  },
+  {
+    "journey_id": "create-edit-save-plan",
+    "verdict": {
+      "steps": [
+        {
+          "drove": true,
+          "action": "open the sign-in page",
+          "detail": "contracted result visible: email, password, sign, create, account",
+          "expect": "email, password, sign in, and create account controls are visible",
+          "status": "pass",
+          "advisories": [],
+          "classification": "PASS"
+        },
+        {
+          "drove": true,
+          "action": "create or sign in to an account with platform authentication",
+          "detail": "the contracted authentication action ran but did not produce the required signed-in state",
+          "expect": "the workspace route opens and the signed-in account indicator is visible",
+          "status": "fail",
+          "observation": {
+            "text": "Sign InWorkspaceLibraryReportsSettingsHome Redirect LUMEN LAYOUTS Sign In Access the authenticated SVG floor-planning workspace, create durable plans, place lighting fixtures, save updates, and confirm that saved layouts reload with their exact position, rotation, and brightness. Workspace route opens after authentication Ready to authenticate. Authentication form Email, password, sign in, and create account controls are visible. Signed-in account indicator auth Email auth Password Start authentication form Sign in Create account New plan form Create a named durable plan and show the title abo",
+            "consoleSince": [],
+            "requestsSince": []
+          },
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "controlEvidence": {
+            "fields": [
+              {
+                "facts": {
+                  "id": "auth-email",
+                  "max": null,
+                  "min": null,
+                  "tag": "input",
+                  "name": "authEmail",
+                  "step": null,
+                  "type": "email",
+                  "labels": [
+                    "auth Email"
+                  ],
+                  "pattern": null,
+                  "disabled": false,
+                  "readOnly": false,
+                  "required": false,
+                  "ariaLabel": "auth Email",
+                  "maxLength": null,
+                  "minLength": null,
+                  "placeholder": null
+                },
+                "field": "authEmail",
+                "status": "filled",
+                "matchedBy": "machine=ctl_9f12d5bd",
+                "expectedValue": "journey+007267@thrallo.dev",
+                "observedValue": "journey+007267@thrallo.dev",
+                "previousValue": "",
+                "accessibleNames": [
+                  "auth Email",
+                  "email"
+                ],
+                "validityMessage": null,
+                "fixtureAuthority": "native_or_generated",
+                "expectedStateOwner": "src/lib/capabilities/composed/crud.js"
+              },
+              {
+                "facts": {
+                  "id": "auth-password",
+                  "max": null,
+                  "min": null,
+                  "tag": "input",
+                  "name": "authPassword",
+                  "step": null,
+                  "type": "text",
+                  "labels": [
+                    "auth Password"
+                  ],
+                  "pattern": null,
+                  "disabled": false,
+                  "readOnly": false,
+                  "required": false,
+                  "ariaLabel": "auth Password",
+                  "maxLength": null,
+                  "minLength": null,
+                  "placeholder": null
+                },
+                "field": "authPassword",
+                "status": "filled",
+                "matchedBy": "machine=ctl_d20ad486",
+                "expectedValue": "Jv-007267!9a",
+                "observedValue": "Jv-007267!9a",
+                "previousValue": "",
+                "accessibleNames": [
+                  "auth Password"
+                ],
+                "validityMessage": null,
+                "fixtureAuthority": "native_or_generated",
+                "expectedStateOwner": "src/lib/capabilities/composed/crud.js"
+              }
+            ],
+            "activation": {
+              "matchedBy": "machine_identity",
+              "requiredAtFlowEntry": true
+            },
+            "authentication": {
+              "via": "contracted_flow_entry",
+              "email": "journey+007267@thrallo.dev",
+              "reason": "the contracted authentication action ran but did not produce the required signed-in state",
+              "attempted": true,
+              "submitted": true,
+              "credentials": {
+                "email": "journey+007267@thrallo.dev",
+                "password": "Jv-007267!9a"
+              },
+              "authenticated": false,
+              "expectationEvidence": {
+                "met": false,
+                "found": [
+                  "workspace",
+                  "route",
+                  "signed-in",
+                  "account",
+                  "indicator"
+                ],
+                "fresh": [],
+                "wanted": [
+                  "workspace",
+                  "route",
+                  "signed-in",
+                  "account",
+                  "indicator"
+                ]
+              }
+            },
+            "renderedControls": [
+              {
+                "id": "auth-email",
+                "tag": "input",
+                "name": "authEmail",
+                "role": null,
+                "type": "email",
+                "value": "",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "auth Email",
+                "placeholder": null,
+                "accessibleName": "auth Email"
+              },
+              {
+                "id": "auth-password",
+                "tag": "input",
+                "name": "authPassword",
+                "role": null,
+                "type": "text",
+                "value": "",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "auth Password",
+                "placeholder": null,
+                "accessibleName": "auth Password"
+              },
+              {
+                "id": "plan-name",
+                "tag": "input",
+                "name": "name",
+                "role": null,
+                "type": "input",
+                "value": "Main Gallery Lighting Plan",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "new plan form",
+                "placeholder": null,
+                "accessibleName": "new plan form"
+              },
+              {
+                "id": "fixture-x",
+                "tag": "input",
+                "name": "fixtureX",
+                "role": null,
+                "type": "number",
+                "value": "280",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "fixture X",
+                "placeholder": null,
+                "accessibleName": "fixture X"
+              },
+              {
+                "id": "fixture-y",
+                "tag": "input",
+                "name": "fixtureY",
+                "role": null,
+                "type": "number",
+                "value": "165",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "fixture Y",
+                "placeholder": null,
+                "accessibleName": "fixture Y"
+              },
+              {
+                "id": "fixture-rotation",
+                "tag": "input",
+                "name": "fixtureRotation",
+                "role": null,
+                "type": "number",
+                "value": "25",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "fixture Rotation",
+                "placeholder": null,
+                "accessibleName": "fixture Rotation"
+              },
+              {
+                "id": "fixture-brightness",
+                "tag": "input",
+                "name": "fixtureBrightness",
+                "role": null,
+                "type": "number",
+                "value": "80",
+                "visible": true,
+                "disabled": false,
+                "readOnly": false,
+                "ariaLabel": "fixture Brightness",
+                "placeholder": null,
+                "accessibleName": "fixture Brightness"
+              }
+            ],
+            "attemptedLocators": [
+              "authEmail:machine=ctl_9f12d5bd",
+              "authEmail:role=textbox name=auth Email",
+              "authEmail:role=spinbutton name=auth Email",
+              "authEmail:role=combobox name=auth Email",
+              "authEmail:label=auth Email",
+              "authEmail:name=auth Email",
+              "authEmail:id=auth Email",
+              "authEmail:placeholder=auth Email",
+              "authEmail:role=textbox name=email",
+              "authEmail:role=spinbutton name=email",
+              "authEmail:role=combobox name=email",
+              "authEmail:label=email",
+              "authEmail:name=email",
+              "authEmail:id=email",
+              "authEmail:placeholder=email",
+              "authEmail:role=textbox name=authEmail",
+              "authEmail:role=spinbutton name=authEmail",
+              "authEmail:role=combobox name=authEmail",
+              "authEmail:label=authEmail",
+              "authEmail:name=authEmail",
+              "authEmail:id=authEmail",
+              "authEmail:placeholder=authEmail",
+              "authEmail:role=textbox name~auth Email",
+              "authEmail:role=spinbutton name~auth Email",
+              "authEmail:role=combobox name~auth Email",
+              "authEmail:label~auth Email",
+              "authEmail:placeholder~auth Email",
+              "authEmail:role=textbox name~email",
+              "authEmail:role=spinbutton name~email",
+              "authEmail:role=combobox name~email",
+              "authEmail:label~email",
+              "authEmail:placeholder~email",
+              "authEmail:role=textbox name~authEmail",
+              "authEmail:role=spinbutton name~authEmail",
+              "authEmail:role=combobox name~authEmail",
+              "authEmail:label~authEmail",
+              "authEmail:placeholder~authEmail",
+              "authPassword:machine=ctl_d20ad486",
+              "authPassword:role=textbox name=auth Password",
+              "authPassword:role=spinbutton name=auth Password",
+              "authPassword:role=combobox name=auth Password",
+              "authPassword:label=auth Password",
+              "authPassword:name=auth Password",
+              "authPassword:id=auth Password",
+              "authPassword:placeholder=auth Password",
+              "authPassword:role=textbox name=authPassword",
+              "authPassword:role=spinbutton name=authPassword",
+              "authPassword:role=combobox name=authPassword",
+              "authPassword:label=authPassword",
+              "authPassword:name=authPassword",
+              "authPassword:id=authPassword",
+              "authPassword:placeholder=authPassword",
+              "authPassword:role=textbox name~auth Password",
+              "authPassword:role=spinbutton name~auth Password",
+              "authPassword:role=combobox name~auth Password",
+              "authPassword:label~auth Password",
+              "authPassword:placeholder~auth Password",
+              "authPassword:role=textbox name~authPassword",
+              "authPassword:role=spinbutton name~authPassword",
+              "authPassword:role=combobox name~authPassword",
+              "authPassword:label~authPassword",
+              "authPassword:placeholder~authPassword"
+            ]
+          }
+        },
+        {
+          "action": "create a new named plan",
+          "detail": "not reached because step 2 was fail",
+          "expect": "the plan title Main Gallery Lighting Plan is shown above an empty SVG canvas",
+          "status": "not_reached",
+          "blockedBy": 1
+        },
+        {
+          "action": "drag a fixture from the library onto the SVG canvas",
+          "detail": "not reached because step 2 was fail",
+          "expect": "a visible fixture appears on the canvas and the inspector shows it as selected",
+          "status": "not_reached",
+          "blockedBy": 1
+        },
+        {
+          "action": "edit the selected fixture position, rotation, and brightness in the inspector",
+          "detail": "not reached because step 2 was fail",
+          "expect": "the SVG fixture moves, rotates, and displays the updated brightness value in the inspector",
+          "status": "not_reached",
+          "blockedBy": 1
+        },
+        {
+          "action": "save the plan",
+          "detail": "not reached because step 2 was fail",
+          "expect": "a Saved status is visible with the plan title still shown",
+          "status": "not_reached",
+          "blockedBy": 1
+        },
+        {
+          "action": "reload",
+          "detail": "not reached because step 2 was fail",
+          "expect": "the saved plan title, fixture location, rotation, and brightness are still visible after the page reload",
+          "status": "not_reached",
+          "blockedBy": 1
+        }
+      ],
+      "status": "fail",
+      "failedSteps": 1,
+      "cacheIdentity": {
+        "journeyId": "create-edit-save-plan",
+        "contractHash": "c7e3e5e86aff83c6f5407270520d28570e9b621d68e2e8d9e7f94c20aff9bd28",
+        "runtimeFiles": [
+          {
+            "path": "src/lib/backend/index.js",
+            "contentHash": "2cf40421f9c5a61b1effca24bfc25b7d220df019bb2988ac8ed50b60ac062bde"
+          },
+          {
+            "path": "src/lib/backend/supabaseBackend.js",
+            "contentHash": "64be4069be90d6c6a487e10998c0c880f2dd86e35d48275855bb8819ec84ef87"
+          },
+          {
+            "path": "src/lib/capabilities/booking.js",
+            "contentHash": "f46e1936767afa4e56f2cfc82b8e97a153735479bc3e4e3aefb83bad459ccf7e"
+          },
+          {
+            "path": "src/lib/capabilities/composed/crud.js",
+            "contentHash": "ef5374d81782d674cddd151880c2d0b1842b57032a078b3976c43f29f9e5ee06"
+          },
+          {
+            "path": "src/lib/capabilities/composed/index.js",
+            "contentHash": "8b8957a6e7415a293982c6fa0d8ef4f48c86e9aa88fbd726c84fdeadcadf51cc"
+          },
+          {
+            "path": "src/lib/capabilities/composed/interaction-primitives.js",
+            "contentHash": "12fdbf5582bdf6ce8880902dee8165301b8f079f4d1f20fcb2941745d1845399"
+          },
+          {
+            "path": "src/lib/capabilities/composed/manifest.js",
+            "contentHash": "afb8d5630cf7581d0e16cc2976db29cc84eaa37ad4994fa301655e20a89f10c9"
+          },
+          {
+            "path": "src/lib/capabilities/composed/roles.js",
+            "contentHash": "b79770b4855c3ca22e7c823c03a07a8f264d6c46a94114281ab0905fd32b2e5b"
+          },
+          {
+            "path": "src/lib/capabilities/composed/session.js",
+            "contentHash": "6bed24733467c54aa2913e4601c0f50b0e68c6e70b9a99f85a56eef00f7593f4"
+          },
+          {
+            "path": "src/lib/capabilities/crud.js",
+            "contentHash": "29b1a44b19f87d166fdc81bf95307280fb3cb26a4a40a6278a15576ea2f88ffe"
+          },
+          {
+            "path": "src/lib/capabilities/forms.js",
+            "contentHash": "ab7fc440318caf8b6d8ef86f560652b18aad58ffdced460b845a68e760c3f173"
+          },
+          {
+            "path": "src/lib/capabilities/index.js",
+            "contentHash": "2ba27fb4b08aefacf7eb0b225a474ed30e7a1470cefcc1ecc7fc7d159845aa96"
+          },
+          {
+            "path": "src/lib/capabilities/react.js",
+            "contentHash": "23a95713b35715d6242c5923cb46c357848d962ecac84050a0102a4c0f392bfb"
+          },
+          {
+            "path": "src/lib/capabilities/roles.js",
+            "contentHash": "475d542802b975675e06b230bb867ff6027ea94ce6176904e9ebdde2d2cf9d4c"
+          },
+          {
+            "path": "src/lib/capabilities/session.js",
+            "contentHash": "958879b69f94e2912358dd40ad25acaaac645da9341bb5833b50ca4576f3ebd0"
+          },
+          {
+            "path": "src/lib/capabilities/wizard.js",
+            "contentHash": "b6edb2d72717db75924bfe08e099b950ff4957c9b6f4aa4ddd5a828bb8189cc4"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/ScaffoldApp.jsx",
+            "contentHash": "b32fce2ad1768288ad987c6a1ec8d8ead9db4752d0a964b5453db192dc2fe816"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/manifest.js",
+            "contentHash": "c25f20d63f8425ae96d6d029787e97b7874ef16ce0fb0e04e4bcc2012ac2a268"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/primitives.jsx",
+            "contentHash": "49e06dfeb79bcd8f8edbc2541fc41b275c55f88fd965b5f7ae768b53ddf07230"
+          },
+          {
+            "path": "src/lib/visitorSession.js",
+            "contentHash": "c298160a4b044c597fc10ce7f158dc924f3ef1b3c8cafe0c3e9ecb636e19d5a1"
+          }
+        ],
+        "configVersion": "journey-verification-config/1",
+        "owningModules": [
+          {
+            "path": "src/extensions/custom/create-edit-save-plan.js",
+            "contentHash": "f26d1a1d6679f815d2397a4e719abb768e7400757ed94dfd2b8849b239fcabc7"
+          },
+          {
+            "path": "src/screens/scaffold/SignInScreen.jsx",
+            "contentHash": "882c101169a579ef89b4ed3605ea8e479765a60466b9dfde61cb26ba0fd0f2eb"
+          }
+        ],
+        "backendVersion": "generated-backend/1",
+        "runtimeVersion": "react-vite-runtime/1",
+        "verifierVersion": "8ffbfa1ea2715cde53d27fc4187e2872703549f984491bb0c2e2be7d1890e33c:46aab6cdeff4c35c3fdfe86ae253ec6584d098f1",
+        "capabilityVersions": [
+          {
+            "name": "crud",
+            "version": "1.0.0"
+          },
+          {
+            "name": "roles",
+            "version": "1.0.0"
+          },
+          {
+            "name": "session",
+            "version": "1.1.0"
+          }
+        ],
+        "environmentVersion": "unknown",
+        "journeyDefinitionHash": "ae0648d1e5a7e2c6f5a69de32b9bdf324ab7432a7354c0c015832f4e18d000ac",
+        "transitiveDependencyClosure": [
+          {
+            "path": "src/lib/backend/index.js",
+            "contentHash": "2cf40421f9c5a61b1effca24bfc25b7d220df019bb2988ac8ed50b60ac062bde"
+          },
+          {
+            "path": "src/lib/backend/supabaseBackend.js",
+            "contentHash": "64be4069be90d6c6a487e10998c0c880f2dd86e35d48275855bb8819ec84ef87"
+          },
+          {
+            "path": "src/lib/capabilities/composed/crud.js",
+            "contentHash": "ef5374d81782d674cddd151880c2d0b1842b57032a078b3976c43f29f9e5ee06"
+          },
+          {
+            "path": "src/lib/capabilities/composed/session.js",
+            "contentHash": "6bed24733467c54aa2913e4601c0f50b0e68c6e70b9a99f85a56eef00f7593f4"
+          },
+          {
+            "path": "src/lib/capabilities/crud.js",
+            "contentHash": "29b1a44b19f87d166fdc81bf95307280fb3cb26a4a40a6278a15576ea2f88ffe"
+          },
+          {
+            "path": "src/lib/capabilities/session.js",
+            "contentHash": "958879b69f94e2912358dd40ad25acaaac645da9341bb5833b50ca4576f3ebd0"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/primitives.jsx",
+            "contentHash": "49e06dfeb79bcd8f8edbc2541fc41b275c55f88fd965b5f7ae768b53ddf07230"
+          },
+          {
+            "path": "src/lib/visitorSession.js",
+            "contentHash": "c298160a4b044c597fc10ce7f158dc924f3ef1b3c8cafe0c3e9ecb636e19d5a1"
+          }
+        ]
+      },
+      "backendEvidence": {
+        "after": {
+          "hash": "07d60e6911a9c55cfd81166087186e035a0d1f8ececa58dee6d20cbe9a438dbd",
+          "appUsers": [
+            {
+              "id": "156520c2-ce4e-413f-8d64-d5889c6db1cf",
+              "createdAt": "2026-09-16T13:40:11.865842+00:00",
+              "authUserHash": "ab22c7fd946ec1492e00"
+            },
+            {
+              "id": "2781e4eb-296b-40fb-a002-b2b4f9f2f628",
+              "createdAt": "2026-09-16T13:37:35.317395+00:00",
+              "authUserHash": "7ee940a843d6f579d470"
+            },
+            {
+              "id": "75d876bf-0611-4969-b26d-b798be0cbb5a",
+              "createdAt": "2026-09-16T13:38:54.753081+00:00",
+              "authUserHash": "9009f9e784ad13b28195"
+            },
+            {
+              "id": "cc85ee50-0911-44ec-9140-3c9d239bccf5",
+              "createdAt": "2026-09-16T13:38:56.116174+00:00",
+              "authUserHash": "f49011155e03f7e2b6ee"
+            }
+          ],
+          "entities": [],
+          "entityCount": 0,
+          "appUserCount": 4
+        },
+        "before": {
+          "hash": "5ae2de5ba8ef4c97596ac82d16c51cee3df18ad1d96db160ce4b99ae8702f14d",
+          "appUsers": [
+            {
+              "id": "2781e4eb-296b-40fb-a002-b2b4f9f2f628",
+              "createdAt": "2026-09-16T13:37:35.317395+00:00",
+              "authUserHash": "7ee940a843d6f579d470"
+            },
+            {
+              "id": "75d876bf-0611-4969-b26d-b798be0cbb5a",
+              "createdAt": "2026-09-16T13:38:54.753081+00:00",
+              "authUserHash": "9009f9e784ad13b28195"
+            },
+            {
+              "id": "cc85ee50-0911-44ec-9140-3c9d239bccf5",
+              "createdAt": "2026-09-16T13:38:56.116174+00:00",
+              "authUserHash": "f49011155e03f7e2b6ee"
+            }
+          ],
+          "entities": [],
+          "entityCount": 0,
+          "appUserCount": 3
+        },
+        "changed": true,
+        "required": true,
+        "entityDiff": {
+          "changed": [],
+          "created": [],
+          "deleted": []
+        }
+      }
+    },
+    "snapshot_id": null,
+    "created_at": "2026-09-16T13:40:34.468+00:00"
+  }
+]

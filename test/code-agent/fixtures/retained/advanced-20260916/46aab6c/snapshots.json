@@ -1,0 +1,51 @@
+[
+  {
+    "id": "38da6e46-7e0a-4678-a588-50f9ac886785",
+    "reason": "foundation:scaffold",
+    "created_at": "2026-09-16T13:32:22.877+00:00",
+    "tree_hash": "020ffbcaf26748a895676b152d42ff6d6e5456c83994409703889ae5382f0d1a",
+    "state": "ready"
+  },
+  {
+    "id": "a38dac28-aab5-4157-b8c4-63293b679aca",
+    "reason": "candidate:core:1",
+    "created_at": "2026-09-16T13:33:11.66+00:00",
+    "tree_hash": "7742f859d439d672ac01be1ef47638958c4bb80c6c8f2cfbf311f35363c55d19",
+    "state": "ready"
+  },
+  {
+    "id": "596a58fd-edbf-4434-bd40-04e39929765c",
+    "reason": "candidate:core:1",
+    "created_at": "2026-09-16T13:34:38.23+00:00",
+    "tree_hash": "c6571754ed45005d5c8f9d17237a2013d5bf3893fc69c5b4e7ce7c4f00e47b3d",
+    "state": "ready"
+  },
+  {
+    "id": "63b9ec32-73a2-4853-8deb-a8b6593d97cd",
+    "reason": "candidate:core:2",
+    "created_at": "2026-09-16T13:35:13.698+00:00",
+    "tree_hash": "f0e962ff35a21f3966c09fd0f0f58fe230bb10cfb0a810e1f8f0f6870b975f81",
+    "state": "ready"
+  },
+  {
+    "id": "b87d6667-8328-4431-b7c0-763833090638",
+    "reason": "candidate:core:2",
+    "created_at": "2026-09-16T13:37:06.986+00:00",
+    "tree_hash": "56fd8fa484da8b0122f7d453920b4a8572dcef910d65f9148e5b0eea29e10ef4",
+    "state": "ready"
+  },
+  {
+    "id": "f6cc787b-8fce-4aca-8758-4bc44ac866c3",
+    "reason": "candidate:repair:1",
+    "created_at": "2026-09-16T13:38:30.959+00:00",
+    "tree_hash": "14ce1a77fc9c2b2f31344b974e7ee1a4abcec2a9d23361f867ed5c9285bd8e54",
+    "state": "ready"
+  },
+  {
+    "id": "e5f46872-ffbb-4ada-b57e-aa1932bdb23b",
+    "reason": "candidate:repair:1",
+    "created_at": "2026-09-16T13:39:43.773+00:00",
+    "tree_hash": "6366c603d213960a3285b3c96da52ac8b7b45e6cf36aec51722f9de316d9cb51",
+    "state": "ready"
+  }
+]

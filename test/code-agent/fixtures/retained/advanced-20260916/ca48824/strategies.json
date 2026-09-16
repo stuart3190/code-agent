@@ -1,0 +1,53 @@
+[
+  {
+    "sequence": 1,
+    "strategy_id": "exact_owning_file_repair",
+    "outcome": "no_progress",
+    "reason": "regressed",
+    "targeted_files": [
+      "src/extensions/capabilityConfiguration.js",
+      "src/extensions/custom/create-edit-save-plan.js",
+      "src/extensions/custom/settings-and-sign-out-boundary.js",
+      "src/extensions/custom/switch-between-plans.js",
+      "src/extensions/custom/undo-redo-fixture-change.js",
+      "src/screens/scaffold/WorkspaceScreen.jsx"
+    ],
+    "created_at": "2026-09-16T12:59:36.915065+00:00",
+    "completed_at": "2026-09-16T13:01:39.679+00:00"
+  },
+  {
+    "sequence": 2,
+    "strategy_id": "causal_dependency_repair",
+    "outcome": "rejected",
+    "reason": "the repair patch remained invalid after the correction allowance",
+    "targeted_files": [
+      "src/components/create-edit-save-plan/CreateEditSavePlanFlow.jsx",
+      "src/extensions/capabilityConfiguration.js",
+      "src/extensions/custom/create-edit-save-plan.js",
+      "src/extensions/custom/settings-and-sign-out-boundary.js",
+      "src/extensions/custom/switch-between-plans.js",
+      "src/extensions/custom/undo-redo-fixture-change.js",
+      "src/lib/scaffolds/composed/ScaffoldApp.jsx",
+      "src/screens/scaffold/SettingsScreen.jsx",
+      "src/screens/scaffold/WorkspaceScreen.jsx"
+    ],
+    "created_at": "2026-09-16T13:01:40.677093+00:00",
+    "completed_at": "2026-09-16T13:13:17.038+00:00"
+  },
+  {
+    "sequence": 3,
+    "strategy_id": "owner_module_regeneration",
+    "outcome": "no_progress",
+    "reason": "regressed",
+    "targeted_files": [
+      "src/extensions/capabilityConfiguration.js",
+      "src/screens/scaffold/WorkspaceScreen.jsx",
+      "src/extensions/custom/create-edit-save-plan.js",
+      "src/extensions/custom/undo-redo-fixture-change.js",
+      "src/extensions/custom/switch-between-plans.js",
+      "src/extensions/custom/settings-and-sign-out-boundary.js"
+    ],
+    "created_at": "2026-09-16T13:13:17.666711+00:00",
+    "completed_at": "2026-09-16T13:16:11.254+00:00"
+  }
+]

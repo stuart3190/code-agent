@@ -1,0 +1,98 @@
+[
+  {
+    "sequence": 1,
+    "strategy_id": "exact_owning_file_repair",
+    "outcome": "no_progress",
+    "reason": "regressed",
+    "targeted_files": [
+      "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+      "src/extensions/capabilityConfiguration.js",
+      "src/extensions/custom/create-edit-save-reload-plan.js",
+      "src/screens/scaffold/WorkspaceScreen.jsx"
+    ],
+    "created_at": "2026-09-16T09:58:30.18408+00:00",
+    "completed_at": "2026-09-16T10:00:20.738+00:00"
+  },
+  {
+    "sequence": 2,
+    "strategy_id": "causal_dependency_repair",
+    "outcome": "no_progress",
+    "reason": "regressed",
+    "targeted_files": [
+      "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+      "src/extensions/capabilityConfiguration.js",
+      "src/extensions/custom/create-edit-save-reload-plan.js",
+      "src/extensions/custom/keyboard-canvas-alternatives.js",
+      "src/extensions/custom/settings-and-sign-out.js",
+      "src/lib/capabilities/composed/crud.js",
+      "src/lib/capabilities/composed/interaction-primitives.js",
+      "src/lib/capabilities/composed/session.js",
+      "src/lib/scaffolds/composed/ScaffoldApp.jsx",
+      "src/screens/scaffold/WorkspaceScreen.jsx"
+    ],
+    "created_at": "2026-09-16T10:00:21.44467+00:00",
+    "completed_at": "2026-09-16T10:01:54.992+00:00"
+  },
+  {
+    "sequence": 3,
+    "strategy_id": "owner_module_regeneration",
+    "outcome": "no_progress",
+    "reason": "regressed",
+    "targeted_files": [
+      "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+      "src/extensions/capabilityConfiguration.js",
+      "src/screens/scaffold/WorkspaceScreen.jsx",
+      "src/extensions/custom/create-edit-save-reload-plan.js"
+    ],
+    "created_at": "2026-09-16T10:01:55.660155+00:00",
+    "completed_at": "2026-09-16T10:05:04.495+00:00"
+  },
+  {
+    "sequence": 4,
+    "strategy_id": "exact_owning_file_repair",
+    "outcome": "no_progress",
+    "reason": "regressed",
+    "targeted_files": [
+      "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+      "src/extensions/capabilityConfiguration.js",
+      "src/extensions/custom/create-edit-save-reload-plan.js",
+      "src/screens/scaffold/WorkspaceScreen.jsx"
+    ],
+    "created_at": "2026-09-16T10:05:05.179082+00:00",
+    "completed_at": "2026-09-16T10:06:57.13+00:00"
+  },
+  {
+    "sequence": 5,
+    "strategy_id": "causal_dependency_repair",
+    "outcome": "no_progress",
+    "reason": "regressed",
+    "targeted_files": [
+      "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+      "src/extensions/capabilityConfiguration.js",
+      "src/extensions/custom/create-edit-save-reload-plan.js",
+      "src/extensions/custom/keyboard-canvas-alternatives.js",
+      "src/extensions/custom/settings-and-sign-out.js",
+      "src/lib/capabilities/composed/crud.js",
+      "src/lib/capabilities/composed/interaction-primitives.js",
+      "src/lib/capabilities/composed/session.js",
+      "src/lib/scaffolds/composed/ScaffoldApp.jsx",
+      "src/screens/scaffold/WorkspaceScreen.jsx"
+    ],
+    "created_at": "2026-09-16T10:06:57.763126+00:00",
+    "completed_at": "2026-09-16T10:08:35.982+00:00"
+  },
+  {
+    "sequence": 6,
+    "strategy_id": "owner_module_regeneration",
+    "outcome": "started",
+    "reason": "evidence prerequisites satisfied for owner_module_regeneration (ui_composition,scaffold_integration,custom_extension)",
+    "targeted_files": [
+      "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+      "src/extensions/capabilityConfiguration.js",
+      "src/screens/scaffold/WorkspaceScreen.jsx",
+      "src/extensions/custom/create-edit-save-reload-plan.js"
+    ],
+    "created_at": "2026-09-16T10:08:36.676143+00:00",
+    "completed_at": null
+  }
+]

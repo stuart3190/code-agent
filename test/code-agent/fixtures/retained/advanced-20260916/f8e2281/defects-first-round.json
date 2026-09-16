@@ -1,0 +1,1274 @@
+[
+  {
+    "classification": "durability",
+    "journey_id": "create-edit-save-reload-plan",
+    "step_id": null,
+    "defect": {
+      "drove": null,
+      "owner": "app",
+      "stepId": null,
+      "version": 1,
+      "defectId": "5a21426616a45df9d2b67052988f2057",
+      "journeyId": "create-edit-save-reload-plan",
+      "pageState": null,
+      "signature": "durability|durable_row_missing|create-edit-save-reload-plan|-|-",
+      "defectCode": "durable_row_missing",
+      "entityDiff": null,
+      "repairTier": "repair",
+      "entityAfter": null,
+      "failureRefs": [
+        "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+        "src/extensions/custom/create-edit-save-reload-plan.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": null,
+      "expectedState": null,
+      "observedState": "the browser journey passed without a corresponding app-scoped database mutation",
+      "owningModules": [
+        "src/extensions/custom/create-edit-save-reload-plan.js"
+      ],
+      "actionIdentity": null,
+      "classification": "durability",
+      "identityStatus": "identity_absent",
+      "sourceTreeHash": "61783274b70c51516d6efede9c3a7451d59638e6d0c7d8f5ed3a7b530e55dc9f",
+      "controlIdentity": null,
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "e58a77db-eb1a-4d74-9edd-ebae79a495c4",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T09:58:24.440235+00:00"
+  },
+  {
+    "classification": "behaviour",
+    "journey_id": "create-edit-save-reload-plan",
+    "step_id": "2",
+    "defect": {
+      "drove": null,
+      "owner": "app",
+      "stepId": "2",
+      "version": 1,
+      "defectId": "3d024f25c10dec97a1ee9375b574e866",
+      "journeyId": "create-edit-save-reload-plan",
+      "pageState": null,
+      "signature": "behaviour|prerequisite_durable_outcome_missing|create-edit-save-reload-plan|2|act_79a8d323",
+      "defectCode": "prerequisite_durable_outcome_missing",
+      "entityDiff": null,
+      "repairTier": "repair",
+      "entityAfter": null,
+      "failureRefs": [
+        "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx"
+      ],
+      "entityBefore": null,
+      "expectedState": "the plan name Lobby Lighting Plan appears as the active plan and the canvas is empty",
+      "observedState": "the durable mutation did not reach its contracted observable state",
+      "owningModules": [
+        "src/screens/scaffold/WorkspaceScreen.jsx",
+        "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx"
+      ],
+      "actionIdentity": {
+        "action": "create a new named plan",
+        "stepId": 2,
+        "journeyId": "create-edit-save-reload-plan"
+      },
+      "classification": "behaviour",
+      "identityStatus": "identified",
+      "sourceTreeHash": "61783274b70c51516d6efede9c3a7451d59638e6d0c7d8f5ed3a7b530e55dc9f",
+      "controlIdentity": {
+        "id": "act_79a8d323",
+        "logicalField": "new plan form"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "e58a77db-eb1a-4d74-9edd-ebae79a495c4",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T09:58:24.440235+00:00"
+  },
+  {
+    "classification": "interaction",
+    "journey_id": "create-edit-save-reload-plan",
+    "step_id": "1",
+    "defect": {
+      "drove": null,
+      "owner": "app",
+      "stepId": "1",
+      "version": 1,
+      "defectId": "2f8c4040a3137125b9cfeba5962b01b7",
+      "journeyId": "create-edit-save-reload-plan",
+      "pageState": "HomeWorkspaceLibraryReportsSettings Home Application screen ready for composition.",
+      "signature": "interaction|contracted_control_undriveable|create-edit-save-reload-plan|1|ctl_9f12d5bd",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "repair",
+      "entityAfter": {
+        "hash": "5582668908f242213bb151fbe90ebbfdcbd1588e9b478fc2a1a6c36e13fdc949",
+        "appUsers": [],
+        "entities": [],
+        "entityCount": 0,
+        "appUserCount": 0
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+        "src/extensions/custom/create-edit-save-reload-plan.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "5582668908f242213bb151fbe90ebbfdcbd1588e9b478fc2a1a6c36e13fdc949",
+        "appUsers": [],
+        "entities": [],
+        "entityCount": 0,
+        "appUserCount": 0
+      },
+      "expectedState": "the workspace shell is visible with the plan list, SVG canvas, fixture library, and inspector",
+      "observedState": "the create account entry was not offered",
+      "owningModules": [
+        "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx"
+      ],
+      "actionIdentity": {
+        "action": "sign up or sign in with email and password",
+        "stepId": 1,
+        "journeyId": "create-edit-save-reload-plan"
+      },
+      "classification": "interaction",
+      "identityStatus": "identified",
+      "sourceTreeHash": "61783274b70c51516d6efede9c3a7451d59638e6d0c7d8f5ed3a7b530e55dc9f",
+      "controlIdentity": {
+        "id": "ctl_9f12d5bd",
+        "logicalField": "authEmail"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "e58a77db-eb1a-4d74-9edd-ebae79a495c4",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T09:58:24.440235+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "keyboard-canvas-alternatives",
+    "step_id": "0",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "0",
+      "version": 1,
+      "defectId": "7eb5ec999f7bfbf15cceb90bc06341cb",
+      "journeyId": "keyboard-canvas-alternatives",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|keyboard-canvas-alternatives|0|-",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [
+          "f933211c-5c05-42d3-bbea-009e6cc64931"
+        ],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "53cb265de6287c51500a066f7f481bb3aaf7032cf7d20f76ce04ecda05092075",
+        "appUsers": [
+          {
+            "id": "31114b69-2f3b-424c-9182-980869b01163",
+            "createdAt": "2026-09-16T09:57:43.774363+00:00",
+            "authUserHash": "3f6437feafc8650ccd43"
+          }
+        ],
+        "entities": [
+          {
+            "id": "f933211c-5c05-42d3-bbea-009e6cc64931",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "cb07ba0375dad75ced2b",
+                "type": "string"
+              },
+              "fixtures": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "redoStack": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "undoStack": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "updatedAt": {
+                "hash": "beaa3e360532344d95f6",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "selectedFixtureId": {
+                "hash": "12ae32cb1ec02d01eda3",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T09:57:44.399334+00:00"
+          }
+        ],
+        "entityCount": 1,
+        "appUserCount": 1
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+        "src/extensions/custom/keyboard-canvas-alternatives.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "5582668908f242213bb151fbe90ebbfdcbd1588e9b478fc2a1a6c36e13fdc949",
+        "appUsers": [],
+        "entities": [],
+        "entityCount": 0,
+        "appUserCount": 0
+      },
+      "expectedState": "the previously saved Lobby Lighting Plan is visible with at least one fixture on the SVG canvas",
+      "observedState": "not reached: the journey's required starting state could not be established (new plan form: the durable mutation did not reach its contracted observable state)",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "open the workspace route",
+        "stepId": 0,
+        "journeyId": "keyboard-canvas-alternatives"
+      },
+      "classification": "platform",
+      "identityStatus": "identity_absent",
+      "sourceTreeHash": "61783274b70c51516d6efede9c3a7451d59638e6d0c7d8f5ed3a7b530e55dc9f",
+      "controlIdentity": null,
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "e58a77db-eb1a-4d74-9edd-ebae79a495c4",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T09:58:24.440235+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "keyboard-canvas-alternatives",
+    "step_id": "1",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "1",
+      "version": 1,
+      "defectId": "fb273eac0c75cd5a9bfb884bb7ab784d",
+      "journeyId": "keyboard-canvas-alternatives",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|keyboard-canvas-alternatives|1|ctl_2abb3b08",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [
+          "f933211c-5c05-42d3-bbea-009e6cc64931"
+        ],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "53cb265de6287c51500a066f7f481bb3aaf7032cf7d20f76ce04ecda05092075",
+        "appUsers": [
+          {
+            "id": "31114b69-2f3b-424c-9182-980869b01163",
+            "createdAt": "2026-09-16T09:57:43.774363+00:00",
+            "authUserHash": "3f6437feafc8650ccd43"
+          }
+        ],
+        "entities": [
+          {
+            "id": "f933211c-5c05-42d3-bbea-009e6cc64931",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "cb07ba0375dad75ced2b",
+                "type": "string"
+              },
+              "fixtures": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "redoStack": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "undoStack": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "updatedAt": {
+                "hash": "beaa3e360532344d95f6",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "selectedFixtureId": {
+                "hash": "12ae32cb1ec02d01eda3",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T09:57:44.399334+00:00"
+          }
+        ],
+        "entityCount": 1,
+        "appUserCount": 1
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+        "src/extensions/custom/keyboard-canvas-alternatives.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "5582668908f242213bb151fbe90ebbfdcbd1588e9b478fc2a1a6c36e13fdc949",
+        "appUsers": [],
+        "entities": [],
+        "entityCount": 0,
+        "appUserCount": 0
+      },
+      "expectedState": "the focused fixture is selected and an accessible selection label is visible",
+      "observedState": "not reached: the journey's required starting state could not be established (new plan form: the durable mutation did not reach its contracted observable state)",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "move keyboard focus to the fixture on the canvas",
+        "stepId": 1,
+        "journeyId": "keyboard-canvas-alternatives"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "61783274b70c51516d6efede9c3a7451d59638e6d0c7d8f5ed3a7b530e55dc9f",
+      "controlIdentity": {
+        "id": "ctl_2abb3b08",
+        "logicalField": "selectedFixtureId"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "e58a77db-eb1a-4d74-9edd-ebae79a495c4",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T09:58:24.440235+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "keyboard-canvas-alternatives",
+    "step_id": "2",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "2",
+      "version": 1,
+      "defectId": "5170f5c50f80c532961f56ee434d5c89",
+      "journeyId": "keyboard-canvas-alternatives",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|keyboard-canvas-alternatives|2|ctl_98ba2953",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [
+          "f933211c-5c05-42d3-bbea-009e6cc64931"
+        ],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "53cb265de6287c51500a066f7f481bb3aaf7032cf7d20f76ce04ecda05092075",
+        "appUsers": [
+          {
+            "id": "31114b69-2f3b-424c-9182-980869b01163",
+            "createdAt": "2026-09-16T09:57:43.774363+00:00",
+            "authUserHash": "3f6437feafc8650ccd43"
+          }
+        ],
+        "entities": [
+          {
+            "id": "f933211c-5c05-42d3-bbea-009e6cc64931",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "cb07ba0375dad75ced2b",
+                "type": "string"
+              },
+              "fixtures": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "redoStack": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "undoStack": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "updatedAt": {
+                "hash": "beaa3e360532344d95f6",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "selectedFixtureId": {
+                "hash": "12ae32cb1ec02d01eda3",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T09:57:44.399334+00:00"
+          }
+        ],
+        "entityCount": 1,
+        "appUserCount": 1
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+        "src/extensions/custom/keyboard-canvas-alternatives.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "5582668908f242213bb151fbe90ebbfdcbd1588e9b478fc2a1a6c36e13fdc949",
+        "appUsers": [],
+        "entities": [],
+        "entityCount": 0,
+        "appUserCount": 0
+      },
+      "expectedState": "the fixture position values in the inspector change and the fixture visibly moves on the canvas",
+      "observedState": "not reached: the journey's required starting state could not be established (new plan form: the durable mutation did not reach its contracted observable state)",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "move the selected fixture with keyboard arrow controls",
+        "stepId": 2,
+        "journeyId": "keyboard-canvas-alternatives"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "61783274b70c51516d6efede9c3a7451d59638e6d0c7d8f5ed3a7b530e55dc9f",
+      "controlIdentity": {
+        "id": "ctl_98ba2953",
+        "logicalField": "fixtures"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "e58a77db-eb1a-4d74-9edd-ebae79a495c4",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T09:58:24.440235+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "keyboard-canvas-alternatives",
+    "step_id": "3",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "3",
+      "version": 1,
+      "defectId": "b1a8567d9ad2d8d42489e89967e99f3e",
+      "journeyId": "keyboard-canvas-alternatives",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|keyboard-canvas-alternatives|3|ctl_98ba2953",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [
+          "f933211c-5c05-42d3-bbea-009e6cc64931"
+        ],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "53cb265de6287c51500a066f7f481bb3aaf7032cf7d20f76ce04ecda05092075",
+        "appUsers": [
+          {
+            "id": "31114b69-2f3b-424c-9182-980869b01163",
+            "createdAt": "2026-09-16T09:57:43.774363+00:00",
+            "authUserHash": "3f6437feafc8650ccd43"
+          }
+        ],
+        "entities": [
+          {
+            "id": "f933211c-5c05-42d3-bbea-009e6cc64931",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "cb07ba0375dad75ced2b",
+                "type": "string"
+              },
+              "fixtures": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "redoStack": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "undoStack": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "updatedAt": {
+                "hash": "beaa3e360532344d95f6",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "selectedFixtureId": {
+                "hash": "12ae32cb1ec02d01eda3",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T09:57:44.399334+00:00"
+          }
+        ],
+        "entityCount": 1,
+        "appUserCount": 1
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+        "src/extensions/custom/keyboard-canvas-alternatives.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "5582668908f242213bb151fbe90ebbfdcbd1588e9b478fc2a1a6c36e13fdc949",
+        "appUsers": [],
+        "entities": [],
+        "entityCount": 0,
+        "appUserCount": 0
+      },
+      "expectedState": "the fixture rotation value changes and the fixture visibly rotates",
+      "observedState": "not reached: the journey's required starting state could not be established (new plan form: the durable mutation did not reach its contracted observable state)",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "rotate the selected fixture with keyboard controls",
+        "stepId": 3,
+        "journeyId": "keyboard-canvas-alternatives"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "61783274b70c51516d6efede9c3a7451d59638e6d0c7d8f5ed3a7b530e55dc9f",
+      "controlIdentity": {
+        "id": "ctl_98ba2953",
+        "logicalField": "fixtures"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "e58a77db-eb1a-4d74-9edd-ebae79a495c4",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T09:58:24.440235+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "keyboard-canvas-alternatives",
+    "step_id": "4",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "4",
+      "version": 1,
+      "defectId": "43fe496609ce26d16f425598022823ac",
+      "journeyId": "keyboard-canvas-alternatives",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|keyboard-canvas-alternatives|4|ctl_98ba2953",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [
+          "f933211c-5c05-42d3-bbea-009e6cc64931"
+        ],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "53cb265de6287c51500a066f7f481bb3aaf7032cf7d20f76ce04ecda05092075",
+        "appUsers": [
+          {
+            "id": "31114b69-2f3b-424c-9182-980869b01163",
+            "createdAt": "2026-09-16T09:57:43.774363+00:00",
+            "authUserHash": "3f6437feafc8650ccd43"
+          }
+        ],
+        "entities": [
+          {
+            "id": "f933211c-5c05-42d3-bbea-009e6cc64931",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "cb07ba0375dad75ced2b",
+                "type": "string"
+              },
+              "fixtures": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "redoStack": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "undoStack": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "updatedAt": {
+                "hash": "beaa3e360532344d95f6",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "selectedFixtureId": {
+                "hash": "12ae32cb1ec02d01eda3",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T09:57:44.399334+00:00"
+          }
+        ],
+        "entityCount": 1,
+        "appUserCount": 1
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+        "src/extensions/custom/keyboard-canvas-alternatives.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "5582668908f242213bb151fbe90ebbfdcbd1588e9b478fc2a1a6c36e13fdc949",
+        "appUsers": [],
+        "entities": [],
+        "entityCount": 0,
+        "appUserCount": 0
+      },
+      "expectedState": "the fixture brightness value changes in the inspector",
+      "observedState": "not reached: the journey's required starting state could not be established (new plan form: the durable mutation did not reach its contracted observable state)",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "adjust the selected fixture brightness with keyboard controls",
+        "stepId": 4,
+        "journeyId": "keyboard-canvas-alternatives"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "61783274b70c51516d6efede9c3a7451d59638e6d0c7d8f5ed3a7b530e55dc9f",
+      "controlIdentity": {
+        "id": "ctl_98ba2953",
+        "logicalField": "fixtures"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "e58a77db-eb1a-4d74-9edd-ebae79a495c4",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T09:58:24.440235+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "keyboard-canvas-alternatives",
+    "step_id": "5",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "5",
+      "version": 1,
+      "defectId": "c3f2316a2c093d4e2bd3aaba1b12167a",
+      "journeyId": "keyboard-canvas-alternatives",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|keyboard-canvas-alternatives|5|act_b229ed12",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [
+          "f933211c-5c05-42d3-bbea-009e6cc64931"
+        ],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "53cb265de6287c51500a066f7f481bb3aaf7032cf7d20f76ce04ecda05092075",
+        "appUsers": [
+          {
+            "id": "31114b69-2f3b-424c-9182-980869b01163",
+            "createdAt": "2026-09-16T09:57:43.774363+00:00",
+            "authUserHash": "3f6437feafc8650ccd43"
+          }
+        ],
+        "entities": [
+          {
+            "id": "f933211c-5c05-42d3-bbea-009e6cc64931",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "cb07ba0375dad75ced2b",
+                "type": "string"
+              },
+              "fixtures": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "redoStack": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "undoStack": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "updatedAt": {
+                "hash": "beaa3e360532344d95f6",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "selectedFixtureId": {
+                "hash": "12ae32cb1ec02d01eda3",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T09:57:44.399334+00:00"
+          }
+        ],
+        "entityCount": 1,
+        "appUserCount": 1
+      },
+      "failureRefs": [
+        "src/screens/scaffold/SettingsScreen.jsx",
+        "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+        "src/extensions/custom/keyboard-canvas-alternatives.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "5582668908f242213bb151fbe90ebbfdcbd1588e9b478fc2a1a6c36e13fdc949",
+        "appUsers": [],
+        "entities": [],
+        "entityCount": 0,
+        "appUserCount": 0
+      },
+      "expectedState": "the previous fixture value is restored and the redo control becomes enabled",
+      "observedState": "not reached: the journey's required starting state could not be established (new plan form: the durable mutation did not reach its contracted observable state)",
+      "owningModules": [
+        "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx"
+      ],
+      "actionIdentity": {
+        "action": "undo the last keyboard change",
+        "stepId": 5,
+        "journeyId": "keyboard-canvas-alternatives"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "61783274b70c51516d6efede9c3a7451d59638e6d0c7d8f5ed3a7b530e55dc9f",
+      "controlIdentity": {
+        "id": "act_b229ed12",
+        "logicalField": "undo control"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "e58a77db-eb1a-4d74-9edd-ebae79a495c4",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T09:58:24.440235+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "keyboard-canvas-alternatives",
+    "step_id": "6",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "6",
+      "version": 1,
+      "defectId": "be43a563fa3a5f1852658d10c61dcd95",
+      "journeyId": "keyboard-canvas-alternatives",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|keyboard-canvas-alternatives|6|act_65cadc9c",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [
+          "f933211c-5c05-42d3-bbea-009e6cc64931"
+        ],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "53cb265de6287c51500a066f7f481bb3aaf7032cf7d20f76ce04ecda05092075",
+        "appUsers": [
+          {
+            "id": "31114b69-2f3b-424c-9182-980869b01163",
+            "createdAt": "2026-09-16T09:57:43.774363+00:00",
+            "authUserHash": "3f6437feafc8650ccd43"
+          }
+        ],
+        "entities": [
+          {
+            "id": "f933211c-5c05-42d3-bbea-009e6cc64931",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "cb07ba0375dad75ced2b",
+                "type": "string"
+              },
+              "fixtures": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "redoStack": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "undoStack": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "updatedAt": {
+                "hash": "beaa3e360532344d95f6",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "selectedFixtureId": {
+                "hash": "12ae32cb1ec02d01eda3",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T09:57:44.399334+00:00"
+          }
+        ],
+        "entityCount": 1,
+        "appUserCount": 1
+      },
+      "failureRefs": [
+        "src/screens/scaffold/SettingsScreen.jsx",
+        "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+        "src/extensions/custom/keyboard-canvas-alternatives.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "5582668908f242213bb151fbe90ebbfdcbd1588e9b478fc2a1a6c36e13fdc949",
+        "appUsers": [],
+        "entities": [],
+        "entityCount": 0,
+        "appUserCount": 0
+      },
+      "expectedState": "the fixture value returns to the redone state and the undo control remains enabled",
+      "observedState": "not reached: the journey's required starting state could not be established (new plan form: the durable mutation did not reach its contracted observable state)",
+      "owningModules": [
+        "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx"
+      ],
+      "actionIdentity": {
+        "action": "redo the undone keyboard change",
+        "stepId": 6,
+        "journeyId": "keyboard-canvas-alternatives"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "61783274b70c51516d6efede9c3a7451d59638e6d0c7d8f5ed3a7b530e55dc9f",
+      "controlIdentity": {
+        "id": "act_65cadc9c",
+        "logicalField": "redo control"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "e58a77db-eb1a-4d74-9edd-ebae79a495c4",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T09:58:24.440235+00:00"
+  },
+  {
+    "classification": "behaviour",
+    "journey_id": "switch-between-plans",
+    "step_id": "0",
+    "defect": {
+      "drove": true,
+      "owner": "app",
+      "stepId": "0",
+      "version": 1,
+      "defectId": "17ae9a9cf803bb68be6b2fff8815ae6e",
+      "journeyId": "switch-between-plans",
+      "pageState": "HomeWorkspaceLibraryReportsSettings LUMEN LAYOUTS Authenticated SVG floor-planning workspace Create durable plans, place and edit fixtures, undo and redo canvas changes, switch plans, save viewport state, and reload restored work. Sign in to Lumen Layouts Use email and password to unlock durable SVG floor plans. Email Password authentication form Sign-in panel is visible when no user session exists.",
+      "signature": "behaviour|contracted_outcome_missing|switch-between-plans|0|-",
+      "defectCode": "contracted_outcome_missing",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "repair",
+      "entityAfter": {
+        "hash": "53cb265de6287c51500a066f7f481bb3aaf7032cf7d20f76ce04ecda05092075",
+        "appUsers": [
+          {
+            "id": "31114b69-2f3b-424c-9182-980869b01163",
+            "createdAt": "2026-09-16T09:57:43.774363+00:00",
+            "authUserHash": "3f6437feafc8650ccd43"
+          }
+        ],
+        "entities": [
+          {
+            "id": "f933211c-5c05-42d3-bbea-009e6cc64931",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "cb07ba0375dad75ced2b",
+                "type": "string"
+              },
+              "fixtures": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "redoStack": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "undoStack": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "updatedAt": {
+                "hash": "beaa3e360532344d95f6",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "selectedFixtureId": {
+                "hash": "12ae32cb1ec02d01eda3",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T09:57:44.399334+00:00"
+          }
+        ],
+        "entityCount": 1,
+        "appUserCount": 1
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+        "src/components/ui/switch.jsx",
+        "src/extensions/custom/create-edit-save-reload-plan.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "53cb265de6287c51500a066f7f481bb3aaf7032cf7d20f76ce04ecda05092075",
+        "appUsers": [
+          {
+            "id": "31114b69-2f3b-424c-9182-980869b01163",
+            "createdAt": "2026-09-16T09:57:43.774363+00:00",
+            "authUserHash": "3f6437feafc8650ccd43"
+          }
+        ],
+        "entities": [
+          {
+            "id": "f933211c-5c05-42d3-bbea-009e6cc64931",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "cb07ba0375dad75ced2b",
+                "type": "string"
+              },
+              "fixtures": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "redoStack": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "undoStack": {
+                "hash": "4f53cda18c2baa0c0354",
+                "type": "array"
+              },
+              "updatedAt": {
+                "hash": "beaa3e360532344d95f6",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "selectedFixtureId": {
+                "hash": "12ae32cb1ec02d01eda3",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T09:57:44.399334+00:00"
+          }
+        ],
+        "entityCount": 1,
+        "appUserCount": 1
+      },
+      "expectedState": "Lobby Lighting Plan is visible in the plan list",
+      "observedState": "the contracted action ran, but the named collection does not contain every required member",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "open the workspace route",
+        "stepId": 0,
+        "journeyId": "switch-between-plans"
+      },
+      "classification": "behaviour",
+      "identityStatus": "identity_absent",
+      "sourceTreeHash": "61783274b70c51516d6efede9c3a7451d59638e6d0c7d8f5ed3a7b530e55dc9f",
+      "controlIdentity": null,
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "e58a77db-eb1a-4d74-9edd-ebae79a495c4",
+      "collectionMembership": {
+        "ok": false,
+        "absent": [],
+        "checked": true,
+        "missing": [
+          "Lobby Lighting Plan"
+        ],
+        "present": [],
+        "unexpected": [],
+        "regionFound": true,
+        "structuralMemberCount": 0
+      },
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T09:58:24.440235+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "settings-and-sign-out",
+    "step_id": "1",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "1",
+      "version": 1,
+      "defectId": "be5d4e0cf52ce4494e0f82f97ff44767",
+      "journeyId": "settings-and-sign-out",
+      "pageState": "HomeWorkspaceLibraryReportsSettings ACCOUNT Settings Signed-out screen Open the workspace route while signed out to see the sign-in panel instead of saved plans. Go to workspace sign-in Signed-out screen: workspace content is no longer visible.",
+      "signature": "platform|contracted_control_undriveable|settings-and-sign-out|1|act_904154b3",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": null,
+      "repairTier": "none",
+      "entityAfter": null,
+      "failureRefs": [
+        "src/screens/scaffold/SettingsScreen.jsx",
+        "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+        "src/extensions/custom/settings-and-sign-out.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": null,
+      "expectedState": "the user is returned to a signed-out screen and workspace content is no longer visible",
+      "observedState": "no visible Sign out control was offered",
+      "owningModules": [
+        "src/screens/scaffold/SettingsScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "sign out",
+        "stepId": 1,
+        "journeyId": "settings-and-sign-out"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "61783274b70c51516d6efede9c3a7451d59638e6d0c7d8f5ed3a7b530e55dc9f",
+      "controlIdentity": {
+        "id": "act_904154b3",
+        "logicalField": "sign-out control"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "e58a77db-eb1a-4d74-9edd-ebae79a495c4",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T09:58:24.440235+00:00"
+  },
+  {
+    "classification": "durability",
+    "journey_id": "switch-between-plans",
+    "step_id": null,
+    "defect": {
+      "drove": null,
+      "owner": "app",
+      "stepId": null,
+      "version": 1,
+      "defectId": "14b93e18227f05d744edb7f0fec2262e",
+      "journeyId": "switch-between-plans",
+      "pageState": null,
+      "signature": "durability|durable_row_missing|switch-between-plans|-|-",
+      "defectCode": "durable_row_missing",
+      "entityDiff": null,
+      "repairTier": "repair",
+      "entityAfter": null,
+      "failureRefs": [
+        "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+        "src/components/ui/switch.jsx",
+        "src/extensions/custom/create-edit-save-reload-plan.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": null,
+      "expectedState": null,
+      "observedState": "the browser journey passed without a corresponding app-scoped database mutation",
+      "owningModules": [
+        "src/extensions/custom/create-edit-save-reload-plan.js"
+      ],
+      "actionIdentity": null,
+      "classification": "durability",
+      "identityStatus": "identity_absent",
+      "sourceTreeHash": "61783274b70c51516d6efede9c3a7451d59638e6d0c7d8f5ed3a7b530e55dc9f",
+      "controlIdentity": null,
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "e58a77db-eb1a-4d74-9edd-ebae79a495c4",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T09:58:24.440235+00:00"
+  }
+]

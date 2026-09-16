@@ -57,6 +57,7 @@ export const BLOCKING_CODES = Object.freeze({
   capability_composition_invalid: "the canonical graph is missing a protected capability module or a declared custom extension interface",
   contract_control_binding_conflict: "the same contracted control is proven machine-bound in one place and hand-wired at another exact journey-facing identity",
   contract_control_wrong_binding: "the mounted contracted control is proven to expose a different machine primitive than the contract requires",
+  contracted_action_unwired: "a contracted action control carries its machine identity but no handler and is not a form submit; the browser would press a dead control",
 
   // ── platform ──
   runtime_configuration_invalid: "the generated runtime cannot reach its backend",
@@ -117,6 +118,7 @@ const UNDEMOTABLE = Object.freeze(new Set([
   "custom_extension_invalid",
   "semantic_field_event_handler_invalid",
   "contract_control_wrong_binding",
+  "contracted_action_unwired",
   "runtime_configuration_invalid",
   "capability_composition_invalid",
   "required_runtime_dependency_missing", "required_runtime_capability_missing",

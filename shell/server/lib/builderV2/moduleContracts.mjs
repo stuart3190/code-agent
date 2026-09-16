@@ -607,7 +607,7 @@ export function validateModuleConformance(tree, {
   // literal/helper binding whose primitive is provably different from the contract. These are
   // exact source facts, not behavioural guesses.
   for (const conflict of (controlBindings.findings || [])
-    .filter((finding) => ["contract_control_binding_conflict", "contract_control_wrong_binding"]
+    .filter((finding) => ["contract_control_binding_conflict", "contract_control_wrong_binding", "contracted_action_unwired"]
       .includes(finding.code))) {
     for (const element of conflict.elements || []) {
       add({ ...conflict, module: element.file, file: element.file, line: element.line,

@@ -1,0 +1,74 @@
+[
+  {
+    "classification": "behaviour",
+    "journey_id": "create-edit-save-plan",
+    "step_id": "1",
+    "defect": {
+      "drove": true,
+      "owner": "app",
+      "stepId": "1",
+      "version": 1,
+      "defectId": "228b672be54eb154d4b786d402ace4d9",
+      "journeyId": "create-edit-save-plan",
+      "pageState": "Sign InWorkspaceLibraryReportsSettingsHome Redirect LUMEN LAYOUTS Sign In Access the authenticated SVG floor-planning workspace, create durable plans, place lighting fixtures, save updates, and confirm that saved layouts reload with their exact position, rotation, and brightness. Workspace route opens after authentication Ready to authenticate. Authentication form Email, password, sign in, and create account controls are visible. Signed-in account indicator auth Email auth Password Start authentication form Sign in Create account New plan form Create a named durable plan and show the title abo",
+      "signature": "behaviour|contracted_outcome_missing|create-edit-save-plan|1|ctl_9f12d5bd",
+      "defectCode": "contracted_outcome_missing",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "repair",
+      "entityAfter": {
+        "hash": "5678a9b2960a4b11199d62f53d22c9dade25e5fbfeaf3e3eb340e5e1aa0767ba",
+        "appUsers": [
+          {
+            "id": "2781e4eb-296b-40fb-a002-b2b4f9f2f628",
+            "createdAt": "2026-09-16T13:37:35.317395+00:00",
+            "authUserHash": "7ee940a843d6f579d470"
+          }
+        ],
+        "entities": [],
+        "entityCount": 0,
+        "appUserCount": 1
+      },
+      "failureRefs": [
+        "src/screens/scaffold/SignInScreen.jsx",
+        "src/extensions/custom/create-edit-save-plan.js"
+      ],
+      "entityBefore": {
+        "hash": "5582668908f242213bb151fbe90ebbfdcbd1588e9b478fc2a1a6c36e13fdc949",
+        "appUsers": [],
+        "entities": [],
+        "entityCount": 0,
+        "appUserCount": 0
+      },
+      "expectedState": "the workspace route opens and the signed-in account indicator is visible",
+      "observedState": "the contracted authentication action ran but did not produce the required signed-in state",
+      "owningModules": [
+        "src/screens/scaffold/SignInScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "create or sign in to an account with platform authentication",
+        "stepId": 1,
+        "journeyId": "create-edit-save-plan"
+      },
+      "classification": "behaviour",
+      "identityStatus": "identified",
+      "sourceTreeHash": "78675c376ab471180f81a2276f7503e9b25a961341b70ee7852f67180cf04b9d",
+      "controlIdentity": {
+        "id": "ctl_9f12d5bd",
+        "logicalField": "authEmail"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "b87d6667-8328-4431-b7c0-763833090638",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T13:37:57.342189+00:00"
+  }
+]

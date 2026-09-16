@@ -263,6 +263,10 @@ function walkFile(file, source, elements) {
       file, line: node.loc?.start?.line || null,
       element: `<${jsxName(opening)}${interactive.role ? ` role="${interactive.role}"` : ""}>`,
       via: interactive.via, binding, bindingEvidence: evidence,
+      // The handlers this element itself declares, and its native type; a literal-bound native
+      // button with neither a handler nor a submit role is pressed by the browser and does nothing.
+      handlers: interactive.handlers || [], spread: (opening.attributes || []).some((row) => row?.type === "JSXSpreadAttribute"), nativeType: String(attr(opening, "type") || "").toLowerCase(),
+      tag: jsxName(opening), role: interactive.role || null,
       // What the BINDING says this control is — the authoritative link when one exists.
       boundName, actionName, factory, attribute, machineId,
       identities: identitiesOf(node, opening, raw, labels),
@@ -418,6 +422,36 @@ export function lintControlBindings(tree, { interactionContract, authoritativeFi
     // contradicted the linter's proof boundary and blocked correctly wired split components.
     const provenBound = matches.filter((row) => [BINDING.LITERAL, BINDING.BINDING].includes(row.binding));
     const compatibleBound = provenBound.filter(compatibleBinding);
+    // A CONTRACTED ACTION MUST DO SOMETHING WHEN PRESSED. The 2026-09-16 Lumen advanced build
+    // rendered <button data-thrallo-action="act_44e00d0b">Start authentication form</button> with
+    // no onClick and no props spread; the browser pressed it as the contracted sign-in and observed
+    // nothing. A literal machine identity on a native button (or button role) that declares no
+    // handler and is not a form submit is an exact source fact, caught here before the browser.
+    if (actionFlow && flow.kind !== "flow_advance") {
+      const isButton = (row) => String(row.tag || "").toLowerCase() === "button" || String(row.role || "").toLowerCase() === "button";
+      // A props spread may carry the handler ("{...action.buttonProps}" beside a literal identity);
+      // only an element with no spread at all is provably inert.
+      const dead = compatibleBound.filter((row) => row.binding === BINDING.LITERAL && isButton(row) && !row.spread
+        && !(row.handlers || []).length && row.nativeType !== "submit");
+      const alive = compatibleBound.filter((row) => !dead.includes(row));
+      if (dead.length && !alive.length) {
+        // An OPERATION control that does nothing is a blocking defect: the contracted act cannot happen.
+        // A flow-entry door with no handler is reported for visibility only - when its form is already
+        // on screen the browser presses it and proceeds, so forcing a correction would spend a call on
+        // nothing (the medium create-step fixture keeps that door by design).
+        const operational = Boolean(flow.operationId) || ["action", "mutation", "cancellation", "lookup"].includes(flow.kind);
+        findings.push({
+          code: operational ? "contracted_action_unwired" : "contracted_flow_entry_unwired", fails: operational,
+          journeyId: flow.journeyId, stepIndex: flow.stepIndex, interactionId: flow.id,
+          control: { machineId: flow.control?.machineId, accessibleName: expectedActionName, operationId: flow.operationId || null },
+          elements: dead.map((row) => ({ file: row.file, line: row.line, element: row.element })),
+          message: `${dead[0].element} at ${dead[0].file}:${dead[0].line} carries the contracted action identity `
+            + `${flow.control?.machineId} ("${expectedActionName}") but declares no onClick/onSubmit handler and is not a `
+            + "form submit: the browser will press a control that does nothing. Wire it to the operation "
+            + "(useSemanticAction buttonProps or an explicit handler) or make it the form's submit.",
+        });
+      }
+    }
     const unresolvedMatches = matches.filter((row) => row.binding === BINDING.UNRESOLVED);
     // A bound implementation on a later surface must not mask a second, hand-wired implementation
     // of the same contracted control. This is narrower than the general textual binding lint: the

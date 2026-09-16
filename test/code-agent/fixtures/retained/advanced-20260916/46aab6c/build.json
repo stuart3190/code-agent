@@ -1,0 +1,39 @@
+{
+  "id": "837b0c7b-b32d-4cdd-b219-08b8c956b291",
+  "owner": "7fc93b1e-7dc6-48c0-ae05-38ce4ee3050f",
+  "project_id": "23392280-b2b2-4f45-ad05-2894a446609f",
+  "profile": "advanced",
+  "request": "Build an interactive SVG floor-planning workspace for Lumen Layouts. Users sign in,\ncreate and name plans, pan and zoom the canvas, drag fixtures from a library, select fixtures, edit\nposition, rotation, and brightness in an inspector, undo and redo changes, switch plans, save and\nreload durable state, export a plan summary, and print it. Include accessible keyboard alternatives\nfor canvas actions and separate workspace, library, reports, and settings routes. Use platform\nauthentication and durable capabilities.\n\nQualification instance 1; create a fresh implementation.",
+  "state": "blocked",
+  "budget_credits": 60,
+  "spent_credits": 28.13242,
+  "contract_id": "d265870f-5f99-4967-a4c5-6fe44e6ba96a",
+  "final_snapshot": null,
+  "error": "required contracted journeys remain red: required journey create-edit-save-plan is fail",
+  "started_at": "2026-09-16T13:25:54.899+00:00",
+  "finished_at": "2026-09-16T13:40:35.466+00:00",
+  "project_id_text": "23392280-b2b2-4f45-ad05-2894a446609f",
+  "max_repair_dispatches": 1000,
+  "envelope_version": 2,
+  "customer_state": "failed",
+  "spent_breakdown": {
+    "thrallo_recovery:thrallo_repair:connected_allowance": 19.9556,
+    "customer_generation:customer_request:connected_allowance": 8.17682
+  },
+  "failure": {
+    "code": "contracted_journeys_red",
+    "action": "stop",
+    "retryable": false,
+    "checkpointId": "b87d6667-8328-4431-b7c0-763833090638",
+    "classification": "generated_app",
+    "internalDetail": "required contracted journeys remain red: required journey create-edit-save-plan is fail [contracted_journeys_red]",
+    "providerCallMade": null,
+    "reservationState": "not_created",
+    "customerMessageKey": "build_checking_repairs",
+    "customerActionRequired": false
+  },
+  "last_durable_progress_at": "2026-09-16T13:37:18.882+00:00",
+  "expected_duration_ms": 1985000,
+  "hard_safety_duration_ms": 5955000,
+  "verifier_policy": "minimal_contract_v1"
+}

@@ -22,6 +22,7 @@ import {
   contractUsesDurablePersistence, entityPersistencePolicy, operationUsesDurablePersistence,
   verificationFixtureFields,
 } from "../../../shared/implementationContract.mjs";
+import { AUTH_CREDENTIAL_FIELDS, contractUsesPlatformAuthentication } from "../../../shared/implementationContract.mjs";
 import { isKeyboardFocusOnlyStep } from "./interactionSemantics.mjs";
 import { operationReadEntityNames } from "./entityScope.mjs";
 
@@ -349,7 +350,17 @@ function actionKinds(step, context = {}) {
   // Flow entry outranks the mutation reading of the same verb: "create an order" that is followed
   // by the steps which fill the order is the door, not the commit.
   const writesOwnValue = kinds.includes("selection") || kinds.includes("input");
-  if (entersFlow(step, { laterStepsDriveControls: context.laterStepsDriveControls, writesOwnValue })) {
+  // A SIGN-IN IS THE ACT, NOT A DOOR. "create or sign in to an account" reads as commencing
+  // something, so it derived a flow-entry control beside the session operation's own control -
+  // two buttons named "authentication form". The generator rendered the door as a dead button
+  // and the browser pressed it first (2026-09-16 advanced 837b0c7b: zero network requests). The
+  // A sign-in commits no record: "create or sign in to an account" is one session action plus the
+  // credentials it operates, never a durable mutation of the journey's entity.
+  if (intents.has(ACTION_INTENT.AUTHENTICATE)) {
+    return unique(["action", ...kinds.filter((kind) => ["selection", "input"].includes(kind))]);
+  }
+  const isAct = intents.has(ACTION_INTENT.AUTHENTICATE);
+  if (!isAct && entersFlow(step, { laterStepsDriveControls: context.laterStepsDriveControls, writesOwnValue })) {
     return unique(["flow_start", ...kinds.filter((kind) => !["mutation", "navigation", "action"].includes(kind))]);
   }
   // A pure transition step: it writes nothing, so it is only ever the movement between two
@@ -652,6 +663,13 @@ export function buildInteractionContract(contract, {
   for (const field of (contract?.entities || []).flatMap((entity) => entity?.fields || [])) {
     const key = normalized(field?.name);
     if (key && !declaredFields.has(key)) declaredFields.set(key, field);
+  }
+  // The reserved credential controls are operable wherever the platform session is in play,
+  // exactly as the validator admits them; they belong to no entity and produce no record.
+  if (contractUsesPlatformAuthentication(contract)) {
+    for (const field of AUTH_CREDENTIAL_FIELDS) {
+      if (!declaredFields.has(normalized(field.name))) declaredFields.set(normalized(field.name), { ...field });
+    }
   }
   const operableFields = new Set(declaredFields.keys());
   const declaredOperations = new Map((contract?.operations || [])
