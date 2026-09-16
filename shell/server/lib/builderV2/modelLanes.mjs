@@ -1406,7 +1406,7 @@ export function planCallReservation(options, model, {
     maxOutputTokens: low, minimumCredits, inputTokens: estimatedInputTokens,
   });
   if (reservedCredits > creditLimit + 1e-9 || low < minimumUsefulOutputTokens) {
-    throw Object.assign(new Error("Builder V2 call cannot fit a useful response inside approved headroom"), {
+    throw Object.assign(new Error(`Builder V2 call cannot fit a useful response inside approved headroom (estimated input ${estimatedInputTokens} tokens, per-call ceiling ${perCall} credits, remaining ${Math.round(remaining * 100) / 100} credits: at most ${low} output tokens fit, ${minimumUsefulOutputTokens} are needed)`), {
       code: limitingCode, retryable: false, dispatchState: "before_dispatch",
       remaining, callCeiling: perCall, repairAllowance: Number.isFinite(allowance) ? allowance : null,
       minimumCredits: Number(minimumCredits || 0), minimumUsefulOutputTokens,

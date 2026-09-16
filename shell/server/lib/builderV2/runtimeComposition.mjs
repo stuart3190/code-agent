@@ -93,8 +93,16 @@ export function assertQueuedProviderSelection(expected, context) {
   }
 }
 
-export function stepOutputPolicy(step) {
-  return {
+// A per-call ceiling is a fraction of the whole-build ceiling the class was approved for, not a
+// constant. The 2026-09-16 advanced qualification (build 13ab5175, 60 approved credits) died at
+// 5.3 credits: its core prompt could not fit 1,200 useful output tokens inside a 6-credit call,
+// the lane split down to single files, and the journey controller alone still did not fit. The
+// whole-build ceiling remains authoritative in planCallReservation; only the per-call slice grows
+// with the class that was approved to spend more.
+export const STEP_CEILING_SCALE = Object.freeze({ simple: 1, medium: 1.5, advanced: 2 });
+
+export function stepOutputPolicy(step, { profile = null } = {}) {
+  const base = {
     contract: { estimatedCredits: 0.5, maxOutputTokens: 6_000, callCeilingCredits: 3 },
     core: { estimatedCredits: 2, maxOutputTokens: 16_000, callCeilingCredits: 6 },
     // repairAllowanceCredits is the nominal planning target, not a hard reservation ceiling.
@@ -103,6 +111,8 @@ export function stepOutputPolicy(step) {
     edit: { estimatedCredits: 0.5, maxOutputTokens: 8_000, callCeilingCredits: 4 },
     increment: { estimatedCredits: 0.5, maxOutputTokens: 8_000, callCeilingCredits: 4 },
   }[step] || { estimatedCredits: 0.5, maxOutputTokens: 8_000, callCeilingCredits: 4 };
+  const scale = STEP_CEILING_SCALE[String(profile || "").toLowerCase()] || 1;
+  return scale === 1 ? base : { ...base, callCeilingCredits: base.callCeilingCredits * scale };
 }
 
 function candidateSet(context) {
@@ -565,7 +575,7 @@ export function createBuilderV2Runtime({
             : recoveryDispatch ? null
               : context.routing?.routingMode === "manual" ? context.routing.preferredModel : null),
         });
-        const outputPolicy = stepOutputPolicy(routedStep);
+        const outputPolicy = stepOutputPolicy(routedStep, { profile: generationProfile });
         Object.assign(decision, outputPolicy);
         const chosen = routingCandidates.find((candidate) => candidate.provider === decision.provider
           && candidate.model === decision.model && candidate.billingLane === decision.billingLane);
