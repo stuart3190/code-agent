@@ -2579,8 +2579,11 @@ export function reviewValuesForStep(step, enteredValues = []) {
 
 export function durableCommitIdentity({ enteredValues = [], textBefore = "", textAfter = "" } = {}) {
   const before = new Set(String(textBefore).match(REFERENCE_TOKEN) || []);
+  // A committed identity is an entered value the commit NEWLY rendered. A value that was already
+  // on the page (a task form filled with the project's own title, then a commit that stored
+  // nothing) proves nothing about the commit, exactly as an old reference proves nothing.
   return {
-    value: enteredValues.find((value) => value && String(textAfter).includes(value)) || null,
+    value: enteredValues.find((value) => value && String(textAfter).includes(value) && !String(textBefore).includes(value)) || null,
     reference: (String(textAfter).match(REFERENCE_TOKEN) || [])
       .find((reference) => !before.has(reference)) || null,
   };
@@ -2985,6 +2988,11 @@ async function runStep(page, step, {
   // hidden contract-scaffolding action was applied by the selection itself.
   let selectionEstablished = false;
   let selectionAutoApplied = false;
+  // The contracted input's owning form was submitted by the driver: the submission is then an
+  // action of this step, proven by the surface it changed.
+  let submittedOwningForm = false;
+  // A read-only operation the surface applied on arrival (no control exists for it).
+  let actionAppliedOnLoad = false;
 
   // What was already on screen BEFORE this step. A word that was visible beforehand is no evidence
   // that the step did anything: "a booking reference is shown" was passing on a page whose only
@@ -3312,6 +3320,7 @@ async function runStep(page, step, {
       await page.waitForTimeout(700);
       drove = true;
       contractDriven = true;
+      submittedOwningForm = true;
       break;
     }
   }
@@ -3781,11 +3790,21 @@ async function runStep(page, step, {
         && (contractedAction.writes || []).every((path) => /\.custom\./.test(String(path)))) {
         const presentation = await contractedActionPresentation(page, contractedAction.control.machineId);
         if (presentation.candidateCount === 0) {
-          const expectationEvidence = await expectationIsVisible(page, expect);
+          // Under the contract policy the operation has run when the outcome the contract
+          // DECLARES is on the surface: its visibleText, or values an earlier step entered that
+          // this step reads. Prose words never stand in for that declaration.
+          const declaredText = Array.isArray(step.visibleText) ? step.visibleText.map(String).filter(Boolean) : [];
+          const declaredValues = reviewValuesForStep(step, enteredValues).map((row) => String(row.value)).filter(Boolean);
+          const declared = [...declaredText, ...declaredValues];
+          const surface = declared.length ? await page.evaluate(() => document.body?.innerText || "").catch(() => "") : "";
+          const expectationEvidence = minimal
+            ? { met: declared.length > 0 && declared.every((text) => surface.includes(text)), declared }
+            : await expectationIsVisible(page, expect);
           if (expectationEvidence.met) {
             activated = true;
             activation.matchedBy = "read_operation_applied_on_load";
             activation.expectationEvidence = expectationEvidence;
+            actionAppliedOnLoad = true;
             delete activation.reason;
           }
         }
@@ -3970,10 +3989,11 @@ async function runStep(page, step, {
       nextControlVisible: flowStartNext ? await semanticControlVisible(page, flowStartNext) : false,
       navigationDeclared: interactionFlows.some((flow) => flow.kind === "navigation") || Boolean(route),
       inputDeclared: interactionFlows.some((flow) => flow.kind === "input" && flow.control),
+      submissionDeclared: submittedOwningForm,
       inputsAccepted: filledSomething || filledContractedInputs.length > 0,
       selectionDeclared: declaredSelections.length > 0,
       selectionProven: declaredSelections.length > 0 && (drove || selectionEstablished),
-      actionAutoApplied: selectionAutoApplied,
+      actionAutoApplied: selectionAutoApplied || actionAppliedOnLoad,
       explicitVisibleText: Array.isArray(step.visibleText) ? step.visibleText.map(String) : [],
       explicitVisibleTextMissing: (Array.isArray(step.visibleText) ? step.visibleText.map(String) : [])
         .filter((text) => !surface.includes(text)),
@@ -4086,7 +4106,7 @@ async function runStep(page, step, {
     if (overflow) return { drove: true, status: "fail",
       detail: `the ${layout.width}px viewport has horizontal overflow (${Math.max(layout.scrollWidth, layout.bodyScrollWidth)}px)`,
       controlEvidence };
-    return layout.singleColumn || minimal
+    return layout.singleColumn
       ? { drove: true, status: "pass",
         detail: `the ${layout.width}px viewport renders ${layout.regionCount} top-level content regions in one column without horizontal overflow`,
         controlEvidence }
@@ -4422,22 +4442,32 @@ export function structuredStepVerdict({
     checks.push({ kind: "reset", ok: Boolean(facts.resetOk),
       detail: facts.resetOk ? "the contracted control returned to its default" : "the contracted control did not return to its default" });
   }
+  // The contract's declared outcome (route, values, visible text, member, removal, reset, next
+  // control) is the stronger evidence: when every declared outcome is present, an action that
+  // repainted nothing still reached its contracted result.
+  const declaredOutcomeChecks = checks.filter((check) => ["route", "values", "visible_text", "collection", "removal", "reset"].includes(check.kind));
+  const declaredSatisfied = declaredOutcomeChecks.length > 0 && declaredOutcomeChecks.every((check) => check.ok);
   if (facts.mutationDeclared) {
-    const ok = Boolean(mutationWithValues || changed);
+    const ok = Boolean(mutationWithValues || changed || declaredSatisfied);
     checks.push({ kind: "mutation", ok,
       detail: ok ? (mutationWithValues ? "the contracted mutation rendered its entered values" : "the contracted mutation changed the surface")
         : "the contracted mutation fired through its control but nothing on the surface changed and no entered value or new reference rendered" });
   } else if (facts.actionDeclared) {
-    const ok = Boolean(changed || mutationWithValues || facts.nextControlVisible || facts.actionAutoApplied);
+    const ok = Boolean(changed || mutationWithValues || facts.nextControlVisible || facts.actionAutoApplied || declaredSatisfied);
     checks.push({ kind: "action", ok,
       detail: ok ? "the contracted action fired through its control and changed the surface"
         : "the contracted action fired through its control but produced no observable state change" });
   }
   if (facts.flowStartDeclared) {
-    const ok = Boolean(facts.nextControlVisible || changed);
+    const ok = Boolean(facts.nextControlVisible || changed || declaredSatisfied);
     checks.push({ kind: "flow_entry", ok,
       detail: ok ? (facts.nextControlVisible ? "the contracted flow entry exposed the contract's next control" : "the contracted flow entry changed the surface")
         : "the contracted flow entry was activated but neither the contract's next control nor any surface change followed" });
+  }
+  if (facts.submissionDeclared) {
+    checks.push({ kind: "submission", ok: changed,
+      detail: changed ? "the contracted input's owning form was submitted and the surface changed"
+        : "the contracted input's owning form was submitted but nothing on the surface changed" });
   }
   if (facts.inputDeclared) {
     checks.push({ kind: "input", ok: Boolean(facts.inputsAccepted),

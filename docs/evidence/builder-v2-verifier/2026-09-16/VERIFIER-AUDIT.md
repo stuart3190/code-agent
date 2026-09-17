@@ -58,8 +58,21 @@ prerequisite producer graph, deadlines.
   (`entitiesDeclaringStatus`). Values and references remain the primary recovery evidence.
 - **#7** — member identities must be structured; a collection region that cannot be located yields
   PLATFORM_INCONCLUSIVE, never an application failure.
-- **#8, #9** — not applied under the production policy (observation steps are judged like any other; single-column
-  geometry no longer fails; the overflow measurement is kept).
+- **#8** — not applied under the production policy (a detail observation is judged like any other step).
+- **#9** — retained: the verdict is measured geometry (region widths, overlap, vertical order); only its arming
+  reads the contract's explicit "single column" wording. (An interim version of this audit disabled it; the
+  viewport browser suite proved the geometry negative control load-bearing and it was restored.)
+- **Owning-form submission** — when the driver submits a contracted input's owning form (a sign-in with only an
+  input declared), the submission is a structured check proven by the surface change it caused; a form that
+  stays put fails (`builder-v2-contracted-auth-browser`).
+- **Declared outcome precedence** — when every declared outcome (route, values, visible text, member, removal,
+  reset) is present, an action that repainted nothing still reached its result; without any declared outcome a
+  fired action needs a surface change, and gets the `action_outcome_undeclared` advisory.
+- **Load-on-arrival read operations** — accepted only when the contract's declared outcome (`visibleText` or
+  entered values it reads) is on the surface; the prose gate is gone (`builder-v2-passive-operations`).
+- **Committed identity freshness** — the producer replay's committed identity is an entered value the commit
+  NEWLY rendered (absent before, present after); a task form filled with the project's own title can no longer
+  conceal a commit that stored nothing (`builder-v2-prerequisite-replay`).
 - **#10** — disabled under the production policy.
 - **#11** — sign-out is driven through its contracted action identity first; label fallback widened to "log out".
 - Access denial extracted as `accessDenialVerdict` (pure) — unchanged semantics, exact private values only.

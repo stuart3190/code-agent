@@ -22,8 +22,8 @@ const BOOKING = {
       priority: "primary", stage: "primary_journey",
       steps: [
         { action: "open the booking page", target: "/book", expect: "the list of services and their available slots is visible" },
-        { action: "select a service and an available slot", target: "slot picker", expect: "the chosen slot is highlighted and continue becomes enabled" },
-        { action: "enter name, email and phone and submit", target: "details form", expect: "a confirmation showing a booking reference is displayed" },
+        { action: "select a service and an available slot", target: "slot picker", operates: ["slotId"], expect: "the chosen slot is highlighted and continue becomes enabled" },
+        { action: "enter name, email and phone and submit", target: "details form", operates: ["email"], expect: "a confirmation showing a booking reference is displayed" },
         { action: "reload and look the booking up by reference", target: "manage booking", expect: "the booking is still shown after the reload" },
       ],
       acceptance: ["a booking survives a full page reload"],
@@ -32,8 +32,8 @@ const BOOKING = {
       id: "refuse-taken-slot", title: "A taken slot is refused",
       priority: "secondary", stage: "supporting",
       steps: [
-        { action: "select a slot already at capacity", target: "slot picker", expect: "the slot is shown as unavailable and cannot be selected" },
-        { action: "submit a duplicate booking for the same slot", target: "details form", expect: "an error appears and no second booking is stored" },
+        { action: "select a slot already at capacity", target: "slot picker", operates: ["slotId"], expect: "the slot is shown as unavailable and cannot be selected" },
+        { action: "submit a duplicate booking for the same slot", target: "details form", operates: ["email"], expect: "an error appears and no second booking is stored" },
       ],
     },
     {
@@ -41,7 +41,7 @@ const BOOKING = {
       priority: "secondary", stage: "supporting",
       steps: [
         { action: "sign in as the farm owner", target: "/admin", expect: "the list of bookings is displayed" },
-        { action: "cancel a booking", target: "bookings table", expect: "the booking disappears from the list and stays gone after a reload" },
+        { action: "cancel a booking", target: "bookings table", operates: ["reference"], expect: "the booking disappears from the list and stays gone after a reload" },
       ],
     },
   ],

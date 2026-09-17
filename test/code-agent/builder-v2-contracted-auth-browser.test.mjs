@@ -122,7 +122,7 @@ test("a contracted plain sign-in input submits its owning form and proves the pr
     });
 
     assert.equal(result.pass, true, JSON.stringify(result.journeys));
-    assert.match(result.journeys[0].steps[0].detail, /project, dashboard, header, studio, operations/i);
+    assert.match(result.journeys[0].steps[0].detail, /owning form was submitted and the surface changed/i);
   });
 
 test("a contracted sign-in outcome cannot pass on retained credential fields alone",

@@ -28,6 +28,7 @@ import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs"
 import { fromScaffold } from "../../src/engine/fileTree.mjs";
 import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
 import { buildTree, ensureDeps, workDirFor } from "../../harness/workspace.mjs";
+import { VERIFICATION_RESULT_CLASS } from "../../shell/server/lib/appBuild/verifierPolicy.mjs";
 
 const requireCjs = createRequire(import.meta.url);
 let playwrightAvailable = true;
@@ -36,7 +37,12 @@ const needsBrowser = { skip: playwrightAvailable ? false : "requires playwright"
 
 const load = async (name) => JSON.parse(await readFile(new URL(`./fixtures/${name}`, import.meta.url), "utf8"));
 const resetContract = deriveBuildSpec(await load("bv2-medium-reset-button-contract.json")).contract;
-const loadContract = deriveBuildSpec(await load("bv2-medium-load-on-arrival-contract.json")).contract;
+// The retained live contract stated its summary in prose only. The verifier judges on declared
+// evidence, so the step declares the text the metric cards must render.
+const loadSource = await load("bv2-medium-load-on-arrival-contract.json");
+(loadSource.contract || loadSource).journeys.find((journey) => journey.id === "view-analytics-summary")
+  .steps[1].visibleText = ["Total projects", "Completion rate"];
+const loadContract = deriveBuildSpec(loadSource.contract || loadSource).contract;
 const flowsOf = (contract, journeyId, stepIndex) => contract.interactionContract.flows
   .filter((flow) => flow.journeyId === journeyId && flow.stepIndex === stepIndex);
 
@@ -226,7 +232,7 @@ ${JSON.stringify(journey.steps[2]?.controlEvidence?.resetTransition)}`);
 // The minimal contract policy passes a step whose contracted words are visible and records an
 // advisory when nothing moved; that leniency belongs to the policy, not to this rule. What this
 // rule must guarantee is that the reset is DRIVEN as a button and its outcome measured honestly.
-test("a clear button that resets nothing is driven and recorded as an unobserved reset", { ...needsBrowser, timeout: 300_000 }, () => {
+test("a clear button that resets nothing is a dead action, with the unobserved reset recorded", { ...needsBrowser, timeout: 300_000 }, () => {
   assert.equal(builds.get("resetBroken").ok, true, builds.get("resetBroken")?.stderr);
   const journey = results.get("resetBroken").journeys.find((row) => row.id === RESET_JOURNEY);
   const transcript = transcriptOf(journey);
@@ -234,9 +240,10 @@ test("a clear button that resets nothing is driven and recorded as an unobserved
   const evidence = journey.steps[2]?.controlEvidence || {};
   assert.equal(evidence.activation?.matchedBy, "machine_identity", JSON.stringify(evidence));
   assert.deepEqual(evidence.resetTransition, { checked: true, ok: false, changes: [] }, JSON.stringify(evidence));
-  assert.ok((journey.steps[2]?.advisories || []).some((row) => row.code === "text_freshness_not_observed"),
-    `the unobserved reset is recorded
-${JSON.stringify(journey.steps[2])}`);
+  // A clear control that clears nothing is a dead action: the measured reset did not happen.
+  assert.equal(journey.steps[2]?.status, "fail", transcript);
+  assert.equal(journey.steps[2]?.classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE, transcript);
+  assert.match(journey.steps[2]?.detail || "", /did not return to its default/, transcript);
 });
 
 test("a read-only operation with no input is proven by its visible result when the app offers no control for it",
@@ -255,5 +262,5 @@ test("a read-only operation whose result never appears stays undriveable", { ...
   const journey = results.get("loadBroken").journeys.find((row) => row.id === LOAD_JOURNEY);
   const transcript = transcriptOf(journey);
   assert.notEqual(journey.steps[1]?.status, "pass", transcript);
-  assert.match(journey.steps[1]?.detail || "", /was not offered/, transcript);
+  assert.match(journey.steps[1]?.detail || "", /was not offered|declared visible text missing/, transcript);
 });

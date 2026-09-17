@@ -266,6 +266,6 @@ test("setup still fails when the replayed commit persists nothing — the rule i
     const journey = results.get("broken").journeys.find((row) => row.id === CONSUMER);
     assert.equal(journey.setup?.ok, false, JSON.stringify(journey.setup));
     assert.equal(journey.setup.failure.control, "new project form");
-    assert.match(journey.setup.failure.reason, /did not reach its contracted observable state/);
+    assert.match(journey.setup.failure.reason, /no entered value or new durable reference was committed|did not reach its contracted observable state/);
     assert.equal(journey.status, "undriveable", transcriptOf(journey));
   });

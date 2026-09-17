@@ -86,6 +86,7 @@ function contractFor(shape) {
       { action: "start generation", target: "Generate button", reads: ["sourceIdea"],
         expect: "the AI analysis progress panel and changing status are visible" },
       { action: "wait for generated directions", target: "directions panel", reads: ["generate-concept"],
+        visibleText: ["Three generated directions are visible"],
         expect: "three generated directions are visible" },
     ] }],
     acceptance: [], states: [], deferred: [], imageIntents: [], integrations: [],
