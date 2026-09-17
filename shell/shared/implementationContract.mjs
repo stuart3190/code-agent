@@ -357,8 +357,17 @@ export function validateContract(contract) {
       problems.push(`${where} has fewer than two steps — a journey is a sequence, not a label`);
       continue;
     }
-    // Fields an earlier step of THIS journey entered: a later step may read them as its outcome.
+    // Fields an earlier step of THIS journey entered or an operation it performed wrote: a later
+    // step may read them as its outcome. A read naming a declared operation id depends on that
+    // operation's result, which is structured too.
     const enteredSoFar = new Set();
+    const declaredOperationIds = new Set((c.operations || []).map((operation) => normaliseReference(operation?.id || operation?.name)).filter(Boolean));
+    const operationWrites = new Map((c.operations || []).map((operation) => [
+      normaliseReference(operation?.id || operation?.name),
+      (Array.isArray(operation?.responsibilities) ? operation.responsibilities : [])
+        .flatMap((responsibility) => Array.isArray(responsibility?.writes) ? responsibility.writes : [])
+        .map((field) => normaliseReference(String(field).split(".").pop())).filter(Boolean),
+    ]));
     for (const [stepIndex, step] of journey.steps.entries()) {
       // EVERY STEP STATES A VERIFIABLE OUTCOME. The browser verifier judges a step on structured
       // contract evidence only: the route it opens, the controls or operation it operates, the
@@ -373,7 +382,7 @@ export function validateContract(contract) {
       const operatesSomething = Array.isArray(step?.operates) && step.operates.some(Boolean);
       const declaresVisibleText = Array.isArray(step?.visibleText) && step.visibleText.some((text) => String(text || "").trim());
       const reads = Array.isArray(step?.reads) ? step.reads.filter(Boolean) : [];
-      const readsEntered = reads.some((field) => enteredSoFar.has(normaliseReference(field)));
+      const readsEntered = reads.some((field) => enteredSoFar.has(normaliseReference(field)) || declaredOperationIds.has(normaliseReference(field)));
       const reloads = /(?:^|[^a-z])(?:reload|refresh)(?:$|[^a-z])/i.test(String(step?.action || ""));
       // A reload is the recovery of the record an earlier step committed; the browser proves it on
       // that record's captured values and reference, so it needs no further declaration.
@@ -383,7 +392,11 @@ export function validateContract(contract) {
           + "name the route it opens in \"target\", the controls or operation it operates in \"operates\", "
           + "fields an earlier step entered in \"reads\", or the exact text the screen must show in \"visibleText\"");
       }
-      for (const field of Array.isArray(step?.operates) ? step.operates : []) if (field) enteredSoFar.add(normaliseReference(field));
+      for (const field of Array.isArray(step?.operates) ? step.operates : []) {
+        if (!field) continue;
+        enteredSoFar.add(normaliseReference(field));
+        for (const written of operationWrites.get(normaliseReference(field)) || []) enteredSoFar.add(written);
+      }
       for (const field of Object.keys(step?.verificationValues || {})) enteredSoFar.add(normaliseReference(field));
       for (const field of Array.isArray(step?.produces) ? step.produces : []) if (field) enteredSoFar.add(normaliseReference(field));
       // `route` is the declared route a navigation step opens. It must be a declared route path

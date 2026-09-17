@@ -24,7 +24,7 @@ function contract({
   operations = [],
   steps = [
     { action: "open the product", target: "/", expect: "the product is visible" },
-    { action: "review the result", target: "main content", expect: "the result is visible" },
+    { action: "review the result", target: "main content", visibleText: ["result"], expect: "the result is visible" },
   ],
   auth = { required: false, model: null, rules: [] },
   integrations = [],
@@ -376,7 +376,7 @@ test("comma-separated exclusions and session-local catalogue selections remain t
       }],
     }],
     steps: [
-      { action: "browse software", target: "catalogue grid", expect: "software entries are visible" },
+      { action: "browse software", target: "catalogue grid", visibleText: ["Software"], expect: "software entries are visible" },
       { action: "filter software", target: "category filter", operates: ["category"], expect: "matching software is visible" },
       { action: "open software details", target: "software card", operates: ["softwareId", "softwareName", "platform"], expect: "the detail view is visible" },
       { action: "select software for comparison", target: "compare control", operates: ["record-catalogue-selection", "successMessage"], expect: "a visible selection confirmation appears" },

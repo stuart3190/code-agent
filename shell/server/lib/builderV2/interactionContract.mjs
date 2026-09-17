@@ -347,7 +347,10 @@ function actionKinds(step, context = {}) {
   // "search the site list by name" operates a textbox and declares no lookup operation: it is
   // an input whose result the contract states elsewhere, not a durable record lookup that would
   // need a reference to exist. The verb never decides that; a declared operation does.
-  if (intents.has(ACTION_INTENT.LOOKUP) && !context.operatesFieldsOnly) kinds.push("lookup");
+  if (intents.has(ACTION_INTENT.LOOKUP)) {
+    if (context.operatesFieldsOnly) { if (!kinds.includes("input")) kinds.push("input"); }
+    else kinds.push("lookup");
+  }
   if (intents.has(ACTION_INTENT.AUTHENTICATE)) kinds.push("action");
   // A cancellation is its own durable transition. It rides ALONGSIDE the commit rather than
   // replacing it: "confirm cancellation" both presses a commit control and cancels the record,

@@ -616,9 +616,9 @@ const RETAINED_SMOKE_CONTRACT = {
       id: "browse-competitions", title: "A visitor browses affordable active competitions",
       priority: "primary", stage: "primary_journey", steps: [
         { action: "open the homepage", target: "/", expect: "the hero headline 'Win big on a low budget' is visible with a browse competitions CTA" },
-        { action: "click the browse competitions CTA", target: "browse competitions CTA", expect: "the Active Competitions section is visible with four competition cards" },
-        { action: "inspect a competition card", target: "competition card", expect: "the card shows prize value, ticket price, entries sold progress, max entries, draw date, and an Enter button" },
-        { action: "resize to a mobile-width viewport", target: "responsive page layout", expect: "competition cards stack in a single column without horizontal scrolling" },
+        { action: "click the browse competitions CTA", target: "browse competitions CTA", visibleText: ["Active Competitions"], expect: "the Active Competitions section is visible with four competition cards" },
+        { action: "inspect a competition card", target: "competition card", visibleText: ["Enter"], expect: "the card shows prize value, ticket price, entries sold progress, max entries, draw date, and an Enter button" },
+        { action: "resize to a mobile-width viewport", target: "responsive page layout", visibleText: ["Active Competitions"], expect: "competition cards stack in a single column without horizontal scrolling" },
       ], acceptance: ["the homepage and all competition cards are visible"],
     },
     {
@@ -660,10 +660,10 @@ const RETAINED_SMOKE_CONTRACT = {
     title: "A visitor reviews responsible play, trust, FAQ, and legal placeholder information",
     priority: "secondary", stage: "polish", steps: [
       { action: "open the homepage", target: "/", expect: "the Low Budget Competitions page is visible" },
-      { action: "scroll to responsible play messaging", target: "responsible play section", expect: "18+ only and responsible play messages are visible" },
-      { action: "scroll to How It Works", target: "How It Works section", expect: "the mock entry steps are explained" },
-      { action: "scroll to Recent Winners and Trust/Safety", target: "Recent Winners and Trust/Safety sections", expect: "winner examples and safety reassurance are visible" },
-      { action: "open or inspect FAQ and footer", target: "FAQ section and footer", expect: "FAQ content and legal placeholder links are visible" },
+      { action: "scroll to responsible play messaging", target: "responsible play section", visibleText: ["18+"], expect: "18+ only and responsible play messages are visible" },
+      { action: "scroll to How It Works", target: "How It Works section", visibleText: ["How It Works"], expect: "the mock entry steps are explained" },
+      { action: "scroll to Recent Winners and Trust/Safety", target: "Recent Winners and Trust/Safety sections", visibleText: ["Recent Winners"], expect: "winner examples and safety reassurance are visible" },
+      { action: "open or inspect FAQ and footer", target: "FAQ section and footer", visibleText: ["FAQ"], expect: "FAQ content and legal placeholder links are visible" },
     ], acceptance: ["responsible play and legal information are visible"],
   }],
   integrations: [], states: [], acceptance: [
@@ -778,7 +778,7 @@ test("retained basic-site smoke aa154da3 keeps one chooser and never invents bac
     journeys: [{ id: "enter-a-competition", title: "A visitor enters a competition", priority: "primary",
       stage: "primary_journey", steps: [
         { action: "open the homepage", target: "/", expect: "the competition homepage is visible" },
-        { action: "click the browse competitions call to action", target: "Browse competitions button", expect: "the competitions are visible" },
+        { action: "click the browse competitions call to action", target: "Browse competitions button", visibleText: ["Competitions"], expect: "the competitions are visible" },
         { action: "choose a competition", target: "Enter now action on a competition card",
           operates: ["competitionId", "competitionTitle", "ticketPricePence"], primitive: "selection",
           expect: "the selected competition entry view is visible" },
