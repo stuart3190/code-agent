@@ -370,15 +370,31 @@ test("observation steps require no control identity", () => {
 });
 
 test("retained false negatives and concrete failures classify correctly in a real browser",
-  { ...needsBrowser, timeout: 240_000 }, async (t) => {
-    await t.test("already-visible observation passes without a control", async () => {
-      const result = await run("<main><h1>Live competitions</h1><p>Competition cards are visible</p></main>",
-        { action: "view live competitions", expect: "competition cards are visible", reads: ["competitions"] });
-      assert.equal(result.pass, true, JSON.stringify(result.journeys));
-      assert.equal(result.journeys[0].steps[0].drove, false);
+  // ~60 real-browser cases at 5-9s each on this class of machine; 240s could never hold them.
+  { ...needsBrowser, timeout: 900_000 }, async (t) => {
+    await t.test("an observation with no structured outcome is CONTRACT_INCOMPLETE, whatever the page says", async () => {
+      for (const html of ["<main><h1>Live competitions</h1><p>Competition cards are visible</p></main>",
+        "<main><h1>Nothing here</h1></main>"]) {
+        const result = await run(html,
+          { action: "view live competitions", expect: "competition cards are visible", reads: ["competitions"] });
+        assert.equal(result.pass, false, JSON.stringify(result.journeys));
+        assert.equal(result.journeys[0].steps[0].classification, VERIFICATION_RESULT_CLASS.CONTRACT_INCOMPLETE);
+        assert.equal(result.journeys[0].steps[0].drove, false);
+      }
     });
 
-    await t.test("a selected detail observation is proven from scoped structure", async () => {
+    await t.test("an observation whose contract declares its visible text is judged on that text alone", async () => {
+      const step = { action: "view live competitions", expect: "the polished overview greets the visitor",
+        visibleText: ["Competition cards"] };
+      const shown = await run("<main><h1>Live competitions</h1><p>Competition cards are visible</p></main>", step);
+      assert.equal(shown.pass, true, JSON.stringify(shown.journeys));
+      assert.equal(shown.journeys[0].steps[0].classification, VERIFICATION_RESULT_CLASS.PASS);
+      const missing = await run("<main><h1>Live competitions</h1><p>Nothing listed yet</p></main>", step);
+      assert.equal(missing.journeys[0].steps[0].classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
+        JSON.stringify(missing.journeys));
+    });
+
+    await t.test("a detail observation declared only in prose is CONTRACT_INCOMPLETE, not a structural guess", async () => {
       const result = await run(`<main><section aria-label="Software catalogue"><h2>Software catalogue</h2>
           <article><h3>Atlas Workbench</h3><p>Catalogue summary remains visible.</p></article></section>
         <aside><section aria-label="detail panel"><h2>Atlas Workbench</h2>
@@ -389,13 +405,14 @@ test("retained false negatives and concrete failures classify correctly in a rea
         action: "inspect the selected software", reads: ["selectedSoftwareId"],
         expect: "the detail panel displays a summary, category badge, platform badges, and capabilities list",
       });
-      assert.equal(result.pass, true, JSON.stringify(result.journeys));
-      const evidence = result.journeys[0].steps[0].controlEvidence.detailObservation;
-      assert.equal(evidence.ok, true);
-      assert.equal(evidence.listItemCount, 2);
+      // Structural nouns in prose (summary, badges, list) are no longer a verdict under the
+      // contract policy: nothing structured is declared, so the contract is what is incomplete.
+      assert.equal(result.pass, false, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].classification, VERIFICATION_RESULT_CLASS.CONTRACT_INCOMPLETE);
+      assert.equal(result.journeys[0].steps[0].controlEvidence?.detailObservation, undefined);
     });
 
-    await t.test("global catalogue copy cannot replace a missing detail list", async () => {
+    await t.test("global catalogue copy cannot turn a prose-only detail observation into a pass", async () => {
       const result = await run(`<main><section aria-label="Software catalogue"><h2>Software catalogue</h2>
           <p>Summary, category badge, platform badges, and capabilities list.</p>
           <ul><li>Unscoped catalogue capability</li></ul></section>
@@ -406,10 +423,10 @@ test("retained false negatives and concrete failures classify correctly in a rea
         action: "inspect the selected software", reads: ["selectedSoftwareId"],
         expect: "the detail panel displays a summary, category badge, platform badges, and capabilities list",
       });
+      // Not green, and not charged to the application either: the prose named nothing verifiable.
       assert.equal(result.pass, false, JSON.stringify(result.journeys));
       assert.equal(result.journeys[0].steps[0].classification,
-        VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE, JSON.stringify(result.journeys));
-      assert.equal(result.journeys[0].steps[0].controlEvidence.detailObservation.checks.list, false);
+        VERIFICATION_RESULT_CLASS.CONTRACT_INCOMPLETE, JSON.stringify(result.journeys));
     });
 
     await t.test("a pre-populated accepted input is not rejected for starting correct", async () => {
@@ -584,13 +601,26 @@ test("retained false negatives and concrete failures classify correctly in a rea
     });
 
     await t.test("unchanged wording does not fail a satisfied result", async () => {
+      // The expectation's words were on screen before the click; the action still did something
+      // observable (a saved timestamp). Words prove nothing either way; the surface change does.
+      const action = control("save", "save", ["button"]);
+      const result = await run(`<main><button data-thrallo-action="save"
+          onclick="document.getElementById('when').textContent='just now'">Save</button>
+          <p>Saved confirmation is visible <span id="when"></span></p></main>`,
+      { action: "click save", expect: "saved confirmation is visible" },
+      [{ kind: "action", control: action }]);
+      assert.equal(result.pass, true, JSON.stringify(result.journeys));
+      assert.ok(result.journeys[0].steps[0].advisories?.some((row) => row.code === "action_outcome_undeclared"));
+    });
+
+    await t.test("a button that does nothing is a dead action even when the page already says 'saved'", async () => {
       const action = control("save", "save", ["button"]);
       const result = await run(`<main><button data-thrallo-action="save">Save</button>
           <p>Saved confirmation is visible</p></main>`,
       { action: "click save", expect: "saved confirmation is visible" },
       [{ kind: "action", control: action }]);
-      assert.equal(result.pass, true, JSON.stringify(result.journeys));
-      assert.ok(result.journeys[0].steps[0].advisories?.some((row) => row.code === "text_freshness_not_observed"));
+      assert.equal(result.pass, false, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE);
     });
 
     await t.test("ambiguous machine identity may fall through to one reliable semantic locator", async () => {
@@ -1342,7 +1372,9 @@ test("retained false negatives and concrete failures classify correctly in a rea
             onclick="document.getElementById('results').hidden=true">Catalogue controls</button>
           <section id="results"><h2>Other software</h2><p>No matching catalogue item is available.</p></section></main>`,
       { action: "search and filter the software catalogue", operates: ["searchQuery"],
-        expect: "the results area shows a visible card named Atlas CLI and the result count reflects the active search" }, [
+        expect: "the results area shows a visible card named Atlas CLI and the result count reflects the active search",
+        // The contract states the result it expects; a filled input and a hidden results area do not show it.
+        visibleText: ["Atlas CLI"] }, [
         { kind: "input", valueWritten: "searchQuery", writes: ["journey.searchQuery"], control: search },
         { kind: "action", operationId: "filter-catalogue", reads: ["journey.searchQuery"],
           writes: ["journey.resultItemIds"], control: apply },
@@ -1602,13 +1634,23 @@ test("retained false negatives and concrete failures classify correctly in a rea
 
     await t.test("a real wrong state transition is an app-functional failure", async () => {
       const action = control("complete project", "complete-project", ["button"]);
-      const result = await run(`<main><button data-thrallo-action="complete-project"
+      const html = `<main><button data-thrallo-action="complete-project"
           onclick="document.getElementById('out').textContent='Still editing'">Complete project</button>
-          <p id="out"></p></main>`,
-      { action: "click complete project", expect: "project completion result visible" },
-      [{ kind: "action", control: action }]);
+          <p id="out"></p></main>`;
+      // The contract states the completed state as its visible result; the app moved to the wrong one.
+      const result = await run(html,
+        { action: "click complete project", expect: "project completion result visible", visibleText: ["Completed"] },
+        [{ kind: "action", control: action }]);
       assert.equal(result.journeys[0].classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
         JSON.stringify(result.journeys));
+      assert.match(result.journeys[0].steps[0].detail, /declared visible text missing: "Completed"/);
+      // Without any declared result the contract cannot tell a wrong state from a right one: the
+      // action fired and changed the surface, which passes, and the contract gap is recorded.
+      const undeclared = await run(html,
+        { action: "click complete project", expect: "project completion result visible" },
+        [{ kind: "action", control: action }]);
+      assert.equal(undeclared.journeys[0].classification, VERIFICATION_RESULT_CLASS.PASS, JSON.stringify(undeclared.journeys));
+      assert.ok(undeclared.journeys[0].steps[0].advisories.some((row) => row.code === "action_outcome_undeclared"));
     });
 
     await t.test("a fatal ReferenceError that breaks the required action is fatal-runtime", async () => {
@@ -1668,7 +1710,7 @@ test("retained false negatives and concrete failures classify correctly in a rea
     await t.test("non-fatal console and network noise is advisory", async () => {
       const result = await run(`<main><h1>Dashboard result visible</h1>
         <script>console.warn('layout hint'); console.error('optional analytics failed')</script></main>`,
-      { action: "view dashboard", expect: "dashboard result visible", reads: ["dashboard"] });
+      { action: "view dashboard", expect: "dashboard result visible", visibleText: ["Dashboard result visible"] });
       assert.equal(result.pass, true, JSON.stringify(result));
       assert.equal(result.fatalErrors.length, 0);
       assert.ok(result.advisories.some((row) => /console/.test(row.code)));

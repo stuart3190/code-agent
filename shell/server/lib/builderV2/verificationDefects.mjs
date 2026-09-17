@@ -360,11 +360,16 @@ export function verificationDefects({
     const resultClass = step?.classification || null;
     const platformInconclusive = minimal
       && resultClass === VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE;
+    // A step whose contract states no structured outcome is a contract gap: not repairable, not
+    // the platform's fault, and never a behaviour defect of the application.
+    const contractIncomplete = minimal
+      && resultClass === VERIFICATION_RESULT_CLASS.CONTRACT_INCOMPLETE;
     const appSelectionValueMissing = platformInconclusive && selectionFixtureIsUnexposed(step, status);
     const repairableResult = !minimal || isAppRepairableVerificationClass(resultClass)
       || appSelectionValueMissing;
     const defectClass = resultClass === VERIFICATION_RESULT_CLASS.PERSISTENCE_FAILURE
       ? DEFECT_CLASS.DURABILITY
+      : contractIncomplete ? DEFECT_CLASS.CONTRACT
       : platformInconclusive && !appSelectionValueMissing ? DEFECT_CLASS.PLATFORM
         : classifyStep({ status, drove: step?.drove, kinds });
     const control = controlIdentity(manifest, flows);
@@ -395,7 +400,7 @@ export function verificationDefects({
         : defectClass === DEFECT_CLASS.DURABILITY ? "durable_outcome_missing"
         : "contracted_outcome_missing",
       defectClass: proven ? DEFECT_CLASS.INTERACTION : defectClass,
-      owner: (platformInconclusive && !appSelectionValueMissing) || inconclusiveAddressing ? DEFECT_OWNER.PLATFORM
+      owner: (platformInconclusive && !appSelectionValueMissing) || contractIncomplete || inconclusiveAddressing ? DEFECT_OWNER.PLATFORM
         : (ambiguous ? DEFECT_OWNER.UNKNOWN : DEFECT_OWNER.APP),
       uncertain: ambiguous || undefined,
       tier: (platformInconclusive && !appSelectionValueMissing) || inconclusiveAddressing || !repairableResult ? REPAIR_TIER.NONE

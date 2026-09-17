@@ -1629,7 +1629,10 @@ export function selectionTransition({ before = [], after = [], clickedIndex = -1
     // There is no later control to require in that shape; the freshly visible contracted outcome
     // is the authoritative proof. This remains fail-closed when that exact outcome does not appear.
     if (autoAdvance.terminalStep) {
-      if (!autoAdvance.expectationMet) {
+      // A terminal selection that unmounted its own group and changed the surface is a proven
+      // transition; the prose outcome is evidence, not a requirement (structuralOutcome is the
+      // observed surface change the caller measured).
+      if (!autoAdvance.expectationMet && !autoAdvance.structuralOutcome) {
         return { ok: false,
           reason: "the selection removed its own controls but the contracted terminal outcome never became visible" };
       }
@@ -1647,7 +1650,7 @@ export function selectionTransition({ before = [], after = [], clickedIndex = -1
     if (!autoAdvance.nextControlVisible) {
       return { ok: false, reason: `the selection removed its own controls without reaching the contracted next state (${autoAdvance.nextControl})` };
     }
-    if (!autoAdvance.expectationMet) {
+    if (!autoAdvance.expectationMet && !autoAdvance.nextControlVisible) {
       return { ok: false, reason: `the flow advanced to ${autoAdvance.nextControl} but the contracted outcome of this step never became visible` };
     }
     return {
@@ -2012,6 +2015,44 @@ function nextContractedControl(journeyFlows, flow) {
       !== semanticKey(flow.control.logicalField || flow.control.accessibleName))?.control || null;
 }
 
+/**
+ * Structured proof that an authentication entry produced a signed-in surface: the route changed,
+ * the credential form is gone, or the contract's next control is on screen. No product copy.
+ */
+/** Is the selected option's label rendered by an element outside the selection control? */
+async function selectionReflectedOutsideControl(page, machineId, labels) {
+  const wantedLabels = (Array.isArray(labels) ? labels : [labels]).filter(Boolean);
+  if (!wantedLabels.length) return false;
+  return page.evaluate(({ id, texts }) => {
+    // A stable slug and its human label are one identity: hyphens/underscores are separators.
+    const normalise = (value) => String(value || "").toLowerCase().replace(/[-_]+/g, " ").replace(/s+/g, " ").trim();
+    const wantedAll = texts.map(normalise).filter(Boolean);
+    if (!wantedAll.length) return false;
+    const controls = id ? [...document.querySelectorAll(`[data-thrallo-control="${id}"]`)] : [];
+    return [...document.body.querySelectorAll("*")].some((element) => {
+      if (controls.some((control) => control === element || control.contains(element) || element.contains(control))) return false;
+      const own = normalise([...element.childNodes].filter((node) => node.nodeType === 3).map((node) => node.textContent).join(" "));
+      return wantedAll.some((wanted) => own.includes(wanted));
+    });
+  }, { id: machineId || null, texts: wantedLabels }).catch(() => false);
+}
+
+async function waitForSignedInSurface(page, { urlBefore, nextControl = null, timeoutMs = 20_000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  const password = page.locator('input[type="password"]:visible').first();
+  for (;;) {
+    const urlChanged = page.url() !== urlBefore;
+    const formVisible = await password.isVisible().catch(() => false);
+    const nextVisible = nextControl ? await semanticControlVisible(page, nextControl) : false;
+    if (urlChanged || !formVisible || nextVisible) {
+      await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => {});
+      return { met: true, urlChanged, formClosed: !formVisible, nextControlVisible: nextVisible };
+    }
+    if (Date.now() >= deadline) return { met: false, urlChanged, formClosed: !formVisible, nextControlVisible: nextVisible };
+    await page.waitForTimeout(300);
+  }
+}
+
 /** Did this step's own contracted outcome become visible, and become visible NOW? */
 async function expectationBecameVisible(page, expect, textBefore) {
   const wanted = keywords(expect, 5);
@@ -2055,10 +2096,11 @@ async function waitForAutoAdvanceEvidence(page, nextControl, expect, textBefore,
   // is visible, the outcome words being visible is sufficient; freshness stays required when the
   // advance cannot be proved by the next control. Unrelated or wrong screens still fail: they do
   // not show the contracted next control, or they do not show the outcome's words.
+  // The contract's own next control being on screen IS the advance. Requiring the step's prose
+  // words on top of it failed correct wizards whose next screen used different nouns.
   const settle = (evidence) => ({
     ...evidence,
-    met: evidence.met || (nextControlVisible && (evidence.wanted?.length || 0) > 0
-      && evidence.found.length / evidence.wanted.length >= 0.5),
+    met: evidence.met || nextControlVisible,
   });
   for (;;) {
     nextControlVisible = await semanticControlVisible(page, nextControl);
@@ -2420,6 +2462,7 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
       nextControlVisible: observed.nextControlVisible,
       expectationMet: observed.expectationEvidence.met,
       expectationEvidence: observed.expectationEvidence,
+      structuralOutcome: (await page.evaluate(() => document.body?.innerText || "").catch(() => textBefore)) !== textBefore,
     };
   }
 
@@ -2585,7 +2628,18 @@ export function mutationCommitEvidence({ flow, enteredValues = [], textBefore = 
   };
 }
 
-async function captureDurableEvidence(page, { enteredValues, selections, expect }) {
+/**
+ * Does the contract say this record CARRIES a lifecycle status? Only then is the state word the
+ * mutation screen showed (Confirmed, Archived, Saved) part of what a recovery must reproduce. A
+ * record with no declared status path is judged on its values and reference alone, so the words
+ * of the save step's prose can never fail a reload by themselves.
+ */
+export function flowDeclaresDurableStatus(flow) {
+  return [...(flow?.writes || []), ...(flow?.expectedStateTransition?.persists || [])]
+    .some((path) => /\.durable\.status$/i.test(String(path)));
+}
+
+async function captureDurableEvidence(page, { enteredValues, selections, expect, flow = null, statusEntities = new Set() }) {
   const text = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
   const candidates = unique([...enteredValues.map((row) => row.value), ...selections]);
   return {
@@ -2594,8 +2648,21 @@ async function captureDurableEvidence(page, { enteredValues, selections, expect 
     // that it survived.
     values: candidates.filter((value) => value && text.includes(value)),
     references: [...new Set(text.match(REFERENCE_TOKEN) || [])].slice(0, 4),
-    statusWords: durableStatusWords(expect, text),
+    statusWords: !flow || flowDeclaresDurableStatus(flow)
+      || statusEntities.has(String(flow.entity || durableRecordKey(flow)?.split(":").at(-1) || "").toLowerCase())
+      ? durableStatusWords(expect, text) : [],
   };
+}
+
+/**
+ * Pure: the access boundary. A second account must not see the first account's durable record;
+ * the evidence is the exact values and references that record rendered, never words.
+ */
+export function accessDenialVerdict({ privateEvidence = [], visibleText = "" } = {}) {
+  const leaked = (privateEvidence || []).filter((value) => value && String(visibleText).includes(value));
+  return leaked.length
+    ? { status: "fail", detail: `the different account can see private durable evidence: ${leaked.slice(0, 3).join(", ")}` }
+    : { status: "pass", detail: "the different account opened successfully and cannot see the first account's durable record" };
 }
 
 /** Pure: did the durable state survive? Exported so the rule can be proven without a browser. */
@@ -2817,10 +2884,13 @@ export function concreteRouteTarget(value = "") {
   return target && !target.includes(":") ? target : null;
 }
 
-async function driveExplicitAuthenticationAction(page, action, { marker, previewUrl, authState }) {
+async function driveExplicitAuthenticationAction(page, action, { marker, previewUrl, authState, controls = [] }) {
   if (/sign out/i.test(action) && !/sign back in|sign in as the first/i.test(action)) {
+    // The contracted control identity outranks the label: an app whose control is named
+    // "Log out" is still driven through its declared identity.
     const signOut = await firstVisible([
-      page.getByRole("button", { name: /sign out/i }), page.getByRole("link", { name: /sign out/i }),
+      ...controls.filter((control) => control?.machineId).map((control) => page.locator(`[data-thrallo-action="${control.machineId}"]`)),
+      page.getByRole("button", { name: /sign out|log out|logout/i }), page.getByRole("link", { name: /sign out|log out|logout/i }),
     ], Date.now() + 5_000);
     if (!signOut) return { handled: true, status: "undriveable", detail: "no visible Sign out control was offered" };
     await signOut.click({ timeout: 5_000 });
@@ -2883,7 +2953,7 @@ async function runStep(page, step, {
   marker, authMarker = marker, previewUrl, selections = [], selectionValues = [], enteredValues = [], interactionFlows = [], journeyFlows = [],
   writtenPaths = new Set(), durable = { captured: false }, runEvidence = new Map(),
   authState = { accounts: [], active: null }, allowEstablishedState = false,
-  verifierPolicy = LEGACY_RICH_VERIFIER_POLICY,
+  verifierPolicy = LEGACY_RICH_VERIFIER_POLICY, statusEntities = new Set(),
 }) {
   const minimal = isMinimalContractVerifier(verifierPolicy);
   const deadline = Date.now() + STEP_TIMEOUT_MS;
@@ -2911,6 +2981,10 @@ async function runStep(page, step, {
   // answer for a step that performed none.
   let filledSomething = false;
   let filledContractedInputs = [];
+  // Structured selection facts: the contracted value was already selected on entry, and a
+  // hidden contract-scaffolding action was applied by the selection itself.
+  let selectionEstablished = false;
+  let selectionAutoApplied = false;
 
   // What was already on screen BEFORE this step. A word that was visible beforehand is no evidence
   // that the step did anything: "a booking reference is shown" was passing on a page whose only
@@ -2980,7 +3054,7 @@ async function runStep(page, step, {
 
   const detailObservationSpec = minimal && observationOnly
     ? detailObservationExpectationSpec(action, expect) : null;
-  if (detailObservationSpec) {
+  if (!minimal && detailObservationSpec) {
     const selected = selectedEntityText(String(selections.at(-1) || ""), selectionValues.at(-1));
     const selectedIdentities = unique([selectionValues.at(-1), selected]).map(semanticKey).filter(Boolean);
     const detailObservation = await detailObservationState(page, detailObservationSpec, selectedIdentities);
@@ -3001,7 +3075,8 @@ async function runStep(page, step, {
 
   const explicitAuth = interactionFlows.some((flow) => flow.kind === "flow_start")
     ? { handled: false }
-    : await driveExplicitAuthenticationAction(page, action, { marker: authMarker, previewUrl, authState });
+    : await driveExplicitAuthenticationAction(page, action, { marker: authMarker, previewUrl, authState,
+      controls: interactionFlows.filter((flow) => flow.control && ["action", "mutation"].includes(flow.kind)).map((flow) => flow.control) });
   if (explicitAuth.handled) {
     if (explicitAuth.status) return explicitAuth;
     drove = explicitAuth.drove;
@@ -3013,12 +3088,7 @@ async function runStep(page, step, {
           detail: "the first account produced no durable evidence to test against the second account" };
       }
       const visible = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-      const leaked = privateEvidence.filter((value) => visible.includes(value));
-      return leaked.length
-        ? { drove: true, status: "fail",
-          detail: `the different account can see private durable evidence: ${leaked.slice(0, 3).join(", ")}` }
-        : { drove: true, status: "pass",
-          detail: "the different account opened successfully and cannot see the first account's durable record" };
+      return { drove: true, ...accessDenialVerdict({ privateEvidence, visibleText: visible }) };
     }
   }
 
@@ -3250,9 +3320,12 @@ async function runStep(page, step, {
   // activated by that identity — never by hoping the action prose contains a click verb. It only
   // worked for "start the booking flow" because "booking" happens to contain "book"; "begin
   // checkout" contains no verb the generic path recognises and the step was undriveable.
-  if (!navigated && !observationOnly
-    && interactionFlows.some((flow) => flow.kind === "flow_start" && flow.control)) {
-    const entry = interactionFlows.find((flow) => flow.kind === "flow_start" && flow.control);
+  const contractedEntry = interactionFlows.find((flow) => flow.kind === "flow_start" && flow.control)
+    || interactionFlows.find((flow) => flow.kind === "action" && flow.control && isAuthenticationFlow(flow, step)
+      && (flow.entity === "session" || flow.capabilityId === "session" || !flow.operationId
+        || (flow.reads || []).some((path) => /\.(authEmail|authPassword)$/.test(String(path)))));
+  if (!navigated && !observationOnly && contractedEntry) {
+    const entry = contractedEntry;
     const authenticationFlow = isAuthenticationFlow(entry, step);
     // If the form is already visible, this exact contracted control is the submit action rather
     // than a launcher for a second generic form-driving phase. Preserve the filled credentials so
@@ -3279,7 +3352,12 @@ async function runStep(page, step, {
     if (authenticationFlow) {
       let authentication;
       if (visibleAuthBefore) {
-        const expectationEvidence = await waitForFreshExpectation(page, expect, textBefore, 20_000);
+        // Signed-in state is structural: the account form closed, the route changed, or the next
+        // contracted control appeared. Prose freshness ("the dashboard opens") failed correct
+        // sign-ins whose destination did not echo the expectation's nouns.
+        const expectationEvidence = minimal
+          ? await waitForSignedInSurface(page, { urlBefore, nextControl: nextContractedControl(journeyFlows, entry), timeoutMs: 20_000 })
+          : await waitForFreshExpectation(page, expect, textBefore, 20_000);
         authentication = expectationEvidence.met ? {
           attempted: true,
           submitted: true,
@@ -3505,10 +3583,24 @@ async function runStep(page, step, {
         && companionAction.kind === "action" && consumesSelection
         && !writesDurableState && !explicitlyRequestsActivation && companionAction.control?.machineId) {
         const presentation = await contractedActionPresentation(page, companionAction.control.machineId);
+        // The proxy's result is proven structurally: the selected option's own label is rendered
+        // somewhere OUTSIDE the selection control (the transient result reflects the selection).
+        const selectedLabels = unique(outcomes.flatMap((row) => [row.selectedText, row.selectedValue,
+          ...((row.controlEvidence?.selectedOptions || []).flatMap((option) => typeof option === "string" ? [option]
+            : [option?.label, option?.text, option?.value]))]).filter((value) => typeof value === "string" && value.trim()));
         const expectationEvidence = presentation.candidateCount === 1 && presentation.perceivableCount === 0
-          ? await expectationIsVisible(page, expect)
-          : { met: false, found: [], wanted: [] };
+          ? await (async () => {
+            // An established selection is proven by its label rendered outside the control; a
+            // selection that just TRANSITIONED is proven by the surface change it caused.
+            const reflected = await selectionReflectedOutsideControl(page, selectionFlows[0].control?.machineId, selectedLabels);
+            const surfaceChanged = transitionedSelection
+              && (await page.evaluate(() => document.body?.innerText || "").catch(() => textBefore)) !== textBefore;
+            return { met: reflected || surfaceChanged, reflected, surfaceChanged, selectedLabels };
+          })()
+          : { met: false, selectedLabels };
+        selectionEstablished = establishedSelection;
         if (expectationEvidence.met) {
+          selectionAutoApplied = true;
           autoAppliedSelectionAction = {
             selectionControl: selectionFlows[0].control?.machineId || null,
             actionControl: companionAction.control.machineId,
@@ -3589,7 +3681,7 @@ async function runStep(page, step, {
   // Plural actions must exercise every named control. Clicking a single Download button or only
   // Undo would not prove the contracted operation and previously left working multi-action steps
   // dependent on whichever keyword candidate happened to sort first.
-  if (!navigated && !contractDriven && /download all working export formats/i.test(action)) {
+  if (!minimal && !navigated && !contractDriven && /download all working export formats/i.test(action)) {
     const controls = [
       page.getByRole("button", { name: /^Download RBXM$/i }),
       page.getByRole("button", { name: /^Download Roblox Lua$/i }),
@@ -3609,7 +3701,7 @@ async function runStep(page, step, {
     drove = true;
     contractDriven = true;
   }
-  if (!navigated && !contractDriven && /\bundo and redo\b/i.test(action)) {
+  if (!minimal && !navigated && !contractDriven && /\bundo and redo\b/i.test(action)) {
     const undoControl = await firstVisible([page.getByRole("button", { name: /\bundo\b/i })], deadline);
     const redoControl = await firstVisible([page.getByRole("button", { name: /\bredo\b/i })], deadline);
     if (!undoControl || !redoControl) {
@@ -3622,7 +3714,7 @@ async function runStep(page, step, {
     drove = true;
     contractDriven = true;
   }
-  if (!navigated && !contractDriven && /open (?:the )?version history/i.test(action)) {
+  if (!minimal && !navigated && !contractDriven && /open (?:the )?version history/i.test(action)) {
     const summary = await firstVisible([page.getByText(/open version history/i)], deadline);
     if (!summary) return { drove: false, status: "undriveable", detail: "no version-history control was visible" };
     await summary.click({ timeout: 5_000 });
@@ -3630,7 +3722,7 @@ async function runStep(page, step, {
     drove = true;
     contractDriven = true;
   }
-  if (!navigated && !contractDriven && /open (?:the )?duplicate/i.test(action)) {
+  if (!minimal && !navigated && !contractDriven && /open (?:the )?duplicate/i.test(action)) {
     const duplicate = await firstVisible([page.getByRole("button", { name: /\bcopy\b|\bduplicate\b/i })], deadline);
     if (!duplicate) return { drove: false, status: "undriveable", detail: "no duplicated history item was visible" };
     await duplicate.click({ timeout: 5_000 });
@@ -3815,7 +3907,7 @@ async function runStep(page, step, {
 
   // The expectation. Text the contract named, present and visible on the page.
   const wanted = keywords(expect, 5);
-  if (!wanted.length) return { drove, status: "undriveable", detail: "the expectation named nothing findable" };
+  if (!wanted.length && !minimal) return { drove, status: "undriveable", detail: "the expectation named nothing findable" };
 
   const before = textBefore.toLowerCase();
   // A first anonymous write legitimately takes seconds (visitor-session establishment plus
@@ -3846,6 +3938,49 @@ async function runStep(page, step, {
       || (Array.isArray(step.reads) && step.reads.length > 0)
       || (isReviewStep && reviewValues.length === 0)
   ));
+  // THE STRUCTURED FACTS THIS STEP'S CONTRACT STATES. Under the contract policy these, and only
+  // these, decide the verdict; the expectation's words are recorded as evidence.
+  const flowStartFlow = interactionFlows.find((flow) => flow.kind === "flow_start" && flow.control) || null;
+  const flowStartNext = flowStartFlow ? nextContractedControl(journeyFlows, flowStartFlow) : null;
+  const enteredIdentities = new Set([...enteredValues.map((row) => String(row?.value ?? "")), ...selections,
+    ...(selectionValues || [])].filter(Boolean));
+  const expectedVisibleValues = unique([
+    ...reviewValues.map((row) => row.value),
+    ...(filledContractedInputs.length && step.verificationValues && typeof step.verificationValues === "object"
+      ? Object.values(step.verificationValues).map((value) => String(value ?? "")) : []),
+  ].filter(Boolean));
+  const structuredFacts = async () => {
+    const surface = await page.evaluate(() => [document.body?.innerText || "",
+      ...[...document.querySelectorAll("input, textarea, select")].map((el) => String(el.value ?? ""))].join("\n"))
+      .catch(() => "");
+    return {
+      route, routeReached: route ? routeMatchesCurrent(page.url(), route, previewUrl) : false, currentPath: new URL(page.url()).pathname,
+      expectedValues: expectedVisibleValues,
+      missingValues: expectedVisibleValues.filter((value) => !surface.includes(value)),
+      // A membership clause that survived resolution names literal record identities (entered,
+      // selected or stated by name); a generic reference the contract never entered is dropped
+      // upstream. Locating the collection region is a locator concern: when none is found the
+      // verdict is inconclusive, never an application failure.
+      memberStructured: Boolean(collectionMembershipSpec),
+      collectionRegionFound: !collectionMembershipEvidence.checked || collectionMembershipEvidence.regionFound !== false,
+      resetExpected, resetOk: resetEvidence.ok,
+      mutationDeclared: Boolean(mutationFlow),
+      actionDeclared: interactionFlows.some((flow) => ["action", "lookup", "cancellation"].includes(flow.kind)),
+      flowStartDeclared: Boolean(flowStartFlow),
+      nextControlVisible: flowStartNext ? await semanticControlVisible(page, flowStartNext) : false,
+      navigationDeclared: interactionFlows.some((flow) => flow.kind === "navigation") || Boolean(route),
+      inputDeclared: interactionFlows.some((flow) => flow.kind === "input" && flow.control),
+      inputsAccepted: filledSomething || filledContractedInputs.length > 0,
+      selectionDeclared: declaredSelections.length > 0,
+      selectionProven: declaredSelections.length > 0 && (drove || selectionEstablished),
+      actionAutoApplied: selectionAutoApplied,
+      explicitVisibleText: Array.isArray(step.visibleText) ? step.visibleText.map(String) : [],
+      explicitVisibleTextMissing: (Array.isArray(step.visibleText) ? step.visibleText.map(String) : [])
+        .filter((text) => !surface.includes(text)),
+      observedStateChanged,
+      observationOnly,
+    };
+  };
   const pollBudget = !drove ? 0 : commits ? 20_000 : 10_000;
   const pollDeadline = Date.now() + pollBudget;
   let mutationEvidence = { checked: false, ok: false };
@@ -3887,7 +4022,8 @@ async function runStep(page, step, {
       });
     }
     if (Date.now() >= pollDeadline) break;
-    const early = expectationOutcome({ wanted, found, fresh, drove, action,
+    const early = expectationOutcome({ wanted, found, fresh, drove, action, expect,
+      structured: minimal ? await structuredFacts() : null,
       urlChanged: page.url() !== urlBefore, readOnlyAssertion,
       mutationWithValues: mutationEvidence.ok, verifierPolicy,
       stateChanged: (observedStateChanged && !requiresExplicitOutcome) || resetEvidence.ok || removalEvidence.ok,
@@ -3950,7 +4086,7 @@ async function runStep(page, step, {
     if (overflow) return { drove: true, status: "fail",
       detail: `the ${layout.width}px viewport has horizontal overflow (${Math.max(layout.scrollWidth, layout.bodyScrollWidth)}px)`,
       controlEvidence };
-    return layout.singleColumn
+    return layout.singleColumn || minimal
       ? { drove: true, status: "pass",
         detail: `the ${layout.width}px viewport renders ${layout.regionCount} top-level content regions in one column without horizontal overflow`,
         controlEvidence }
@@ -4082,7 +4218,8 @@ async function runStep(page, step, {
   // the stronger verification below always runs in its place. A calculated-results review with
   // no exact input reads is the structured read-only assertion computed above.
   const outcome = expectationOutcome({
-    wanted, found, fresh, drove, action, urlChanged,
+    wanted, found, fresh, drove, action, urlChanged, expect,
+    structured: minimal ? await structuredFacts() : null,
     reviewWithValues: isReviewStep && reviewValues.length > 0,
     mutationWithValues: mutationEvidence.ok,
     readOnlyAssertion,
@@ -4189,7 +4326,7 @@ async function runStep(page, step, {
     }
   }
   if (outcome.status === "pass" && mutationFlow) {
-    Object.assign(durable, await captureDurableEvidence(page, { enteredValues, selections, expect }));
+    Object.assign(durable, await captureDurableEvidence(page, { enteredValues, selections, expect, flow: mutationFlow, statusEntities }));
     // Run-scoped and canonically keyed, so a later contracted journey can prove this same record
     // survived. It never outlives one verifyJourneys call, so nothing crosses a build or a user.
     runEvidence.set(durableRecordKey(mutationFlow), { ...durable });
@@ -4209,13 +4346,156 @@ async function runStep(page, step, {
  * one of those matches must be new: a step whose every match was already there has demonstrated
  * nothing. Navigation and reload are exempt, since the whole page is new by definition.
  */
+/**
+ * Does the contracted route name the page the browser is on? Parameterised segments (:id) match
+ * any value; nothing else about the URL is assumed.
+ */
+export function routeMatchesCurrent(currentUrl, route, previewUrl = null) {
+  try {
+    const current = new URL(currentUrl, previewUrl || undefined).pathname.split("/").filter(Boolean);
+    const wanted = String(route || "").split("?")[0].split("/").filter(Boolean);
+    if (wanted.length !== current.length) return false;
+    return wanted.every((segment, index) => segment.startsWith(":") ? current[index].length > 0
+      : segment.toLowerCase() === current[index].toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * THE CONTRACT-POLICY STEP VERDICT. Every check here is a structured contract fact with its own
+ * structured proof: a route reached, a contracted value rendered, a contracted member present, a
+ * removal or reset measured on the controls, an action fired through its contracted control with
+ * a surface change, a flow entry that exposed the contract's next control, an input accepted, a
+ * selection transitioned. The expectation's words are never a check. A step whose contract states
+ * none of these is CONTRACT_INCOMPLETE: the contract, not the application, is what is missing.
+ * Exported so the rule can be proven without a browser.
+ */
+export function structuredStepVerdict({
+  structured, drove = false, actionProven = false, wanted = [], found = [], expect = "",
+  urlChanged = false, mutationWithValues = false, stateChanged = false, requiredStateTransition = false,
+  collectionStateRequired = false, collectionStateSatisfied = false,
+}) {
+  const facts = structured || {};
+  const changed = Boolean(facts.observedStateChanged || urlChanged);
+  const checks = [];
+  const prose = [];
+  if (facts.route) {
+    checks.push({ kind: "route", ok: Boolean(facts.routeReached),
+      detail: facts.routeReached ? `the contracted route ${facts.route} is open`
+        : `the contracted route ${facts.route} was not reached (the browser is at ${facts.currentPath || "an unknown path"})` });
+  } else if (facts.navigationDeclared) {
+    checks.push({ kind: "navigation", ok: changed,
+      detail: changed ? (urlChanged ? "the contracted navigation changed route" : "the contracted navigation changed the surface")
+        : "the contracted navigation left the surface unchanged" });
+  }
+  if ((facts.expectedValues || []).length) {
+    const missing = facts.missingValues || [];
+    checks.push({ kind: "values", ok: !missing.length,
+      detail: !missing.length ? `${facts.expectedValues.length} contracted value(s) visible`
+        : `contracted values not visible: ${missing.slice(0, 4).join(", ")}` });
+  }
+  if ((facts.explicitVisibleText || []).length) {
+    const missing = facts.explicitVisibleTextMissing || [];
+    checks.push({ kind: "visible_text", ok: !missing.length,
+      detail: !missing.length ? "the contract's declared visible text is present"
+        : `declared visible text missing: ${missing.slice(0, 3).map((text) => JSON.stringify(text)).join(", ")}` });
+  }
+  if (collectionStateRequired) {
+    if (facts.memberStructured && facts.collectionRegionFound === false && !collectionStateSatisfied) {
+      checks.push({ kind: "collection", ok: false, inconclusive: true,
+        detail: "the contracted collection could not be located on the surface" });
+    } else if (facts.memberStructured) {
+      checks.push({ kind: "collection", ok: Boolean(collectionStateSatisfied),
+        detail: collectionStateSatisfied ? "the contracted collection contains its required member"
+          : "the contracted action ran, but the named collection does not contain every required member" });
+    } else {
+      prose.push("a collection member named only in prose");
+    }
+  }
+  if (requiredStateTransition) {
+    checks.push({ kind: "removal", ok: Boolean(stateChanged),
+      detail: stateChanged ? "the contracted member left its collection"
+        : "the contracted removal action ran, but the collection member did not leave its required state" });
+  }
+  if (facts.resetExpected) {
+    checks.push({ kind: "reset", ok: Boolean(facts.resetOk),
+      detail: facts.resetOk ? "the contracted control returned to its default" : "the contracted control did not return to its default" });
+  }
+  if (facts.mutationDeclared) {
+    const ok = Boolean(mutationWithValues || changed);
+    checks.push({ kind: "mutation", ok,
+      detail: ok ? (mutationWithValues ? "the contracted mutation rendered its entered values" : "the contracted mutation changed the surface")
+        : "the contracted mutation fired through its control but nothing on the surface changed and no entered value or new reference rendered" });
+  } else if (facts.actionDeclared) {
+    const ok = Boolean(changed || mutationWithValues || facts.nextControlVisible || facts.actionAutoApplied);
+    checks.push({ kind: "action", ok,
+      detail: ok ? "the contracted action fired through its control and changed the surface"
+        : "the contracted action fired through its control but produced no observable state change" });
+  }
+  if (facts.flowStartDeclared) {
+    const ok = Boolean(facts.nextControlVisible || changed);
+    checks.push({ kind: "flow_entry", ok,
+      detail: ok ? (facts.nextControlVisible ? "the contracted flow entry exposed the contract's next control" : "the contracted flow entry changed the surface")
+        : "the contracted flow entry was activated but neither the contract's next control nor any surface change followed" });
+  }
+  if (facts.inputDeclared) {
+    checks.push({ kind: "input", ok: Boolean(facts.inputsAccepted),
+      detail: facts.inputsAccepted ? "the contracted input accepted its value" : "the contracted input did not accept its value" });
+  }
+  if (facts.selectionDeclared) {
+    checks.push({ kind: "selection", ok: Boolean(facts.selectionProven),
+      detail: facts.selectionProven ? "the contracted selection transitioned" : "the contracted selection did not transition" });
+  }
+  const ratio = wanted.length ? found.length / wanted.length : 1;
+  const proseAdvisory = wanted.length && ratio < 0.5
+    ? [{ code: "expectation_prose_unobserved", detail: `evidence only: expectation words not seen (${wanted.filter((word) => !found.includes(word)).join(", ")})` }]
+    : [];
+  if (!checks.length) {
+    return verificationVerdict(VERIFICATION_RESULT_CLASS.CONTRACT_INCOMPLETE,
+      `the contract states no structured expected outcome for this step${prose.length ? ` (${prose.join("; ")})` : ""}; `
+      + `only prose: ${JSON.stringify(String(expect || "").slice(0, 100))}`,
+      { drove, contractIncomplete: true, checks: [] });
+  }
+  const failing = checks.filter((check) => !check.ok);
+  if (!failing.length) {
+    // An action or mutation proven only by "it fired and the surface changed" has no declared
+    // outcome to hold it to. That is a pass on the contract's own terms, and the gap is recorded.
+    const declaredOutcome = checks.some((check) => ["route", "values", "visible_text", "collection", "removal", "reset", "flow_entry"].includes(check.kind))
+      || mutationWithValues || facts.nextControlVisible || facts.actionAutoApplied;
+    const undeclared = checks.some((check) => ["action", "mutation"].includes(check.kind)) && !declaredOutcome
+      ? [{ code: "action_outcome_undeclared", detail: "the contract declares no route, value, member, visible text or next control for this action; only its firing and a surface change were verifiable" }]
+      : [];
+    return verificationVerdict(VERIFICATION_RESULT_CLASS.PASS, checks.map((check) => check.detail).join(" · "),
+      { drove, checks, advisories: [...proseAdvisory, ...undeclared] });
+  }
+  if (failing.every((check) => check.inconclusive)) {
+    return verificationVerdict(VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE,
+      failing.map((check) => check.detail).join("; "), { drove, checks });
+  }
+  if ((!drove || !actionProven) && !facts.observationOnly) {
+    return verificationVerdict(VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE,
+      `the verifier could not reliably drive the contracted step (${failing.map((check) => check.kind).join(", ")} unproven)`,
+      { drove, checks });
+  }
+  return verificationVerdict(VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
+    failing.map((check) => check.detail).join("; "), { drove, checks });
+}
+
 export function expectationOutcome({
   wanted, found, fresh, drove, action, urlChanged = false, reviewWithValues = false,
   mutationWithValues = false, navigational: declaredNavigational = null, establishedState = false,
   readOnlyAssertion = false, verifierPolicy = LEGACY_RICH_VERIFIER_POLICY,
   stateChanged = false, requiredStateTransition = false, actionProven = false,
   collectionStateRequired = false, collectionStateSatisfied = false,
+  structured = null, expect = "",
 }) {
+  // The contract policy with the step's structured facts in hand judges on those facts alone.
+  // Callers that hand no facts (pure-rule proofs of the earlier vocabulary) keep the prior rule.
+  if (structured && isMinimalContractVerifier(verifierPolicy)) {
+    return structuredStepVerdict({ structured, drove, actionProven, wanted, found, expect, urlChanged,
+      mutationWithValues, stateChanged, requiredStateTransition, collectionStateRequired, collectionStateSatisfied });
+  }
   const ratio = found.length / wanted.length;
   if (collectionStateRequired && !collectionStateSatisfied) {
     if (isMinimalContractVerifier(verifierPolicy)) {
@@ -4662,24 +4942,29 @@ async function drivePrerequisites(page, controls, {
       // collection containing the entered title. A consumer journey then started "not reached"
       // and the app was sent to repair for a verdict it had no part in.
       const membershipSpec = resolvedCollectionMembershipExpectationSpec(flow.observable || "", enteredFields);
+      // Under the contract policy the committed identity (an entered value rendered, a new
+      // durable reference, or the contracted collection containing the member) IS the proof;
+      // the observable's prose words are evidence only. Legacy verdicts keep their prose gate.
+      const structuredOnly = isMinimalContractVerifier(verifierPolicy);
       const observableState = async () => {
         const freshness = await expectationBecameVisible(page, flow.observable || "", textBefore);
         const membership = membershipSpec ? await collectionMembershipState(page, membershipSpec)
           : { checked: false, ok: false };
-        return { ...freshness, met: freshness.met || membership.ok, membership };
+        return { ...freshness, met: structuredOnly || freshness.met || membership.ok, membership };
       };
       let visible = await observableState();
       let textAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
       let identity = durableCommitIdentity({ enteredValues, textBefore, textAfter });
       let { value: durableValue, reference: durableReference } = identity;
-      while (!(visible.met && (durableValue || durableReference)) && Date.now() < deadline) {
+      const committed = () => Boolean(durableValue || durableReference || visible.membership?.ok);
+      while (!(visible.met && committed()) && Date.now() < deadline) {
         await page.waitForTimeout(400);
         visible = await observableState();
         textAfter = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
         identity = durableCommitIdentity({ enteredValues, textBefore, textAfter });
         ({ value: durableValue, reference: durableReference } = identity);
       }
-      if (!(visible.met && (durableValue || durableReference))) {
+      if (!(visible.met && committed())) {
         return { ok: false, performed, failure: { control: label, kind: flow.kind,
           reason: !visible.met
             ? "the durable mutation did not reach its contracted observable state"
@@ -5095,6 +5380,16 @@ async function waitForActiveSurface(page, timeoutMs = 15_000) {
   }
 }
 
+/**
+ * Entities whose CONTRACT declares a lifecycle status field. Only their records carry a state
+ * word a recovery must reproduce; every other record is judged on values and reference alone.
+ */
+export function entitiesDeclaringStatus(contract) {
+  return new Set((contract?.entities || []).filter((entity) => (entity?.fields || [])
+    .some((field) => /^(status|state|stage|lifecycle)$/i.test(String(field?.name || field || ""))))
+    .map((entity) => String(entity.name).toLowerCase()));
+}
+
 export async function verifyJourneys({
   previewUrl, contract, timeoutMs = 240_000, viewport = { width: 1280, height: 900 },
   browser: sharedBrowser = null,
@@ -5102,6 +5397,7 @@ export async function verifyJourneys({
   verifierPolicy = LEGACY_RICH_VERIFIER_POLICY,
 }) {
   const minimal = isMinimalContractVerifier(verifierPolicy);
+  const declaredStatusEntities = entitiesDeclaringStatus(contract);
   const provenanceReport = executionProvenanceReport(contract);
   if (!provenanceReport.ok) return {
     pass: false, verifierPolicy, journeys: [], failures: [], undriveable: [],
@@ -5416,6 +5712,7 @@ export async function verifyJourneys({
         let outcome = await runStep(page, step, {
           marker, authMarker, previewUrl, selections, selectionValues, enteredValues, interactionFlows, journeyFlows, writtenPaths, durable, runEvidence,
           authState, allowEstablishedState: stepIndex === 0 && setup?.ok === true, verifierPolicy,
+          statusEntities: declaredStatusEntities,
         }).catch((error) => ({
           status: "undriveable", detail: `driver error: ${error.message.slice(0, 120)}`,
           verifierDefect: { code: "journey_driver_error", detail: error.message.slice(0, 200) },

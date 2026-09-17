@@ -14,6 +14,10 @@ export const VERIFICATION_RESULT_CLASS = Object.freeze({
   PERSISTENCE_FAILURE: "PERSISTENCE_FAILURE",
   FATAL_RUNTIME_FAILURE: "FATAL_RUNTIME_FAILURE",
   PLATFORM_INCONCLUSIVE: "PLATFORM_INCONCLUSIVE",
+  // The contract states no structured expected outcome for the step (no route, control, value,
+  // collection member, state transition or durable record to verify). Neither a pass nor an app
+  // failure is knowable, so the verdict names the contract gap instead of guessing from prose.
+  CONTRACT_INCOMPLETE: "CONTRACT_INCOMPLETE",
 });
 
 export function isMinimalContractVerifier(policy) {
@@ -23,6 +27,7 @@ export function isMinimalContractVerifier(policy) {
 export function statusForVerificationClass(classification) {
   if (classification === VERIFICATION_RESULT_CLASS.PASS) return "pass";
   if (classification === VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE) return "undriveable";
+  if (classification === VERIFICATION_RESULT_CLASS.CONTRACT_INCOMPLETE) return "undriveable";
   return "fail";
 }
 
@@ -32,6 +37,10 @@ export function isAppRepairableVerificationClass(classification) {
     VERIFICATION_RESULT_CLASS.PERSISTENCE_FAILURE,
     VERIFICATION_RESULT_CLASS.FATAL_RUNTIME_FAILURE,
   ].includes(classification);
+}
+
+export function isContractIncompleteVerificationClass(classification) {
+  return classification === VERIFICATION_RESULT_CLASS.CONTRACT_INCOMPLETE;
 }
 
 export function verificationVerdict(classification, detail, extra = {}) {
