@@ -42,6 +42,8 @@ const resetContract = deriveBuildSpec(await load("bv2-medium-reset-button-contra
 const loadSource = await load("bv2-medium-load-on-arrival-contract.json");
 (loadSource.contract || loadSource).journeys.find((journey) => journey.id === "view-analytics-summary")
   .steps[1].visibleText = ["Total projects", "Completion rate"];
+(loadSource.contract || loadSource).journeys.find((journey) => journey.id === "view-analytics-summary")
+  .steps[2].visibleText = ["Status breakdown"];
 const loadContract = deriveBuildSpec(loadSource.contract || loadSource).contract;
 const flowsOf = (contract, journeyId, stepIndex) => contract.interactionContract.flows
   .filter((flow) => flow.journeyId === journeyId && flow.stepIndex === stepIndex);

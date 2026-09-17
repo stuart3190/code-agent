@@ -70,6 +70,8 @@ prerequisite producer graph, deadlines.
   fired action needs a surface change, and gets the `action_outcome_undeclared` advisory.
 - **Load-on-arrival read operations** — accepted only when the contract's declared outcome (`visibleText` or
   entered values it reads) is on the surface; the prose gate is gone (`builder-v2-passive-operations`).
+- **Semantic navigation** — a navigation with no literal route (a section, a card) is proven by a surface or route
+  change, or by the contract's declared outcome being present; a literal route stays strict (`routeMatchesCurrent`).
 - **Committed identity freshness** — the producer replay's committed identity is an entered value the commit
   NEWLY rendered (absent before, present after); a task form filled with the project's own title can no longer
   conceal a commit that stored nothing (`builder-v2-prerequisite-replay`).

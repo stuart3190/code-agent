@@ -4404,11 +4404,10 @@ export function structuredStepVerdict({
     checks.push({ kind: "route", ok: Boolean(facts.routeReached),
       detail: facts.routeReached ? `the contracted route ${facts.route} is open`
         : `the contracted route ${facts.route} was not reached (the browser is at ${facts.currentPath || "an unknown path"})` });
-  } else if (facts.navigationDeclared) {
-    checks.push({ kind: "navigation", ok: changed,
-      detail: changed ? (urlChanged ? "the contracted navigation changed route" : "the contracted navigation changed the surface")
-        : "the contracted navigation left the surface unchanged" });
   }
+  // A semantic navigation (no literal route) opens a surface; when the contract declares what
+  // that surface shows and it is present, the surface is open even if nothing had to change.
+  const semanticNavigation = !facts.route && facts.navigationDeclared;
   if ((facts.expectedValues || []).length) {
     const missing = facts.missingValues || [];
     checks.push({ kind: "values", ok: !missing.length,
@@ -4447,6 +4446,13 @@ export function structuredStepVerdict({
   // repainted nothing still reached its contracted result.
   const declaredOutcomeChecks = checks.filter((check) => ["route", "values", "visible_text", "collection", "removal", "reset"].includes(check.kind));
   const declaredSatisfied = declaredOutcomeChecks.length > 0 && declaredOutcomeChecks.every((check) => check.ok);
+  if (semanticNavigation) {
+    const ok = changed || declaredSatisfied;
+    checks.push({ kind: "navigation", ok,
+      detail: ok ? (urlChanged ? "the contracted navigation changed route" : changed ? "the contracted navigation changed the surface"
+        : "the contracted surface is open (its declared outcome is present)")
+        : "the contracted navigation left the surface unchanged" });
+  }
   if (facts.mutationDeclared) {
     const ok = Boolean(mutationWithValues || changed || declaredSatisfied);
     checks.push({ kind: "mutation", ok,
