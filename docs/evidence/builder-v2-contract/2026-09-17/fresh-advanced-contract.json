@@ -1,0 +1,1260 @@
+{
+  "summary": "Northwind Field Ops is an authenticated field-service workspace where dispatchers manage sites and work orders, technicians log visits, admins manage team roles, and analytics are computed from saved operational data.",
+  "projectType": "dashboard",
+  "journeys": [
+    {
+      "id": "dispatcher-create-work-order",
+      "title": "A dispatcher signs in and creates a work order that survives reload",
+      "priority": "primary",
+      "stage": "primary_journey",
+      "steps": [
+        {
+          "action": "open the sign-in screen",
+          "target": "/login",
+          "expect": "email and password controls are visible"
+        },
+        {
+          "action": "sign in as a dispatcher",
+          "target": "sign-in form",
+          "operates": [
+            "authEmail",
+            "authPassword",
+            "sign-in-dispatcher"
+          ],
+          "verificationValues": {
+            "authEmail": "dispatcher@northwind.test"
+          },
+          "expect": "the work orders dashboard is visible with a dispatcher role indicator"
+        },
+        {
+          "action": "open the work orders screen",
+          "target": "/work-orders",
+          "expect": "the create work order control and work order list are visible"
+        },
+        {
+          "action": "create a work order with a site, priority, scheduled date, assigned technician and status",
+          "target": "create work order form",
+          "operates": [
+            "title",
+            "siteId",
+            "priority",
+            "scheduledDate",
+            "assignedTechnicianId",
+            "status",
+            "create-work-order"
+          ],
+          "verificationValues": {
+            "title": "Replace rooftop HVAC belt",
+            "priority": "High",
+            "scheduledDate": "2026-02-10",
+            "status": "Open"
+          },
+          "expect": "the work order list shows Replace rooftop HVAC belt with High priority and Open status"
+        },
+        {
+          "action": "open the created work order detail route",
+          "target": "/work-orders/:workOrderId",
+          "reads": [
+            "workOrderId",
+            "title",
+            "siteId",
+            "assignedTechnicianId",
+            "status"
+          ],
+          "expect": "the detail page shows the work order title, assigned technician, selected site and current status"
+        },
+        {
+          "action": "reload",
+          "reads": [
+            "workOrderId",
+            "title",
+            "priority",
+            "scheduledDate",
+            "assignedTechnicianId",
+            "status"
+          ],
+          "expect": "the reloaded detail page still shows Replace rooftop HVAC belt with High priority and Open status"
+        }
+      ],
+      "acceptance": [
+        "a work order created by a dispatcher is readable after a full page reload",
+        "the created work order detail route displays the referenced site and assigned technician"
+      ]
+    },
+    {
+      "id": "dispatcher-update-work-order",
+      "title": "A dispatcher updates an existing work order later",
+      "priority": "secondary",
+      "stage": "supporting",
+      "dependsOn": [
+        "dispatcher-create-work-order"
+      ],
+      "steps": [
+        {
+          "action": "sign in as a dispatcher",
+          "target": "/login",
+          "operates": [
+            "authEmail",
+            "authPassword",
+            "sign-in-dispatcher-update"
+          ],
+          "verificationValues": {
+            "authEmail": "dispatcher@northwind.test"
+          },
+          "expect": "the work orders dashboard is visible with a dispatcher role indicator"
+        },
+        {
+          "action": "open the existing work order detail route",
+          "target": "/work-orders/:workOrderId",
+          "reads": [
+            "workOrderId",
+            "title"
+          ],
+          "expect": "the detail page shows Replace rooftop HVAC belt"
+        },
+        {
+          "action": "update the work order priority and scheduled date",
+          "target": "work order edit form",
+          "operates": [
+            "priority",
+            "scheduledDate",
+            "update-work-order"
+          ],
+          "verificationValues": {
+            "priority": "Urgent",
+            "scheduledDate": "2026-02-11"
+          },
+          "expect": "the detail page shows Urgent priority and scheduled date 2026-02-11"
+        },
+        {
+          "action": "reload",
+          "reads": [
+            "workOrderId",
+            "priority",
+            "scheduledDate"
+          ],
+          "expect": "the updated Urgent priority and 2026-02-11 scheduled date are still visible"
+        }
+      ],
+      "acceptance": [
+        "dispatcher edits to an existing work order persist after reload"
+      ]
+    },
+    {
+      "id": "technician-log-visit",
+      "title": "A technician logs a visit on a work order and updates its status",
+      "priority": "secondary",
+      "stage": "supporting",
+      "dependsOn": [
+        "dispatcher-create-work-order"
+      ],
+      "steps": [
+        {
+          "action": "sign in as the assigned technician",
+          "target": "/login",
+          "operates": [
+            "authEmail",
+            "authPassword",
+            "sign-in-technician"
+          ],
+          "verificationValues": {
+            "authEmail": "tech.alex@northwind.test"
+          },
+          "expect": "the technician work orders surface is visible with a technician role indicator"
+        },
+        {
+          "action": "open the assigned work order detail route",
+          "target": "/work-orders/:workOrderId",
+          "reads": [
+            "workOrderId",
+            "title",
+            "assignedTechnicianId"
+          ],
+          "expect": "the detail page shows Replace rooftop HVAC belt and the visit log form"
+        },
+        {
+          "action": "log a visit with arrival time, notes and parts used",
+          "target": "visit log form",
+          "operates": [
+            "arrivalTime",
+            "notes",
+            "partsUsed",
+            "create-visit"
+          ],
+          "verificationValues": {
+            "arrivalTime": "2026-02-10T09:30",
+            "notes": "Found worn belt and verified blower alignment.",
+            "partsUsed": "Belt AX-42"
+          },
+          "reads": [
+            "workOrderId"
+          ],
+          "expect": "the visit timeline shows the arrival time, notes and parts used"
+        },
+        {
+          "action": "update the work order status from the same detail screen",
+          "target": "work order status control",
+          "operates": [
+            "status",
+            "update-work-order-status"
+          ],
+          "verificationValues": {
+            "status": "In Progress"
+          },
+          "reads": [
+            "workOrderId"
+          ],
+          "expect": "the detail page shows status In Progress"
+        },
+        {
+          "action": "reload",
+          "reads": [
+            "workOrderId",
+            "arrivalTime",
+            "notes",
+            "partsUsed",
+            "status"
+          ],
+          "expect": "the reloaded detail page still shows the logged visit and In Progress status"
+        }
+      ],
+      "acceptance": [
+        "a technician visit belongs to the selected work order and persists after reload",
+        "status changed by the technician on the detail screen persists after reload"
+      ]
+    },
+    {
+      "id": "dispatcher-manage-sites",
+      "title": "A dispatcher adds a customer site and finds it with region filter and name search",
+      "priority": "secondary",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "sign in as a dispatcher",
+          "target": "/login",
+          "operates": [
+            "authEmail",
+            "authPassword",
+            "sign-in-dispatcher-sites"
+          ],
+          "verificationValues": {
+            "authEmail": "dispatcher@northwind.test"
+          },
+          "expect": "the sites navigation item is visible"
+        },
+        {
+          "action": "open the sites screen",
+          "target": "/sites",
+          "expect": "the customer sites list, region filter, name search and add site control are visible"
+        },
+        {
+          "action": "add a customer site",
+          "target": "add site form",
+          "operates": [
+            "name",
+            "region",
+            "contactEmail",
+            "create-site"
+          ],
+          "verificationValues": {
+            "name": "Harbor Pump Station",
+            "region": "North",
+            "contactEmail": "harbor.ops@example.test"
+          },
+          "expect": "the site list shows Harbor Pump Station with North region and harbor.ops@example.test"
+        },
+        {
+          "action": "filter sites by region",
+          "target": "region filter",
+          "operates": [
+            "region"
+          ],
+          "primitive": "selection",
+          "verificationValues": {
+            "region": "North"
+          },
+          "expect": "the filtered list still shows Harbor Pump Station"
+        },
+        {
+          "action": "search sites by name",
+          "target": "site name search",
+          "operates": [
+            "name"
+          ],
+          "primitive": "textbox",
+          "verificationValues": {
+            "name": "Harbor"
+          },
+          "reads": [
+            "region"
+          ],
+          "expect": "the filtered search result shows Harbor Pump Station and does not show sites from other regions"
+        },
+        {
+          "action": "reload",
+          "reads": [
+            "name",
+            "region",
+            "contactEmail"
+          ],
+          "expect": "Harbor Pump Station remains visible when the North filter and Harbor search are applied again"
+        }
+      ],
+      "acceptance": [
+        "a dispatcher-created customer site is saved and can be found after reload"
+      ]
+    },
+    {
+      "id": "admin-manage-team",
+      "title": "An admin manages team member accounts and roles",
+      "priority": "secondary",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "sign in as an admin",
+          "target": "/login",
+          "operates": [
+            "authEmail",
+            "authPassword",
+            "sign-in-admin"
+          ],
+          "verificationValues": {
+            "authEmail": "admin@northwind.test"
+          },
+          "expect": "the admin navigation item is visible with an admin role indicator"
+        },
+        {
+          "action": "open the admin screen",
+          "target": "/admin",
+          "expect": "the team member account table and add member control are visible"
+        },
+        {
+          "action": "create a team member account record",
+          "target": "add team member form",
+          "operates": [
+            "displayName",
+            "email",
+            "role",
+            "status",
+            "create-team-member"
+          ],
+          "verificationValues": {
+            "displayName": "Jordan Field",
+            "email": "jordan.field@northwind.test",
+            "role": "technician",
+            "status": "active"
+          },
+          "expect": "the team member table shows Jordan Field with technician role and active status"
+        },
+        {
+          "action": "change the team member role",
+          "target": "team member role control",
+          "operates": [
+            "role",
+            "update-team-member-role"
+          ],
+          "primitive": "selection",
+          "verificationValues": {
+            "role": "dispatcher"
+          },
+          "reads": [
+            "email"
+          ],
+          "expect": "the team member table shows Jordan Field with dispatcher role"
+        },
+        {
+          "action": "reload",
+          "reads": [
+            "displayName",
+            "email",
+            "role",
+            "status"
+          ],
+          "expect": "Jordan Field remains visible with dispatcher role and active status"
+        }
+      ],
+      "acceptance": [
+        "an admin-created team member account record and role change persist after reload"
+      ]
+    },
+    {
+      "id": "technician-denied-admin",
+      "title": "A technician is denied access to the admin screen",
+      "priority": "secondary",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "sign in as a technician",
+          "target": "/login",
+          "operates": [
+            "authEmail",
+            "authPassword",
+            "sign-in-technician-denied"
+          ],
+          "verificationValues": {
+            "authEmail": "tech.alex@northwind.test"
+          },
+          "expect": "the technician role indicator is visible"
+        },
+        {
+          "action": "attempt to open the admin screen",
+          "target": "/admin",
+          "visibleText": [
+            "Access denied",
+            "Admin role required"
+          ],
+          "expect": "an access denied message is visible and the team member account table is not shown"
+        }
+      ],
+      "acceptance": [
+        "technicians cannot view or operate admin team member controls"
+      ]
+    },
+    {
+      "id": "view-analytics",
+      "title": "An authorized user views analytics computed from saved work orders and visits",
+      "priority": "secondary",
+      "stage": "supporting",
+      "dependsOn": [
+        "dispatcher-create-work-order",
+        "technician-log-visit"
+      ],
+      "steps": [
+        {
+          "action": "sign in as an admin",
+          "target": "/login",
+          "operates": [
+            "authEmail",
+            "authPassword",
+            "sign-in-admin-analytics"
+          ],
+          "verificationValues": {
+            "authEmail": "admin@northwind.test"
+          },
+          "expect": "the analytics navigation item is visible"
+        },
+        {
+          "action": "open the analytics screen",
+          "target": "/analytics",
+          "reads": [
+            "status",
+            "workOrderId",
+            "visitId"
+          ],
+          "visibleText": [
+            "Open",
+            "In Progress",
+            "Completed",
+            "Average visits per work order"
+          ],
+          "expect": "analytics metric cards for work order status counts and average visits per work order are visible"
+        },
+        {
+          "action": "calculate analytics from saved data",
+          "target": "analytics metrics",
+          "operates": [
+            "calculate-analytics"
+          ],
+          "reads": [
+            "status",
+            "workOrderId",
+            "visitId"
+          ],
+          "visibleText": [
+            "Open 0",
+            "In Progress 1",
+            "Completed 0",
+            "Average visits per work order 1"
+          ],
+          "expect": "the screen shows Open 0, In Progress 1, Completed 0 and Average visits per work order 1"
+        },
+        {
+          "action": "reload",
+          "reads": [
+            "status",
+            "workOrderId",
+            "visitId"
+          ],
+          "visibleText": [
+            "Open 0",
+            "In Progress 1",
+            "Completed 0",
+            "Average visits per work order 1"
+          ],
+          "expect": "the same computed analytics values are visible after reload"
+        }
+      ],
+      "acceptance": [
+        "analytics values are computed from saved work orders and visits rather than hard-coded text"
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "path": "/login",
+      "name": "Sign In",
+      "purpose": "email and password sign-in for dispatchers, technicians and admins",
+      "auth": false
+    },
+    {
+      "path": "/work-orders",
+      "name": "Work Orders",
+      "purpose": "list work orders and allow dispatchers to create new work orders",
+      "auth": true
+    },
+    {
+      "path": "/work-orders/:workOrderId",
+      "name": "Work Order Detail",
+      "purpose": "show one work order, allow technicians to log visits, and allow permitted users to update status",
+      "auth": true
+    },
+    {
+      "path": "/sites",
+      "name": "Sites",
+      "purpose": "list customer sites, filter by region, search by name, and allow dispatchers to add sites",
+      "auth": true
+    },
+    {
+      "path": "/analytics",
+      "name": "Analytics",
+      "purpose": "show status counts and average visits per work order computed from saved data",
+      "auth": true
+    },
+    {
+      "path": "/admin",
+      "name": "Admin",
+      "purpose": "allow admins to manage team member account records and roles",
+      "auth": true
+    }
+  ],
+  "entities": [
+    {
+      "name": "site",
+      "fields": [
+        {
+          "name": "siteId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "region",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "contactEmail",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "owned": false,
+      "relationships": [
+        "a site can be referenced by many work orders"
+      ]
+    },
+    {
+      "name": "teamMember",
+      "fields": [
+        {
+          "name": "teamMemberId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "displayName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "email",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "role",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "owned": false,
+      "relationships": [
+        "a team member can be assigned to many work orders",
+        "a team member with technician role can create visits"
+      ]
+    },
+    {
+      "name": "workOrder",
+      "fields": [
+        {
+          "name": "workOrderId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "siteId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "priority",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "scheduledDate",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "assignedTechnicianId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "owned": false,
+      "relationships": [
+        "a work order references one customer site",
+        "a work order references one assigned technician",
+        "a work order has many visits"
+      ]
+    },
+    {
+      "name": "visit",
+      "fields": [
+        {
+          "name": "visitId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "workOrderId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "technicianId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "arrivalTime",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "notes",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "partsUsed",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "owned": false,
+      "relationships": [
+        "a visit belongs to one work order",
+        "a visit is logged by one technician"
+      ]
+    }
+  ],
+  "sampleData": {
+    "site": [
+      {
+        "siteId": "site-river-plant",
+        "name": "River Plant",
+        "region": "North",
+        "contactEmail": "river.plant@example.test"
+      },
+      {
+        "siteId": "site-south-depot",
+        "name": "South Depot",
+        "region": "South",
+        "contactEmail": "south.depot@example.test"
+      }
+    ],
+    "teamMember": [
+      {
+        "teamMemberId": "tm-dispatcher",
+        "displayName": "Dana Dispatcher",
+        "email": "dispatcher@northwind.test",
+        "role": "dispatcher",
+        "status": "active"
+      },
+      {
+        "teamMemberId": "tm-tech-alex",
+        "displayName": "Alex Technician",
+        "email": "tech.alex@northwind.test",
+        "role": "technician",
+        "status": "active"
+      },
+      {
+        "teamMemberId": "tm-admin",
+        "displayName": "Avery Admin",
+        "email": "admin@northwind.test",
+        "role": "admin",
+        "status": "active"
+      }
+    ]
+  },
+  "auth": {
+    "required": true,
+    "model": "email + password via the backend SDK",
+    "rules": [
+      "signed-out visitors are redirected to /login when opening /work-orders, /work-orders/:workOrderId, /sites, /analytics or /admin",
+      "the signed-in user's email is matched to a teamMember record to determine role",
+      "dispatchers can create sites and create or update work orders",
+      "technicians can open assigned work order detail screens, create visits, and update status from the detail screen",
+      "admins can open /admin and manage team member account records and roles",
+      "technicians opening /admin see Access denied and cannot see team member management controls",
+      "saved operational data is shared across authorized company roles rather than owned by one signed-in user"
+    ]
+  },
+  "operations": [
+    {
+      "id": "sign-in-dispatcher",
+      "kind": "signIn",
+      "journey": "dispatcher-create-work-order",
+      "description": "sign in a dispatcher account",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "capability": "session",
+          "capabilityMethod": "signIn",
+          "behavior": "establish the platform session for a dispatcher email",
+          "reads": [
+            "authEmail",
+            "authPassword"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "id": "sign-in-dispatcher-update",
+      "kind": "signIn",
+      "journey": "dispatcher-update-work-order",
+      "description": "sign in a dispatcher account for editing work orders",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "capability": "session",
+          "capabilityMethod": "signIn",
+          "behavior": "establish the platform session for a dispatcher email",
+          "reads": [
+            "authEmail",
+            "authPassword"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "id": "sign-in-technician",
+      "kind": "signIn",
+      "journey": "technician-log-visit",
+      "description": "sign in a technician account",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "capability": "session",
+          "capabilityMethod": "signIn",
+          "behavior": "establish the platform session for a technician email",
+          "reads": [
+            "authEmail",
+            "authPassword"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "id": "sign-in-dispatcher-sites",
+      "kind": "signIn",
+      "journey": "dispatcher-manage-sites",
+      "description": "sign in a dispatcher account for site management",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "capability": "session",
+          "capabilityMethod": "signIn",
+          "behavior": "establish the platform session for a dispatcher email",
+          "reads": [
+            "authEmail",
+            "authPassword"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "id": "sign-in-admin",
+      "kind": "signIn",
+      "journey": "admin-manage-team",
+      "description": "sign in an admin account",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "capability": "session",
+          "capabilityMethod": "signIn",
+          "behavior": "establish the platform session for an admin email",
+          "reads": [
+            "authEmail",
+            "authPassword"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "id": "sign-in-technician-denied",
+      "kind": "signIn",
+      "journey": "technician-denied-admin",
+      "description": "sign in a technician account before checking admin denial",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "capability": "session",
+          "capabilityMethod": "signIn",
+          "behavior": "establish the platform session for a technician email",
+          "reads": [
+            "authEmail",
+            "authPassword"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "id": "sign-in-admin-analytics",
+      "kind": "signIn",
+      "journey": "view-analytics",
+      "description": "sign in an admin account for analytics",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "capability": "session",
+          "capabilityMethod": "signIn",
+          "behavior": "establish the platform session for an admin email",
+          "reads": [
+            "authEmail",
+            "authPassword"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "id": "create-site",
+      "entity": "site",
+      "kind": "create",
+      "description": "persist a customer site via db.entity('site').create",
+      "journey": "dispatcher-manage-sites",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "behavior": "generate a durable siteId for the new customer site",
+          "reads": [
+            "name",
+            "region",
+            "contactEmail"
+          ],
+          "writes": [
+            "siteId"
+          ]
+        },
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "create",
+          "reads": [
+            "siteId",
+            "name",
+            "region",
+            "contactEmail"
+          ],
+          "writes": [
+            "siteId",
+            "name",
+            "region",
+            "contactEmail"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "create-team-member",
+      "entity": "teamMember",
+      "kind": "create",
+      "description": "persist a team member account record via db.entity('teamMember').create",
+      "journey": "admin-manage-team",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "behavior": "generate a durable teamMemberId for the account record",
+          "reads": [
+            "displayName",
+            "email",
+            "role",
+            "status"
+          ],
+          "writes": [
+            "teamMemberId"
+          ]
+        },
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "create",
+          "reads": [
+            "teamMemberId",
+            "displayName",
+            "email",
+            "role",
+            "status"
+          ],
+          "writes": [
+            "teamMemberId",
+            "displayName",
+            "email",
+            "role",
+            "status"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "update-team-member-role",
+      "entity": "teamMember",
+      "kind": "update",
+      "description": "update a team member role via db.entity('teamMember').update",
+      "journey": "admin-manage-team",
+      "responsibilities": [
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "update",
+          "reads": [
+            "teamMemberId",
+            "role"
+          ],
+          "writes": [
+            "role"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "create-work-order",
+      "entity": "workOrder",
+      "kind": "create",
+      "description": "persist a work order via db.entity('workOrder').create",
+      "journey": "dispatcher-create-work-order",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "behavior": "generate a durable workOrderId for the new work order",
+          "reads": [
+            "title",
+            "siteId",
+            "priority",
+            "scheduledDate",
+            "assignedTechnicianId",
+            "status"
+          ],
+          "writes": [
+            "workOrderId"
+          ]
+        },
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "create",
+          "reads": [
+            "workOrderId",
+            "title",
+            "siteId",
+            "priority",
+            "scheduledDate",
+            "assignedTechnicianId",
+            "status"
+          ],
+          "writes": [
+            "workOrderId",
+            "title",
+            "siteId",
+            "priority",
+            "scheduledDate",
+            "assignedTechnicianId",
+            "status"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "update-work-order",
+      "entity": "workOrder",
+      "kind": "update",
+      "description": "update work order editable fields via db.entity('workOrder').update",
+      "journey": "dispatcher-update-work-order",
+      "responsibilities": [
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "update",
+          "reads": [
+            "workOrderId",
+            "priority",
+            "scheduledDate"
+          ],
+          "writes": [
+            "priority",
+            "scheduledDate"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "create-visit",
+      "entity": "visit",
+      "kind": "create",
+      "description": "persist a technician visit via db.entity('visit').create",
+      "journey": "technician-log-visit",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "behavior": "generate a durable visitId and attach the signed-in technician to the visit",
+          "reads": [
+            "workOrderId",
+            "arrivalTime",
+            "notes",
+            "partsUsed",
+            "authEmail"
+          ],
+          "writes": [
+            "visitId",
+            "technicianId"
+          ]
+        },
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "create",
+          "reads": [
+            "visitId",
+            "workOrderId",
+            "technicianId",
+            "arrivalTime",
+            "notes",
+            "partsUsed"
+          ],
+          "writes": [
+            "visitId",
+            "workOrderId",
+            "technicianId",
+            "arrivalTime",
+            "notes",
+            "partsUsed"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "update-work-order-status",
+      "entity": "workOrder",
+      "kind": "update",
+      "description": "update a work order status from its detail screen via db.entity('workOrder').update",
+      "journey": "technician-log-visit",
+      "responsibilities": [
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "update",
+          "reads": [
+            "workOrderId",
+            "status"
+          ],
+          "writes": [
+            "status"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "calculate-analytics",
+      "entity": "workOrder",
+      "kind": "read",
+      "description": "compute work order status counts and average visits per work order from saved work orders and visits",
+      "journey": "view-analytics",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "behavior": "count saved work orders by status and divide saved visit count by saved work order count",
+          "reads": [
+            "workOrderId",
+            "status",
+            "visitId"
+          ],
+          "writes": [],
+          "outputEffect": {
+            "type": "transient_result",
+            "effect": "read_result",
+            "operationKind": "read",
+            "durable": false
+          }
+        }
+      ]
+    }
+  ],
+  "integrations": [
+    {
+      "name": "none",
+      "purpose": "",
+      "required": false
+    }
+  ],
+  "states": [
+    {
+      "surface": "sign-in screen",
+      "loading": "signing in indicator while the session is being established",
+      "empty": "no empty state",
+      "validation": "email must look like an email and password is required",
+      "error": "sign in failed",
+      "success": "role indicator and protected navigation are visible"
+    },
+    {
+      "surface": "work orders list",
+      "loading": "skeleton rows while work orders load",
+      "empty": "No work orders yet",
+      "validation": "title, site, priority, scheduled date, assigned technician and status are required",
+      "error": "Could not save work order",
+      "success": "saved work order appears in the list"
+    },
+    {
+      "surface": "work order detail",
+      "loading": "detail skeleton while work order and visits load",
+      "empty": "No visits logged yet",
+      "validation": "arrival time and notes are required before logging a visit",
+      "error": "Could not save visit or status update",
+      "success": "visit timeline and current status update on screen"
+    },
+    {
+      "surface": "sites screen",
+      "loading": "skeleton rows while sites load",
+      "empty": "No sites match this search",
+      "validation": "site name, region and a valid contact email are required",
+      "error": "Could not save site",
+      "success": "new site appears in the sites list"
+    },
+    {
+      "surface": "analytics screen",
+      "loading": "metric skeletons while saved data is read",
+      "empty": "No work order data yet",
+      "validation": "no user-entered analytics inputs",
+      "error": "Could not calculate analytics",
+      "success": "status counts and average visits per work order are visible"
+    },
+    {
+      "surface": "admin screen",
+      "loading": "skeleton rows while team members load",
+      "empty": "No team members yet",
+      "validation": "display name, valid email, role and status are required",
+      "error": "Could not save team member",
+      "success": "team member table reflects the saved account record or role change"
+    },
+    {
+      "surface": "admin authorization guard",
+      "loading": "checking role indicator",
+      "empty": "no empty state",
+      "validation": "admin role is required",
+      "error": "Access denied",
+      "success": "admin controls are shown only to admins"
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "a1",
+      "statement": "a dispatcher-created work order remains visible on its detail route after a full page reload",
+      "journey": "dispatcher-create-work-order",
+      "kind": "persistence"
+    },
+    {
+      "id": "a2",
+      "statement": "a technician-created visit remains listed under the same work order after a full page reload",
+      "journey": "technician-log-visit",
+      "kind": "persistence"
+    },
+    {
+      "id": "a3",
+      "statement": "a dispatcher-created customer site remains searchable by name and filterable by region after reload",
+      "journey": "dispatcher-manage-sites",
+      "kind": "persistence"
+    },
+    {
+      "id": "a4",
+      "statement": "analytics displays the saved-data-derived values Open 0, In Progress 1, Completed 0 and Average visits per work order 1 after the create-work-order and log-visit journeys have run",
+      "journey": "view-analytics",
+      "kind": "functional"
+    },
+    {
+      "id": "a5",
+      "statement": "an admin role change for a team member remains visible after reload",
+      "journey": "admin-manage-team",
+      "kind": "persistence"
+    },
+    {
+      "id": "a6",
+      "statement": "a technician opening /admin sees Access denied and cannot see the team member table",
+      "journey": "technician-denied-admin",
+      "kind": "authorization"
+    }
+  ],
+  "deferred": [
+    {
+      "item": "real email invitations and password provisioning for newly created team member account records",
+      "reason": "the available backend SDK supports authentication but does not expose an administrative user-invite API"
+    },
+    {
+      "item": "GPS tracking, route optimization and technician mobile push notifications",
+      "reason": "the request only requires work order, visit, site, role and analytics workflows"
+    },
+    {
+      "item": "file attachments for visits or work orders",
+      "reason": "the request does not ask for document or photo uploads"
+    }
+  ],
+  "version": 2,
+  "buildProfile": {
+    "version": 1,
+    "requestedBuildType": "application",
+    "resolvedBuildType": "application",
+    "applicationSubtype": "auto",
+    "requirementSignals": [
+      "user_accounts",
+      "saved_data"
+    ],
+    "inferenceSource": "explicit",
+    "confidence": 1
+  }
+}

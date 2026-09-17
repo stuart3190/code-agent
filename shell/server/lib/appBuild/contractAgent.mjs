@@ -10,6 +10,9 @@
 // a blocked build costs the customer everything.
 
 import { runAgent } from "../../../../src/engine/runAgent.mjs";
+import { AUTH_CREDENTIAL_FIELDS as RESERVED_CREDENTIAL_FIELDS } from "../../../shared/implementationContract.mjs";
+const isReservedCredentialField = (name) => [...RESERVED_CREDENTIAL_FIELDS]
+  .some((field) => String(field?.name ?? field).toLowerCase() === String(name || "").toLowerCase());
 import {
   CONTRACT_VERSION, STAGES, validateContract, contractSummary, functionalOutputEffect,
 } from "../../../shared/implementationContract.mjs";
@@ -161,7 +164,8 @@ Rules:
 - AUTHENTICATION, when the request requires accounts: set auth.required to true. A sign-in or
   sign-up step operates the RESERVED credential controls "authEmail" and "authPassword" (they are
   not entity fields; declare no session, account or authSession entity and never pre-fill demo
-  credentials) plus ONE session operation declared like
+  credentials - NEVER put authEmail or authPassword in verificationValues, the platform supplies
+  the verification account itself) plus ONE session operation declared like
   { "id": "sign-in", "kind": "signIn", "journey": "<journey id>", "description": "sign in or create the account",
     "responsibilities": [{ "type": "functional", "capability": "session", "capabilityMethod": "signIn",
       "behavior": "establish the platform session", "reads": ["authEmail", "authPassword"], "writes": [] }] }
@@ -212,8 +216,17 @@ export function normaliseContract(contract, { prompt, buildProfile = null, legac
       const operates = list(step?.operates);
       const reads = list(step?.reads);
       const produces = list(step?.produces);
+      // The reserved credential controls never carry a fixture: the platform supplies the
+      // verification account itself, and a demo credential in the contract would be typed
+      // straight into the generated sign-in screen (6833295 pre-filled demo credentials, 401).
+      // Stripped deterministically so one stray fixture never costs a contract retry.
+      const { verificationValues: rawFixtures, ...rest } = step || {};
+      const fixtures = rawFixtures && typeof rawFixtures === "object" && !Array.isArray(rawFixtures)
+        ? Object.fromEntries(Object.entries(rawFixtures).filter(([key]) => !isReservedCredentialField(key)))
+        : null;
       return {
-        ...step,
+        ...rest,
+        ...(fixtures && Object.keys(fixtures).length ? { verificationValues: fixtures } : {}),
         ...(operates?.length ? { operates } : {}),
         ...(reads?.length ? { reads } : {}),
         ...(produces?.length ? { produces } : {}),

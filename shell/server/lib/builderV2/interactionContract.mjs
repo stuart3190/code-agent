@@ -344,7 +344,10 @@ function actionKinds(step, context = {}) {
   if (intents.has(ACTION_INTENT.REVIEW)) kinds.push("review");
   if (intents.has(ACTION_INTENT.CONFIRM)) kinds.push("mutation");
   if (intents.has(ACTION_INTENT.RECOVER)) kinds.push("recovery");
-  if (intents.has(ACTION_INTENT.LOOKUP)) kinds.push("lookup");
+  // "search the site list by name" operates a textbox and declares no lookup operation: it is
+  // an input whose result the contract states elsewhere, not a durable record lookup that would
+  // need a reference to exist. The verb never decides that; a declared operation does.
+  if (intents.has(ACTION_INTENT.LOOKUP) && !context.operatesFieldsOnly) kinds.push("lookup");
   if (intents.has(ACTION_INTENT.AUTHENTICATE)) kinds.push("action");
   // A cancellation is its own durable transition. It rides ALONGSIDE the commit rather than
   // replacing it: "confirm cancellation" both presses a commit control and cancels the record,
@@ -709,18 +712,29 @@ export function buildInteractionContract(contract, {
     // The durable entities this journey inherits from the producers it declares (dependsOn or a
     // durableState sourceJourney): the fields of every entity a declared producer creates.
     const inheritedEntityFields = new Set();
+    const inheritedEntityNames = new Set();
     for (const producerId of declaredProducerJourneys(journey)) {
       for (const operation of contract?.operations || []) {
         if (String(operation?.journey || "") !== String(producerId)) continue;
         if (canonicalOperationKind(operation?.kind || operation?.action || operation?.method) !== "create") continue;
         const owner = (contract?.entities || []).find((entity) => normalized(entity?.name) === normalized(operation?.entity));
+        if (owner?.name) inheritedEntityNames.add(normalized(owner.name));
         for (const field of owner?.fields || []) if (field?.name) inheritedEntityFields.add(normalized(field.name));
       }
     }
+    // A foreign key named after an inherited entity (visit.workOrderId when the journey inherits
+    // the workOrder) is that inherited record's identity, whatever the child entity calls it.
+    const readsInheritedRecord = (field) => inheritedEntityFields.has(normalized(field))
+      || [...inheritedEntityNames].some((name) => normalized(field) === `${name}id`);
     for (const [stepIndex, step] of stepsList.entries()) {
       const fixtureRequired = new Set(verificationFixtureFields(step, contract).map(normalized));
       const stepFlowStart = flows.length;
-      const kinds = actionKinds(step, { laterStepsDriveControls: drivesControls(stepIndex + 1) });
+      const stepOperationIds = [...list(step?.operates), ...list(step?.reads)].map(normalized)
+        .filter((identifier) => declaredOperations.has(identifier));
+      const kinds = actionKinds(step, {
+        laterStepsDriveControls: drivesControls(stepIndex + 1),
+        operatesFieldsOnly: list(step?.operates).length > 0 && stepOperationIds.length === 0,
+      });
       const keyboardFocusOnly = isKeyboardFocusOnlyStep(step);
       // WHICH CONTROLS THIS STEP OPERATES is a structured fact the contract states, not a reading
       // of its prose. "select a party size that does not exceed the slot's remaining capacity"
@@ -1113,6 +1127,13 @@ export function buildInteractionContract(contract, {
               .flatMap((flow) => flow.writes || [])
               .findLast((path) => String(path).endsWith(suffix));
             if (priorProducer) return priorProducer;
+            // AN INHERITED RECORD'S FIELD IS THE DURABLE RECORD. A journey that declares the producer
+            // which creates the entity reads that record's fields as durable state - even when a
+            // later operation of this journey re-writes the same field (create-visit persists the
+            // workOrderId it was given). The 2026-09-17 fresh Advanced contract mapped a detail-route
+            // navigation's workOrderId read to custom state produced two steps LATER and was rejected
+            // ("reads state before it is produced"). A producer that runs after the read is no producer.
+            if (readsInheritedRecord(field)) return `${journey.id}.durable.${field}`;
             const operationProducer = (contract?.operations || []).map((operation) => {
               const writesField = (operation.responsibilities || []).some((responsibility) => (
                 list(responsibility?.writes).some((value) => normalized(value) === normalized(field))
@@ -1125,7 +1146,11 @@ export function buildInteractionContract(contract, {
               if (operation?.journey && operation.journey !== journey.id && producerStep < 0) return null;
               return { operation, producerStep };
             }).find(Boolean);
-            if (operationProducer?.producerStep >= 0) return `${journey.id}.custom.${field}`;
+            // A field this step's OWN operation writes is this step's output, not a dependency (a
+            // create step "reading" the id it generates); a producer that runs strictly earlier is
+            // custom state this journey already holds.
+            if (operationProducer?.producerStep === stepIndex) return null;
+            if (operationProducer?.producerStep >= 0 && operationProducer.producerStep < stepIndex) return `${journey.id}.custom.${field}`;
             // A legacy operation with no structured step identity is bound later by the capability
             // graph. Let that authority attach its exact custom/capability output path rather than
             // inventing a parallel draft dependency here.
