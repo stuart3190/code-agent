@@ -357,7 +357,35 @@ export function validateContract(contract) {
       problems.push(`${where} has fewer than two steps — a journey is a sequence, not a label`);
       continue;
     }
+    // Fields an earlier step of THIS journey entered: a later step may read them as its outcome.
+    const enteredSoFar = new Set();
     for (const [stepIndex, step] of journey.steps.entries()) {
+      // EVERY STEP STATES A VERIFIABLE OUTCOME. The browser verifier judges a step on structured
+      // contract evidence only: the route it opens, the controls or operation it operates, the
+      // values an earlier step entered, or the exact text the screen must show (visibleText).
+      // Prose alone ("fixture cards are visible") is CONTRACT_INCOMPLETE in the browser and can
+      // never turn a build green; the 2026-09-16 corpus carried four such steps. Named here, free,
+      // before any generation is paid for.
+      const routeNames = new Set((c.routes || []).flatMap((route) => [route?.path, route?.name])
+        .filter(Boolean).map((value) => String(value).trim().toLowerCase()));
+      const targetText = String(step?.target || "").trim().toLowerCase();
+      const opensRoute = Boolean(step?.route) || (targetText && (targetText.startsWith("/") || routeNames.has(targetText)));
+      const operatesSomething = Array.isArray(step?.operates) && step.operates.some(Boolean);
+      const declaresVisibleText = Array.isArray(step?.visibleText) && step.visibleText.some((text) => String(text || "").trim());
+      const reads = Array.isArray(step?.reads) ? step.reads.filter(Boolean) : [];
+      const readsEntered = reads.some((field) => enteredSoFar.has(normaliseReference(field)));
+      const reloads = /(?:^|[^a-z])(?:reload|refresh)(?:$|[^a-z])/i.test(String(step?.action || ""));
+      // A reload is the recovery of the record an earlier step committed; the browser proves it on
+      // that record's captured values and reference, so it needs no further declaration.
+      if (!opensRoute && !operatesSomething && !declaresVisibleText && !readsEntered && !reloads) {
+        problems.push(`${where} step ${stepIndex + 1} states no verifiable outcome: `
+          + (reads.length ? `it reads ${JSON.stringify(reads)} that no earlier step entered; ` : "")
+          + "name the route it opens in \"target\", the controls or operation it operates in \"operates\", "
+          + "fields an earlier step entered in \"reads\", or the exact text the screen must show in \"visibleText\"");
+      }
+      for (const field of Array.isArray(step?.operates) ? step.operates : []) if (field) enteredSoFar.add(normaliseReference(field));
+      for (const field of Object.keys(step?.verificationValues || {})) enteredSoFar.add(normaliseReference(field));
+      for (const field of Array.isArray(step?.produces) ? step.produces : []) if (field) enteredSoFar.add(normaliseReference(field));
       // `route` is the declared route a navigation step opens. It must be a declared route path
       // (parameterised patterns included): the platform navigates by it, never by prose.
       if (step?.route !== undefined && step?.route !== null && step?.route !== "") {

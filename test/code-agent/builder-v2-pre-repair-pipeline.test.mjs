@@ -111,7 +111,10 @@ test("every retained Advanced fixture passes the full pre-repair pipeline determ
   for (const short of shorts) {
     const contract = await load(new URL(`${short}/contract.json`, RETAINED));
     const validated = validateContract(contract);
-    assert.equal(validated.ok, true, `${short}: validator — ${(validated.problems || []).join("; ")}`);
+    // The retained contracts predate the verifiable-outcome rule; its four known findings are
+    // pinned in builder-v2-verifiable-outcomes. Every other validator rule must hold.
+    const other = (validated.problems || []).filter((problem) => !/states no verifiable outcome/.test(problem));
+    assert.deepEqual(other, [], `${short}: validator`);
     const spec = deriveBuildSpec(contract);
     assert.equal(spec.verdict.ok, true, `${short}: gate — ${spec.verdict.problems.join("; ")}`);
     assert.equal(spec.interactionContract.valid, true, `${short}: interaction contract`);

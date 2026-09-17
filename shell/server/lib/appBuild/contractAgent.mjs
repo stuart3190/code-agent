@@ -103,6 +103,11 @@ Rules:
 - A step that opens a screen names the declared route path it opens as its "target" ("/projects",
   "/projects/:projectId") or in "route". Prose such as "open the board" names no screen; a step that
   operates controls stays on the screen it is already on. Reload steps say "reload" and name no route.
+- EVERY step states a VERIFIABLE OUTCOME the browser can hold the app to: the route it opens
+  ("target"/"route"), the controls or operation it operates ("operates"), fields an earlier step
+  entered that it must show ("reads"), or "visibleText": [exact strings the screen must render]
+  for a pure observation ("visibleText": ["Pendant Light", "Wall Sconce"]). The verifier never
+  matches the "expect" sentence literally; a step with none of those is rejected as unverifiable.
 - Add "primitive": "selection" or "textbox" only when the verb leaves it ambiguous.
 - A keyboard-focus or tab-navigation step is a control interaction, not a passive observation. It
   MUST name the focused entity field(s) in "operates" and declare "primitive". Split text-entry

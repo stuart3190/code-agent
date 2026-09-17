@@ -2025,7 +2025,7 @@ async function selectionReflectedOutsideControl(page, machineId, labels) {
   if (!wantedLabels.length) return false;
   return page.evaluate(({ id, texts }) => {
     // A stable slug and its human label are one identity: hyphens/underscores are separators.
-    const normalise = (value) => String(value || "").toLowerCase().replace(/[-_]+/g, " ").replace(/s+/g, " ").trim();
+    const normalise = (value) => String(value || "").toLowerCase().replace(/[-_]+/g, " ").replace(/[ \t\r\n]+/g, " ").trim();
     const wantedAll = texts.map(normalise).filter(Boolean);
     if (!wantedAll.length) return false;
     const controls = id ? [...document.querySelectorAll(`[data-thrallo-control="${id}"]`)] : [];
