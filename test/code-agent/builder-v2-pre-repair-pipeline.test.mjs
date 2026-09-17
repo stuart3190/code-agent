@@ -98,3 +98,38 @@ test("the retained first core candidates carry the blocking findings production 
   const verdict = staticCandidateVerdict(first, coreGenerationScope(spec, contract));
   assert.ok(verdict.blocking.length > 0, "an unfinished headroom batch is not runnable");
 });
+
+// ── THE WHOLE PRE-REPAIR PIPELINE, EVERY RETAINED ADVANCED FIXTURE, NO MODEL ───────────────────
+// contract validator → interaction/provenance gate → core scope → execution specification
+// (complete, deterministic) → static verdict on the candidate production sent to the browser.
+test("every retained Advanced fixture passes the full pre-repair pipeline deterministically", async () => {
+  const { validateContract } = await import("../../shell/shared/implementationContract.mjs");
+  const { buildExecutionSpec, renderExecutionSpecBrief, executionSpecCoverage } = await import("../../shell/server/lib/builderV2/executionSpec.mjs");
+  const { persistenceOwnershipPlan } = await import("../../shell/server/lib/builderV2/contractTiering.mjs");
+  const shorts = (await readdir(RETAINED)).filter((name) => /^[0-9a-f]{7}$/.test(name));
+  assert.ok(shorts.length >= 6);
+  for (const short of shorts) {
+    const contract = await load(new URL(`${short}/contract.json`, RETAINED));
+    const validated = validateContract(contract);
+    assert.equal(validated.ok, true, `${short}: validator — ${(validated.problems || []).join("; ")}`);
+    const spec = deriveBuildSpec(contract);
+    assert.equal(spec.verdict.ok, true, `${short}: gate — ${spec.verdict.problems.join("; ")}`);
+    assert.equal(spec.interactionContract.valid, true, `${short}: interaction contract`);
+    const scope = coreGenerationScope(spec, contract);
+    assert.ok(scope.journeyIds.length > 0, `${short}: a core scope`);
+    const sources = {
+      capabilityGraph: scope.scoped.capabilityGraph, scaffoldGraph: scope.scoped.scaffoldGraph,
+      modulePlan: scope.scoped.modulePlan, moduleContracts: scope.scoped.moduleContracts,
+      interactionContract: scope.scoped.interactionContract,
+      persistencePlan: persistenceOwnershipPlan(contract, scope.journeys, scope.scoped.modulePlan),
+    };
+    const text = renderExecutionSpecBrief(buildExecutionSpec(sources));
+    assert.deepEqual(executionSpecCoverage(text, sources).missing, [], `${short}: execution specification complete`);
+    assert.equal(text, renderExecutionSpecBrief(buildExecutionSpec(sources)), `${short}: deterministic`);
+    const file = BROWSER_REACHING[short];
+    if (!file) continue; // attempts that never produced a candidate: nothing to judge statically
+    const tree = JSON.parse(await readFile(new URL(`${short}/${file}`, RETAINED), "utf8"));
+    const verdict = staticCandidateVerdict(tree, scope);
+    assert.deepEqual(verdict.blocking.map((row) => row.code), [], `${short}: static verdict on the browser-reaching candidate`);
+  }
+});

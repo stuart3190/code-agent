@@ -265,13 +265,15 @@ export const AUTH_CREDENTIAL_FIELDS = Object.freeze([
   { name: "authEmail", type: "email", required: true },
   { name: "authPassword", type: "password", required: true },
 ]);
-const SESSION_OPERATION_KIND = /^(?:sign ?in|sign ?up|sign ?out|log ?in|log ?out|authenticate|register)$/i;
+// "auth" is the legacy kind that pre-vocabulary contracts used for a platform sign-in; it names the
+// same session operation and carries no entity records of its own.
+const SESSION_OPERATION_KIND = /^(?:auth|sign ?in|sign ?up|sign ?out|log ?in|log ?out|authenticate|register)$/i;
 
 export function isSessionOperation(operation) {
   if (!operation || typeof operation !== "object") return false;
   if (SESSION_OPERATION_KIND.test(String(operation.kind || operation.action || operation.method || "").trim())) return true;
   return (Array.isArray(operation.responsibilities) ? operation.responsibilities : [])
-    .some((responsibility) => String(responsibility?.capability || responsibility?.capabilityId || "").toLowerCase() === "session");
+    .some((responsibility) => ["session", "auth"].includes(String(responsibility?.capability || responsibility?.capabilityId || "").toLowerCase()));
 }
 
 /** True when the contract relies on the platform session: auth.required, or a session operation. */

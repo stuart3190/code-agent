@@ -4,6 +4,7 @@
 // the implementation contract. It does not render JSX or prescribe a booking visual template.
 
 import { parse } from "@babel/parser";
+const SESSION_CAPABILITY_IDS = new Set(["session", "auth"]);
 import { INTERACTION_CONTRACT_RULES } from "./executionSpecRules.mjs";
 
 import {
@@ -24,6 +25,7 @@ import {
   verificationFixtureFields,
 } from "../../../shared/implementationContract.mjs";
 import { AUTH_CREDENTIAL_FIELDS, contractUsesPlatformAuthentication } from "../../../shared/implementationContract.mjs";
+import { isSessionOperation } from "../../../shared/implementationContract.mjs";
 import { isKeyboardFocusOnlyStep } from "./interactionSemantics.mjs";
 import { operationReadEntityNames } from "./entityScope.mjs";
 
@@ -1572,6 +1574,14 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
       .filter((responsibility) => responsibility.requiresTransformation);
     const functional = functionalResponsibilities[0] || null;
     const persistence = responsibilities.find((responsibility) => responsibility.type === "persistence") || null;
+    // The platform session is not a record store: a sign-in bound to the session capability (or the
+    // legacy "auth" capability of pre-vocabulary contracts) creates no durable record and so has
+    // no lifecycle a consumer journey would have to prove a producer for. Treating it as durable
+    // persistence made every dependent journey of a legacy accountView contract "consume records
+    // with no proven source".
+    const durablePersistence = persistence
+      && !SESSION_CAPABILITY_IDS.has(String(persistence.capabilityId || persistence.capability || "").toLowerCase())
+      ? persistence : null;
     const semantic = functional || persistence;
     if (!semantic) continue;
 
@@ -1666,16 +1676,18 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
       Object.assign(flow, {
         operationId: operation.operationId,
         entity: operation.entity || null,
-        durableOperation: persistence ? persistence.capabilityMethod : null,
-        durableLifecycle: persistence
-          ? `${persistence.capabilityId || "crud"}:${operation.entity}` : flow.durableLifecycle,
+        durableOperation: durablePersistence ? durablePersistence.capabilityMethod : null,
+        durableLifecycle: durablePersistence
+          ? `${durablePersistence.capabilityId || "crud"}:${operation.entity}` : flow.durableLifecycle,
         // Record inputs are not all instances of the first entity in the app.
         // Keep exact schema identities for isolated multi-entity setup replay.
         requiredProducerEntities: operationReadEntityNames(contract,
           (contract?.operations || []).find((candidate) => (candidate.id || candidate.name) === operation.operationId) || {})
           .filter((entity) => entityPersistencePolicy(contract, entity) !== "transient"
             && (contract?.operations || []).some((candidate) => candidate.entity === entity
-              && operationUsesDurablePersistence(contract, candidate)))
+              // A session operation stores no record: an entity whose only durable-looking
+              // operations are sign-ins (legacy accountView) is never a producer requirement.
+              && operationUsesDurablePersistence(contract, candidate) && !isSessionOperation(candidate)))
           .filter((entity) => entity !== operation.entity || persistence?.capabilityMethod !== "create"),
         responsibilityIds: responsibilities.map((responsibility) => responsibility.id),
         semanticResponsibilityTypes: responsibilities.map((responsibility) => responsibility.type),
@@ -1701,7 +1713,7 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
         persistenceSource,
         expectedStateTransition: {
           produces: unique([...semanticWrites, ...declaredStepProduces]),
-          persists: handoff?.writes || (persistence ? persistence.writes || [] : []),
+          persists: handoff?.writes || (durablePersistence ? durablePersistence.writes || [] : []),
           readsPersisted: persistenceSource?.writes || [],
           requirement: flow.nextStateRequirement || step?.expect || semantic.behavior,
         },

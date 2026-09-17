@@ -156,3 +156,56 @@ test("the contract prompt teaches the session vocabulary and forbids a session e
   assert.match(SYSTEM_PROMPT, /declare no session, account or authSession entity/);
   assert.match(SYSTEM_PROMPT, /never pre-fill demo\s+credentials/);
 });
+
+test("a session sign-in creates no durable record lifecycle, so dependent journeys need no producer for it", () => {
+  // Pre-vocabulary contracts bound sign-in to capability "auth" on an accountView entity holding
+  // the credential fields. The platform session stores no record: a consumer journey that signs in
+  // is not consuming accountView records, and the provenance gate must not demand a producer.
+  const legacy = {
+    summary: "Workspace with account access",
+    entities: [
+      { name: "item", fields: [{ name: "title" }] },
+      { name: "accountView", fields: [{ name: "authEmail" }, { name: "authPassword" }] },
+    ],
+    operations: [
+      { id: "create-item", entity: "item", kind: "create", journey: "manage-items" },
+      { id: "sign-in-workspace", entity: "accountView", kind: "auth", journey: "manage-items",
+        responsibilities: [{ type: "persistence", capability: "auth", capabilityMethod: "signIn", reads: ["authEmail", "authPassword"], writes: [] }] },
+      { id: "sign-in-catalogue", entity: "accountView", kind: "auth", journey: "filter-catalogue",
+        responsibilities: [{ type: "persistence", capability: "auth", capabilityMethod: "signIn", reads: ["authEmail", "authPassword"], writes: [] }] },
+    ],
+    routes: [{ path: "/", name: "Home" }, { path: "/workspace", name: "Workspace" }, { path: "/catalogue", name: "Catalogue" }],
+    auth: { required: true },
+    journeys: [
+      { id: "manage-items", title: "Manage items", priority: "primary", steps: [
+        { action: "enter account sign-in credentials", target: "authEmail", operates: ["authEmail", "authPassword"], primitive: "textbox", expect: "the account email is visible" },
+        { action: "submit sign-in", target: "sign in control", operates: ["sign-in-workspace"], expect: "the workspace opens" },
+        { action: "create an item", target: "title", operates: ["create-item"], expect: "the created item is visible" },
+      ] },
+      { id: "filter-catalogue", title: "Filter the catalogue", priority: "secondary", steps: [
+        { action: "enter account sign-in credentials", target: "authEmail", operates: ["authEmail", "authPassword"], primitive: "textbox", expect: "the account email is visible" },
+        { action: "submit sign-in", target: "sign in control", operates: ["sign-in-catalogue"], expect: "the catalogue opens" },
+        { action: "enter a catalogue filter", target: "filter", expect: "matching items are visible" },
+      ] },
+    ],
+  };
+  const spec = deriveBuildSpec(legacy);
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
+  const signIn = spec.interactionContract.flows.find((flow) => flow.journeyId === "filter-catalogue" && flow.operationId === "sign-in-catalogue");
+  assert.ok(signIn, "the sign-in action is derived");
+  assert.equal(signIn.durableLifecycle ?? null, null, "a session operation has no record lifecycle");
+  assert.equal(signIn.durableOperation ?? null, null);
+  // A real durable consumer keeps its producer requirement: the same catalogue journey updating
+  // report records that no journey creates, no loader loads and no seed supplies is still rejected.
+  const consumer = {
+    ...legacy,
+    entities: [...legacy.entities, { name: "report", fields: [{ name: "title" }] }],
+    operations: [...legacy.operations, { id: "update-report", entity: "report", kind: "update", journey: "filter-catalogue" }],
+    journeys: [legacy.journeys[0], { ...legacy.journeys[1], steps: [...legacy.journeys[1].steps,
+      { action: "rename the first report", target: "title", operates: ["update-report"], expect: "the renamed report is visible" }] }],
+  };
+  const rejected = deriveBuildSpec(consumer);
+  assert.equal(rejected.verdict.ok, false);
+  assert.match(rejected.verdict.problems.join("; "), /filter-catalogue consumes report records with no proven source/);
+  assert.doesNotMatch(rejected.verdict.problems.join("; "), /accountView/, "the session entity is never the complaint");
+});

@@ -409,9 +409,12 @@ function renderJourneyBrief(journeys) {
     for (const [i, step] of (journey.steps || []).entries()) {
       lines.push(`  ${i + 1}. ACTION: ${step.action}${step.target ? ` (${step.target})` : ""}`);
       lines.push(`     RESULT (must be caused by the action): ${step.expect}`);
+      // The verifier judges a step on structured contract evidence (the contracted route, the
+      // control identities, the entered values, collection members, the persisted record), never
+      // on the words of this sentence. The words are still the clearest statement of intent.
       const wanted = expectationKeywords(step.expect);
       if (wanted.length) {
-        lines.push(`     the verifier looks for these EXACT words as visible text: [${wanted.join(", ")}] — at least half must be present (newly, unless this step is navigation/page-load)`);
+        lines.push(`     verified structurally: the contracted route/control/values/record above must really change; the words [${wanted.join(", ")}] describe the intent and are never matched literally`);
       }
     }
     lines.push("");
