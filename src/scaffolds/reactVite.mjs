@@ -345,6 +345,9 @@ export default function HomePage() {
   "src/lib/modules/asyncState.js": sdk("lib/modules/asyncState.js"),
   "src/lib/modules/settings.js": sdk("lib/modules/settings.js"),
   "src/lib/modules/audit.js": sdk("lib/modules/audit.js"),
+  "src/lib/modules/workflow.js": sdk("lib/modules/workflow.js"),
+  "src/lib/modules/workspace.js": sdk("lib/modules/workspace.js"),
+  "src/lib/modules/editor.js": sdk("lib/modules/editor.js"),
   "src/lib/modules/uiReact.js": sdk("lib/modules/uiReact.js"),
 
   // Asset helpers (Builder v2, master plan Part 18): picture/srcset/lazy/blur rendering

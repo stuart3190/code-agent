@@ -343,6 +343,134 @@ export function useHistory(query = {}) { return useHistoryState(history, query);
   return { files, interfaces };
 }
 
+// WP9: declared workflows, workspace lifecycle and reversible editor state.
+export const WORKFLOW_COMPOSED_PATH = `${COMPOSED_ROOT}/workflow.js`;
+export const WORKSPACE_COMPOSED_PATH = `${COMPOSED_ROOT}/workspace.js`;
+export const EDITOR_COMPOSED_PATH = `${COMPOSED_ROOT}/editor.js`;
+export const APP_FACADE_WORKFLOW_PATH = `${APP_FACADE_ROOT}/workflow.js`;
+export const APP_FACADE_WORKSPACE_PATH = `${APP_FACADE_ROOT}/workspace.js`;
+export const APP_FACADE_EDITOR_PATH = `${APP_FACADE_ROOT}/editor.js`;
+
+function behaviourFiles(behaviourPlan, { entitySchema = null } = {}) {
+  const files = {};
+  const interfaces = [];
+  const facades = [];
+  const workflows = behaviourPlan?.workflows || [];
+  const workspaces = behaviourPlan?.workspaces || [];
+  const editors = behaviourPlan?.editors || [];
+
+  if (workflows.length) {
+    const durable = workflows.some((workflow) => workflow.persistence === "durable");
+    files[WORKFLOW_COMPOSED_PATH] = `${banner("workflows")}import { compileWorkflow, createWorkflow${durable ? ", durableWorkflowPersistence" : ""} } from "../../modules/workflow.js";
+${durable ? 'import { repository } from "./entities.js";\n' : ""}
+/** The declared state graph of each multi-step journey. Steps and fields come from the contract. */
+export const workflowDefinitions = Object.freeze({
+${workflows.map((workflow) => `  ${quote(workflow.id)}: compileWorkflow(${jsObject({ id: workflow.id, steps: workflow.steps, review: workflow.review })}),`).join("\n")}
+});
+
+/**
+ * One workflow controller per declared journey. Persistence mode is explicit per workflow: a flow
+ * the contract did not describe as resumable writes nothing anywhere.
+ */
+export function createAppWorkflow(id, { values = {}, validate = null, onConfirm = null } = {}) {
+  const definition = workflowDefinitions[id];
+  if (!definition) throw new Error(\`no workflow "\${id}" is declared for this application\`);
+  return createWorkflow({
+    definition, values, validate, onConfirm,
+    persistence: ${durable
+      ? `WORKFLOW_PERSISTENCE_MODE[id] === "durable"\n      ? durableWorkflowPersistence({ repository, entity: "workflowState", key: id }) : null`
+      : "null"},
+  });
+}
+
+export const WORKFLOW_PERSISTENCE_MODE = Object.freeze(${jsObject(Object.fromEntries(workflows.map((workflow) => [workflow.id, workflow.persistence])))});
+export const workflows = Object.freeze(Object.keys(workflowDefinitions));
+`;
+    interfaces.push({ module: WORKFLOW_COMPOSED_PATH, exports: ["workflowDefinitions", "createAppWorkflow", "workflows"],
+      owns: ["workflow position"], operations: ["transition", "restore", "confirmWorkflow"] });
+    files[APP_FACADE_WORKFLOW_PATH] = `${banner("public workflow ABI")}import { createAppWorkflow, workflowDefinitions, workflows } from "../capabilities/composed/workflow.js";
+import { useWorkflowState } from "../modules/uiReact.js";
+
+export { workflowDefinitions, workflows, createAppWorkflow };
+
+const controllers = new Map();
+/** The controller for one declared journey. The same one, so two screens share its position. */
+export function workflowFor(id, options = {}) {
+  if (!controllers.has(id)) controllers.set(id, createAppWorkflow(id, options));
+  return controllers.get(id);
+}
+/** { step, values, errors, status, next, back, goTo, confirm, cancel } for one declared journey. */
+export function useWorkflow(id, options = {}) { return useWorkflowState(workflowFor(id, options)); }
+`;
+    facades.push("workflow");
+  }
+
+  if (workspaces.length) {
+    files[WORKSPACE_COMPOSED_PATH] = `${banner("workspace lifecycle")}import { createWorkspace } from "../../modules/workspace.js";
+import { repository } from "./entities.js";
+
+/** Every durable root the contract opens, edits and saves in place. */
+export const workspaceRoots = Object.freeze(${jsObject(workspaces.map((workspace) => ({ entity: workspace.entity, fields: workspace.fields })))});
+
+const controllers = new Map();
+/**
+ * The workspace for one root entity. The SAME controller is returned for the same entity, so two
+ * screens editing one project share its draft and its identity instead of racing each other.
+ */
+export function workspaceFor(entity) {
+  const declared = workspaceRoots.find((root) => root.entity === entity);
+  if (!declared) throw new Error(\`no workspace is declared for "\${entity}"\`);
+  if (!controllers.has(entity)) {
+    controllers.set(entity, createWorkspace({ repository: repository(entity), fields: declared.fields }));
+  }
+  return controllers.get(entity);
+}
+export const workspaces = Object.freeze(workspaceRoots.map((root) => root.entity));
+`;
+    interfaces.push({ module: WORKSPACE_COMPOSED_PATH, exports: ["workspaceRoots", "workspaceFor", "workspaces"],
+      owns: ["active workspace"], operations: ["open", "save", "discard"] });
+    files[APP_FACADE_WORKSPACE_PATH] = `${banner("public workspace ABI")}import { workspaceFor, workspaceRoots, workspaces } from "../capabilities/composed/workspace.js";
+import { useWorkspaceState } from "../modules/uiReact.js";
+
+export { workspaceRoots, workspaces, workspaceFor };
+/** { draft, dirty, status, record, open, save, discard, reopen } for one declared root entity. */
+export function useWorkspace(entity, options = {}) { return useWorkspaceState(workspaceFor(entity), options); }
+`;
+    facades.push("workspace");
+  }
+
+  if (editors.length) {
+    const editor = editors[0];
+    files[EDITOR_COMPOSED_PATH] = `${banner("editor state and history")}import { createEditor, objectCommands } from "../../modules/editor.js";
+
+/**
+ * The reversible command vocabulary. Each command declares its own inverse, so undo replays what
+ * actually happened rather than what a screen believed it did. A domain command is added here with
+ * its inverse beside it; one without an inverse is refused at registration.
+ */
+export const editorCommands = objectCommands({ collection: "objects" });
+export const editorCollection = ${quote(editor.collection)};
+
+/** A fresh editor over one document. History belongs to the document it was opened with. */
+export function createAppEditor(document = { objects: [] }) {
+  return createEditor({ document, commands: editorCommands });
+}
+`;
+    interfaces.push({ module: EDITOR_COMPOSED_PATH, exports: ["editorCommands", "editorCollection", "createAppEditor"],
+      owns: ["editor document"], operations: ["select", "execute", "undo", "redo"] });
+    files[APP_FACADE_EDITOR_PATH] = `${banner("public editor ABI")}import { createAppEditor, editorCollection, editorCommands } from "../capabilities/composed/editor.js";
+import { useEditorState } from "../modules/uiReact.js";
+
+export { editorCommands, editorCollection, createAppEditor };
+/** { objects, selected, canUndo, canRedo, select, execute, undo, redo } over one editor instance. */
+export function useEditor(editor) { return useEditorState(editor); }
+`;
+    facades.push("editor");
+  }
+
+  return { files, interfaces, facades };
+}
+
 function facadeIndexSource(moduleLock, facadeModules) {
   return `${banner("public application ABI")}// The one import surface for generated application code. Everything here is deterministic and
 // protected; layout, styling, copy and domain logic remain entirely the application's.
@@ -356,7 +484,7 @@ export const THRALLO_APP_ABI = Object.freeze(${jsObject({
 `;
 }
 
-function capabilityFiles(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null } = {}) {
+function capabilityFiles(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null } = {}) {
   const nodes = new Map((graph?.nodes || []).map((node) => [node.id, node]));
   const files = {};
   const interfaces = [];
@@ -491,6 +619,12 @@ export const newsletterCapability = makeNewsletter({ entity: ${quote(entity)} })
       interfaces.push(...settings.interfaces);
       facades.push("settings");
     }
+    const behaviour = behaviourFiles(behaviourPlan, { entitySchema });
+    if (Object.keys(behaviour.files).length) {
+      Object.assign(files, behaviour.files);
+      interfaces.push(...behaviour.interfaces);
+      facades.push(...behaviour.facades);
+    }
     files[APP_FACADE_INDEX_PATH] = facadeIndexSource(moduleLock, facades);
   }
   if (moduleLock) files[MODULE_LOCK_PATH] = lockFileSource(moduleLock);
@@ -514,8 +648,8 @@ export { CAPABILITY_COMPOSITION } from "./manifest.js";
   return { files, interfaces };
 }
 
-export function capabilityCompositionPlan(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null } = {}) {
-  const rendered = capabilityFiles(graph, { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan });
+export function capabilityCompositionPlan(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null } = {}) {
+  const rendered = capabilityFiles(graph, { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan });
   const extensionPoints = (graph?.nodes || []).filter((node) => node.type === "custom_behavior")
     .map((node) => ({ id: node.id, ...node.extension, inputs: node.requiredInputs, outputs: node.outputs,
       stateOwnership: node.stateOwnership, persistenceSemantics: node.persistenceSemantics }));
@@ -534,7 +668,7 @@ export function capabilityCompositionPlan(graph, { moduleLock = null, identityPl
 }
 
 /** Apply or refresh the foundation. Existing model-owned extension configuration is preserved. */
-export function composeCapabilityFoundation(tree, graph, { moduleLock = null, identityPlan = null, entitySchema = null, routePlan = null, settingsPlan = null } = {}) {
+export function composeCapabilityFoundation(tree, graph, { moduleLock = null, identityPlan = null, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null } = {}) {
   // Production Builder V2 starts from the full React/Vite scaffold. Some retained unit/legacy
   // baselines intentionally predate the capability runtime; do not emit adapters with dangling
   // imports into those trees. They remain on the migration-compatible path until refreshed from
@@ -553,7 +687,7 @@ export function composeCapabilityFoundation(tree, graph, { moduleLock = null, id
   // A base tree without the module runtime (a legacy snapshot, a retained fixture) composes the
   // capability adapters exactly as before and simply does not receive the identity controller.
   const identityRuntime = typeof tree?.[IDENTITY_RUNTIME_PATH] === "string";
-  const options = { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan };
+  const options = { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan };
   const rendered = capabilityFiles(graph, options);
   const next = { ...(tree || {}), ...rendered.files };
   if (typeof next[CAPABILITY_CONFIGURATION_PATH] !== "string") {

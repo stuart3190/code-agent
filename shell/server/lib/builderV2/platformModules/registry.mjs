@@ -572,7 +572,134 @@ const AUDIT_MODULE = platformModule({
   proof: "test/code-agent/builder-v2-settings-audit.test.mjs",
 });
 
-const MODULES = [CORE_MODULE, ...LEGACY_WRAPPED.map(legacyCapabilityModule), IDENTITY_1_2, ACCOUNTS_MODULE, AUTHORIZATION_1_1, ADMIN_MODULE, ENTITIES_1_1, ROUTING_MODULE, QUERY_MODULE, FORMS_1_1, ASYNC_MODULE, SETTINGS_MODULE, AUDIT_MODULE];
+// WP9 — workflow 1.1.0: the legacy wizard wrapper plus a declared state graph with refused
+// transitions, terminal states and an EXPLICIT persistence mode. 1.0.0 stays registered for locks
+// that pinned it, exactly as entities 1.0.0 and forms 1.0.0 do.
+const WORKFLOW_1_1 = (() => {
+  const legacy = legacyCapabilityModule("wizard");
+  const workflowOperations = [
+    clientOperation({ id: "transition", effect: "mutation", stateOwner: "workflow position", errors: ["workflow_step_invalid", "workflow_terminal", "workflow_step_unknown"], hooks: ["an invalid step refuses to advance and says why"] }),
+    clientOperation({ id: "confirmWorkflow", effect: "mutation", stateOwner: "workflow position", errors: ["workflow_step_invalid", "workflow_terminal", "workflow_confirm_failed"], hooks: ["a confirmed workflow refuses a second confirmation"] }),
+  ];
+  return defineModule({
+    ...legacy,
+    version: "1.1.0",
+    title: "workflow (declared state graph, refused transitions, explicit persistence mode)",
+    compatibility: { ...legacy.compatibility, clientAbi: "workflow@1" },
+    provides: { capabilities: [...legacy.provides.capabilities],
+      operations: [...legacy.provides.operations.map((operation) => (operation.id === "restore"
+        ? { ...operation, errors: [...operation.errors, "workflow_persistence_unavailable"], hooks: [...(operation.hooks || []), "saved progress reopens on the step it was left on"] }
+        : operation)), ...workflowOperations] },
+    runtime: {
+      ...legacy.runtime,
+      clientEntrypoints: [
+        ...legacy.runtime.clientEntrypoints,
+        { module: "src/lib/modules/workflow.js", exports: ["compileWorkflow", "createWorkflow", "durableWorkflowPersistence", "WORKFLOW_STATUS", "WORKFLOW_PERSISTENCE", "WorkflowError"] },
+        { module: "src/lib/modules/uiReact.js", exports: ["useWorkflowState"] },
+        { module: "src/lib/capabilities/composed/workflow.js", exports: ["workflows", "workflowDefinitions"], composed: true },
+        { module: "src/lib/app/workflow.js", exports: ["useWorkflow", "workflowFor", "workflows"], composed: true },
+      ],
+      protectedArtifacts: [
+        ...legacy.runtime.protectedArtifacts,
+        { path: "src/lib/modules/workflow.js", kind: "runtime" },
+        { path: "src/lib/capabilities/composed/workflow.js", kind: "composed" },
+        { path: "src/lib/app/workflow.js", kind: "composed" },
+      ],
+    },
+    verification: {
+      deterministicTests: [...legacy.verification.deterministicTests, "refused transition", "terminal state", "restore", "one confirmation"],
+      browserEvidence: [...legacy.verification.browserEvidence, "an incomplete step cannot advance", "a confirmed flow cannot be submitted twice"],
+    },
+    proof: "test/code-agent/builder-v2-workflow-workspace-editor.test.mjs",
+  });
+})();
+
+// WP9 — booking 1.1.0: the proven booking system, now declaring the versioned entities repository
+// it sits on, so a cancellation is a compare-and-set rather than a blind overwrite.
+const BOOKING_1_1 = (() => {
+  const legacy = legacyCapabilityModule("booking");
+  const operations = legacy.provides.operations.map((operation) => (operation.id === "cancelBooking"
+    ? { ...operation, concurrency: "versioned", errors: [...operation.errors, "version_conflict"] } : operation));
+  return defineModule({
+    ...legacy,
+    version: "1.1.0",
+    title: "booking (capacity admission by deterministic rank; versioned cancellation)",
+    compatibility: { ...legacy.compatibility, clientAbi: "booking@1" },
+    provides: { capabilities: [...legacy.provides.capabilities], operations },
+    requires: { ...legacy.requires, modules: [...legacy.requires.modules, { id: "thrallo.entities", range: "^1.1.0" }] },
+    verification: {
+      deterministicTests: [...legacy.verification.deterministicTests, "concurrent admission by rank", "versioned cancellation"],
+      browserEvidence: [...legacy.verification.browserEvidence],
+    },
+    proof: "test/code-agent/builder-v2-workflow-workspace-editor.test.mjs",
+  });
+})();
+
+// WP9 — workspace lifecycle and editor state/history. Neither is a capability a contract declares:
+// both are selected from contract STRUCTURE (a workspace scaffold family, an editor family),
+// exactly like routing and query.
+const WORKSPACE_MODULE = platformModule({
+  id: "thrallo.workspace", version: "1.0.0", title: "Workspace lifecycle",
+  clientAbi: "workspace@1", services: ["backend_sdk", "entities"],
+  requires: [{ id: "thrallo.entities", range: "^1.1.0" }],
+  operations: [
+    clientOperation({ id: "open", stateOwner: "active workspace", errors: ["workspace_not_found"], hooks: ["a reopened workspace is the same record"] }),
+    clientOperation({ id: "save", effect: "mutation", concurrency: "versioned", stateOwner: "active workspace", errors: ["workspace_version_conflict", "validation_failed"], hooks: ["a save updates the record it opened, never a second one"] }),
+    clientOperation({ id: "discard", effect: "mutation", stateOwner: "active workspace", hooks: ["discarding restores the saved values"] }),
+  ],
+  entrypoints: [
+    { module: "src/lib/modules/workspace.js", exports: ["createWorkspace", "draftDiffers", "WORKSPACE_STATUS", "WorkspaceError"] },
+    { module: "src/lib/modules/uiReact.js", exports: ["useWorkspaceState"] },
+    { module: "src/lib/capabilities/composed/workspace.js", exports: ["workspaces"], composed: true },
+    { module: "src/lib/app/workspace.js", exports: ["useWorkspace", "workspaces"], composed: true },
+  ],
+  artifacts: [
+    { path: "src/lib/modules/workspace.js", kind: "runtime" },
+    { path: "src/lib/capabilities/composed/workspace.js", kind: "composed" },
+    { path: "src/lib/app/workspace.js", kind: "composed" },
+  ],
+  surfaceBindings: [
+    { state: "empty", required: true }, { state: "loading", required: true }, { state: "ready", required: true },
+    { state: "conflict", required: true }, { state: "error", required: true },
+  ],
+  deterministicTests: ["same-id save and reopen", "derived dirty state", "version conflict", "discard restores"],
+  browserEvidence: ["a saved project reopens with its own values", "an unsaved change is visible as unsaved"],
+  proof: "test/code-agent/builder-v2-workflow-workspace-editor.test.mjs",
+});
+
+const EDITOR_MODULE = platformModule({
+  id: "thrallo.editor", version: "1.0.0", title: "Editor state/history",
+  clientAbi: "editor@1", services: [],
+  operations: [
+    clientOperation({ id: "select", stateOwner: "editor selection", hooks: ["a selection never names an object that is gone"] }),
+    clientOperation({ id: "execute", effect: "mutation", stateOwner: "editor document", errors: ["editor_command_unknown", "editor_command_not_reversible", "editor_command_failed"], hooks: ["an unknown command is refused, not ignored"] }),
+    clientOperation({ id: "undo", effect: "mutation", stateOwner: "editor document", errors: ["editor_nothing_to_undo"], hooks: ["one transaction is one undo"] }),
+    clientOperation({ id: "redo", effect: "mutation", stateOwner: "editor document", errors: ["editor_nothing_to_redo"], hooks: ["a new command discards the redo branch"] }),
+  ],
+  entrypoints: [
+    { module: "src/lib/modules/editor.js", exports: ["createEditor", "compileCommands", "objectCommands", "EditorError"] },
+    { module: "src/lib/modules/uiReact.js", exports: ["useEditorState"] },
+    { module: "src/lib/capabilities/composed/editor.js", exports: ["createAppEditor", "editorCommands"], composed: true },
+    { module: "src/lib/app/editor.js", exports: ["useEditor", "createAppEditor"], composed: true },
+  ],
+  artifacts: [
+    { path: "src/lib/modules/editor.js", kind: "runtime" },
+    { path: "src/lib/capabilities/composed/editor.js", kind: "composed" },
+    { path: "src/lib/app/editor.js", kind: "composed" },
+  ],
+  surfaceBindings: [
+    { state: "ready", required: true }, { state: "empty", required: true }, { state: "error", required: false },
+  ],
+  deterministicTests: ["declared inverses", "transaction is one undo", "redo branch truncation", "identity and order restored", "unknown command refused"],
+  browserEvidence: ["undo restores what the visitor changed", "redo is unavailable after a new change"],
+  proof: "test/code-agent/builder-v2-workflow-workspace-editor.test.mjs",
+});
+
+const MODULES = [
+  CORE_MODULE, ...LEGACY_WRAPPED.map(legacyCapabilityModule), IDENTITY_1_2, ACCOUNTS_MODULE, AUTHORIZATION_1_1,
+  ADMIN_MODULE, ENTITIES_1_1, ROUTING_MODULE, QUERY_MODULE, FORMS_1_1, ASYNC_MODULE, SETTINGS_MODULE, AUDIT_MODULE,
+  WORKFLOW_1_1, BOOKING_1_1, WORKSPACE_MODULE, EDITOR_MODULE,
+];
 
 /** id → every registered version of that module, highest last. */
 const byId = new Map();

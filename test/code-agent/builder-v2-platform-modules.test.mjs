@@ -116,8 +116,9 @@ test("registry — every legacy capability is wrapped by a validated module; pub
   assert.deepEqual(validateModuleRegistry(), { ok: true, problems: [] });
   assert.deepEqual(registeredModuleIds(), [
     "thrallo.accounts", "thrallo.admin", "thrallo.async", "thrallo.audit", "thrallo.authorization", "thrallo.booking",
-    "thrallo.contact", "thrallo.core", "thrallo.entities", "thrallo.forms", "thrallo.identity", "thrallo.newsletter",
-    "thrallo.query", "thrallo.routing", "thrallo.settings", "thrallo.workflow",
+    "thrallo.contact", "thrallo.core", "thrallo.editor", "thrallo.entities", "thrallo.forms", "thrallo.identity",
+    "thrallo.newsletter", "thrallo.query", "thrallo.routing", "thrallo.settings", "thrallo.workflow",
+    "thrallo.workspace",
   ]);
   for (const [capabilityId, capability] of Object.entries(CAPABILITIES)) {
     const manifest = moduleForCapability(capabilityId);
@@ -280,7 +281,9 @@ test("build spec v4 — the spec carries the resolution and lock; v3 consumers s
   // included, plus the platform modules the contract's own structure implies (WP6: it declares
   // routes, so it needs the route compiler).
   assert.deepEqual(resolvedModuleIds(spec.moduleResolution), [
-    "thrallo.core", "thrallo.async", "thrallo.identity", "thrallo.booking", "thrallo.entities", "thrallo.forms",
+    // WP9: booking 1.1.0 declares the versioned entities repository it sits on, so entities is
+    // resolved before it. Dependency order is the lock order.
+    "thrallo.core", "thrallo.async", "thrallo.identity", "thrallo.entities", "thrallo.booking", "thrallo.forms",
     "thrallo.newsletter", "thrallo.routing", "thrallo.workflow",
   ]);
   assert.deepEqual(spec.moduleResolution.modules.find((row) => row.id === "thrallo.routing").reasons, ["routes declared"]);
@@ -373,7 +376,7 @@ test("old-spec adapter — a v3 spec or persisted contract gains a legacy-flagge
   assert.deepEqual(lockFromLegacySpec(persisted).modules.map((row) => row.id), adapted.modules.map((row) => row.id));
   const bare = { contract: CONTRACT, bindings: fresh.bindings };
   assert.deepEqual(lockFromLegacySpec(bare).modules.map((row) => row.id),
-    ["thrallo.core", "thrallo.identity", "thrallo.booking", "thrallo.entities", "thrallo.newsletter", "thrallo.workflow"],
+    ["thrallo.core", "thrallo.identity", "thrallo.entities", "thrallo.booking", "thrallo.newsletter", "thrallo.workflow"],
     "bindings alone omit the graph-added interaction primitives");
   assert.ok(typeof scaffoldArtifactSource("src/lib/capabilities/crud.js") === "string");
 });

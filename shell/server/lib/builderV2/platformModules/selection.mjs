@@ -12,6 +12,7 @@
 // whole target catalogue while each work package lands its module.
 
 import { MODULE_REGISTRY } from "./registry.mjs";
+import { selectedFamilies } from "../scaffoldGraph.mjs";
 
 export const PLATFORM_SELECTION_VERSION = 1;
 
@@ -26,10 +27,13 @@ const kindOf = (operation) => String(operation?.kind || operation?.type || opera
  * @param {object} options
  * @param {object} [options.entitySchema] compiled entity schema (durable domain entities)
  * @param {object} [options.settingsPlan] derived settings/audit plan (WP8)
+ * @param {object} [options.capabilityGraph] the derived capability graph, for scaffold-family
+ *   selection (WP9). The families are asked for here rather than re-derived, so the modules a
+ *   build locks and the families it composes can never disagree.
  * @param {object} [options.registry]
  * @returns {Array<{id: string, range: string, reason: string}>}
  */
-export function platformModuleRequests(contract, { entitySchema = null, settingsPlan = null, registry = MODULE_REGISTRY } = {}) {
+export function platformModuleRequests(contract, { entitySchema = null, settingsPlan = null, capabilityGraph = null, registry = MODULE_REGISTRY } = {}) {
   const operations = contract?.operations || [];
   const durableEntities = entitySchema?.entities || [];
   const requests = [];
@@ -60,6 +64,16 @@ export function platformModuleRequests(contract, { entitySchema = null, settings
   // changes, because history the application never shows is history nobody can check.
   if ((settingsPlan?.declarations || []).length) request("thrallo.settings", "settings singleton declared");
   if (settingsPlan?.audit?.enabled) request("thrallo.audit", "the contract reviews who changed what");
+  // WP9 — workspace and editor are structural, like routing: a contract that opens, edits and
+  // saves a durable root record needs the lifecycle module whether or not it says "workspace",
+  // and an interactive surface needs a command history whether or not it says "undo".
+  const families = new Set(capabilityGraph ? selectedFamilies(contract, capabilityGraph) : []);
+  if (families.has("project_workspace") && durableEntities.length) {
+    request("thrallo.workspace", "a durable record is opened, edited and saved in place");
+  }
+  if (families.has("canvas_editor")) {
+    request("thrallo.editor", "an interactive surface manipulates objects that must be reversible");
+  }
 
   return requests;
 }

@@ -75,3 +75,57 @@ export function useHistoryState(controller, query = {}) {
   useEffect(() => { void controller.load(query); }, [controller, key]);
   return useMemo(() => ({ ...state, more: () => controller.more(), reload: () => controller.load(query) }), [state, controller, key]);
 }
+
+/**
+ * WP9 — a declared workflow. { step, values, errors, status, next, back, goTo, confirm, cancel }.
+ * A durable workflow restores itself once on mount, so a resumed flow never renders step 1.
+ */
+export function useWorkflowState(workflow) {
+  const state = useCapabilityState(workflow);
+  useEffect(() => {
+    if (workflow.persistenceMode !== "none" && !state?.hydrated) void workflow.restore();
+  }, [workflow, state?.hydrated]);
+  return useMemo(() => ({
+    ...state,
+    setValue: workflow.setValue, setValues: workflow.setValues,
+    next: () => workflow.next(), back: () => workflow.back(), goTo: (id) => workflow.goTo(id),
+    confirm: () => workflow.confirm(), cancel: () => workflow.cancel(), reset: () => workflow.reset(),
+    validateCurrent: () => workflow.validateCurrent(),
+    field: (name) => ({
+      name, value: state?.values?.[name] ?? "", error: state?.errors?.[name] || null,
+      onChange: (value) => workflow.setValue(name, value),
+    }),
+  }), [state, workflow]);
+}
+
+/** WP9 — one workspace root: { draft, dirty, status, record, open, save, discard, reopen }. */
+export function useWorkspaceState(workspace, { open = null } = {}) {
+  const state = useCapabilityState(workspace);
+  useEffect(() => { if (open) void workspace.open(open); }, [workspace, open]);
+  return useMemo(() => ({
+    ...state,
+    open: (id) => workspace.open(id), openNew: (values) => workspace.openNew(values),
+    setDraft: (patch) => workspace.setDraft(patch), replaceDraft: (values) => workspace.replaceDraft(values),
+    save: (overrides) => workspace.save(overrides), discard: () => workspace.discard(),
+    reopen: () => workspace.reopen(), close: () => workspace.close(),
+    refreshFromConflict: () => workspace.refreshFromConflict(),
+    field: (name) => ({
+      name, value: state?.draft?.[name] ?? "",
+      onChange: (value) => workspace.setDraft({ [name]: value }),
+    }),
+  }), [state, workspace]);
+}
+
+/** WP9 — editor state and history: { objects, selected, canUndo, canRedo, execute, undo, redo }. */
+export function useEditorState(editor) {
+  const state = useCapabilityState(editor);
+  return useMemo(() => ({
+    ...state,
+    select: (id) => editor.select(id), selectMany: (ids) => editor.selectMany(ids),
+    toggleSelect: (id) => editor.toggleSelect(id), clearSelection: () => editor.clearSelection(),
+    setViewport: (patch) => editor.setViewport(patch),
+    execute: (command, payload) => editor.execute(command, payload),
+    transaction: (label, run) => editor.transaction(label, run),
+    undo: () => editor.undo(), redo: () => editor.redo(), history: () => editor.history(),
+  }), [state, editor]);
+}
