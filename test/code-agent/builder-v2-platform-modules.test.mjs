@@ -116,9 +116,9 @@ test("registry — every legacy capability is wrapped by a validated module; pub
   assert.deepEqual(validateModuleRegistry(), { ok: true, problems: [] });
   assert.deepEqual(registeredModuleIds(), [
     "thrallo.accounts", "thrallo.admin", "thrallo.async", "thrallo.audit", "thrallo.authorization", "thrallo.booking",
-    "thrallo.contact", "thrallo.core", "thrallo.editor", "thrallo.entities", "thrallo.forms", "thrallo.identity",
-    "thrallo.newsletter", "thrallo.query", "thrallo.routing", "thrallo.settings", "thrallo.workflow",
-    "thrallo.workspace",
+    "thrallo.contact", "thrallo.core", "thrallo.editor", "thrallo.entities", "thrallo.files", "thrallo.forms",
+    "thrallo.identity", "thrallo.newsletter", "thrallo.notifications", "thrallo.query", "thrallo.realtime",
+    "thrallo.routing", "thrallo.settings", "thrallo.workflow", "thrallo.workspace",
   ]);
   for (const [capabilityId, capability] of Object.entries(CAPABILITIES)) {
     const manifest = moduleForCapability(capabilityId);
@@ -217,10 +217,12 @@ test("availability — a missing required service is an explicit configuration-r
   assert.ok(resolvedModuleIds(resolution).includes("thrallo.identity"));
 
   assert.throws(() => declaredAvailability({ teleport: true }), /unknown deployment services/);
-  // The source baseline (what the platform can install) includes the WP4 accounts service; a
-  // deployment declares what it actually enabled through availabilityFromEnv.
+  // The source baseline (what the platform can install) includes the WP4 accounts service and
+  // the WP10 notification tables, both of which ship in this repository. Storage does NOT: the
+  // bucket is provisioned per deployment. A deployment declares what it enabled through
+  // availabilityFromEnv.
   assert.deepEqual(Object.entries(baselineDeploymentAvailability().services).filter(([, on]) => on).map(([id]) => id),
-    ["backend_sdk", "app_auth", "entities", "realtime", "accounts"]);
+    ["backend_sdk", "app_auth", "entities", "notifications", "realtime", "accounts"]);
   const env = availabilityFromEnv({ SUPABASE_URL: "https://x.supabase.co", SUPABASE_ANON_KEY: "anon", THRALLO_APP_SERVICE_STORAGE: "1" });
   assert.equal(env.services.storage, true);
   assert.equal(env.services.payments, false, "optional services are never assumed");

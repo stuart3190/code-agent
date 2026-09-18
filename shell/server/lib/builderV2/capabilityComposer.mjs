@@ -471,6 +471,106 @@ export function useEditor(editor) { return useEditorState(editor); }
   return { files, interfaces, facades };
 }
 
+// WP10: a declared file policy, declared notification events and declared realtime topics.
+export const FILES_COMPOSED_PATH = `${COMPOSED_ROOT}/files.js`;
+export const NOTIFICATIONS_COMPOSED_PATH = `${COMPOSED_ROOT}/notifications.js`;
+export const REALTIME_COMPOSED_PATH = `${COMPOSED_ROOT}/realtime.js`;
+export const APP_FACADE_FILES_PATH = `${APP_FACADE_ROOT}/files.js`;
+export const APP_FACADE_NOTIFICATIONS_PATH = `${APP_FACADE_ROOT}/notifications.js`;
+export const APP_FACADE_REALTIME_PATH = `${APP_FACADE_ROOT}/realtime.js`;
+
+function deliveryFiles(deliveryPlan, { entitySchema = null } = {}) {
+  const files = {};
+  const interfaces = [];
+  const facades = [];
+  const policy = deliveryPlan?.files?.policy || null;
+  const events = deliveryPlan?.notifications?.events || [];
+  const topics = deliveryPlan?.realtime?.topics || [];
+  const durable = entitySchema?.entities || [];
+
+  if (policy) {
+    const metadataEntity = durable.includes("storedFile") ? "storedFile" : null;
+    files[FILES_COMPOSED_PATH] = `${banner("files")}import { storage } from "../../backend/index.js";
+import { compileFilePolicy, createFiles } from "../../modules/files.js";
+${metadataEntity ? 'import { repository } from "./entities.js";\n' : ""}
+/** The declared upload policy. Checked BEFORE a byte is sent, so a refusal names what is wrong. */
+export const filePolicy = compileFilePolicy(${jsObject({ kinds: policy.kinds, maxBytes: policy.maxBytes, maxPerSubject: policy.maxPerSubject, signedUrlSeconds: policy.signedUrlSeconds })});
+
+export const fileSubjects = Object.freeze(${jsObject((deliveryPlan?.files?.subjects || []).map((row) => ({ subject: row.subject, fields: row.fields.map((field) => field.name) })))});
+
+export const files = createFiles({
+  policy: filePolicy,
+  storage,
+  metadata: ${metadataEntity ? `repository(${quote(metadataEntity)})` : "null"},
+});
+`;
+    interfaces.push({ module: FILES_COMPOSED_PATH, exports: ["files", "filePolicy", "fileSubjects"],
+      owns: ["stored files"], operations: ["check", "upload", "fileUrl", "removeFile"] });
+    files[APP_FACADE_FILES_PATH] = `${banner("public files ABI")}import { filePolicy, fileSubjects, files } from "../capabilities/composed/files.js";
+import { useFilesState } from "../modules/uiReact.js";
+
+export { files, filePolicy, fileSubjects };
+/** { files, status, progress, error, upload, remove, url } for one subject record. */
+export function useFiles(options = {}) { return useFilesState(files, options); }
+/** The accept attribute a file input should carry, so the picker and the policy agree. */
+export const fileAccept = filePolicy.accept.join(",");
+`;
+    facades.push("files");
+  }
+
+  if (events.length) {
+    files[NOTIFICATIONS_COMPOSED_PATH] = `${banner("notifications")}import { notifications as transport } from "../../backend/index.js";
+import { compileNotifications, createNotifications } from "../../modules/notifications.js";
+
+/** Every message this application declared it sends. One it never declared cannot be sent. */
+export const notificationEvents = compileNotifications(${jsObject(events.map((event) => ({ id: event.id, title: event.title, body: event.body, recipient: event.recipient, channel: event.channel })))});
+
+export const notifications = createNotifications({ schema: notificationEvents, transport });
+`;
+    interfaces.push({ module: NOTIFICATIONS_COMPOSED_PATH, exports: ["notifications", "notificationEvents"],
+      owns: ["notification inbox"], operations: ["inbox", "send", "markRead"] });
+    files[APP_FACADE_NOTIFICATIONS_PATH] = `${banner("public notifications ABI")}import { notificationEvents, notifications } from "../capabilities/composed/notifications.js";
+import { useNotificationsState } from "../modules/uiReact.js";
+
+export { notifications, notificationEvents };
+/** { notifications, unread, status, markRead, markAllRead, reload } — the badge follows the list. */
+export function useNotifications(options = {}) { return useNotificationsState(notifications, options); }
+`;
+    facades.push("notifications");
+  }
+
+  if (topics.length) {
+    files[REALTIME_COMPOSED_PATH] = `${banner("realtime")}import { db } from "../../backend/index.js";
+import { compileTopics, createRealtime } from "../../modules/realtime.js";
+
+/** The topics this application watches. Each names the entity it re-reads after a gap. */
+export const realtimeTopics = compileTopics(${jsObject(topics.map((topic) => ({ id: topic.id, entity: topic.entity, resync: topic.resync })))});
+
+export const realtime = createRealtime({
+  schema: realtimeTopics,
+  // One channel per topic. The adapter reports connection status so a reconnect can resync.
+  connect: (definition, handler) => db.entity(definition.entity)
+    .subscribe((event) => handler({ type: "event", event })),
+  // The gap closer: after a reconnect the topic re-reads its own rows rather than assuming
+  // nothing happened while the socket was down.
+  resync: (definition) => db.entity(definition.entity).list({ limit: 200 }),
+});
+`;
+    interfaces.push({ module: REALTIME_COMPOSED_PATH, exports: ["realtime", "realtimeTopics"],
+      owns: ["live subscriptions"], operations: ["watch", "resync"] });
+    files[APP_FACADE_REALTIME_PATH] = `${banner("public realtime ABI")}import { realtime, realtimeTopics } from "../capabilities/composed/realtime.js";
+import { useLiveState } from "../modules/uiReact.js";
+
+export { realtime, realtimeTopics };
+/** { status, events, last } for one declared topic; unsubscribes when the screen leaves. */
+export function useLive(topic, onEvent) { return useLiveState(realtime, topic, onEvent); }
+`;
+    facades.push("realtime");
+  }
+
+  return { files, interfaces, facades };
+}
+
 function facadeIndexSource(moduleLock, facadeModules) {
   return `${banner("public application ABI")}// The one import surface for generated application code. Everything here is deterministic and
 // protected; layout, styling, copy and domain logic remain entirely the application's.
@@ -484,7 +584,7 @@ export const THRALLO_APP_ABI = Object.freeze(${jsObject({
 `;
 }
 
-function capabilityFiles(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null } = {}) {
+function capabilityFiles(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null } = {}) {
   const nodes = new Map((graph?.nodes || []).map((node) => [node.id, node]));
   const files = {};
   const interfaces = [];
@@ -625,6 +725,12 @@ export const newsletterCapability = makeNewsletter({ entity: ${quote(entity)} })
       interfaces.push(...behaviour.interfaces);
       facades.push(...behaviour.facades);
     }
+    const delivery = deliveryFiles(deliveryPlan, { entitySchema });
+    if (Object.keys(delivery.files).length) {
+      Object.assign(files, delivery.files);
+      interfaces.push(...delivery.interfaces);
+      facades.push(...delivery.facades);
+    }
     files[APP_FACADE_INDEX_PATH] = facadeIndexSource(moduleLock, facades);
   }
   if (moduleLock) files[MODULE_LOCK_PATH] = lockFileSource(moduleLock);
@@ -648,8 +754,8 @@ export { CAPABILITY_COMPOSITION } from "./manifest.js";
   return { files, interfaces };
 }
 
-export function capabilityCompositionPlan(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null } = {}) {
-  const rendered = capabilityFiles(graph, { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan });
+export function capabilityCompositionPlan(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null } = {}) {
+  const rendered = capabilityFiles(graph, { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan, deliveryPlan });
   const extensionPoints = (graph?.nodes || []).filter((node) => node.type === "custom_behavior")
     .map((node) => ({ id: node.id, ...node.extension, inputs: node.requiredInputs, outputs: node.outputs,
       stateOwnership: node.stateOwnership, persistenceSemantics: node.persistenceSemantics }));
@@ -668,7 +774,7 @@ export function capabilityCompositionPlan(graph, { moduleLock = null, identityPl
 }
 
 /** Apply or refresh the foundation. Existing model-owned extension configuration is preserved. */
-export function composeCapabilityFoundation(tree, graph, { moduleLock = null, identityPlan = null, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null } = {}) {
+export function composeCapabilityFoundation(tree, graph, { moduleLock = null, identityPlan = null, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null } = {}) {
   // Production Builder V2 starts from the full React/Vite scaffold. Some retained unit/legacy
   // baselines intentionally predate the capability runtime; do not emit adapters with dangling
   // imports into those trees. They remain on the migration-compatible path until refreshed from
@@ -687,7 +793,7 @@ export function composeCapabilityFoundation(tree, graph, { moduleLock = null, id
   // A base tree without the module runtime (a legacy snapshot, a retained fixture) composes the
   // capability adapters exactly as before and simply does not receive the identity controller.
   const identityRuntime = typeof tree?.[IDENTITY_RUNTIME_PATH] === "string";
-  const options = { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan };
+  const options = { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan, deliveryPlan };
   const rendered = capabilityFiles(graph, options);
   const next = { ...(tree || {}), ...rendered.files };
   if (typeof next[CAPABILITY_CONFIGURATION_PATH] !== "string") {

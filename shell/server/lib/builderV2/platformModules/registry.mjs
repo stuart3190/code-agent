@@ -695,10 +695,102 @@ const EDITOR_MODULE = platformModule({
   proof: "test/code-agent/builder-v2-workflow-workspace-editor.test.mjs",
 });
 
+// WP10 — files, notifications and realtime. All three wrap SDK surfaces that already exist; what
+// they add is the POLICY and the LIFECYCLE the generated code around those surfaces kept getting
+// wrong. Each declares the deployment service it needs, so an application that selects one on a
+// deployment without it blocks before generation rather than shipping a dead upload button.
+const FILES_MODULE = platformModule({
+  id: "thrallo.files", version: "1.0.0", title: "Files/storage",
+  clientAbi: "files@1", services: ["backend_sdk", "app_auth", "storage"],
+  requires: [{ id: "thrallo.identity", range: "^1.2.0" }],
+  operations: [
+    clientOperation({ id: "check", stateOwner: "file policy", errors: ["file_type_not_allowed", "file_too_large", "file_quota_exceeded"], hooks: ["a file outside the declared policy is refused before it is sent"] }),
+    clientOperation({ id: "upload", effect: "mutation", stateOwner: "stored files", errors: ["file_type_not_allowed", "file_too_large", "file_quota_exceeded", "file_upload_failed"], hooks: ["an accepted file is listed against its subject"] }),
+    clientOperation({ id: "fileUrl", stateOwner: "stored files", errors: ["file_not_found"], hooks: ["access is a short-lived signed link, minted on demand"] }),
+    clientOperation({ id: "removeFile", effect: "mutation", stateOwner: "stored files", errors: ["file_not_found"], hooks: ["removing a file removes its metadata too"] }),
+  ],
+  entrypoints: [
+    { module: "src/lib/modules/files.js", exports: ["compileFilePolicy", "createFiles", "checkFile", "fileKey", "formatBytes", "FILE_STATUS", "FileError"] },
+    { module: "src/lib/modules/uiReact.js", exports: ["useFilesState"] },
+    { module: "src/lib/capabilities/composed/files.js", exports: ["files", "filePolicy"], composed: true },
+    { module: "src/lib/app/files.js", exports: ["useFiles", "filePolicy"], composed: true },
+  ],
+  artifacts: [
+    { path: "src/lib/modules/files.js", kind: "runtime" },
+    { path: "src/lib/capabilities/composed/files.js", kind: "composed" },
+    { path: "src/lib/app/files.js", kind: "composed" },
+  ],
+  surfaceBindings: [
+    { state: "idle", required: false }, { state: "uploading", required: true }, { state: "ready", required: true },
+    { state: "refused", required: true }, { state: "error", required: true },
+  ],
+  deterministicTests: ["declared type and size refusal before upload", "per-subject quota", "signed URL expiry", "subject cleanup removes object and metadata"],
+  browserEvidence: ["an oversized file is refused with a reason", "an uploaded image is visible after a reload"],
+  proof: "test/code-agent/builder-v2-files-notifications-realtime.test.mjs",
+});
+
+const NOTIFICATIONS_MODULE = platformModule({
+  id: "thrallo.notifications", version: "1.0.0", title: "Notifications",
+  clientAbi: "notifications@1", services: ["backend_sdk", "app_auth", "notifications"],
+  requires: [{ id: "thrallo.identity", range: "^1.2.0" }],
+  operations: [
+    clientOperation({ id: "inbox", stateOwner: "notification inbox", errors: ["notifications_unavailable"], hooks: ["the unread badge and the list are one answer"] }),
+    clientOperation({ id: "send", effect: "mutation", stateOwner: "notification inbox", errors: ["notification_event_unknown", "notifications_unavailable"], hooks: ["the same event about the same subject is delivered once"] }),
+    clientOperation({ id: "markRead", effect: "mutation", stateOwner: "notification inbox", errors: ["notifications_unavailable"], hooks: ["a read receipt survives a reload"] }),
+  ],
+  entrypoints: [
+    { module: "src/lib/modules/notifications.js", exports: ["compileNotifications", "createNotifications", "renderTemplate", "deliveryKey", "RECIPIENT", "NotificationError"] },
+    { module: "src/lib/modules/uiReact.js", exports: ["useNotificationsState"] },
+    { module: "src/lib/capabilities/composed/notifications.js", exports: ["notifications", "notificationEvents"], composed: true },
+    { module: "src/lib/app/notifications.js", exports: ["useNotifications", "notificationEvents"], composed: true },
+  ],
+  artifacts: [
+    { path: "src/lib/modules/notifications.js", kind: "runtime" },
+    { path: "src/lib/capabilities/composed/notifications.js", kind: "composed" },
+    { path: "src/lib/app/notifications.js", kind: "composed" },
+  ],
+  surfaceBindings: [
+    { state: "loading", required: true }, { state: "ready", required: true },
+    { state: "empty", required: true }, { state: "error", required: true },
+  ],
+  deterministicTests: ["idempotent delivery", "derived unread count", "optimistic read with rollback", "undeclared event refused", "server-only recipient never written from the client"],
+  browserEvidence: ["a badge clears and stays cleared after a reload", "the same event twice shows once"],
+  proof: "test/code-agent/builder-v2-files-notifications-realtime.test.mjs",
+});
+
+const REALTIME_MODULE = platformModule({
+  id: "thrallo.realtime", version: "1.0.0", title: "Realtime",
+  clientAbi: "realtime@1", services: ["backend_sdk", "app_auth", "realtime"],
+  requires: [{ id: "thrallo.identity", range: "^1.2.0" }, { id: "thrallo.entities", range: "^1.1.0" }],
+  operations: [
+    clientOperation({ id: "watch", stateOwner: "live subscriptions", errors: ["realtime_topic_unknown", "realtime_not_authorized", "realtime_unavailable"], hooks: ["a subscription to an undeclared topic is refused"] }),
+    clientOperation({ id: "resync", stateOwner: "live subscriptions", errors: ["realtime_unavailable"], hooks: ["a reconnect re-reads rather than leaving a silent gap"] }),
+  ],
+  entrypoints: [
+    { module: "src/lib/modules/realtime.js", exports: ["compileTopics", "createRealtime", "REALTIME_STATUS", "RealtimeError"] },
+    { module: "src/lib/modules/uiReact.js", exports: ["useLiveState"] },
+    { module: "src/lib/capabilities/composed/realtime.js", exports: ["realtime", "realtimeTopics"], composed: true },
+    { module: "src/lib/app/realtime.js", exports: ["useLive", "realtimeTopics"], composed: true },
+  ],
+  artifacts: [
+    { path: "src/lib/modules/realtime.js", kind: "runtime" },
+    { path: "src/lib/capabilities/composed/realtime.js", kind: "composed" },
+    { path: "src/lib/app/realtime.js", kind: "composed" },
+  ],
+  surfaceBindings: [
+    { state: "connecting", required: true }, { state: "live", required: true },
+    { state: "reconnecting", required: true }, { state: "error", required: true },
+  ],
+  deterministicTests: ["undeclared topic refused", "unauthorised subscription refused", "one channel per topic", "reconnect resyncs", "close on last unsubscribe"],
+  browserEvidence: ["a change made elsewhere appears without a reload", "a dropped connection recovers its missed changes"],
+  proof: "test/code-agent/builder-v2-files-notifications-realtime.test.mjs",
+});
+
 const MODULES = [
   CORE_MODULE, ...LEGACY_WRAPPED.map(legacyCapabilityModule), IDENTITY_1_2, ACCOUNTS_MODULE, AUTHORIZATION_1_1,
   ADMIN_MODULE, ENTITIES_1_1, ROUTING_MODULE, QUERY_MODULE, FORMS_1_1, ASYNC_MODULE, SETTINGS_MODULE, AUDIT_MODULE,
   WORKFLOW_1_1, BOOKING_1_1, WORKSPACE_MODULE, EDITOR_MODULE,
+  FILES_MODULE, NOTIFICATIONS_MODULE, REALTIME_MODULE,
 ];
 
 /** id → every registered version of that module, highest last. */

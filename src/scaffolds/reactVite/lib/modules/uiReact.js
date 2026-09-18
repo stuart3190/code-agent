@@ -129,3 +129,57 @@ export function useEditorState(editor) {
     undo: () => editor.undo(), redo: () => editor.redo(), history: () => editor.history(),
   }), [state, editor]);
 }
+
+/**
+ * WP10 — files attached to one subject record. { files, status, progress, upload, remove, url }.
+ * The policy is exposed so a screen can state the limit rather than discovering it on failure.
+ */
+export function useFilesState(controller, { subject = "shared", subjectId = null } = {}) {
+  const state = useCapabilityState(controller);
+  useEffect(() => { void controller.list({ subject, subjectId }); }, [controller, subject, subjectId]);
+  return useMemo(() => ({
+    ...state,
+    policy: controller.policy,
+    check: (file) => controller.check(file, { held: state?.files?.length || 0 }),
+    upload: (file, options) => controller.upload(file, { subject, subjectId, ...options }),
+    uploadMany: (files, options) => controller.uploadMany(files, { subject, subjectId, ...options }),
+    remove: (pathOrId) => controller.remove(pathOrId),
+    url: (path, options) => controller.url(path, options),
+    reload: () => controller.list({ subject, subjectId }),
+  }), [state, controller, subject, subjectId]);
+}
+
+/** WP10 — the inbox and its badge, from one set of rows so the two can never disagree. */
+export function useNotificationsState(controller, { unreadOnly = false, limit = 50 } = {}) {
+  const state = useCapabilityState(controller);
+  useEffect(() => { void controller.load({ unreadOnly, limit }); }, [controller, unreadOnly, limit]);
+  return useMemo(() => ({
+    ...state,
+    send: (event, payload, options) => controller.send(event, payload, options),
+    markRead: (id) => controller.markRead(id),
+    markAllRead: () => controller.markAllRead(),
+    reload: () => controller.load({ unreadOnly, limit }),
+  }), [state, controller, unreadOnly, limit]);
+}
+
+/**
+ * WP10 — one declared realtime topic. Unsubscribes when the screen leaves, so a socket never
+ * outlives the thing that wanted it, and reports a reconnect rather than hiding it.
+ */
+export function useLiveState(controller, topic, onEvent = null) {
+  const state = useCapabilityState(controller);
+  const [last, setLast] = useState(null);
+  useEffect(() => {
+    let release = null;
+    let cancelled = false;
+    void controller.watch(topic, (event) => { setLast(event); onEvent?.(event); })
+      .then((off) => { if (cancelled) off(); else release = off; })
+      .catch(() => { /* the refusal is already in the controller's state */ });
+    return () => { cancelled = true; release?.(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [controller, topic]);
+  return useMemo(() => ({
+    status: state?.topics?.[topic] || state?.status || "idle",
+    error: state?.error || null, reconnects: state?.reconnects || 0, resyncs: state?.resyncs || 0, last,
+  }), [state, topic, last]);
+}

@@ -63,6 +63,7 @@ export const CURRENT_FORMAT_VERSIONS = Object.freeze({
   settingsPlan: 1,       // WP8: new — typed settings keys, scopes and defaults
   platformStateService: 1, // WP8: new — app_settings/app_audit_events service and audit config
   behaviourPlan: 1,      // WP9: new — declared workflow graphs, workspace roots and editor surfaces
+  deliveryPlan: 1,       // WP10: new — declared file policy, notification events and realtime topics
 });
 
 /** The immutable snapshot row as written by snapshotStore.createSnapshot(). */

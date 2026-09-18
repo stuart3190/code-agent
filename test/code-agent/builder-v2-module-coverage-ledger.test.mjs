@@ -33,6 +33,7 @@ import { QUERY_LINT_VERSION } from "../../shell/server/lib/builderV2/platformMod
 import { SETTINGS_PLAN_VERSION } from "../../shell/server/lib/builderV2/platformModules/settingsPlan.mjs";
 import { PLATFORM_STATE_SERVICE_VERSION } from "../../supabase/functions/app-accounts/platformStateService.mjs";
 import { BEHAVIOUR_PLAN_VERSION } from "../../shell/server/lib/builderV2/platformModules/behaviourPlan.mjs";
+import { DELIVERY_PLAN_VERSION } from "../../shell/server/lib/builderV2/platformModules/deliveryPlan.mjs";
 import { CAPABILITIES } from "../../shell/server/lib/builderV2/capabilityRegistry.mjs";
 import { SCAFFOLDS, SCAFFOLD_REGISTRY_VERSION } from "../../shell/server/lib/builderV2/scaffoldRegistry.mjs";
 import { RUNTIME_CAPABILITY_OPERATIONS } from "../../shell/server/lib/capabilityRuntime.mjs";
@@ -121,6 +122,7 @@ test("WP0 — the baseline formats stay frozen and every live format equals the 
     settingsPlan: SETTINGS_PLAN_VERSION,
     platformStateService: PLATFORM_STATE_SERVICE_VERSION,
     behaviourPlan: BEHAVIOUR_PLAN_VERSION,
+    deliveryPlan: DELIVERY_PLAN_VERSION,
   }, CURRENT_FORMAT_VERSIONS);
 });
 

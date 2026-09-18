@@ -348,6 +348,9 @@ export default function HomePage() {
   "src/lib/modules/workflow.js": sdk("lib/modules/workflow.js"),
   "src/lib/modules/workspace.js": sdk("lib/modules/workspace.js"),
   "src/lib/modules/editor.js": sdk("lib/modules/editor.js"),
+  "src/lib/modules/files.js": sdk("lib/modules/files.js"),
+  "src/lib/modules/notifications.js": sdk("lib/modules/notifications.js"),
+  "src/lib/modules/realtime.js": sdk("lib/modules/realtime.js"),
   "src/lib/modules/uiReact.js": sdk("lib/modules/uiReact.js"),
 
   // Asset helpers (Builder v2, master plan Part 18): picture/srcset/lazy/blur rendering

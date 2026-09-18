@@ -26,7 +26,10 @@ export function declaredAvailability(services = {}, { source = "declared" } = {}
  * availabilityFromEnv(), where every optional service must be declared explicitly.
  */
 export function baselineDeploymentAvailability() {
-  return declaredAvailability({ backend_sdk: true, app_auth: true, entities: true, realtime: true, accounts: true }, { source: "source_baseline" });
+  // WP10: the notification tables ship in this repository, so the source can install the
+  // notifications module. Storage does NOT: the runtime-assets bucket is provisioned per
+  // deployment, so a build that wants files blocks until a deployment declares it.
+  return declaredAvailability({ backend_sdk: true, app_auth: true, entities: true, realtime: true, accounts: true, notifications: true }, { source: "source_baseline" });
 }
 
 /** A deployment that has not enabled any WP4+ service: the pre-migration production shape. */

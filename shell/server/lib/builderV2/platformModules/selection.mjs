@@ -27,13 +27,14 @@ const kindOf = (operation) => String(operation?.kind || operation?.type || opera
  * @param {object} options
  * @param {object} [options.entitySchema] compiled entity schema (durable domain entities)
  * @param {object} [options.settingsPlan] derived settings/audit plan (WP8)
+ * @param {object} [options.deliveryPlan] derived files/notifications/realtime plan (WP10)
  * @param {object} [options.capabilityGraph] the derived capability graph, for scaffold-family
  *   selection (WP9). The families are asked for here rather than re-derived, so the modules a
  *   build locks and the families it composes can never disagree.
  * @param {object} [options.registry]
  * @returns {Array<{id: string, range: string, reason: string}>}
  */
-export function platformModuleRequests(contract, { entitySchema = null, settingsPlan = null, capabilityGraph = null, registry = MODULE_REGISTRY } = {}) {
+export function platformModuleRequests(contract, { entitySchema = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, capabilityGraph = null, registry = MODULE_REGISTRY } = {}) {
   const operations = contract?.operations || [];
   const durableEntities = entitySchema?.entities || [];
   const requests = [];
@@ -74,6 +75,16 @@ export function platformModuleRequests(contract, { entitySchema = null, settings
   if (families.has("canvas_editor")) {
     request("thrallo.editor", "an interactive surface manipulates objects that must be reversible");
   }
+  // WP10 — files, notifications and realtime are each requested only where the contract asks:
+  // an upload surface nobody described, an inbox nobody reads and a socket nobody needs are all
+  // costs an application did not agree to.
+  if (deliveryPlan?.files?.policy) request("thrallo.files", "declared fields hold uploaded files");
+  if ((deliveryPlan?.notifications?.events || []).length) request("thrallo.notifications", "a journey step tells someone something");
+  if ((deliveryPlan?.realtime?.topics || []).length) {
+    request("thrallo.realtime", deliveryPlan.realtime.source === "signal:realtime"
+      ? "the build profile declares realtime" : "the contract claims changes appear without a reload");
+  }
+  void behaviourPlan;
 
   return requests;
 }
