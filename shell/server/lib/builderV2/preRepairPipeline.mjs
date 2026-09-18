@@ -12,7 +12,7 @@
 import { journeysInMountedScreenUnit, scopeBuildSpec } from "./buildSpec.mjs";
 import { validateModuleConformance } from "./moduleContracts.mjs";
 import { lintDurablePersistence } from "./persistenceLint.mjs";
-import { runStaticApplicationGate } from "./staticApplicationGate.mjs";
+import { rewriteMissingReactImports, runStaticApplicationGate } from "./staticApplicationGate.mjs";
 import { partitionFindings } from "./validationSeverity.mjs";
 
 /**
@@ -36,6 +36,17 @@ export function coreGenerationScope(spec, contract, { tiers = spec?.tiers } = {}
     contract,
     generationTiers: tiers ? { ...tiers, essential: { ...tiers.essential, journeys: [...journeyIds] } } : null,
   };
+}
+
+/**
+ * Deterministic corrections a candidate receives BEFORE it is judged: defects with exactly one
+ * safe fix are applied here rather than spending a model correction call on them. The
+ * orchestrator and zero-model validation of a retained tree call this same step.
+ */
+export function preprocessCandidateTree(tree) {
+  if (!tree || typeof tree !== "object") return { tree, rewrites: [] };
+  const react = rewriteMissingReactImports(tree);
+  return { tree: react.tree, rewrites: react.rewrites };
 }
 
 /**

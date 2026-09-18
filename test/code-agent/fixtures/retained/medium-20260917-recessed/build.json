@@ -1,0 +1,26 @@
+{
+  "id": "675d2a73-5fd4-40c1-ae5a-11f6d95c83d8",
+  "profile": "medium",
+  "state": "blocked",
+  "spent_credits": 40.2936,
+  "budget_credits": 30,
+  "error": "blocking pre-compile findings remain after the correction allowance",
+  "failure": {
+    "code": "blocked",
+    "action": "stop",
+    "retryable": false,
+    "checkpointId": "6b3d4b9f-7454-4154-ada0-72f9f596aca3",
+    "classification": "generated_app",
+    "internalDetail": "blocking pre-compile findings remain after the correction allowance [blocked]",
+    "providerCallMade": null,
+    "reservationState": "not_created",
+    "customerMessageKey": "build_checking_repairs",
+    "customerActionRequired": false
+  },
+  "spent_breakdown": {
+    "thrallo_recovery:thrallo_repair:connected_allowance": 12.89148,
+    "customer_generation:customer_request:connected_allowance": 27.40212
+  },
+  "started_at": "2026-09-17T22:47:29.965+00:00",
+  "finished_at": "2026-09-17T23:15:19.848+00:00"
+}

@@ -143,6 +143,32 @@ function resolvedImportCandidates(from, specifier) {
     ...[".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"].map((extension) => `${raw}/index${extension}`)]);
 }
 
+/**
+ * A generated file that references `React.` (React.useState, React.useMemo) without binding React
+ * is corrected deterministically: `import React from "react";` is inserted, after a leading
+ * directive when there is one. The recessed-light rerun (675d2a73) spent correction calls on
+ * exactly this defect three times in one screen. The same scope analysis that reports
+ * undefined_identifier decides the rewrite, so a bound React (default, namespace or local) is
+ * never touched, platform files are never touched, and the rewrite is idempotent.
+ */
+export function rewriteMissingReactImports(tree = {}) {
+  const rewrites = [];
+  const next = { ...tree };
+  for (const [path, source] of Object.entries(tree)) {
+    if (!SOURCE.test(path) || PLATFORM.test(path) || typeof source !== "string") continue;
+    if (!/\bReact\s*\./.test(source)) continue;
+    const result = undefinedInSource(source, path);
+    if (result.parseError) continue;
+    const lines = result.identifiers.filter((row) => row.name === "React").map((row) => row.line);
+    if (!lines.length) continue;
+    const directive = source.match(/^(\s*(?:['"]use [a-z]+['"];?\s*\n))/);
+    const head = directive ? directive[1] : "";
+    next[path] = `${head}import React from "react";\n${source.slice(head.length)}`;
+    rewrites.push({ file: path, rewrite: "react_default_import", lines });
+  }
+  return { tree: next, rewrites };
+}
+
 export function lintUndefinedIdentifiers(tree = {}) {
   const findings = [];
   for (const [path, source] of Object.entries(tree)) {

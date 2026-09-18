@@ -457,7 +457,7 @@ export function executionSpecCoverage(rendered, {
   const seen = new Set();
   const missing = [];
   for (const row of required) {
-    const key = `${row.source} ${row.value}`;
+    const key = `${row.source}\u0000${row.value}`;
     if (seen.has(key)) continue;
     seen.add(key);
     if (!text.includes(row.value)) missing.push(row);

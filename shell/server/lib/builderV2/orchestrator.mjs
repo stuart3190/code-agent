@@ -20,7 +20,7 @@ import { memoryGraph } from "./graphStore.mjs";
 import { applyPatches, escalationPlan, patchOutcomes, REJECTION } from "./patchEngine.mjs";
 import { completionEligibility } from "./contractTiering.mjs";
 import { deriveBuildSpec, journeysInMountedScreenUnit, scopeBuildSpec } from "./buildSpec.mjs";
-import { coreGenerationScope, staticCandidateVerdict } from "./preRepairPipeline.mjs";
+import { coreGenerationScope, preprocessCandidateTree, staticCandidateVerdict } from "./preRepairPipeline.mjs";
 import { deriveVerificationManifest } from "./verificationManifest.mjs";
 import { advisoryMessages, partitionFindings } from "./validationSeverity.mjs";
 import {
@@ -649,6 +649,14 @@ export function createOrchestrator({
         continue;
       }
       const applied = applyPatches(working, patches, { contract });
+      // Deterministic corrections first: a defect with one safe fix never spends a correction call.
+      for (const key of ["tree", "provisionalTree"]) {
+        if (!applied[key]) continue;
+        const preprocessed = preprocessCandidateTree(applied[key]);
+        if (!preprocessed.rewrites.length) continue;
+        applied[key] = preprocessed.tree;
+        if (key === "tree") log(`${step}: deterministic rewrite ${preprocessed.rewrites.map((row) => `${row.file} (${row.rewrite})`).join(", ")}`);
+      }
       let retainedPartial = false;
       const retainedPatchRejections = [...(applied.rejected || [])];
       // A STRUCTURAL PROBLEM THE BATCH INHERITED IS AN INSTRUCTION, NOT A REJECTION.

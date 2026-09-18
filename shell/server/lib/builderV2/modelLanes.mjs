@@ -38,6 +38,11 @@ import { scaffoldCompositionBrief } from "./scaffoldComposer.mjs";
 import { buildExecutionSpec, compactInteractionFlow, renderExecutionSpecSection } from "./executionSpec.mjs";
 
 /** Same shape as buildJobs' private bucket: one accumulator for the whole job. */
+/** The exact system prompt of a full generation dispatch, so an offline estimate equals production's. */
+export function coreSystemPrompt() {
+  return `${PATCH_SYSTEM_PROMPT}\n\nAVAILABLE CAPABILITIES (import, never rewrite):\n${capabilityBrief()}`;
+}
+
 export function jobUsageBucket() {
   const total = { turns: 0, input: 0, output: 0, reasoning: 0, cached: 0, cacheWrite: 0, total: 0 };
   const providerRequestIds = new Set();
@@ -56,7 +61,7 @@ export function jobUsageBucket() {
 
 // ── prompt rendering (byte-stable given identical inputs — Part 10 prefix discipline) ─────────
 
-const PATCH_SYSTEM_PROMPT = `You are the implementation engine of an app builder. You receive an
+export const PATCH_SYSTEM_PROMPT = `You are the implementation engine of an app builder. You receive an
 implementation contract, the current file tree of a React+Vite app, and pre-resolved image
 assets. You make changes ONLY by calling emit_patches — symbol-level operations validated
 against a code index. Rules:
@@ -444,14 +449,17 @@ function isDownstreamFailureEvidence(problem) {
 // the fields needed to implement its selected modules. Registry test contracts and the graph's
 // repeated node/journey copies remain enforced after the patch; serializing those copies again
 // can make the input alone exceed the unchanged per-call ceiling on a complex application.
-function headroomCapabilityGraphBrief(graph) {
+// A BOUNDED DISPATCH — headroom continuation, module correction or targeted repair — carries a
+// retained tree and a machine-enforced write boundary. It needs the protected runtime interface
+// it may call, not the build-wide semantic rows: the interaction and per-module contracts below
+// already carry every selected operation's reads, writes, responsibility, state owner and
+// persistence handoff. Repeating the full rows made a three-journey shared controller consume
+// the entire per-call allowance before one useful output token could fit, and (recessed-light
+// rerun 675d2a73) turned a four-screen correction into a 753k-byte prompt that no envelope
+// could hold, so every correction was fragmented into isolated batches. Canonical full-graph
+// validation still runs after the patch and remains the authority for the omitted rows.
+function boundedCapabilityGraphBrief(graph) {
   if (!graph) return null;
-  // The interaction and per-module contracts immediately below already carry every selected
-  // operation's reads, writes, responsibility, state owner and persistence handoff. Repeating
-  // those same build-wide semantic rows here made a three-journey shared controller consume the
-  // entire per-call allowance before one useful output token could fit. A continuation needs the
-  // protected runtime interface it may call; canonical full-graph validation still runs after
-  // the patch and remains the authority for all omitted verifier-only relationships.
   return {
     version: graph.version,
     buildProfile: graph.buildProfile,
@@ -778,7 +786,7 @@ export function renderPatchPrompt({
       ...(specification.semanticInteractions || []).map((interaction) => interaction.interactionId),
       ...(specification.downstream?.consumers || []),
     ]).filter(Boolean));
-  const headroomOwnedInteractionFlows = headroomScope && activeScopePaths.length
+  const boundedOwnedInteractionFlows = activeScope && activeScopePaths.length
     ? repairFlows.filter((flow) => [
       flow.stateOwner,
       flow.control?.stateOwner,
@@ -786,13 +794,20 @@ export function renderPatchPrompt({
       ...(flow.responsibleModules || []),
     ].some((path) => activeScopePaths.includes(path)))
     : [];
-  const promptInteractionFlows = headroomScope
-    ? headroomInteractionIds.size || headroomOwnedInteractionFlows.length
-      ? repairFlows.filter((flow) => headroomInteractionIds.has(flow.id)
-        || headroomOwnedInteractionFlows.includes(flow))
+  const scopeNamedInteractionIds = new Set([
+    ...headroomInteractionIds,
+    ...(moduleCorrectionScope?.findings || []).map((finding) => finding?.interactionId),
+    ...(repairScope?.findings || []).map((finding) => finding?.interactionId),
+  ].filter(Boolean));
+  // A bounded dispatch carries the flows its write boundary owns or its findings name; it cannot
+  // change any other module, and the same validators re-run after the patch.
+  const promptInteractionFlows = activeScopePaths.length
+    ? scopeNamedInteractionIds.size || boundedOwnedInteractionFlows.length
+      ? repairFlows.filter((flow) => scopeNamedInteractionIds.has(flow.id)
+        || boundedOwnedInteractionFlows.includes(flow))
       : repairFlows
     : repairFlows;
-  const repairInteractionPlan = browserRepair || headroomScope ? {
+  const repairInteractionPlan = browserRepair || activeScopePaths.length ? {
     version: scopedInteractions.version,
     flows: promptInteractionFlows.map((flow) => compactInteractionFlow(flow)),
   } : scopedInteractions;
@@ -881,8 +896,8 @@ export function renderPatchPrompt({
       : capabilityRequirementsBrief(scopedContract),
     executionSpec ? renderExecutionSpecSection(executionSpec, "capabilityGraph") : scopedCapabilityGraph ? [
       "CAPABILITY GRAPH (authoritative behavior/state/data-flow ownership for this scope):",
-      JSON.stringify(headroomScope
-        ? headroomCapabilityGraphBrief(scopedCapabilityGraph)
+      JSON.stringify(activeScopePaths.length
+        ? boundedCapabilityGraphBrief(scopedCapabilityGraph)
         : scopedCapabilityGraph, null, 2),
     ].join("\n") : "CAPABILITY GRAPH: none.",
     executionSpec ? renderExecutionSpecSection(executionSpec, "composition")
@@ -1275,6 +1290,22 @@ export function routeForStep(step, { repairScope = null, moduleCorrectionScope =
  * This remains deliberately above observed Responses usage while avoiding a 3-4x false hold for
  * large retrieval prompts.
  */
+// BYTES PER TOKEN, MEASURED. Every generation prompt is JSON-heavy structured text, and the
+// provider's own usage on the retained recessed-light build (675d2a73, 17 calls, medium profile)
+// tokenised it at 4.0-4.5 bytes per token on every prompt above 60k bytes. The previous constant
+// (bytes / 3 * 1.2 = 2.5 bytes per token) overestimated those calls by 1.6-1.8x: a 259,824-byte
+// core prompt that really was ~63k tokens was declared 111k, could not "fit" the 90k-token
+// medium envelope, and was fragmented into twelve isolated headroom batches whose files were
+// generated without seeing each other (a screen with no imports, a placeholder detail screen).
+// On the exact wire (system prompt + user prompt + tool schema) every one of those 17 calls
+// tokenised at 4.02-4.87 bytes per token. 3.8 stays below the densest of them (a 1.06x margin on
+// that call, 1.06-1.73x across the table, plus the framing constant), and is the largest divisor
+// that still lets the 275.9k-byte retained core dispatch as ONE call with its full 16k output
+// inside the 90k-token medium envelope. Both facts are pinned in
+// builder-v2-generation-envelope.test.mjs; move this constant only with new measured calls.
+export const ESTIMATED_BYTES_PER_TOKEN = 3.8;
+export const ESTIMATED_FRAMING_TOKENS = 512;
+
 export function estimatePromptTokens(options) {
   // Count the values sent over the wire, not JSON escape bytes. JSON.stringify turns every source
   // newline into two characters and was the remaining source of the live repair's false hold.
@@ -1286,7 +1317,7 @@ export function estimatePromptTokens(options) {
     ]),
     JSON.stringify(options?.tools || []),
   ].join("\n");
-  return Math.ceil((Buffer.byteLength(wire, "utf8") / 3) * 1.2) + 512;
+  return Math.ceil(Buffer.byteLength(wire, "utf8") / ESTIMATED_BYTES_PER_TOKEN) + ESTIMATED_FRAMING_TOKENS;
 }
 
 export function conservativeCallReservation(options, model, {
@@ -1806,7 +1837,7 @@ export function createModelLanes({
       regenerateFiles = [], advisory = [], spec = null, signal = null }) => {
       const projectKnowledge = repairScope || moduleCorrectionScope || requestedHeadroomScope
         ? null : await loadKnowledge(owner, projectId);
-      const fullSystemPrompt = `${PATCH_SYSTEM_PROMPT}\n\nAVAILABLE CAPABILITIES (import, never rewrite):\n${capabilityBrief()}`;
+      const fullSystemPrompt = coreSystemPrompt();
       let systemPrompt = fullSystemPrompt;
       const startedAt = Date.now();
       let headroomScope = requestedHeadroomScope;

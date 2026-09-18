@@ -114,7 +114,7 @@ function oversizedModuleFixture({ source = null } = {}) {
       // downstream consumer list of three unrelated modules, far larger than any real build's.
       // This reproduces the live failure class (a correction re-sending every unrelated contract).
       downstream: { consumes: [], produces: [], consumers: module.path.endsWith("/A.jsx")
-        ? [] : [`send-message:${"x".repeat(65_000)}`] },
+        ? [] : [`send-message:${"x".repeat(90_000)}`] },
       persistence: { owner: null }, requiredExports: [], moduleSizeBoundary: 6_000,
     })),
   };
@@ -175,7 +175,8 @@ test("scoped correction prompts use compact module contracts while full generati
   const compact = renderPatchPrompt({ step: "correction", originalStep: "core", contract: CONTRACT,
     tiers: TIERS, tree: fixture.tree, modulePlan: fixture.modulePlan,
     moduleContracts: fixture.moduleContracts, headroomScope: repairScope });
-  assert.ok(estimatePromptTokens({ messages: [{ role: "user", content: full }] }) > 70_000);
+  // 3 x 90k bytes of unrelated contract at 3.8 bytes/token: past a 6-credit (60k-token) call.
+  assert.ok(estimatePromptTokens({ messages: [{ role: "user", content: full }] }) > 60_000);
   assert.ok(estimatePromptTokens({ messages: [{ role: "user", content: compact }] }) < 15_000,
     "bounded corrections no longer resend every unrelated module contract");
   assert.match(compact, /HEADROOM-SCOPED CONTINUATION/);

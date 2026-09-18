@@ -78,10 +78,12 @@ test("14S cancellation returns every unused repair hold", async () => {
 
 test("14S planning is conservative while cached and uncached usage reconcile at canonical prices", () => {
   const reserved = conservativeCallReservation(options, "gpt-5.5", { maxOutputTokens: 3_000 });
+  // The 20k-byte prompt above tokenises at ~4 bytes per token on the measured builds
+  // (builder-v2-generation-envelope.test.mjs), so its real usage is ~5k input tokens.
   const uncached = creditsForUsage({ model: "gpt-5.5",
-    usage: { input: 8_000, cached: 0, output: 3_000 } });
+    usage: { input: 5_000, cached: 0, output: 3_000 } });
   const cached = creditsForUsage({ model: "gpt-5.5",
-    usage: { input: 8_000, cached: 6_000, output: 3_000 } });
+    usage: { input: 5_000, cached: 3_500, output: 3_000 } });
   assert.ok(reserved >= uncached);
   assert.ok(cached < uncached);
 });

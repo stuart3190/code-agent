@@ -1,0 +1,178 @@
+{
+  "build": "675d2a73-5fd4-40c1-ae5a-11f6d95c83d8",
+  "profile": "medium",
+  "model": "codex gpt-5.5",
+  "note": "prompt sizes and provider-reported usage of every generation call; prompt text not retained bytes/chars are the user prompt only; actualInputTokens is the provider's usage for the whole wire (system prompt + user prompt + tool schema). systemPrompt names which system prompt the lane sent: headroom_fragment (HEADROOM_FRAGMENT_SYSTEM_PROMPT, for headroom continuations and micro-repairs) or core (coreSystemPrompt(), for scaffold mounts and structural corrections). Tool schema on every call: EMIT_PATCHES_SCHEMA.",
+  "calls": [
+    {
+      "seq": 2,
+      "label": "core: patches (3)",
+      "chars": 183325,
+      "bytes": 183335,
+      "actualInputTokens": 40788,
+      "actualOutputTokens": 4077,
+      "systemPrompt": "headroom_fragment",
+      "dispatch": "headroom_continuation"
+    },
+    {
+      "seq": 3,
+      "label": "core: patches (3)",
+      "chars": 93744,
+      "bytes": 93754,
+      "actualInputTokens": 23409,
+      "actualOutputTokens": 2681,
+      "systemPrompt": "headroom_fragment",
+      "dispatch": "headroom_continuation"
+    },
+    {
+      "seq": 4,
+      "label": "core: patches (1)",
+      "chars": 71893,
+      "bytes": 71899,
+      "actualInputTokens": 18075,
+      "actualOutputTokens": 5486,
+      "systemPrompt": "headroom_fragment",
+      "dispatch": "headroom_continuation"
+    },
+    {
+      "seq": 5,
+      "label": "correction: patches (5)",
+      "chars": 25901,
+      "bytes": 25908,
+      "actualInputTokens": 7992,
+      "actualOutputTokens": 6216,
+      "systemPrompt": "core",
+      "dispatch": "structural_modularity"
+    },
+    {
+      "seq": 6,
+      "label": "correction: patches (1)",
+      "chars": 68151,
+      "bytes": 68157,
+      "actualInputTokens": 17554,
+      "actualOutputTokens": 3955,
+      "systemPrompt": "headroom_fragment",
+      "dispatch": "headroom_continuation"
+    },
+    {
+      "seq": 7,
+      "label": "correction: patches (1)",
+      "chars": 119619,
+      "bytes": 119625,
+      "actualInputTokens": 27174,
+      "actualOutputTokens": 2791,
+      "systemPrompt": "headroom_fragment",
+      "dispatch": "headroom_continuation"
+    },
+    {
+      "seq": 8,
+      "label": "correction: patches (1)",
+      "chars": 2957,
+      "bytes": 2957,
+      "actualInputTokens": 1152,
+      "actualOutputTokens": 490,
+      "systemPrompt": "headroom_fragment",
+      "dispatch": "micro_repair"
+    },
+    {
+      "seq": 9,
+      "label": "correction: patches (1)",
+      "chars": 1851,
+      "bytes": 1851,
+      "actualInputTokens": 927,
+      "actualOutputTokens": 472,
+      "systemPrompt": "headroom_fragment",
+      "dispatch": "micro_repair"
+    },
+    {
+      "seq": 10,
+      "label": "core: patches (3)",
+      "chars": 169873,
+      "bytes": 169885,
+      "actualInputTokens": 37895,
+      "actualOutputTokens": 5962,
+      "systemPrompt": "headroom_fragment",
+      "dispatch": "headroom_continuation"
+    },
+    {
+      "seq": 11,
+      "label": "core: patches (3)",
+      "chars": 117354,
+      "bytes": 117366,
+      "actualInputTokens": 28575,
+      "actualOutputTokens": 3617,
+      "systemPrompt": "headroom_fragment",
+      "dispatch": "headroom_continuation"
+    },
+    {
+      "seq": 12,
+      "label": "core: patches (1)",
+      "chars": 4309,
+      "bytes": 4313,
+      "actualInputTokens": 3174,
+      "actualOutputTokens": 151,
+      "systemPrompt": "core",
+      "dispatch": "scaffold_mount"
+    },
+    {
+      "seq": 13,
+      "label": "core: patches (1)",
+      "chars": 72267,
+      "bytes": 72275,
+      "actualInputTokens": 18148,
+      "actualOutputTokens": 4166,
+      "systemPrompt": "headroom_fragment",
+      "dispatch": "headroom_continuation"
+    },
+    {
+      "seq": 14,
+      "label": "core: patches (2)",
+      "chars": 183820,
+      "bytes": 183828,
+      "actualInputTokens": 41198,
+      "actualOutputTokens": 5357,
+      "systemPrompt": "headroom_fragment",
+      "dispatch": "headroom_continuation"
+    },
+    {
+      "seq": 15,
+      "label": "core: patches (2)",
+      "chars": 152931,
+      "bytes": 152937,
+      "actualInputTokens": 34307,
+      "actualOutputTokens": 3326,
+      "systemPrompt": "headroom_fragment",
+      "dispatch": "headroom_continuation"
+    },
+    {
+      "seq": 16,
+      "label": "core: patches (1)",
+      "chars": 66740,
+      "bytes": 66746,
+      "actualInputTokens": 17259,
+      "actualOutputTokens": 5762,
+      "systemPrompt": "headroom_fragment",
+      "dispatch": "headroom_continuation"
+    },
+    {
+      "seq": 17,
+      "label": "core: patches (1)",
+      "chars": 3866,
+      "bytes": 3870,
+      "actualInputTokens": 1346,
+      "actualOutputTokens": 159,
+      "systemPrompt": "headroom_fragment",
+      "dispatch": "micro_repair"
+    },
+    {
+      "seq": 18,
+      "label": "core: patches (1)",
+      "chars": 3743,
+      "bytes": 3745,
+      "actualInputTokens": 1325,
+      "actualOutputTokens": 232,
+      "systemPrompt": "headroom_fragment",
+      "dispatch": "micro_repair"
+    }
+  ]
+}
