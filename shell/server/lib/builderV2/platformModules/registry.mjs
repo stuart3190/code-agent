@@ -35,6 +35,9 @@ const CAPABILITY_MODULE_IDS = Object.freeze({
   accounts: "thrallo.accounts",
   authorization: "thrallo.authorization",
   admin: "thrallo.admin",
+  // WP8
+  settings: "thrallo.settings",
+  audit: "thrallo.audit",
 });
 
 const REQUIRED_SERVICES = Object.freeze({
@@ -369,13 +372,17 @@ const ENTITIES_1_1 = (() => {
  * A platform module with no legacy capability to wrap (WP6/WP7). These are selected by the
  * compiler from the contract's own structure — declared routes, a search operation, a form —
  * rather than by a capability binding, so they carry no `provides.capabilities` entry.
+ *
+ * WP8 relaxes that for settings and audit only: those ARE capabilities a contract responsibility
+ * names, so they declare `capabilities` and resolve through the same capability binding as the
+ * legacy eight. A module that declares none is still selected purely from contract structure.
  */
-const platformModule = ({ id, version, title, requires = [], services = [], clientAbi, operations, entrypoints, artifacts, deterministicTests, browserEvidence, proof, surfaceBindings = [] }) => defineModule({
+const platformModule = ({ id, version, title, requires = [], services = [], clientAbi, operations, entrypoints, artifacts, deterministicTests, browserEvidence, proof, surfaceBindings = [], capabilities = [] }) => defineModule({
   schemaVersion: MANIFEST_SCHEMA_VERSION,
   id, version, status: "qualified", title,
   compatibility: { contractVersions: [1, 2], clientAbi, serverAbi: null, runtimeRange: "^1.0.0" },
   requires: { modules: [{ id: "thrallo.core", range: "^1.0.0" }, ...requires], capabilities: [], services },
-  provides: { capabilities: [], operations },
+  provides: { capabilities, operations },
   conflicts: [],
   configSchema: { type: "object" },
   entityContributions: [], routeContributions: [], surfaceBindings,
@@ -512,7 +519,60 @@ const ASYNC_MODULE = platformModule({
   proof: "test/code-agent/builder-v2-query-forms-async.test.mjs",
 });
 
-const MODULES = [CORE_MODULE, ...LEGACY_WRAPPED.map(legacyCapabilityModule), IDENTITY_1_2, ACCOUNTS_MODULE, AUTHORIZATION_1_1, ADMIN_MODULE, ENTITIES_1_1, ROUTING_MODULE, QUERY_MODULE, FORMS_1_1, ASYNC_MODULE];
+// WP8 — settings and audit history. Both are served by the app-accounts function, so both need
+// the same deployment service; an application that selects them on a deployment without it blocks
+// before generation rather than falling back to a fabricated settings record.
+const SETTINGS_MODULE = platformModule({
+  id: "thrallo.settings", version: "1.0.0", title: "Settings/preferences",
+  clientAbi: "settings@1", services: ["backend_sdk", "app_auth", "accounts"], capabilities: ["settings"],
+  requires: [{ id: "thrallo.identity", range: "^1.2.0" }],
+  operations: [
+    clientOperation({ id: "get", stateOwner: "application settings", errors: ["setting_unknown"], hooks: ["a declared default answers before anything is written"] }),
+    clientOperation({ id: "all", stateOwner: "application settings", errors: ["forbidden"], hooks: ["every declared key of one scope, defaults included"] }),
+    clientOperation({ id: "set", effect: "mutation", stateOwner: "application settings", errors: ["setting_unknown", "setting_invalid_value", "forbidden"], hooks: ["a changed value survives a reload"] }),
+    clientOperation({ id: "reset", effect: "mutation", stateOwner: "application settings", errors: ["setting_unknown"], hooks: ["a reset key reads as its default again"] }),
+  ],
+  entrypoints: [
+    { module: "src/lib/modules/settings.js", exports: ["compileSettings", "createSettingsController", "coerceSetting", "SETTING_SCOPES", "SettingsError"] },
+    { module: "src/lib/modules/uiReact.js", exports: ["useSettingsState"] },
+    { module: "src/lib/capabilities/composed/settings.js", exports: ["settings", "settingsSchema"], composed: true },
+    { module: "src/lib/app/settings.js", exports: ["useSettings", "useHistory"], composed: true },
+  ],
+  artifacts: [
+    { path: "src/lib/modules/settings.js", kind: "runtime" },
+    { path: "src/lib/capabilities/composed/settings.js", kind: "composed" },
+    { path: "src/lib/app/settings.js", kind: "composed" },
+  ],
+  deterministicTests: ["declared defaults", "typed coercion", "scope isolation", "administration required for an application value", "reload"],
+  browserEvidence: ["an administrator's change is visible to a member", "a member cannot change an application value"],
+  proof: "test/code-agent/builder-v2-settings-audit.test.mjs",
+});
+
+const AUDIT_MODULE = platformModule({
+  id: "thrallo.audit", version: "1.0.0", title: "Audit/history",
+  clientAbi: "audit@1", services: ["backend_sdk", "app_auth", "accounts"], capabilities: ["audit"],
+  requires: [{ id: "thrallo.identity", range: "^1.2.0" }],
+  // There is deliberately no append operation: history is written by the platform, and an
+  // application that could append its own history could also write a false one.
+  operations: [
+    clientOperation({ id: "list", stateOwner: "audit history", errors: ["forbidden", "history_unavailable"], hooks: ["an administrative change appears, attributed"] }),
+    clientOperation({ id: "redact", stateOwner: "audit history", hooks: ["no sensitive value appears in any event"] }),
+  ],
+  entrypoints: [
+    { module: "src/lib/modules/audit.js", exports: ["createHistoryController", "redactEvent", "redactValues", "changedFields", "ALWAYS_SENSITIVE"] },
+    { module: "src/lib/modules/uiReact.js", exports: ["useHistoryState"] },
+    { module: "src/lib/capabilities/composed/audit.js", exports: ["history"], composed: true },
+  ],
+  artifacts: [
+    { path: "src/lib/modules/audit.js", kind: "runtime" },
+    { path: "src/lib/capabilities/composed/audit.js", kind: "composed" },
+  ],
+  deterministicTests: ["append-only", "attribution", "redaction of always-sensitive and declared fields", "authorised read", "paging"],
+  browserEvidence: ["a change is listed with who made it", "a member without the grant sees no history"],
+  proof: "test/code-agent/builder-v2-settings-audit.test.mjs",
+});
+
+const MODULES = [CORE_MODULE, ...LEGACY_WRAPPED.map(legacyCapabilityModule), IDENTITY_1_2, ACCOUNTS_MODULE, AUTHORIZATION_1_1, ADMIN_MODULE, ENTITIES_1_1, ROUTING_MODULE, QUERY_MODULE, FORMS_1_1, ASYNC_MODULE, SETTINGS_MODULE, AUDIT_MODULE];
 
 /** id → every registered version of that module, highest last. */
 const byId = new Map();

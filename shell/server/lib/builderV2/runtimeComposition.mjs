@@ -29,7 +29,10 @@ import { createAssetService } from "./assets/assetService.mjs";
 import { createOptimiser } from "./assets/optimiser.mjs";
 import { pexelsProvider } from "./assets/pexelsProvider.mjs";
 import { persistContract, tierContract } from "./contractTiering.mjs";
-import { accountPolicyFromContract, persistAppAccountPolicy } from "../appAccounts/accountPolicyStore.mjs";
+import {
+  accountPolicyFromContract, persistAppAccountPolicy, persistAppAuditConfig,
+} from "../appAccounts/accountPolicyStore.mjs";
+import { deriveSettingsPlan } from "./platformModules/settingsPlan.mjs";
 import { availabilityFromEnv } from "./platformModules/availability.mjs";
 import { contractWorkflowRecoveryAuthority } from "./contractStageBudget.mjs";
 import { compareGraphIndexes, manifestOf } from "./graphParity.mjs";
@@ -681,9 +684,19 @@ export function createBuilderV2Runtime({
           // WP4: the account policy the app-accounts service enforces for this application is the
           // typed contract's — declared roles and profile fields — recorded beside the contract.
           // The table is optional on a deployment; an absent one is reported once, never fatal.
-          if ((contract?.ownership?.platformRequirements || []).some((row) => row?.type === "accounts")) {
-            await persistAppAccountPolicy(eventProject, accountPolicyFromContract(contract), { client })
+          // WP8: the same record carries the settings keys the service may accept a write for,
+          // and the audit configuration decides whether history is captured at all. Neither is
+          // inferred at request time: a key the build never declared cannot be written.
+          const settingsPlan = deriveSettingsPlan(contract);
+          const requirements = contract?.ownership?.platformRequirements || [];
+          if (requirements.some((row) => ["accounts", "settings"].includes(row?.type))) {
+            await persistAppAccountPolicy(eventProject, accountPolicyFromContract(contract, { settingsPlan }), { client })
               .catch((error) => log(`account policy persist skipped: ${error.message}`));
+          }
+          if (settingsPlan.audit.enabled || requirements.some((row) => row?.type === "audit")) {
+            await persistAppAuditConfig(eventProject, {
+              enabled: true, sensitiveFields: settingsPlan.audit.sensitiveFields,
+            }, { client }).catch((error) => log(`audit config persist skipped: ${error.message}`));
           }
           await recordFacts(eventOwner, eventProject, [
             {

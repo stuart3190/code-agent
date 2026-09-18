@@ -13,9 +13,13 @@ export const MEMBER_STATUS = Object.freeze({ ACTIVE: "active", INVITED: "invited
 export const ACTIONS = Object.freeze([
   "profile.read", "profile.write", "profile.read.any", "profile.write.any",
   "members.read", "members.invite", "members.provision", "members.role", "members.status",
+  // WP8. An application's declared settings are part of how it works, so every active member may
+  // READ them; changing an application-wide value is administration, and history is a record of
+  // administration, so both are granted explicitly.
+  "settings.read", "settings.write", "history.read",
 ]);
 
-export const MEMBER_GRANTS = Object.freeze(["profile.read", "profile.write"]);
+export const MEMBER_GRANTS = Object.freeze(["profile.read", "profile.write", "settings.read"]);
 export const ADMIN_GRANTS = Object.freeze([...ACTIONS]);
 export const ADMIN_ROLE_NAME = /^(?:admin(?:istrator)?|owner|superuser|manager)s?$/i;
 

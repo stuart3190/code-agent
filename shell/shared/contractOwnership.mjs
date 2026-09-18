@@ -55,12 +55,24 @@ const CAPABILITY_MODULES = Object.freeze({
   booking: "thrallo.booking", wizard: "thrallo.workflow", contact: "thrallo.contact", newsletter: "thrallo.newsletter",
   "interaction-primitives": "thrallo.forms",
   accounts: "thrallo.accounts", authorization: "thrallo.authorization", admin: "thrallo.admin",
+  settings: "thrallo.settings", audit: "thrallo.audit",
 });
 // Fields of an account-shaped entity that are platform membership facts, never profile data.
 const PLATFORM_ACCOUNT_FIELD = /^(?:id|user[-_ ]?id|auth[-_ ]?user[-_ ]?id|email|user[-_ ]?email|role|roles|status|account[-_ ]?status|created[-_ ]?at|updated[-_ ]?at|last[-_ ]?login|invited(?:[-_ ]?at)?)$/i;
 const ROLE_FIELD = /^roles?$/i;
 const STATUS_FIELD = /^(?:status|account[-_ ]?status)$/i;
 const ACCOUNT_STORAGE_NOTE = "platform-managed account membership through the accounts service; not an application record";
+// WP8 — the settings singleton. Deliberately narrow (see isSettingsSingleton): a keyed lookup
+// table of per-something defaults is domain data and stays a domain entity, because claiming it
+// would silently delete a real application concept.
+const SETTINGS_ENTITY_NAME = /^(?:app[-_ ]?)?(?:settings?|preferences?|configuration|config|system[-_ ]?settings?|site[-_ ]?settings?)$/i;
+// An ADDRESS, not an attribute: a field whose last word is id/key/code/slug means rows are
+// looked up by it. "roomType" is an attribute of one settings record; "roomTypeKey" addresses a
+// table of them. Deliberately excludes "name" and "type", which are ordinary settings values
+// ("siteName", "invoiceType") far more often than they are keys.
+const SETTINGS_KEY_WORDS = new Set(["id", "key", "code", "slug"]);
+const SETTINGS_OWN_ID = /^(?:id|settings?[-_ ]?id)$/i;
+const SETTINGS_STORAGE_NOTE = "platform-managed application settings through the settings module; not an application record";
 const CRUD_METHOD_BY_KIND = Object.freeze({
   create: "create", insert: "create", add: "create",
   read: "get", get: "get", find: "get", lookup: "get", view: "get", fetch: "get",
@@ -86,6 +98,8 @@ export const PLATFORM_REQUIREMENT_ENFORCEMENT = Object.freeze({
   authorization: "block", // WP4 — module exists (thrallo.authorization)
   admin: "block",         // WP4 — module exists (thrallo.admin); availability decides
   entities: "block",      // WP5 — module exists (thrallo.entities)
+  settings: "block",      // WP8 — module exists (thrallo.settings); availability decides
+  audit: "block",         // WP8 — module exists (thrallo.audit); availability decides
   file_uploads: "warn",   // WP10
   realtime: "warn",       // WP10
   exports: "warn",        // WP11
@@ -117,6 +131,25 @@ function sessionMethodFor(operation) {
     for (const [pattern, method] of SESSION_METHOD_BY_VOCABULARY) if (pattern.test(text)) return method;
   }
   return null;
+}
+
+/**
+ * Is this entity the application's settings singleton rather than a domain record? True only for
+ * a settings-shaped name with no create and no collection read and no key-like field: anything
+ * addressable by a key is a lookup table the application owns.
+ */
+export function isSettingsSingleton(contract, entity) {
+  if (!entity?.name || !SETTINGS_ENTITY_NAME.test(String(entity.name))) return false;
+  const operations = listOf(contract?.operations).filter((operation) => lower(operation?.entity) === lower(entity.name));
+  if (operations.some((operation) => ["create", "insert", "add"].includes(kindOf(operation)) || COLLECTION_KINDS.has(kindOf(operation)))) return false;
+  const fields = listOf(entity.fields).map((field) => String(field?.name || field));
+  return !fields.some((name) => !SETTINGS_OWN_ID.test(name) && SETTINGS_KEY_WORDS.has(lastWord(name)));
+}
+
+/** The last word of a field name, whether it is camelCase, snake_case or spaced. */
+function lastWord(name) {
+  const words = String(name || "").replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().match(/[a-z0-9]+/g) || [];
+  return words.at(-1) || "";
 }
 
 function isSessionEntity(entity) {
@@ -157,6 +190,7 @@ export function normalizeContractOwnership(contract, { buildProfile = null } = {
   const warnings = [];
   const accountCandidates = [];
   const accountEntities = [];
+  const settingsEntities = [];
   const profileSchema = [];
   const entities = [];
   for (const entity of listOf(contract.entities)) {
@@ -190,9 +224,18 @@ export function normalizeContractOwnership(contract, { buildProfile = null } = {
       continue;
     }
     if (entity.platform === "accounts") accountCandidates.push(entity.name);
+    if (entity.platform === "settings" || isSettingsSingleton(contract, entity)) {
+      // WP8: the settings singleton stays DECLARED — its fields are the contract's vocabulary for
+      // the keys, their types and their defaults — but it is never an application record: no entity
+      // store is composed for it and its operations bind to the settings module below.
+      settingsEntities.push({ name: entity.name, original: JSON.parse(JSON.stringify(entity)) });
+      entities.push({ ...entity, fields: kept, platform: "settings", owned: false, storage: SETTINGS_STORAGE_NOTE });
+      continue;
+    }
     entities.push(kept.length === fields.length ? entity : { ...entity, fields: kept });
   }
   const accountNames = new Set(entities.filter((entity) => entity.platform === "accounts").map((entity) => lower(entity.name)));
+  const settingsNames = new Set(settingsEntities.map((entity) => lower(entity.name)));
   const hasAdminVocabulary = listOf(contract.auth?.roles).some((role) => /admin|owner|manager/i.test(String(role)))
     || listOf(buildProfile?.requirementSignals || contract.buildProfile?.requirementSignals).includes("admin");
 
@@ -300,6 +343,38 @@ export function normalizeContractOwnership(contract, { buildProfile = null } = {
           to: { kind: next.kind, entity: next.entity || null, module: CAPABILITY_MODULES[retarget.capability], operation: retarget.method },
           ...(fabricated.length ? { droppedResponsibilities: fabricated } : {}) });
       }
+    } else if (settingsNames.has(lower(operation?.entity))
+      && !listOf(operation.responsibilities).some((row) => ["settings", "audit"].includes(lower(row?.capability || row?.capabilityId)))) {
+      // WP8: generic CRUD on the settings singleton becomes the settings command it means. A read
+      // answers with the declared default for a key nobody has written yet; a write is authorised
+      // by the settings grant. Neither fabricates the "one settings record" the corpus produced.
+      const original = JSON.parse(JSON.stringify(operation));
+      const settingsKind = kindOf(operation);
+      const method = MUTATION_KINDS.has(settingsKind) ? "set" : REMOVAL_KINDS.has(settingsKind) ? "reset" : "get";
+      const previous = responsibilities.find((row) => row?.type === "persistence") || responsibilities[0] || {};
+      // A generated transformation that only chooses which declared setting to write IS the
+      // settings command — coerce the value, authorise it, store it — so it is dropped and
+      // recorded, exactly as an account-fact transformation is. A responsibility that writes
+      // anything outside the declared keys is real domain logic and stays generated.
+      const settingsFields = listOf(settingsEntities.find((entity) => lower(entity.name) === lower(operation.entity))?.original?.fields)
+        .map((field) => String(field?.name || field)).filter((name) => !SETTINGS_OWN_ID.test(name));
+      const settingsKeys = new Set(settingsFields.map(lower));
+      const absorbed = responsibilities.filter((row) => row !== previous && row?.type !== "persistence"
+        && listOf(row?.writes).length > 0
+        && listOf(row.writes).every((field) => settingsKeys.has(lower(String(field).split(".").pop()))));
+      responsibilities = [
+        { type: "functional", capability: "settings", capabilityMethod: method,
+          behavior: previous?.behavior || operation.description || `${method} application settings`,
+          reads: listOf(operation.responsibilities).flatMap((row) => listOf(row?.reads)).length
+            ? [...new Set(listOf(operation.responsibilities).flatMap((row) => listOf(row.reads)).map(String))]
+            : settingsFields,
+          writes: [] },
+        ...responsibilities.filter((row) => row !== previous && row?.type !== "persistence" && !absorbed.includes(row)),
+      ];
+      next = { ...next, responsibilities };
+      retargetedOperations.push({ id: idOf(operation), reason: "platform_settings", from: original,
+        to: { kind: next.kind, entity: next.entity || null, module: "thrallo.settings", operation: method },
+        ...(absorbed.length ? { droppedResponsibilities: absorbed } : {}) });
     }
     // Strip credential fields from every responsibility's writes and from any operation's inputs.
     responsibilities = responsibilities.map((responsibility) => ({
@@ -378,6 +453,21 @@ export function normalizeContractOwnership(contract, { buildProfile = null } = {
     platformRequirements.push({ type: "admin", module: "thrallo.admin", status: "resolved",
       source: usesAdminModule ? "account_operations" : signals.has("admin") ? "signal:admin" : "auth.roles" });
   }
+  // WP8: a declared settings singleton requires the settings module, and the audit history the
+  // settings service writes requires the audit module. Both are resolved requirements — the
+  // resolver refuses a deployment without the service rather than generating a settings record.
+  const usesSettingsModule = operations.some((operation) => operation.module === "thrallo.settings"
+    || (operation.moduleBindings || []).some((binding) => binding.module === "thrallo.settings"));
+  if (settingsEntities.length || usesSettingsModule) {
+    platformRequirements.push({ type: "settings", module: "thrallo.settings", status: "resolved",
+      source: settingsEntities.length ? `entity:${settingsEntities[0].name}` : "settings_operations",
+      entities: settingsEntities.map((entity) => entity.name) });
+  }
+  const usesAuditModule = operations.some((operation) => operation.module === "thrallo.audit"
+    || (operation.moduleBindings || []).some((binding) => binding.module === "thrallo.audit"));
+  if (usesAuditModule) {
+    platformRequirements.push({ type: "audit", module: "thrallo.audit", status: "resolved", source: "history_operations" });
+  }
   for (const [signal, type] of [["payments", "payments"], ["file_uploads", "file_uploads"], ["realtime", "realtime"], ["export", "exports"]]) {
     if (signals.has(signal)) platformRequirements.push({ type, module: null, status: "unresolved", source: `signal:${signal}` });
   }
@@ -404,6 +494,7 @@ export function normalizeContractOwnership(contract, { buildProfile = null } = {
     retargetedOperations,
     strippedFields,
     accountEntities,
+    settingsEntities,
     profileSchema,
     warnings,
   };

@@ -18,7 +18,11 @@ export const CONTRACT_VERSION = 2;
 /** Modules whose records are platform-owned and never stored as generic application entities. */
 export const PLATFORM_RECORD_MODULES = new Set(["thrallo.identity", "thrallo.accounts", "thrallo.authorization", "thrallo.admin"]);
 /** Capabilities whose functional responsibilities output platform values rather than entity fields. */
-export const PLATFORM_OUTPUT_CAPABILITIES = new Set(["session", "auth", "accounts", "admin", "authorization"]);
+// WP8 adds settings and audit: a settings command's output is the stored setting and a history
+// read's is the event list — platform values, not declared entity fields.
+export const PLATFORM_OUTPUT_CAPABILITIES = new Set([
+  "session", "auth", "accounts", "admin", "authorization", "settings", "audit",
+]);
 
 // The five stages PR5 generates in. Named here because the contract is what assigns work to them.
 export const STAGES = ["foundation", "data", "primary_journey", "supporting", "polish"];

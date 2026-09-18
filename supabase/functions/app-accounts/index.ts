@@ -23,6 +23,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2.111.0";
 import { AccountError, createAccountService } from "./accountService.mjs";
+import { PlatformStateError, createPlatformStateService } from "./platformStateService.mjs";
 import { buildPolicy } from "./policy.js";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -41,7 +42,12 @@ const json = (status: number, body: unknown, origin: string) => new Response(JSO
 });
 const uuid = (value: unknown) => /^[0-9a-f-]{36}$/i.test(String(value || ""));
 const text = (value: unknown, max = 200) => String(value || "").trim().slice(0, max);
-const COMMANDS = ["me", "updateMe", "permissions", "member", "members", "invite", "provision", "setRole", "setStatus"];
+const COMMANDS = [
+  "me", "updateMe", "permissions", "member", "members", "invite", "provision", "setRole", "setStatus",
+  // WP8 — settings and audit history. There is deliberately no "appendHistory": history is
+  // written by the platform (this function and the entities trigger), never by an application.
+  "settings", "setSetting", "history",
+];
 
 type Row = Record<string, unknown>;
 const fromRow = (row: Row | null) => row ? ({
@@ -103,6 +109,55 @@ function supabaseAccountStorage(appIdFilter: string) {
   };
 }
 
+/** Supabase storage twin for settings and history (service role, app-scoped). */
+function supabasePlatformStateStorage() {
+  return {
+    async getSettings(appId: string, scope: string, target: string | null) {
+      const { data } = await svc.from("app_settings").select("key,value")
+        .eq("app_id", appId).eq("scope", scope).eq("scope_target", target || "");
+      return (data || []).reduce((all: Row, row: Row) => ({ ...all, [String(row.key)]: row.value }), {} as Row);
+    },
+    async setSetting(row: Row) {
+      const { data, error } = await svc.from("app_settings").upsert({
+        app_id: row.appId, scope: row.scope, scope_target: row.scopeTarget || "", key: row.key,
+        value: row.value, updated_by: row.updatedBy ?? null, updated_at: row.updatedAt,
+      }, { onConflict: "app_id,scope,scope_target,key" }).select("key,value,version").single();
+      if (error) throw new PlatformStateError("storage_error", error.message, 500);
+      return { ...row, value: data.value, version: data.version };
+    },
+    async appendEvent(row: Row) {
+      const { data, error } = await svc.from("app_audit_events").insert({
+        app_id: row.appId, actor_user_id: row.actorUserId, actor_email: row.actorEmail, action: row.action,
+        resource: row.resource, resource_id: row.resourceId, before: row.before, after: row.after, created_at: row.createdAt,
+      }).select("id").single();
+      if (error) throw new PlatformStateError("storage_error", error.message, 500);
+      return { ...row, id: data.id };
+    },
+    async listEvents(appId: string, { resource = null, resourceId = null, limit = 50, cursor = null }: Record<string, unknown> = {}) {
+      let query = svc.from("app_audit_events").select("*").eq("app_id", appId)
+        .order("created_at", { ascending: false }).order("id", { ascending: false }).limit(Number(limit) + 1);
+      if (resource) query = query.eq("resource", resource);
+      if (resourceId) query = query.eq("resource_id", resourceId);
+      if (cursor) {
+        const { data: at } = await svc.from("app_audit_events").select("created_at").eq("id", cursor).maybeSingle();
+        if (at?.created_at) query = query.lt("created_at", at.created_at);
+      }
+      const { data } = await query;
+      const rows = (data || []).map((row: Row) => ({
+        id: row.id, action: row.action, resource: row.resource, resourceId: row.resource_id,
+        actorUserId: row.actor_user_id, actorEmail: row.actor_email,
+        before: row.before, after: row.after, createdAt: row.created_at,
+      }));
+      const page = rows.slice(0, Number(limit));
+      return { events: page, nextCursor: rows.length > Number(limit) ? page.at(-1)?.id || null : null };
+    },
+    async getAuditConfig(appId: string) {
+      const { data } = await svc.from("app_audit_config").select("enabled,sensitive_fields").eq("app_id", appId).maybeSingle();
+      return data ? { enabled: data.enabled === true, sensitiveFields: (data.sensitive_fields as string[]) || [] } : null;
+    },
+  };
+}
+
 async function provisionAuthUser(appId: string, email: string) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${appId}:${email}`));
   const synth = `${Array.from(new Uint8Array(digest)).slice(0, 12).map((b) => b.toString(16).padStart(2, "0")).join("")}@${SYNTH_DOMAIN}`;
@@ -137,6 +192,12 @@ Deno.serve(async (req: Request) => {
   const service = createAccountService({ storage, policy, profileFields: (policy as unknown as { profileFields?: string[] })?.profileFields || ["displayName"] });
   const actor = await service.actorFor(appId, authed.user.id);
   if (!actor) return json(401, { error: "Sign in to this app first.", code: "unauthenticated" }, origin);
+  const platformState = createPlatformStateService({
+    storage: supabasePlatformStateStorage(),
+    policy: policy || undefined,
+    settingsSchema: (policy as unknown as { settings?: Record<string, unknown> })?.settings || null,
+    sensitiveFields: (policy as unknown as { sensitiveFields?: string[] })?.sensitiveFields || [],
+  });
 
   try {
     switch (command) {
@@ -156,10 +217,18 @@ Deno.serve(async (req: Request) => {
       }
       case "setRole": return json(200, await service.setRole(appId, actor, { userId: text(body.userId, 64) || null, email: text(body.email) || null, role: text(body.role, 40) }), origin);
       case "setStatus": return json(200, await service.setStatus(appId, actor, { userId: text(body.userId, 64) || null, email: text(body.email) || null, status: text(body.status, 20) }), origin);
+      case "settings": return json(200, { values: await platformState.settings(appId, actor, { scope: text(body.scope, 20) || "app", target: text(body.target, 64) || null }) }, origin);
+      case "setSetting": return json(200, await platformState.setSetting(appId, actor, { key: text(body.key, 80), value: body.value, target: text(body.target, 64) || null }), origin);
+      case "history": return json(200, await platformState.history(appId, actor, {
+        resource: text(body.resource, 80) || null, resourceId: text(body.resourceId, 80) || null,
+        limit: Math.max(1, Math.min(200, Number(body.limit) || 50)), cursor: text(body.cursor, 80) || null,
+      }), origin);
       default: return json(400, { error: "unknown command" }, origin);
     }
   } catch (error) {
-    if (error instanceof AccountError) return json(error.status, { error: error.message, code: error.code, ...(error.details ? { details: error.details } : {}) }, origin);
+    if (error instanceof AccountError || error instanceof PlatformStateError) {
+      return json(error.status, { error: error.message, code: error.code, ...(error.details ? { details: error.details } : {}) }, origin);
+    }
     return json(500, { error: String((error as Error)?.message || error).slice(0, 300) }, origin);
   }
 });

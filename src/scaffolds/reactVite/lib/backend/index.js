@@ -66,7 +66,7 @@ function unconfigured() {
     knowledge: { search: fail },
     integrations: { meta: { overview: fail, start: fail, connect: fail, select: fail, disconnect: fail } },
     analytics: { track: fail, page: fail },
-    accounts: { me: fail, updateMe: fail, permissions: fail, member: fail, members: fail, invite: fail, provision: fail, setRole: fail, setStatus: fail },
+    accounts: { me: fail, updateMe: fail, permissions: fail, member: fail, members: fail, invite: fail, provision: fail, setRole: fail, setStatus: fail, settings: fail, setSetting: fail, history: fail },
     _client: null,
   };
 }

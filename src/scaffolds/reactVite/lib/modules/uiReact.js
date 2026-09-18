@@ -1,7 +1,7 @@
 // React bindings for the routing, collections, forms and async-state modules — platform
 // infrastructure, do not edit. State and functions only; no JSX, no layout.
 
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useCapabilityState } from "../capabilities/react.js";
 
 /** The router's live state: { path, route, params, state: loading|ready|not_found|forbidden|error, data, redirectTo }. */
@@ -48,4 +48,30 @@ export function useResourceState(resource, fetcher = null) {
 export function useMutationState(mutation) {
   const state = useCapabilityState(mutation);
   return useMemo(() => ({ ...state, run: mutation.run, reset: mutation.reset }), [state, mutation]);
+}
+
+/**
+ * WP8 — settings. { values, status, error, get, set, reset } for one scope; a key that was never
+ * written answers with its declared default, so a screen never invents one.
+ */
+export function useSettingsState(controller, { scope = "app", target = null } = {}) {
+  const state = useCapabilityState(controller);
+  const [values, setValues] = useState(null);
+  const load = useCallback(async () => setValues(await controller.all({ scope, target })), [controller, scope, target]);
+  useEffect(() => { void load(); }, [load]);
+  return useMemo(() => ({
+    status: state?.status || "idle", error: state?.error || null, values: values || {},
+    get: (key) => controller.get(key, { target }),
+    set: async (key, value) => { const saved = await controller.set(key, value, { target }); await load(); return saved; },
+    reset: async (key) => { const saved = await controller.reset(key, { target }); await load(); return saved; },
+    reload: load,
+  }), [state, values, controller, target, load]);
+}
+
+/** WP8 — authorised history, newest first, already redacted. Loads on first use. */
+export function useHistoryState(controller, query = {}) {
+  const state = useCapabilityState(controller);
+  const key = JSON.stringify(query);
+  useEffect(() => { void controller.load(query); }, [controller, key]);
+  return useMemo(() => ({ ...state, more: () => controller.more(), reload: () => controller.load(query) }), [state, controller, key]);
 }

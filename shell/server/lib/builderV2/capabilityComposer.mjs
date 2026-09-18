@@ -289,6 +289,60 @@ export function Link({ to, params = {}, replace = false, children, onClick, ...r
   return { files, interfaces };
 }
 
+// WP8: typed settings with declared scopes and defaults, and authorised append-only history.
+export const SETTINGS_COMPOSED_PATH = `${COMPOSED_ROOT}/settings.js`;
+export const AUDIT_COMPOSED_PATH = `${COMPOSED_ROOT}/audit.js`;
+export const APP_FACADE_SETTINGS_PATH = `${APP_FACADE_ROOT}/settings.js`;
+
+function settingsFiles(settingsPlan) {
+  const files = {};
+  const interfaces = [];
+  const declarations = settingsPlan?.declarations || [];
+  const audit = settingsPlan?.audit?.enabled === true;
+  if (!declarations.length && !audit) return { files, interfaces };
+  if (declarations.length) {
+    files[SETTINGS_COMPOSED_PATH] = `${banner("settings")}import { accounts } from "../../backend/index.js";
+import { compileSettings, createSettingsController } from "../../modules/settings.js";
+
+export const settingsSchema = compileSettings(${jsObject(declarations)});
+/** Reads and writes go through the accounts service, which enforces the scope's policy. */
+export const settings = createSettingsController({
+  schema: settingsSchema,
+  transport: {
+    get: (scope, target) => accounts.settings({ scope, target }),
+    set: (scope, target, key, value) => accounts.setSetting({ key, value, target }).then((row) => row.value),
+  },
+});
+`;
+    interfaces.push({ module: SETTINGS_COMPOSED_PATH, exports: ["settings", "settingsSchema"], owns: ["application settings"],
+      operations: ["get", "set", "reset"] });
+  }
+  if (audit) {
+    files[AUDIT_COMPOSED_PATH] = `${banner("audit history")}import { accounts } from "../../backend/index.js";
+import { createHistoryController } from "../../modules/audit.js";
+
+/** Read-only by construction: the platform appends history, the application never does. */
+export const history = createHistoryController({
+  transport: { list: (query) => accounts.history(query) },
+  sensitiveFields: ${jsObject(settingsPlan?.audit?.sensitiveFields || [])},
+});
+`;
+    interfaces.push({ module: AUDIT_COMPOSED_PATH, exports: ["history"], owns: ["audit history"], operations: ["list"] });
+  }
+  files[APP_FACADE_SETTINGS_PATH] = `${banner("public settings ABI")}${declarations.length ? 'import { settings, settingsSchema } from "../capabilities/composed/settings.js";\n' : ""}${audit ? 'import { history } from "../capabilities/composed/audit.js";\n' : ""}import {
+  ${[declarations.length ? "useSettingsState" : null, audit ? "useHistoryState" : null].filter(Boolean).join(", ")},
+} from "../modules/uiReact.js";
+
+${declarations.length ? `export { settings, settingsSchema };
+/** { values, get, set, reset, status } for one scope; an unwritten key answers with its default. */
+export function useSettings(options = {}) { return useSettingsState(settings, options); }
+` : ""}${audit ? `export { history };
+/** { events, status, more } — authorised history, newest first, already redacted. */
+export function useHistory(query = {}) { return useHistoryState(history, query); }
+` : ""}`;
+  return { files, interfaces };
+}
+
 function facadeIndexSource(moduleLock, facadeModules) {
   return `${banner("public application ABI")}// The one import surface for generated application code. Everything here is deterministic and
 // protected; layout, styling, copy and domain logic remain entirely the application's.
@@ -302,7 +356,7 @@ export const THRALLO_APP_ABI = Object.freeze(${jsObject({
 `;
 }
 
-function capabilityFiles(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null } = {}) {
+function capabilityFiles(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null } = {}) {
   const nodes = new Map((graph?.nodes || []).map((node) => [node.id, node]));
   const files = {};
   const interfaces = [];
@@ -431,6 +485,12 @@ export const newsletterCapability = makeNewsletter({ entity: ${quote(entity)} })
       interfaces.push(...route.interfaces);
       facades.push("routing");
     }
+    const settings = settingsFiles(settingsPlan);
+    if (Object.keys(settings.files).length) {
+      Object.assign(files, settings.files);
+      interfaces.push(...settings.interfaces);
+      facades.push("settings");
+    }
     files[APP_FACADE_INDEX_PATH] = facadeIndexSource(moduleLock, facades);
   }
   if (moduleLock) files[MODULE_LOCK_PATH] = lockFileSource(moduleLock);
@@ -454,8 +514,8 @@ export { CAPABILITY_COMPOSITION } from "./manifest.js";
   return { files, interfaces };
 }
 
-export function capabilityCompositionPlan(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null } = {}) {
-  const rendered = capabilityFiles(graph, { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan });
+export function capabilityCompositionPlan(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null } = {}) {
+  const rendered = capabilityFiles(graph, { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan });
   const extensionPoints = (graph?.nodes || []).filter((node) => node.type === "custom_behavior")
     .map((node) => ({ id: node.id, ...node.extension, inputs: node.requiredInputs, outputs: node.outputs,
       stateOwnership: node.stateOwnership, persistenceSemantics: node.persistenceSemantics }));
@@ -474,7 +534,7 @@ export function capabilityCompositionPlan(graph, { moduleLock = null, identityPl
 }
 
 /** Apply or refresh the foundation. Existing model-owned extension configuration is preserved. */
-export function composeCapabilityFoundation(tree, graph, { moduleLock = null, identityPlan = null, entitySchema = null, routePlan = null } = {}) {
+export function composeCapabilityFoundation(tree, graph, { moduleLock = null, identityPlan = null, entitySchema = null, routePlan = null, settingsPlan = null } = {}) {
   // Production Builder V2 starts from the full React/Vite scaffold. Some retained unit/legacy
   // baselines intentionally predate the capability runtime; do not emit adapters with dangling
   // imports into those trees. They remain on the migration-compatible path until refreshed from
@@ -493,7 +553,7 @@ export function composeCapabilityFoundation(tree, graph, { moduleLock = null, id
   // A base tree without the module runtime (a legacy snapshot, a retained fixture) composes the
   // capability adapters exactly as before and simply does not receive the identity controller.
   const identityRuntime = typeof tree?.[IDENTITY_RUNTIME_PATH] === "string";
-  const options = { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan };
+  const options = { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan };
   const rendered = capabilityFiles(graph, options);
   const next = { ...(tree || {}), ...rendered.files };
   if (typeof next[CAPABILITY_CONFIGURATION_PATH] !== "string") {

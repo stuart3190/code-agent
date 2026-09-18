@@ -115,9 +115,9 @@ test("manifest — the schema rejects every malformed shape the audit forbids", 
 test("registry — every legacy capability is wrapped by a validated module; public imports are unchanged", () => {
   assert.deepEqual(validateModuleRegistry(), { ok: true, problems: [] });
   assert.deepEqual(registeredModuleIds(), [
-    "thrallo.accounts", "thrallo.admin", "thrallo.async", "thrallo.authorization", "thrallo.booking", "thrallo.contact",
-    "thrallo.core", "thrallo.entities", "thrallo.forms", "thrallo.identity", "thrallo.newsletter", "thrallo.query",
-    "thrallo.routing", "thrallo.workflow",
+    "thrallo.accounts", "thrallo.admin", "thrallo.async", "thrallo.audit", "thrallo.authorization", "thrallo.booking",
+    "thrallo.contact", "thrallo.core", "thrallo.entities", "thrallo.forms", "thrallo.identity", "thrallo.newsletter",
+    "thrallo.query", "thrallo.routing", "thrallo.settings", "thrallo.workflow",
   ]);
   for (const [capabilityId, capability] of Object.entries(CAPABILITIES)) {
     const manifest = moduleForCapability(capabilityId);

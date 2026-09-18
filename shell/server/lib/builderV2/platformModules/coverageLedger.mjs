@@ -60,6 +60,8 @@ export const CURRENT_FORMAT_VERSIONS = Object.freeze({
   routePlan: 1,          // WP6: new — typed route plan stamped onto the scaffold graph
   platformSelection: 1,  // WP6: new — contract-structure selection of non-capability modules
   queryLint: 1,          // WP7: new — generated query-binding lint
+  settingsPlan: 1,       // WP8: new — typed settings keys, scopes and defaults
+  platformStateService: 1, // WP8: new — app_settings/app_audit_events service and audit config
 });
 
 /** The immutable snapshot row as written by snapshotStore.createSnapshot(). */
@@ -201,6 +203,13 @@ export const COVERAGE_LEDGER = Object.freeze([
   row("capability", "admin", { status: "D/S", targetModule: "thrallo.admin", workPackage: 4,
     retains: "src/lib/modules/accounts.js createAdmin; app-accounts commands invite/provision/setRole/setStatus",
     disposition: "authorized admin commands; replaces fake user CRUD and generated authority checks" }),
+  // WP8 — settings and audit (added; the audit's "settings singleton inferred from prose")
+  row("capability", "settings", { status: "D/S", targetModule: "thrallo.settings", workPackage: 8,
+    retains: "src/lib/modules/settings.js compileSettings/createSettingsController; app-accounts settings commands",
+    disposition: "typed keys with declared scopes and defaults; replaces the fabricated settings record and its default glue" }),
+  row("capability", "audit", { status: "D/S", targetModule: "thrallo.audit", workPackage: 8,
+    retains: "src/lib/modules/audit.js createHistoryController; app-accounts history command",
+    disposition: "platform-appended, authorised, redacted history; the application reads and never writes it" }),
   row("capability", "interaction-primitives", { status: "D/S", targetModule: "thrallo.forms", workPackage: 7,
     retains: "src/lib/capabilities/react.js useCapabilityState/useCapabilityAction/useSemanticField/useSemanticSelection/useSemanticAction/useFlowAdvance/useStatusRegion",
     disposition: "headless form/action/semantic-binding module" }),

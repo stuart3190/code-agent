@@ -60,7 +60,7 @@ test("WP4 — policy: grants derive from declared roles, never from a record; ow
   assert.deepEqual([...policy.roles], ["electrician", "admin"]);
   assert.equal(policy.defaultRole, "electrician");
   assert.deepEqual([...policy.adminRoles], ["admin"]);
-  assert.deepEqual([...policy.grants.electrician], ["profile.read", "profile.write"]);
+  assert.deepEqual([...policy.grants.electrician], ["profile.read", "profile.write", "settings.read"]);
   assert.deepEqual([...policy.grants.admin], [...ACTIONS]);
   const admin = { userId: "u1", email: "a@x", role: "admin", status: MEMBER_STATUS.ACTIVE };
   const member = { userId: "u2", email: "b@x", role: "electrician", status: MEMBER_STATUS.ACTIVE };
@@ -71,7 +71,7 @@ test("WP4 — policy: grants derive from declared roles, never from a record; ow
   assert.equal(evaluate(policy, member, "profile.write", { target: { userId: "u1" } }).allowed, false, "another member's profile");
   assert.deepEqual(evaluate(policy, { ...member, status: MEMBER_STATUS.SUSPENDED }, "profile.read"), { allowed: false, reason: "account_suspended" });
   assert.deepEqual(evaluate(policy, null, "profile.read"), { allowed: false, reason: "unauthenticated" });
-  assert.deepEqual(allowedActions(policy, member), ["profile.read", "profile.write"]);
+  assert.deepEqual(allowedActions(policy, member), ["profile.read", "profile.write", "settings.read"]);
   assert.equal(isAdminRole(DEFAULT_POLICY, "admin"), true);
   // A catalogue with no administrative role still gets one, so provisioning is possible.
   assert.deepEqual([...buildPolicy({ roles: ["viewer"] }).adminRoles], ["admin"]);
@@ -128,7 +128,7 @@ test("WP4 — service: profile allow-list, invitations activate on signup, provi
   const me = await service.me("app-a", bob);
   assert.deepEqual(me.principal, { kind: "member", id: "u-bob", email: "bob@a.test" });
   assert.deepEqual(me.membership, { role: "member", status: "active" });
-  assert.deepEqual(me.allowedActions, ["profile.read", "profile.write"]);
+  assert.deepEqual(me.allowedActions, ["profile.read", "profile.write", "settings.read"]);
   await assert.rejects(service.updateMe("app-a", bob, { role: "admin" }), (error) => error.code === "profile_field_not_allowed",
     "a role can never be written through the profile");
   assert.deepEqual((await service.updateMe("app-a", bob, { displayName: "Bob" })).profile, { displayName: "Bob" });
@@ -186,7 +186,10 @@ test("WP4 — contract typing: an account-shaped entity is platform-owned and it
   assert.deepEqual(byId["update-user-role"].responsibilities, [{ type: "functional", capability: "admin", capabilityMethod: "setMemberRole",
     behavior: "update an app user's role in the admin area", reads: ["email", "role"], writes: [] }]);
   assert.deepEqual(report.retargetedOperations.map((row) => [row.id, row.reason]),
-    [["sign-in", "platform_session"], ["create-app-user", "platform_accounts"], ["update-user-role", "platform_accounts"]]);
+    [["sign-in", "platform_session"], ["create-app-user", "platform_accounts"], ["update-user-role", "platform_accounts"],
+      // WP8: this fixture's settings entity is the singleton it describes, so both of its updates
+      // become settings commands rather than CRUD on a fabricated record.
+      ["update-lux-setting", "platform_settings"], ["update-system-settings", "platform_settings"]]);
   const requirements = Object.fromEntries(report.platformRequirements.map((row) => [row.type, row]));
   assert.deepEqual([requirements.accounts.status, requirements.accounts.module, requirements.accounts.enforcement], ["resolved", "thrallo.accounts", "block"]);
   assert.deepEqual([requirements.admin.status, requirements.admin.module], ["resolved", "thrallo.admin"]);
@@ -195,7 +198,7 @@ test("WP4 — contract typing: an account-shaped entity is platform-owned and it
   // The shell records the policy the service enforces: declared roles and the profile fields.
   assert.deepEqual(accountPolicyFromContract(typed), {
     version: 1, roles: ["electrician", "admin"], defaultRole: "electrician", adminRoles: ["admin"],
-    grants: { electrician: ["profile.read", "profile.write"], admin: [...ACTIONS] }, profileFields: ["displayName"],
+    grants: { electrician: ["profile.read", "profile.write", "settings.read"], admin: [...ACTIONS] }, profileFields: ["displayName"],
   });
   // Idempotent.
   assert.equal(normalizeContractOwnership(typed).changed, false);

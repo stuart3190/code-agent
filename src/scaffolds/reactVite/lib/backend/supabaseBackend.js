@@ -500,6 +500,11 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     async provision({ email, role = null } = {}) { return accountsPost("provision", { email, role }); },
     async setRole({ userId = null, email = null, role } = {}) { return accountsPost("setRole", { userId, email, role }); },
     async setStatus({ userId = null, email = null, status } = {}) { return accountsPost("setStatus", { userId, email, status }); },
+    // WP8 — settings and append-only history. There is no append: history is written by the
+    // platform, never by the application.
+    async settings({ scope = "app", target = null } = {}) { return (await accountsPost("settings", { scope, target })).values; },
+    async setSetting({ key, value, target = null } = {}) { return accountsPost("setSetting", { key, value, target }); },
+    async history(query = {}) { return accountsPost("history", query); },
   };
   const knowledge = { async search(actionKey, query, options = {}) {
     const job = await actions.invoke(actionKey, { query, ...options }); return actions.wait(job.id);

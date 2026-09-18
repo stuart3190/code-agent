@@ -88,6 +88,19 @@ const LEGACY_CAPABILITIES = Object.freeze({
     interface: ["createAdmin"], entities: [],
     uiContract: ["idle", "loading", "ready", "error", "denied"], upgradePolicy: "replace-on-iterate",
   },
+  // WP8. Settings are typed keys with declared scopes and defaults, never a fabricated singleton
+  // record; history is read-only to the application because the platform is the only honest
+  // author of "who changed what".
+  settings: {
+    name: "settings", version: "1.0.0", package: "src/lib/modules/settings.js",
+    interface: ["compileSettings", "createSettingsController"], entities: [],
+    uiContract: ["idle", "loading", "ready", "error", "denied"], upgradePolicy: "replace-on-iterate",
+  },
+  audit: {
+    name: "audit", version: "1.0.0", package: "src/lib/modules/audit.js",
+    interface: ["createHistoryController"], entities: [],
+    uiContract: ["idle", "loading", "ready", "empty", "error", "denied"], upgradePolicy: "replace-on-iterate",
+  },
 });
 
 const metadata = Object.freeze({
@@ -197,6 +210,28 @@ const metadata = Object.freeze({
     verificationSemantics: { actions: ["list", "invite", "provision", "changeRole", "suspend", "reinstate"], stateChange: "membership rows", durableMutation: true, observe: ["member listed", "role after reload", "suspended member denied", "non-admin denied"] },
     testContract: ["non-admin denied", "admin invites", "role change persists", "suspension denies sign-in", "cross-app isolation", "last admin protected"],
   },
+  settings: {
+    supportedOperations: ["get", "all", "set", "reset"],
+    requiredInputs: { factory: ["schema"], operations: { get: ["key"], set: ["key", "value"], reset: ["key"] } },
+    operationOutputs: { get: ["value"], all: ["values"], set: ["value"], reset: ["value"] },
+    outputs: { value: "the current value of one declared key, or its declared default", values: "every declared key in one scope" },
+    stateOwnership: { owns: "application, workspace and member settings", scope: "the requested scope, isolated server-side" },
+    persistenceSemantics: { durable: true, owner: "app-accounts service (app_settings)", browserStorage: false },
+    dependencies: ["session", "authorization"], compatibleUiInteractionPrimitives: ["field", "selection", "action", "status"],
+    verificationSemantics: { actions: ["read", "change", "reset"], stateChange: "setting values", durableMutation: true, observe: ["declared default before any write", "changed value after reload", "member denied an application value"] },
+    testContract: ["declared default", "typed coercion", "scope isolation", "administration required", "reload"],
+  },
+  audit: {
+    supportedOperations: ["list", "redact"],
+    requiredInputs: { factory: [], operations: { list: [] } },
+    operationOutputs: { list: ["events"] },
+    outputs: { events: "authorised history newest first, already redacted" },
+    stateOwnership: { owns: "no state: history is written by the platform", scope: "events this application's policy lets the actor read" },
+    persistenceSemantics: { durable: true, owner: "app-accounts service (app_audit_events)", browserStorage: false },
+    dependencies: ["session", "authorization"], compatibleUiInteractionPrimitives: ["selection", "status"],
+    verificationSemantics: { actions: ["list"], stateChange: "none", durableMutation: false, observe: ["a change is attributed", "no sensitive value appears", "a member without the grant sees none"] },
+    testContract: ["append-only", "attribution", "redaction", "authorised read", "paging"],
+  },
   "interaction-primitives": {
     supportedOperations: ["subscribe_state", "run_action", "field", "selection", "action", "flow_advance", "status"],
     requiredInputs: { factory: [], operations: { field: ["name", "value", "onChange"], selection: ["name", "value", "onSelect"], action: ["name", "onActivate"] } },
@@ -255,6 +290,13 @@ const RESPONSIBILITY_SEMANTICS = Object.freeze({
     persistence: Object.freeze([]),
     functional: Object.freeze(["subscribe_state", "run_action", "field", "selection", "action", "flow_advance", "status"]),
   }),
+  settings: Object.freeze({
+    persistence: Object.freeze(["set", "reset"]),
+    functional: Object.freeze(["get", "all", "set", "reset"]),
+  }),
+  // There is deliberately no append: an application that could write its own history could write
+  // a false one, so the platform appends and the application only reads.
+  audit: Object.freeze({ persistence: Object.freeze([]), functional: Object.freeze(["list", "redact"]) }),
 });
 
 /** The one machine-readable inventory of reusable behavior that actually ships. */

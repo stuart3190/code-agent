@@ -25,10 +25,11 @@ const kindOf = (operation) => String(operation?.kind || operation?.type || opera
  * @param {object} contract the typed, route-stamped contract
  * @param {object} options
  * @param {object} [options.entitySchema] compiled entity schema (durable domain entities)
+ * @param {object} [options.settingsPlan] derived settings/audit plan (WP8)
  * @param {object} [options.registry]
  * @returns {Array<{id: string, range: string, reason: string}>}
  */
-export function platformModuleRequests(contract, { entitySchema = null, registry = MODULE_REGISTRY } = {}) {
+export function platformModuleRequests(contract, { entitySchema = null, settingsPlan = null, registry = MODULE_REGISTRY } = {}) {
   const operations = contract?.operations || [];
   const durableEntities = entitySchema?.entities || [];
   const requests = [];
@@ -54,6 +55,11 @@ export function platformModuleRequests(contract, { entitySchema = null, registry
   }
   // Async state: every durable read or mutation has loading/error/empty states and cancellation.
   if (durableEntities.length) request("thrallo.async", "durable reads and mutations carry async state");
+  // WP8 — settings: a declared settings singleton is typed keys with declared defaults, never a
+  // fabricated record. Audit is requested only where the contract's own vocabulary asks to review
+  // changes, because history the application never shows is history nobody can check.
+  if ((settingsPlan?.declarations || []).length) request("thrallo.settings", "settings singleton declared");
+  if (settingsPlan?.audit?.enabled) request("thrallo.audit", "the contract reviews who changed what");
 
   return requests;
 }
