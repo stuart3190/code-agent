@@ -36,8 +36,14 @@ import { entitiesForOperations } from "./entityScope.mjs";
 import {
   adoptBuildProfile, resolveBuildProfile, validateBuildProfileContract,
 } from "../../../shared/buildProfile.mjs";
+import { resolveModules } from "./platformModules/resolver.mjs";
+import { buildModuleLock } from "./platformModules/lock.mjs";
+import { baselineDeploymentAvailability } from "./platformModules/availability.mjs";
 
-export const BUILD_SPEC_VERSION = 3;
+// v4 (WP1): the spec carries a deterministic module resolution and an immutable module lock.
+// Consumers of v3 specs keep working: every v3 field is present and unchanged; the lock is an
+// additive field on the enriched contract, and lockFromLegacySpec() adapts a v3 spec on demand.
+export const BUILD_SPEC_VERSION = 4;
 
 /**
  * Derive the complete build specification from a raw contract.
@@ -46,7 +52,7 @@ export const BUILD_SPEC_VERSION = 3;
  * feeds interaction ownership, and both feed the per-module contracts. Computing any of them
  * out of band reproduces the drift this replaces.
  */
-export function deriveBuildSpec(rawContract, { userCritical = [], journeys = null } = {}) {
+export function deriveBuildSpec(rawContract, { userCritical = [], journeys = null, availability = null } = {}) {
   // Producer declarations made under durableState become dependsOn here, once, so the gate, the
   // verifier's prerequisite replay and the execution specification all see one declared chain.
   const contract = withDeclaredProducerDependencies(rawContract);
@@ -87,13 +93,27 @@ export function deriveBuildSpec(rawContract, { userCritical = [], journeys = nul
   const interactionContract = composeCapabilityGraphInteractions(
     graphBoundInteraction, capabilityGraph, plannedContract,
   );
-  const compositionPlan = capabilityCompositionPlan(capabilityGraph);
+  // Module resolution is the one place the graph's deterministic capability nodes — the exact set
+  // the composer emits, including the always-present interaction primitives and any capability a
+  // structured responsibility pulled in — become versioned, dependency-complete module selections
+  // checked against what the deployment declares. An unavailable required service is a verdict
+  // problem HERE, before any implementation generation — never a silent fallback into generated code.
+  const moduleBindings = (capabilityGraph.nodes || [])
+    .filter((node) => node.type === "deterministic_capability")
+    .map((node) => ({ name: node.capabilityId, version: node.version, configuration: node.configuration || null }));
+  const moduleResolution = resolveModules({
+    bindings: moduleBindings, availability: availability || baselineDeploymentAvailability(),
+  });
+  const moduleLock = moduleResolution.ok
+    ? buildModuleLock({ resolution: moduleResolution, contract: plannedContract, bindings: moduleBindings })
+    : null;
+  const compositionPlan = capabilityCompositionPlan(capabilityGraph, { moduleLock });
   const scaffoldGraph = deriveScaffoldGraph(plannedContract, capabilityGraph, { modulePlan, routeResolution });
   const finalModulePlan = scaffoldModulePlan(scaffoldGraph, modulePlan);
   const finalInteractionContract = bindInteractionModulePlan(interactionContract, finalModulePlan);
   const scaffoldPlan = scaffoldCompositionPlan(scaffoldGraph);
   const enriched = { ...plannedContract, interactionContract: finalInteractionContract,
-    dependencyPlan, capabilityGraph, scaffoldGraph };
+    dependencyPlan, capabilityGraph, scaffoldGraph, ...(moduleLock ? { moduleLock } : {}) };
   const tiers = tierContract(enriched, { userCritical });
   const moduleContracts = buildModuleGenerationContracts({
     contract: enriched, modulePlan: finalModulePlan, interactionContract: finalInteractionContract,
@@ -105,6 +125,12 @@ export function deriveBuildSpec(rawContract, { userCritical = [], journeys = nul
   const graphVerdict = validateCapabilityGraph(capabilityGraph, enriched, interactionContract);
   const scaffoldVerdict = validateScaffoldGraph(scaffoldGraph, enriched, capabilityGraph);
   const profileVerdict = validateBuildProfileContract(enriched, buildProfile);
+  const moduleVerdict = {
+    ok: moduleResolution.ok,
+    problems: moduleResolution.problems.map((problem) => `module_resolution ${problem.code}: ${problem.message}`),
+    issues: moduleResolution.problems,
+    configurationRequired: moduleResolution.problems.some((problem) => problem.configurationRequired === true),
+  };
   return {
     version: BUILD_SPEC_VERSION,
     contract: enriched,
@@ -114,6 +140,8 @@ export function deriveBuildSpec(rawContract, { userCritical = [], journeys = nul
     operations: plannedContract?.operations || [],
     tiers,
     bindings,
+    moduleResolution,
+    moduleLock,
     dependencyPlan,
     modulePlan: finalModulePlan,
     interactionContract: finalInteractionContract,
@@ -125,13 +153,14 @@ export function deriveBuildSpec(rawContract, { userCritical = [], journeys = nul
     persistencePlan: persistenceOwnershipPlan(enriched, journeys, finalModulePlan),
     imageIntents: imageIntents(plannedContract),
     verdict: {
-      ok: interactionVerdict.ok && graphVerdict.ok && scaffoldVerdict.ok && profileVerdict.ok,
+      ok: interactionVerdict.ok && graphVerdict.ok && scaffoldVerdict.ok && profileVerdict.ok && moduleVerdict.ok,
       problems: [...interactionVerdict.problems, ...graphVerdict.problems,
-        ...scaffoldVerdict.problems, ...profileVerdict.problems],
+        ...scaffoldVerdict.problems, ...profileVerdict.problems, ...moduleVerdict.problems],
       interaction: interactionVerdict,
       capabilityGraph: graphVerdict,
       scaffoldGraph: scaffoldVerdict,
       buildProfile: profileVerdict,
+      modules: moduleVerdict,
     },
   };
 }
@@ -244,5 +273,10 @@ export function buildSpecSummary(spec) {
     scaffold: scaffoldGraphSummary(spec?.scaffoldGraph),
     scaffoldModules: spec?.scaffoldCompositionPlan?.protectedFiles || [],
     durableJourneys: spec?.persistencePlan?.durableJourneys || [],
+    modules: (spec?.moduleResolution?.modules || []).map((row) => `${row.id}@${row.version}`),
+    moduleLock: spec?.moduleLock ? {
+      compilerVersion: spec.moduleLock.compilerVersion,
+      modules: spec.moduleLock.modules.map((row) => ({ id: row.id, version: row.version, artifactHash: row.artifactHash })),
+    } : null,
   };
 }

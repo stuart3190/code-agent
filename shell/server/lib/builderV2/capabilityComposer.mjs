@@ -12,6 +12,14 @@ import { CAPABILITY_COMPOSITION_RULES } from "./executionSpecRules.mjs";
 export const CAPABILITY_COMPOSITION_VERSION = 1;
 export const COMPOSED_ROOT = "src/lib/capabilities/composed";
 export const CAPABILITY_CONFIGURATION_PATH = "src/extensions/capabilityConfiguration.js";
+// WP1: when a build carries a module lock, the composer ships it inside the protected root so the
+// snapshot records the exact module versions and artefact hashes it was built from. Trees without
+// a lock (retained fixtures, legacy specs) compose exactly as before.
+export const MODULE_LOCK_PATH = `${COMPOSED_ROOT}/lock.js`;
+
+function lockFileSource(moduleLock) {
+  return `${banner("module lock")}export const MODULE_LOCK = Object.freeze(${jsObject(moduleLock)});\n`;
+}
 
 const unique = (values) => [...new Set((values || []).filter(Boolean))];
 const quote = (value) => JSON.stringify(String(value));
@@ -159,7 +167,7 @@ export { CAPABILITY_COMPOSITION } from "./manifest.js";
   return { files, interfaces };
 }
 
-export function capabilityCompositionPlan(graph) {
+export function capabilityCompositionPlan(graph, { moduleLock = null } = {}) {
   const rendered = capabilityFiles(graph);
   const extensionPoints = (graph?.nodes || []).filter((node) => node.type === "custom_behavior")
     .map((node) => ({ id: node.id, ...node.extension, inputs: node.requiredInputs, outputs: node.outputs,
@@ -168,15 +176,16 @@ export function capabilityCompositionPlan(graph) {
     version: CAPABILITY_COMPOSITION_VERSION,
     graphVersion: graph?.version || 1,
     protectedRoot: COMPOSED_ROOT,
-    protectedFiles: Object.keys(rendered.files).sort(),
+    protectedFiles: [...Object.keys(rendered.files), ...(moduleLock ? [MODULE_LOCK_PATH] : [])].sort(),
     interfaces: rendered.interfaces,
     configurationModule: CAPABILITY_CONFIGURATION_PATH,
     extensionPoints,
+    ...(moduleLock ? { moduleLockPath: MODULE_LOCK_PATH } : {}),
   };
 }
 
 /** Apply or refresh the foundation. Existing model-owned extension configuration is preserved. */
-export function composeCapabilityFoundation(tree, graph) {
+export function composeCapabilityFoundation(tree, graph, { moduleLock = null } = {}) {
   // Production Builder V2 starts from the full React/Vite scaffold. Some retained unit/legacy
   // baselines intentionally predate the capability runtime; do not emit adapters with dangling
   // imports into those trees. They remain on the migration-compatible path until refreshed from
@@ -193,13 +202,13 @@ export function composeCapabilityFoundation(tree, graph) {
     };
   }
   const rendered = capabilityFiles(graph);
-  const next = { ...(tree || {}), ...rendered.files };
+  const next = { ...(tree || {}), ...rendered.files, ...(moduleLock ? { [MODULE_LOCK_PATH]: lockFileSource(moduleLock) } : {}) };
   if (typeof next[CAPABILITY_CONFIGURATION_PATH] !== "string") {
     next[CAPABILITY_CONFIGURATION_PATH] = `// Model-owned domain configuration for the protected capability composition.\n`
       + `// Configuration may supply visual/domain values and bounded hooks; it must not replace persistence.\n`
       + `export const capabilityConfiguration = Object.freeze({ booking: Object.freeze({ slots: [] }), wizard: Object.freeze({}) });\n`;
   }
-  return { tree: next, plan: capabilityCompositionPlan(graph) };
+  return { tree: next, plan: capabilityCompositionPlan(graph, { moduleLock }) };
 }
 
 export function capabilityCompositionBrief(graph, plan = capabilityCompositionPlan(graph)) {

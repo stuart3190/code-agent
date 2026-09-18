@@ -13,9 +13,13 @@ import path from "node:path";
 import {
   BASELINE, BASELINE_FORMAT_VERSIONS, BASELINE_PROMPT_MEASUREMENTS, BASELINE_PROTECTED_PATH_SOURCES,
   BASELINE_RETAINED_FIXTURES, BASELINE_RUNTIME_REFRESH_PATTERN, BASELINE_SNAPSHOT_ROW_FIELDS,
-  COVERAGE_LEDGER, MODULE_CATALOGUE, coverageLedgerReport, ledgerEntry, ledgerRows,
+  COVERAGE_LEDGER, CURRENT_FORMAT_VERSIONS, MODULE_CATALOGUE, coverageLedgerReport, ledgerEntry, ledgerRows,
   validateCoverageLedger, workPackageScope,
 } from "../../shell/server/lib/builderV2/platformModules/coverageLedger.mjs";
+import { MANIFEST_SCHEMA_VERSION } from "../../shell/server/lib/builderV2/platformModules/manifest.mjs";
+import { MODULE_LOCK_VERSION } from "../../shell/server/lib/builderV2/platformModules/lock.mjs";
+import { MODULE_RESOLUTION_VERSION } from "../../shell/server/lib/builderV2/platformModules/resolver.mjs";
+import { AVAILABILITY_VERSION } from "../../shell/server/lib/builderV2/platformModules/availability.mjs";
 import { CAPABILITIES } from "../../shell/server/lib/builderV2/capabilityRegistry.mjs";
 import { SCAFFOLDS, SCAFFOLD_REGISTRY_VERSION } from "../../shell/server/lib/builderV2/scaffoldRegistry.mjs";
 import { RUNTIME_CAPABILITY_OPERATIONS } from "../../shell/server/lib/capabilityRuntime.mjs";
@@ -67,7 +71,15 @@ test("WP0 — the baseline pins the audited revision and every retained corpus s
   }
 });
 
-test("WP0 — every versioned artefact format equals the pinned baseline", () => {
+test("WP0 — the baseline formats stay frozen and every live format equals the recorded current version", () => {
+  // The baseline is what historical snapshots carry; it never moves.
+  assert.deepEqual(BASELINE_FORMAT_VERSIONS, {
+    implementationContract: 2, buildProfile: 1, buildSpec: 3, capabilityGraph: 2, scaffoldRegistry: 1,
+    scaffoldGraph: 3, scaffoldComposition: 3, capabilityComposition: 1, executionProvenance: 2,
+    executionSpec: 1, routeResolution: 1,
+  });
+  // The live source must match the ledger's record of the current formats: a re-version without a
+  // ledger entry (and therefore without a compatibility note) fails here.
   assert.deepEqual({
     implementationContract: CONTRACT_VERSION,
     buildProfile: BUILD_PROFILE_VERSION,
@@ -80,7 +92,11 @@ test("WP0 — every versioned artefact format equals the pinned baseline", () =>
     executionProvenance: EXECUTION_PROVENANCE_VERSION,
     executionSpec: EXECUTION_SPEC_VERSION,
     routeResolution: ROUTE_RESOLUTION_VERSION,
-  }, BASELINE_FORMAT_VERSIONS);
+    moduleManifest: MANIFEST_SCHEMA_VERSION,
+    moduleLock: MODULE_LOCK_VERSION,
+    moduleResolution: MODULE_RESOLUTION_VERSION,
+    deploymentAvailability: AVAILABILITY_VERSION,
+  }, CURRENT_FORMAT_VERSIONS);
 });
 
 test("WP0 — the snapshot row shape and the protected write guard are captured exactly", async () => {

@@ -45,6 +45,7 @@ import { createSnapshotStore } from "./snapshotStore.mjs";
 import { serviceClient } from "../supabase.mjs";
 import { generationPolicyFor } from "./generationPolicy.mjs";
 import { composeCapabilityFoundation } from "./capabilityComposer.mjs";
+import { moduleLockDelta, moduleLockFromTree, verifyModuleLock } from "./platformModules/lock.mjs";
 import { composeScaffoldFoundation, validateScaffoldComposition } from "./scaffoldComposer.mjs";
 import { transformWizardEntryState, wizardEntryTransformSummary } from "../appBuild/wizardEntryTransform.mjs";
 import { MINIMAL_CONTRACT_VERIFIER_POLICY } from "../appBuild/verifierPolicy.mjs";
@@ -373,6 +374,7 @@ export function createOrchestrator({
   maxMechanicsCorrections = 1,      // probe-proven dead controls: a correction, never a repair round
   compile = async () => ({ ok: true }),
   baseTree,                         // () → scaffold tree (injected so tests pin the real REACT_VITE)
+  moduleAvailability = null,        // WP1: declared deployment availability for module resolution (baseline when absent)
   baseline = null,                  // protected-path baseline for the stage gate
   extraGateOptions = {},            // e.g. { nodeModules, log } for live runs — merged into every gate call
   maxCoreAttempts = 3,              // REAL generation failures only: unusable output or a tree that will not compile
@@ -420,10 +422,28 @@ export function createOrchestrator({
     return refreshed;
   };
 
-  const refreshDeterministicFoundation = (tree, spec) => composeScaffoldFoundation(
-    composeCapabilityFoundation(refreshPlatformRuntime(tree), spec.capabilityGraph).tree,
-    spec.scaffoldGraph,
-  ).tree;
+  // WP1: one derivation entry point so every spec in this build resolves modules against the same
+  // declared deployment availability.
+  const deriveSpec = (contract, options = {}) => deriveBuildSpec(contract, { ...options, availability: moduleAvailability });
+
+  const refreshDeterministicFoundation = (tree, spec) => {
+    // A resumed snapshot may carry an older module lock. The refresh below still adopts the
+    // worker's runtime (the audited behaviour is preserved until the versioned upgrade path
+    // lands); what changes now is that the adoption is RECORDED as a lock delta instead of
+    // happening silently.
+    const previousLock = moduleLockFromTree(tree);
+    if (previousLock && spec.moduleLock) {
+      const delta = moduleLockDelta(previousLock, spec.moduleLock);
+      if (!delta.identical) {
+        log(`module lock refreshed with the worker runtime: ${delta.changes
+          .map((change) => `${change.id} ${change.change}${change.from ? ` ${String(change.from).slice(0, 8)}` : ""}${change.to ? `→${String(change.to).slice(0, 8)}` : ""}`).join(", ")}`);
+      }
+    }
+    return composeScaffoldFoundation(
+      composeCapabilityFoundation(refreshPlatformRuntime(tree), spec.capabilityGraph, { moduleLock: spec.moduleLock || null }).tree,
+      spec.scaffoldGraph,
+    ).tree;
+  };
 
   async function verifyJourneySet({ owner, projectId, buildId, contract, journeys, tree, snapshotId, signal,
     forceFresh = false }) {
@@ -533,7 +553,7 @@ export function createOrchestrator({
     // ONE derived specification, narrowed to this increment's journeys. Every view below —
     // module plan, interaction contract, per-module contracts, persistence ownership — is a
     // projection of the same object rather than an independent re-reading of the contract.
-    const scoped = scopeBuildSpec(spec || deriveBuildSpec(contract, { journeys }), journeys);
+    const scoped = scopeBuildSpec(spec || deriveSpec(contract, { journeys }), journeys);
     const { modulePlan, moduleContracts, bindings: scopedBindings, interactionContract: scopedInteractionContract } = scoped;
 
     // Two independent allowances. A core ATTEMPT means "that generation was unusable and the
@@ -1202,11 +1222,24 @@ export function createOrchestrator({
         // ONE derivation for the whole build: tiers, bindings, module plan, interaction
         // contract, per-module contracts, persistence ownership and image intents all come
         // from here and are passed down, so no subsystem re-reads the contract prose alone.
-        let spec = deriveBuildSpec(rawContract, { userCritical });
-        const failingGates = (verdict) => ["interaction", "capabilityGraph", "scaffoldGraph", "buildProfile"]
+        let spec = deriveSpec(rawContract, { userCritical });
+        const failingGates = (verdict) => ["interaction", "capabilityGraph", "scaffoldGraph", "buildProfile", "modules"]
           .filter((gate) => verdict?.[gate] && !verdict[gate].ok);
         let contractRepairUsed = false;
         let contractRepairError = null;
+        // WP1: a module the contract needs that this deployment cannot provide is a configuration
+        // gap, not a contract defect. It is reported explicitly BEFORE any correction or generation
+        // spend, and it is never resolved by falling through into generated custom code.
+        if (spec.verdict.modules && !spec.verdict.modules.ok && spec.verdict.modules.configurationRequired) {
+          const problems = spec.verdict.modules.problems || [];
+          log(`module resolution blocked before generation: ${problems.join(" | ")}`);
+          return finish("blocked", {
+            error: `required platform modules are unavailable on this deployment: ${problems.slice(0, 3).join("; ")}`
+              + `${problems.length > 3 ? ` (+${problems.length - 3} more)` : ""}`,
+            problems, failingGates: ["modules"], moduleResolution: spec.moduleResolution,
+            failureClassification: "module_unavailable", actionRequired: true, configurationRequired: true,
+          });
+        }
         if (!spec.verdict.ok) {
           // ONE targeted contract repair before the build dies. The contract lane deliberately
           // returns a degraded contract rather than nothing, and this gate then rejected it on
@@ -1226,7 +1259,7 @@ export function createOrchestrator({
             });
             // Whatever the repair produced is now the build's contract: when it still fails, its
             // problems — not the superseded first attempt's — are what the build died on.
-            spec = deriveBuildSpec(repairedContract, { userCritical });
+            spec = deriveSpec(repairedContract, { userCritical });
             contractRepairUsed = true;
             const dependencyProgress = interactionDependencyProgress(
               dependencyIssuesBefore,
@@ -1347,10 +1380,19 @@ export function createOrchestrator({
         // erase the known-good router, mounted screens, capability adapters or extension seams.
         await setState("compose_scaffold");
         const compositionStartedAt = Date.now();
-        const capabilityFoundation = composeCapabilityFoundation(baseTree(), spec.capabilityGraph);
+        const capabilityFoundation = composeCapabilityFoundation(baseTree(), spec.capabilityGraph, { moduleLock: spec.moduleLock || null });
         const scaffoldFoundation = composeScaffoldFoundation(capabilityFoundation.tree, spec.scaffoldGraph);
         let tree = scaffoldFoundation.tree;
         tree["src/lib/assetData.js"] = renderAssetData(resolved);
+        // WP1: the composed tree must carry exactly the locked runtime bytes. A mismatch here is a
+        // platform packaging defect (a worker whose scaffold differs from the lock it computed).
+        if (spec.moduleLock) {
+          const lockVerdict = verifyModuleLock(tree, spec.moduleLock);
+          if (!lockVerdict.ok) return finish("blocked", {
+            error: `Builder V2 module lock verification failed: ${lockVerdict.problems.map((problem) => problem.message).join("; ")}`,
+            failureClassification: "module_installation_defect", problems: lockVerdict.problems,
+          });
+        }
         const foundationVerdict = validateScaffoldComposition(tree, spec.scaffoldGraph,
           scaffoldFoundation.plan, { requireExtensions: false, rejectScreenSlots: false });
         if (!foundationVerdict.ok) return finish("blocked", {
@@ -1444,7 +1486,7 @@ export function createOrchestrator({
         let eligibility = evaluateCore(coreVerdicts, backendRowFailures);
         // ONE typed view of what the browser proved, recomputed after every verification. Class,
         // owner, control identity and owning modules come from here; nothing below re-reads prose.
-        const verificationManifest = deriveVerificationManifest(spec || deriveBuildSpec(contract));
+        const verificationManifest = deriveVerificationManifest(spec || deriveSpec(contract));
         const defectsFor = (verdicts, rows, evidenceTree = tree) => browserRepairDefects({
           contract, interactionContract, journeyResults: verdicts, tree: evidenceTree,
           backendRowFailures: rows, manifest: verificationManifest,
@@ -1827,7 +1869,7 @@ export function createOrchestrator({
           // contracted field lives HERE, in the manifest the orchestrator derives and deliberately
           // withholds from the browser, so the brief can say "eventDate" without the browser ever
           // having known it. The model owns that name: it wrote the contract the name came from.
-          const mapping = deriveVerificationManifest(spec || deriveBuildSpec(contract)).mapping || {};
+          const mapping = deriveVerificationManifest(spec || deriveSpec(contract)).mapping || {};
           const named = (id) => (mapping[id]?.logicalField ? `${id} (the contracted "${mapping[id].logicalField}")` : id);
           const mechanicsFiles = [...new Set(failures.flatMap((row) => [
             mapping[row.id]?.stateOwner,
@@ -2230,7 +2272,7 @@ export function createOrchestrator({
         abortIfRequested(signal);
         const source = await this.resumeWorkingContext(owner, projectId, sourceBuildId);
         if (!source) return finish("blocked", { error: "failed build has no resumable working checkpoint" });
-        const spec = deriveBuildSpec(contract, { userCritical });
+        const spec = deriveSpec(contract, { userCritical });
         source.tree = refreshDeterministicFoundation(source.tree, spec);
         contract = spec.contract;
         const { tiers, bindings } = spec;
@@ -2379,7 +2421,7 @@ export function createOrchestrator({
         abortIfRequested(signal);
         const source = await this.resumeWorkingContext(owner, projectId, sourceBuildId);
         if (!source) return finish("blocked", { error: "failed build has no resumable working checkpoint" });
-        const spec = deriveBuildSpec(contract, { userCritical });
+        const spec = deriveSpec(contract, { userCritical });
         const tree = refreshDeterministicFoundation(source.tree, spec);
         contract = spec.contract;
         const journeys = contract.journeys || [];
@@ -2457,7 +2499,7 @@ export function createOrchestrator({
 
       try {
         abortIfRequested(signal);
-        const spec = deriveBuildSpec(contract, { userCritical });
+        const spec = deriveSpec(contract, { userCritical });
         contract = spec.contract;
         const ctx = await this.resumeContext(owner, projectId);
         if (!ctx) return finish("blocked", { error: "no green snapshot to edit — run a build first" });

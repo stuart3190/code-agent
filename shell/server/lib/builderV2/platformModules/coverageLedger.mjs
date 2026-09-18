@@ -40,6 +40,19 @@ export const BASELINE_FORMAT_VERSIONS = Object.freeze({
   routeResolution: 1,
 });
 
+/**
+ * The formats the CURRENT source emits. Every difference from the baseline is a versioned
+ * migration recorded here in the same commit that made it, with the work package that owns it.
+ */
+export const CURRENT_FORMAT_VERSIONS = Object.freeze({
+  ...BASELINE_FORMAT_VERSIONS,
+  buildSpec: 4,          // WP1: additive moduleResolution/moduleLock fields; v3 consumers unaffected
+  moduleManifest: 1,     // WP1: new
+  moduleLock: 1,         // WP1: new
+  moduleResolution: 1,   // WP1: new
+  deploymentAvailability: 1, // WP1: new
+});
+
 /** The immutable snapshot row as written by snapshotStore.createSnapshot(). */
 export const BASELINE_SNAPSHOT_ROW_FIELDS = Object.freeze([
   "owner", "project_id", "build_id", "parent_snapshot", "tree_hash", "reason", "state",
@@ -56,7 +69,6 @@ export const BASELINE_PROTECTED_PATH_SOURCES = Object.freeze([
 
 /** Runtime paths the orchestrator refreshes from the worker on every checkpoint (audit P1). */
 export const BASELINE_RUNTIME_REFRESH_PATTERN = "^src\\/lib\\/(?:capabilities\\/|backend\\/|visitorSession\\.js$|assets\\.js$)";
-
 /**
  * Literal-text sizes of the prompt constants, measured at the baseline revision. These are the
  * numbers the audit reported (its 12,104 for the contract prompt was measured one edit earlier;
