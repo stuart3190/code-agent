@@ -51,6 +51,8 @@ export const CURRENT_FORMAT_VERSIONS = Object.freeze({
   moduleLock: 1,         // WP1: new
   moduleResolution: 1,   // WP1: new
   deploymentAvailability: 1, // WP1: new
+  identityPlan: 1,       // WP3: new — rendered into the composed identity module
+  abiLint: 1,            // WP3: new — public-ABI import lint
 });
 
 /** The immutable snapshot row as written by snapshotStore.createSnapshot(). */
@@ -69,6 +71,15 @@ export const BASELINE_PROTECTED_PATH_SOURCES = Object.freeze([
 
 /** Runtime paths the orchestrator refreshes from the worker on every checkpoint (audit P1). */
 export const BASELINE_RUNTIME_REFRESH_PATTERN = "^src\\/lib\\/(?:capabilities\\/|backend\\/|visitorSession\\.js$|assets\\.js$)";
+
+/** The current write guard and refresh seam: baseline plus the module runtime and app facade (WP3). */
+export const CURRENT_PROTECTED_PATH_SOURCES = Object.freeze([
+  ...BASELINE_PROTECTED_PATH_SOURCES,
+  "^src\\/lib\\/modules\\/",
+  "^src\\/lib\\/app\\/",
+]);
+export const CURRENT_RUNTIME_REFRESH_PATTERN = "^src\\/lib\\/(?:capabilities\\/|backend\\/|modules\\/|visitorSession\\.js$|assets\\.js$)";
+
 /**
  * Literal-text sizes of the prompt constants, measured at the baseline revision. These are the
  * numbers the audit reported (its 12,104 for the contract prompt was measured one edit earlier;

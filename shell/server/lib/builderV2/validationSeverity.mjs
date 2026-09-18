@@ -41,6 +41,10 @@ export const BLOCKING_CODES = Object.freeze({
   scaffold_composition_invalid: "the protected scaffold graph, router, or mounted screen contract is broken",
   journey_surface_unreachable: "contracted implementation exists but cannot be reached from the mounted application",
   custom_extension_invalid: "a bounded custom extension is missing, unexported, disconnected, or called without its declared semantic inputs",
+  // WP3: the public ABI is the boundary the module lock certifies. A locked tree whose generated
+  // code reaches past it (backend SDK, visitor session, module internals) is not the application
+  // the lock describes.
+  private_platform_import: "generated code on a locked tree imports a private platform path instead of the public application facade",
 
   // ── honesty: the app would appear to work while losing customer data ──
   forbidden_persistence: "browser/process-local storage is holding contracted durable business state",
@@ -83,6 +87,10 @@ export const ADVISORY_CODES = Object.freeze({
   // blocking rejected 7 of 7. The binding inference is not accurate enough to gate a build: a
   // correct app may bind through a wrapper, a store, a loop, or a component this walker cannot
   // follow. Reported, therefore, and not enforced — until that suite scores zero.
+  // WP3: on a tree that predates the module lock, a private platform import is reported, not
+  // enforced — retained candidates and legacy snapshots keep judging exactly as they did.
+  private_platform_import_legacy: "a legacy (unlocked) tree imports a private platform path; reported so the migration can measure it",
+  generated_session_orchestration: "generated code drives the session directly where the identity module owns it; the browser decides whether the surface still works",
   contract_control_unbound: "a contracted control appears hand-wired; verification may not be able to address it",
   contract_control_missing: "no element in the tree names this contracted control",
   contract_control_coverage_undetermined: "the tree binds controls dynamically, so coverage cannot be decided offline",

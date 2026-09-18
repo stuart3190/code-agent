@@ -13,13 +13,16 @@ import path from "node:path";
 import {
   BASELINE, BASELINE_FORMAT_VERSIONS, BASELINE_PROMPT_MEASUREMENTS, BASELINE_PROTECTED_PATH_SOURCES,
   BASELINE_RETAINED_FIXTURES, BASELINE_RUNTIME_REFRESH_PATTERN, BASELINE_SNAPSHOT_ROW_FIELDS,
-  COVERAGE_LEDGER, CURRENT_FORMAT_VERSIONS, MODULE_CATALOGUE, coverageLedgerReport, ledgerEntry, ledgerRows,
+  COVERAGE_LEDGER, CURRENT_FORMAT_VERSIONS, CURRENT_PROTECTED_PATH_SOURCES, CURRENT_RUNTIME_REFRESH_PATTERN,
+  MODULE_CATALOGUE, coverageLedgerReport, ledgerEntry, ledgerRows,
   validateCoverageLedger, workPackageScope,
 } from "../../shell/server/lib/builderV2/platformModules/coverageLedger.mjs";
 import { MANIFEST_SCHEMA_VERSION } from "../../shell/server/lib/builderV2/platformModules/manifest.mjs";
 import { MODULE_LOCK_VERSION } from "../../shell/server/lib/builderV2/platformModules/lock.mjs";
 import { MODULE_RESOLUTION_VERSION } from "../../shell/server/lib/builderV2/platformModules/resolver.mjs";
 import { AVAILABILITY_VERSION } from "../../shell/server/lib/builderV2/platformModules/availability.mjs";
+import { IDENTITY_PLAN_VERSION } from "../../shell/server/lib/builderV2/platformModules/identityPlan.mjs";
+import { ABI_LINT_VERSION } from "../../shell/server/lib/builderV2/platformModules/abiLint.mjs";
 import { CAPABILITIES } from "../../shell/server/lib/builderV2/capabilityRegistry.mjs";
 import { SCAFFOLDS, SCAFFOLD_REGISTRY_VERSION } from "../../shell/server/lib/builderV2/scaffoldRegistry.mjs";
 import { RUNTIME_CAPABILITY_OPERATIONS } from "../../shell/server/lib/capabilityRuntime.mjs";
@@ -96,14 +99,21 @@ test("WP0 — the baseline formats stay frozen and every live format equals the 
     moduleLock: MODULE_LOCK_VERSION,
     moduleResolution: MODULE_RESOLUTION_VERSION,
     deploymentAvailability: AVAILABILITY_VERSION,
+    identityPlan: IDENTITY_PLAN_VERSION,
+    abiLint: ABI_LINT_VERSION,
   }, CURRENT_FORMAT_VERSIONS);
 });
 
 test("WP0 — the snapshot row shape and the protected write guard are captured exactly", async () => {
-  assert.deepEqual(PROTECTED_PATHS.map((pattern) => pattern.source), [...BASELINE_PROTECTED_PATH_SOURCES]);
+  // The baseline guard is frozen; the live guard equals the ledger's record of the current one.
+  assert.deepEqual([...BASELINE_PROTECTED_PATH_SOURCES], [
+    "^src\\/lib\\/backend\\/", "^src\\/lib\\/visitorSession\\.js$", "^src\\/lib\\/capabilities\\/", "^src\\/lib\\/scaffolds\\/composed\\/",
+  ]);
+  assert.deepEqual(PROTECTED_PATHS.map((pattern) => pattern.source), [...CURRENT_PROTECTED_PATH_SOURCES]);
   const orchestrator = read("shell/server/lib/builderV2/orchestrator.mjs");
-  assert.ok(orchestrator.includes(BASELINE_RUNTIME_REFRESH_PATTERN.replaceAll("\\/", "\\/")),
+  assert.ok(orchestrator.includes(CURRENT_RUNTIME_REFRESH_PATTERN),
     "refreshPlatformRuntime pattern drifted from the ledger");
+  assert.ok(CURRENT_RUNTIME_REFRESH_PATTERN.startsWith(BASELINE_RUNTIME_REFRESH_PATTERN.slice(0, 12)));
   const store = createSnapshotStore(memorySnapshotStorage());
   const snapshot = await store.createSnapshot("owner", "project", { "src/App.jsx": "export default () => null;" }, { buildId: "b1" });
   for (const field of BASELINE_SNAPSHOT_ROW_FIELDS) assert.ok(field in snapshot, `snapshot row lacks ${field}`);

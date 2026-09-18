@@ -13,7 +13,8 @@ import { partitionFindings } from "./validationSeverity.mjs";
 import { lintControlBindings } from "./bindingLint.mjs";
 import { lintInteractiveWorkflow } from "./interactionContract.mjs";
 import { FILE_MAX_TOKENS, APP_SHELL_MAX_TOKENS } from "../appBuild/modularity.mjs";
-import { capabilityCompositionPlan, validateCapabilityComposition } from "./capabilityComposer.mjs";
+import { MODULE_LOCK_PATH, capabilityCompositionPlan, validateCapabilityComposition } from "./capabilityComposer.mjs";
+import { lintPlatformAbi } from "./platformModules/abiLint.mjs";
 import { scaffoldCompositionPlan, validateScaffoldComposition } from "./scaffoldComposer.mjs";
 import { reachableSourcePaths } from "./surfaceIntegration.mjs";
 
@@ -548,6 +549,9 @@ export function validateModuleConformance(tree, {
   // (The former sessionless_mutation dedupe is gone with the finding itself — session
   // establishment is a runtime invariant, not a generated-source obligation.)
   for (const issue of lintCapabilitySafety(tree, bindings).findings || []) add(issue);
+  // WP3: generated code stays behind the public ABI. Blocking on a locked tree, advisory on a
+  // legacy one, so retained candidates keep judging exactly as they did.
+  for (const issue of lintPlatformAbi(tree, { locked: typeof tree?.[MODULE_LOCK_PATH] === "string" }).findings) add(issue);
 
   // The composition contract is structural authority, not source inference: protected modules
   // must exist and every explicitly custom node must expose its declared bounded interface.

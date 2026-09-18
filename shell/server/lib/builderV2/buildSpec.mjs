@@ -40,6 +40,7 @@ import { resolveModules } from "./platformModules/resolver.mjs";
 import { buildModuleLock } from "./platformModules/lock.mjs";
 import { baselineDeploymentAvailability } from "./platformModules/availability.mjs";
 import { moduleManifest } from "./platformModules/registry.mjs";
+import { deriveIdentityPlan } from "./platformModules/identityPlan.mjs";
 import {
   normalizeContractOwnership, ownershipProblems, ownershipWarnings,
 } from "../../../shared/contractOwnership.mjs";
@@ -118,7 +119,10 @@ export function deriveBuildSpec(rawContract, { userCritical = [], journeys = nul
   const moduleLock = moduleResolution.ok
     ? buildModuleLock({ resolution: moduleResolution, contract: plannedContract, bindings: moduleBindings })
     : null;
-  const compositionPlan = capabilityCompositionPlan(capabilityGraph, { moduleLock });
+  // WP3: the identity installation plan — mode, methods, protected routes, redirects and the
+  // deterministic probes — derived once here and rendered by the composer.
+  const identityPlan = deriveIdentityPlan(plannedContract);
+  const compositionPlan = capabilityCompositionPlan(capabilityGraph, { moduleLock, identityPlan });
   const scaffoldGraph = deriveScaffoldGraph(plannedContract, capabilityGraph, { modulePlan, routeResolution });
   const finalModulePlan = scaffoldModulePlan(scaffoldGraph, modulePlan);
   const finalInteractionContract = bindInteractionModulePlan(interactionContract, finalModulePlan);
@@ -156,6 +160,7 @@ export function deriveBuildSpec(rawContract, { userCritical = [], journeys = nul
     bindings,
     moduleResolution,
     moduleLock,
+    identityPlan,
     dependencyPlan,
     modulePlan: finalModulePlan,
     interactionContract: finalInteractionContract,
@@ -246,7 +251,7 @@ export function scopeBuildSpec(spec, journeys = []) {
     modulePlan,
     interactionContract,
     capabilityGraph,
-    compositionPlan: capabilityCompositionPlan(capabilityGraph),
+    compositionPlan: capabilityCompositionPlan(capabilityGraph, { moduleLock: spec.moduleLock || null, identityPlan: spec.identityPlan || null }),
     scaffoldGraph,
     scaffoldCompositionPlan: scaffoldCompositionPlan(scaffoldGraph),
     moduleContracts: buildModuleGenerationContracts({
@@ -313,6 +318,8 @@ export function buildSpecSummary(spec) {
     scaffoldModules: spec?.scaffoldCompositionPlan?.protectedFiles || [],
     durableJourneys: spec?.persistencePlan?.durableJourneys || [],
     modules: (spec?.moduleResolution?.modules || []).map((row) => `${row.id}@${row.version}`),
+    identity: spec?.identityPlan ? { mode: spec.identityPlan.mode, methods: spec.identityPlan.methods,
+      protectedRoutes: spec.identityPlan.protectedRoutes } : null,
     moduleLock: spec?.moduleLock ? {
       compilerVersion: spec.moduleLock.compilerVersion,
       modules: spec.moduleLock.modules.map((row) => ({ id: row.id, version: row.version, artifactHash: row.artifactHash })),

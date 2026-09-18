@@ -415,7 +415,7 @@ export function createOrchestrator({
     const refreshed = { ...tree };
     const currentPlatform = baseTree();
     for (const [path, source] of Object.entries(currentPlatform)) {
-      if (/^src\/lib\/(?:capabilities\/|backend\/|visitorSession\.js$|assets\.js$)/.test(path)) {
+      if (/^src\/lib\/(?:capabilities\/|backend\/|modules\/|visitorSession\.js$|assets\.js$)/.test(path)) {
         refreshed[path] = source;
       }
     }
@@ -440,7 +440,9 @@ export function createOrchestrator({
       }
     }
     return composeScaffoldFoundation(
-      composeCapabilityFoundation(refreshPlatformRuntime(tree), spec.capabilityGraph, { moduleLock: spec.moduleLock || null }).tree,
+      composeCapabilityFoundation(refreshPlatformRuntime(tree), spec.capabilityGraph, {
+        moduleLock: spec.moduleLock || null, identityPlan: spec.identityPlan || null,
+      }).tree,
       spec.scaffoldGraph,
     ).tree;
   };
@@ -1380,13 +1382,17 @@ export function createOrchestrator({
         // erase the known-good router, mounted screens, capability adapters or extension seams.
         await setState("compose_scaffold");
         const compositionStartedAt = Date.now();
-        const capabilityFoundation = composeCapabilityFoundation(baseTree(), spec.capabilityGraph, { moduleLock: spec.moduleLock || null });
+        const capabilityFoundation = composeCapabilityFoundation(baseTree(), spec.capabilityGraph, {
+          moduleLock: spec.moduleLock || null, identityPlan: spec.identityPlan || null,
+        });
         const scaffoldFoundation = composeScaffoldFoundation(capabilityFoundation.tree, spec.scaffoldGraph);
         let tree = scaffoldFoundation.tree;
         tree["src/lib/assetData.js"] = renderAssetData(resolved);
         // WP1: the composed tree must carry exactly the locked runtime bytes. A mismatch here is a
         // platform packaging defect (a worker whose scaffold differs from the lock it computed).
-        if (spec.moduleLock) {
+        // A legacy base tree without the capability runtime composes nothing and installs no
+        // module (the composer says so); there is nothing to verify against the lock there.
+        if (spec.moduleLock && !capabilityFoundation.plan?.skipped) {
           const lockVerdict = verifyModuleLock(tree, spec.moduleLock);
           if (!lockVerdict.ok) return finish("blocked", {
             error: `Builder V2 module lock verification failed: ${lockVerdict.problems.map((problem) => problem.message).join("; ")}`,

@@ -122,9 +122,14 @@ test("registry — every legacy capability is wrapped by a validated module; pub
     const manifest = moduleForCapability(capabilityId);
     assert.ok(manifest, `${capabilityId} has a module`);
     assert.equal(manifest.id, LEGACY_CAPABILITY_MODULES[capabilityId]);
-    assert.equal(manifest.version, capability.version, `${capabilityId} module version equals the capability version`);
-    assert.deepEqual(manifest.provides.operations.map((row) => row.id), [...capability.supportedOperations],
-      `${capabilityId} operations equal the registry's supported operations`);
+    // A module may advance beyond its legacy capability (identity 1.2.0 wraps session 1.1.0) but
+    // never across a major: the capability's public imports are unchanged by construction.
+    assert.equal(manifest.version.split(".")[0], String(capability.version).split(".")[0], `${capabilityId} module major equals the capability major`);
+    assert.ok(satisfiesRange(manifest.version, `^${capability.version}`), `${capabilityId} module ${manifest.version} satisfies ^${capability.version}`);
+    for (const operation of capability.supportedOperations) {
+      assert.ok(manifest.provides.operations.some((row) => row.id === operation),
+        `${capabilityId} module provides the registry operation ${operation}`);
+    }
     // The protected runtime artefact is the same file the capability registry has always shipped.
     assert.equal(manifest.runtime.protectedArtifacts[0].path, capability.package);
     assert.ok(typeof REACT_VITE[capability.package] === "string", `${capability.package} still ships in the scaffold`);

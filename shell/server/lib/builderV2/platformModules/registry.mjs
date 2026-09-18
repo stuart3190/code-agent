@@ -205,7 +205,57 @@ const CORE_MODULE = defineModule({
   qualification: { basis: "baseline_runtime", revision: "e83d4ef212b08fc2aa9d9ddc0937cd279ad8d042", proof: "scripts/prove-app-backend.mjs" },
 });
 
-const MODULES = [CORE_MODULE, ...Object.keys(CAPABILITY_MODULE_IDS).map(legacyCapabilityModule)];
+// WP3: identity 1.2.0 — the legacy session capability wrapper plus the deterministic session
+// controller (src/lib/modules/identity.js), the React bindings and the composed per-application
+// controller. 1.1.0 stays registered so snapshots locked to it remain verifiable.
+const IDENTITY_1_2 = (() => {
+  const legacy = legacyCapabilityModule("session");
+  const extraOperations = [
+    { id: "requireMember", input: { type: "object" }, output: { type: "object", description: "member principal" },
+      execution: "client", transport: "in_process", effect: "session", stateOwner: "authentication and session identity",
+      authorization: null, idempotency: "supported", concurrency: null, errors: ["member_required"], verificationHooks: ["visitor denied on a member route"] },
+    { id: "markExpired", input: { type: "object" }, output: { type: "object", description: "expired session state" },
+      execution: "client", transport: "in_process", effect: "session", stateOwner: "authentication and session identity",
+      authorization: null, idempotency: "supported", concurrency: null, errors: [], verificationHooks: ["expired then recovered"] },
+  ];
+  return defineModule({
+    ...legacy,
+    version: "1.2.0",
+    title: "identity/session (deterministic session controller)",
+    compatibility: { ...legacy.compatibility, clientAbi: "identity@1" },
+    provides: { capabilities: [...legacy.provides.capabilities],
+      operations: [...legacy.provides.operations, ...extraOperations] },
+    runtime: {
+      ...legacy.runtime,
+      clientEntrypoints: [
+        ...legacy.runtime.clientEntrypoints,
+        { module: "src/lib/modules/identity.js", exports: ["createIdentityController", "identityGuard", "classifyIdentityError", "SESSION_STATUS", "IDENTITY_MODE", "IDENTITY_ERROR"] },
+        { module: "src/lib/modules/identityReact.js", exports: ["useIdentityState", "useIdentityAction", "useIdentityGuard"] },
+        { module: "src/lib/capabilities/composed/identity.js", exports: ["identity", "identityPlan"], composed: true },
+        { module: "src/lib/app/identity.js", exports: ["useSession", "useSignIn", "useSignUp", "useSignOut", "usePasswordReset", "useConfirmReset", "useSessionGuard"], composed: true },
+      ],
+      protectedArtifacts: [
+        ...legacy.runtime.protectedArtifacts,
+        { path: "src/lib/modules/identity.js", kind: "runtime" },
+        { path: "src/lib/modules/identityReact.js", kind: "runtime" },
+        { path: "src/lib/capabilities/composed/identity.js", kind: "composed" },
+        { path: "src/lib/app/identity.js", kind: "composed" },
+      ],
+    },
+    surfaceBindings: [
+      { state: "initializing", required: true }, { state: "signed_out", required: true },
+      { state: "visitor", required: false }, { state: "signed_in", required: true },
+      { state: "expired", required: true }, { state: "error", required: true },
+    ],
+    verification: {
+      deterministicTests: ["initial state", "sign in", "sign up", "reload keeps principal", "sign out", "reset", "expiry then recover", "visitor denied on member route", "UI binding"],
+      browserEvidence: [...legacy.verification.browserEvidence, "signed-in surface after submit", "protected route denied to a visitor"],
+    },
+    qualification: { basis: "module_suite", proof: "test/code-agent/builder-v2-identity-module.test.mjs" },
+  });
+})();
+
+const MODULES = [CORE_MODULE, ...Object.keys(CAPABILITY_MODULE_IDS).map(legacyCapabilityModule), IDENTITY_1_2];
 
 /** id → every registered version of that module, highest last. */
 const byId = new Map();

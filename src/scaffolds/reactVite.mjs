@@ -328,6 +328,9 @@ export default function HomePage() {
   "src/lib/capabilities/wizard.js": sdk("lib/capabilities/wizard.js"),
   "src/lib/capabilities/forms.js": sdk("lib/capabilities/forms.js"),
   "src/lib/capabilities/react.js": sdk("lib/capabilities/react.js"),
+  // Platform modules (WP3+): versioned runtime the composer binds per application. Protected.
+  "src/lib/modules/identity.js": sdk("lib/modules/identity.js"),
+  "src/lib/modules/identityReact.js": sdk("lib/modules/identityReact.js"),
 
   // Asset helpers (Builder v2, master plan Part 18): picture/srcset/lazy/blur rendering
   // for the imagery the Asset Service resolves. Headless props-builders, no JSX.

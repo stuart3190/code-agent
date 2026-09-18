@@ -7,6 +7,7 @@
 
 import { CAPABILITIES } from "./capabilityRegistry.mjs";
 import { CAPABILITY_COMPOSITION_RULES } from "./executionSpecRules.mjs";
+import { satisfiesRange } from "./platformModules/semver.mjs";
 
 
 export const CAPABILITY_COMPOSITION_VERSION = 1;
@@ -43,7 +44,53 @@ function wizardDefinitions(graph) {
   });
 }
 
-function capabilityFiles(graph) {
+// WP3: the identity module is composed when the lock resolves thrallo.identity at 1.2 or later
+// and the base tree ships the module runtime (a legacy base does not; it composes as before).
+export const IDENTITY_COMPOSED_PATH = `${COMPOSED_ROOT}/identity.js`;
+export const APP_FACADE_ROOT = "src/lib/app";
+export const APP_FACADE_INDEX_PATH = `${APP_FACADE_ROOT}/index.js`;
+export const APP_FACADE_IDENTITY_PATH = `${APP_FACADE_ROOT}/identity.js`;
+export const IDENTITY_RUNTIME_PATH = "src/lib/modules/identity.js";
+
+export function identityModuleLocked(moduleLock) {
+  return (moduleLock?.modules || []).some((row) => row.id === "thrallo.identity" && satisfiesRange(row.version, ">=1.2.0"));
+}
+
+function identityFiles(moduleLock, identityPlan) {
+  const files = {};
+  files[IDENTITY_COMPOSED_PATH] = `${banner("identity")}import { auth } from "../../backend/index.js";
+import { ensureVisitorSession } from "../../visitorSession.js";
+import { createIdentityController } from "../../modules/identity.js";
+
+export const identityPlan = Object.freeze(${jsObject(identityPlan)});
+export const identity = createIdentityController({ auth, ensureVisitorSession, mode: identityPlan.mode });
+`;
+  files[APP_FACADE_IDENTITY_PATH] = `${banner("public identity ABI")}import { identity } from "../capabilities/composed/identity.js";
+import { useIdentityAction, useIdentityGuard, useIdentityState } from "../modules/identityReact.js";
+
+/** The live session state: initializing | signed_out | visitor | signed_in | expired | error. */
+export function useSession() { return useIdentityState(identity); }
+export function useSignIn() { return useIdentityAction(identity, "signIn"); }
+export function useSignUp() { return useIdentityAction(identity, "signUp"); }
+export function useSignOut() { return useIdentityAction(identity, "signOut"); }
+export function usePasswordReset() { return useIdentityAction(identity, "resetPassword"); }
+export function useConfirmReset() { return useIdentityAction(identity, "confirmReset"); }
+/** { allowed, reason, pending } for a surface that needs "member", "visitor" or "any". */
+export function useSessionGuard(requirement = "member") { return useIdentityGuard(identity, requirement); }
+`;
+  files[APP_FACADE_INDEX_PATH] = `${banner("public application ABI")}// The one import surface for generated application code. Everything here is deterministic and
+// protected; layout, styling, copy and domain logic remain entirely the application's.
+export * from "../capabilities/composed/index.js";
+export * from "./identity.js";
+export const THRALLO_APP_ABI = Object.freeze(${jsObject({
+    version: 1,
+    modules: (moduleLock?.modules || []).map((row) => `${row.id}@${row.version}`),
+  })});
+`;
+  return files;
+}
+
+function capabilityFiles(graph, { moduleLock = null, identityPlan = null, identityRuntime = true } = {}) {
   const nodes = new Map((graph?.nodes || []).map((node) => [node.id, node]));
   const files = {};
   const interfaces = [];
@@ -148,6 +195,14 @@ export const newsletterCapability = makeNewsletter({ entity: ${quote(entity)} })
     ] });
   }
 
+  const composeIdentity = Boolean(identityPlan) && identityModuleLocked(moduleLock) && identityRuntime;
+  if (composeIdentity && nodes.has("capability:session")) {
+    Object.assign(files, identityFiles(moduleLock, identityPlan));
+    interfaces.push({ module: IDENTITY_COMPOSED_PATH, exports: ["identity", "identityPlan"], owns: ["session"],
+      operations: identityPlan.methods });
+  }
+  if (moduleLock) files[MODULE_LOCK_PATH] = lockFileSource(moduleLock);
+
   const composedModules = interfaces.map((row) => row.module);
   files[`${COMPOSED_ROOT}/index.js`] = `${banner("public composition surface")}${composedModules
     .map((module) => `export * from "./${module.split("/").at(-1)}";`).join("\n")}
@@ -167,25 +222,27 @@ export { CAPABILITY_COMPOSITION } from "./manifest.js";
   return { files, interfaces };
 }
 
-export function capabilityCompositionPlan(graph, { moduleLock = null } = {}) {
-  const rendered = capabilityFiles(graph);
+export function capabilityCompositionPlan(graph, { moduleLock = null, identityPlan = null, identityRuntime = true } = {}) {
+  const rendered = capabilityFiles(graph, { moduleLock, identityPlan, identityRuntime });
   const extensionPoints = (graph?.nodes || []).filter((node) => node.type === "custom_behavior")
     .map((node) => ({ id: node.id, ...node.extension, inputs: node.requiredInputs, outputs: node.outputs,
       stateOwnership: node.stateOwnership, persistenceSemantics: node.persistenceSemantics }));
+  const composedIdentity = IDENTITY_COMPOSED_PATH in rendered.files;
   return {
     version: CAPABILITY_COMPOSITION_VERSION,
     graphVersion: graph?.version || 1,
     protectedRoot: COMPOSED_ROOT,
-    protectedFiles: [...Object.keys(rendered.files), ...(moduleLock ? [MODULE_LOCK_PATH] : [])].sort(),
+    protectedFiles: Object.keys(rendered.files).sort(),
     interfaces: rendered.interfaces,
     configurationModule: CAPABILITY_CONFIGURATION_PATH,
     extensionPoints,
     ...(moduleLock ? { moduleLockPath: MODULE_LOCK_PATH } : {}),
+    ...(composedIdentity ? { publicFacade: APP_FACADE_INDEX_PATH, identityModule: IDENTITY_COMPOSED_PATH } : {}),
   };
 }
 
 /** Apply or refresh the foundation. Existing model-owned extension configuration is preserved. */
-export function composeCapabilityFoundation(tree, graph, { moduleLock = null } = {}) {
+export function composeCapabilityFoundation(tree, graph, { moduleLock = null, identityPlan = null } = {}) {
   // Production Builder V2 starts from the full React/Vite scaffold. Some retained unit/legacy
   // baselines intentionally predate the capability runtime; do not emit adapters with dangling
   // imports into those trees. They remain on the migration-compatible path until refreshed from
@@ -201,14 +258,18 @@ export function composeCapabilityFoundation(tree, graph, { moduleLock = null } =
         skipped: "legacy_base_without_capability_runtime", missingRuntime },
     };
   }
-  const rendered = capabilityFiles(graph);
-  const next = { ...(tree || {}), ...rendered.files, ...(moduleLock ? { [MODULE_LOCK_PATH]: lockFileSource(moduleLock) } : {}) };
+  // A base tree without the module runtime (a legacy snapshot, a retained fixture) composes the
+  // capability adapters exactly as before and simply does not receive the identity controller.
+  const identityRuntime = typeof tree?.[IDENTITY_RUNTIME_PATH] === "string";
+  const options = { moduleLock, identityPlan, identityRuntime };
+  const rendered = capabilityFiles(graph, options);
+  const next = { ...(tree || {}), ...rendered.files };
   if (typeof next[CAPABILITY_CONFIGURATION_PATH] !== "string") {
     next[CAPABILITY_CONFIGURATION_PATH] = `// Model-owned domain configuration for the protected capability composition.\n`
       + `// Configuration may supply visual/domain values and bounded hooks; it must not replace persistence.\n`
       + `export const capabilityConfiguration = Object.freeze({ booking: Object.freeze({ slots: [] }), wizard: Object.freeze({}) });\n`;
   }
-  return { tree: next, plan: capabilityCompositionPlan(graph, { moduleLock }) };
+  return { tree: next, plan: capabilityCompositionPlan(graph, options) };
 }
 
 export function capabilityCompositionBrief(graph, plan = capabilityCompositionPlan(graph)) {
