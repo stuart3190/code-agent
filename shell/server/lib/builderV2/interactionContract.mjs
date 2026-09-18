@@ -729,6 +729,28 @@ export function buildInteractionContract(contract, {
     // the workOrder) is that inherited record's identity, whatever the child entity calls it.
     const readsInheritedRecord = (field) => inheritedEntityFields.has(normalized(field))
       || [...inheritedEntityNames].some((name) => normalized(field) === `${name}id`);
+    // The identity a field names (`projectId` -> project) belongs to a record this journey
+    // created: a STRICTLY EARLIER step operates a durable create of that entity. The created
+    // record is what the later step reads, unless that step or its operation declares the
+    // identity as an explicit output (produces: ["recordId"], or a responsibility that writes
+    // it) - an explicit output keeps its own custom path. Returns the record path or null.
+    const createdRecordPath = (field, stepIndex) => {
+      if (!IDENTITY_FIELD.test(String(field || ""))) return null;
+      const stem = normalized(String(field).replace(IDENTITY_FIELD, ""));
+      if (!stem) return null;
+      const declaresIdentity = (candidate, operation) => list(candidate?.produces).some((value) => normalized(value) === normalized(field))
+        || (operation?.responsibilities || []).some((responsibility) => list(responsibility?.writes)
+          .some((value) => normalized(value) === normalized(field)));
+      const created = stepsList.slice(0, stepIndex).some((candidate) => list(candidate?.operates).some((value) => {
+        const operation = declaredOperations.get(normalized(value));
+        return Boolean(operation)
+          && canonicalOperationKind(operation?.kind || operation?.action || operation?.method) === "create"
+          && normalized(operation?.entity) === stem
+          && operationUsesDurablePersistence(contract, operation)
+          && !declaresIdentity(candidate, operation);
+      }));
+      return created ? `${journey.id}.durable.record` : null;
+    };
     for (const [stepIndex, step] of stepsList.entries()) {
       const fixtureRequired = new Set(verificationFixtureFields(step, contract).map(normalized));
       const stepFlowStart = flows.length;
@@ -1137,6 +1159,14 @@ export function buildInteractionContract(contract, {
             // navigation's workOrderId read to custom state produced two steps LATER and was rejected
             // ("reads state before it is produced"). A producer that runs after the read is no producer.
             if (readsInheritedRecord(field)) return `${journey.id}.durable.${field}`;
+            // A RECORD THIS JOURNEY CREATED IS READ AS ITS DURABLE RECORD. Two steps after
+            // create-project, a navigation's `projectId` names the identity that create produced -
+            // not the foreign key a later create-room persists as room.projectId, and not a draft
+            // field nothing enters. The 2026-09-18 recessed-light rerun (7e74b401) mapped that read
+            // to custom state no flow writes and was rejected before generation on four steps of
+            // two journeys, each of which had created the project itself.
+            const createdRecord = createdRecordPath(field, stepIndex);
+            if (createdRecord) return createdRecord;
             const operationProducer = (contract?.operations || []).map((operation) => {
               const writesField = (operation.responsibilities || []).some((responsibility) => (
                 list(responsibility?.writes).some((value) => normalized(value) === normalized(field))
