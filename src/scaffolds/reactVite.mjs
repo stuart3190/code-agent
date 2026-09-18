@@ -351,6 +351,8 @@ export default function HomePage() {
   "src/lib/modules/files.js": sdk("lib/modules/files.js"),
   "src/lib/modules/notifications.js": sdk("lib/modules/notifications.js"),
   "src/lib/modules/realtime.js": sdk("lib/modules/realtime.js"),
+  "src/lib/modules/analytics.js": sdk("lib/modules/analytics.js"),
+  "src/lib/modules/exports.js": sdk("lib/modules/exports.js"),
   "src/lib/modules/uiReact.js": sdk("lib/modules/uiReact.js"),
 
   // Asset helpers (Builder v2, master plan Part 18): picture/srcset/lazy/blur rendering

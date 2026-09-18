@@ -56,6 +56,7 @@ const CAPABILITY_MODULES = Object.freeze({
   "interaction-primitives": "thrallo.forms",
   accounts: "thrallo.accounts", authorization: "thrallo.authorization", admin: "thrallo.admin",
   settings: "thrallo.settings", audit: "thrallo.audit",
+  exports: "thrallo.exports", metrics: "thrallo.analyticsQueries", analytics: "thrallo.analyticsEvents",
 });
 // Fields of an account-shaped entity that are platform membership facts, never profile data.
 const PLATFORM_ACCOUNT_FIELD = /^(?:id|user[-_ ]?id|auth[-_ ]?user[-_ ]?id|email|user[-_ ]?email|role|roles|status|account[-_ ]?status|created[-_ ]?at|updated[-_ ]?at|last[-_ ]?login|invited(?:[-_ ]?at)?)$/i;
@@ -100,9 +101,10 @@ export const PLATFORM_REQUIREMENT_ENFORCEMENT = Object.freeze({
   entities: "block",      // WP5 — module exists (thrallo.entities)
   settings: "block",      // WP8 — module exists (thrallo.settings); availability decides
   audit: "block",         // WP8 — module exists (thrallo.audit); availability decides
-  file_uploads: "warn",   // WP10
-  realtime: "warn",       // WP10
-  exports: "warn",        // WP11
+  file_uploads: "block",  // WP10 — module exists (thrallo.files); availability decides
+  realtime: "block",      // WP10 — module exists (thrallo.realtime)
+  notifications: "block", // WP10 — module exists (thrallo.notifications)
+  exports: "block",       // WP11 — module exists (thrallo.exports)
   payments: "warn",       // WP12
 });
 
@@ -468,11 +470,27 @@ export function normalizeContractOwnership(contract, { buildProfile = null } = {
   if (usesAuditModule) {
     platformRequirements.push({ type: "audit", module: "thrallo.audit", status: "resolved", source: "history_operations" });
   }
-  for (const [signal, type] of [["payments", "payments"], ["file_uploads", "file_uploads"], ["realtime", "realtime"], ["export", "exports"]]) {
-    if (signals.has(signal)) platformRequirements.push({ type, module: null, status: "unresolved", source: `signal:${signal}` });
+  // WP10 resolved files and realtime; WP11 resolved exports. Payments stays unresolved until WP12.
+  for (const [signal, type, module] of [
+    ["payments", "payments", null],
+    ["file_uploads", "file_uploads", "thrallo.files"],
+    ["realtime", "realtime", "thrallo.realtime"],
+    ["notifications", "notifications", "thrallo.notifications"],
+  ]) {
+    if (signals.has(signal)) {
+      platformRequirements.push({ type, module, status: module ? "resolved" : "unresolved", source: `signal:${signal}` });
+    }
   }
-  if (!signals.has("export") && operations.some((operation) => operation.output?.type === "artifact")) {
-    platformRequirements.push({ type: "exports", module: null, status: "unresolved", source: "artifact_operations" });
+  // WP11: an operation whose platform value is an artifact is the exports module's work. It was
+  // an unresolved requirement while no module existed; now it resolves, and a deployment that
+  // cannot install the module blocks rather than generating serialisation by hand.
+  const artifactOperations = operations.filter((operation) => operation.output?.type === "artifact");
+  if (artifactOperations.length) {
+    platformRequirements.push({ type: "exports", module: "thrallo.exports", status: "resolved",
+      source: signals.has("export") ? "signal:export" : "artifact_operations",
+      operations: artifactOperations.map((operation) => idOf(operation)) });
+  } else if (signals.has("export")) {
+    platformRequirements.push({ type: "exports", module: "thrallo.exports", status: "resolved", source: "signal:export" });
   }
   for (const requirement of platformRequirements) {
     requirement.enforcement = PLATFORM_REQUIREMENT_ENFORCEMENT[requirement.type] || "warn";

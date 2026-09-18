@@ -28,13 +28,14 @@ const kindOf = (operation) => String(operation?.kind || operation?.type || opera
  * @param {object} [options.entitySchema] compiled entity schema (durable domain entities)
  * @param {object} [options.settingsPlan] derived settings/audit plan (WP8)
  * @param {object} [options.deliveryPlan] derived files/notifications/realtime plan (WP10)
+ * @param {object} [options.insightPlan] derived telemetry/metrics/exports plan (WP11)
  * @param {object} [options.capabilityGraph] the derived capability graph, for scaffold-family
  *   selection (WP9). The families are asked for here rather than re-derived, so the modules a
  *   build locks and the families it composes can never disagree.
  * @param {object} [options.registry]
  * @returns {Array<{id: string, range: string, reason: string}>}
  */
-export function platformModuleRequests(contract, { entitySchema = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, capabilityGraph = null, registry = MODULE_REGISTRY } = {}) {
+export function platformModuleRequests(contract, { entitySchema = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null, capabilityGraph = null, registry = MODULE_REGISTRY } = {}) {
   const operations = contract?.operations || [];
   const durableEntities = entitySchema?.entities || [];
   const requests = [];
@@ -84,6 +85,12 @@ export function platformModuleRequests(contract, { entitySchema = null, settings
     request("thrallo.realtime", deliveryPlan.realtime.source === "signal:realtime"
       ? "the build profile declares realtime" : "the contract claims changes appear without a reload");
   }
+  // WP11 — telemetry, domain metrics and exports are three separate requests, because they are
+  // three separate decisions: measuring the product, answering a question about the customer's
+  // records, and putting those records in a file someone takes away.
+  if ((insightPlan?.telemetry?.events || []).length) request("thrallo.analyticsEvents", "the contract asks to measure product usage");
+  if ((insightPlan?.metrics || []).length) request("thrallo.analyticsQueries", "the contract asks for totals over durable records");
+  if ((insightPlan?.exports || []).length) request("thrallo.exports", "an operation produces a downloadable artifact");
   void behaviourPlan;
 
   return requests;

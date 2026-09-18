@@ -183,3 +183,47 @@ export function useLiveState(controller, topic, onEvent = null) {
     error: state?.error || null, reconnects: state?.reconnects || 0, resyncs: state?.resyncs || 0, last,
   }), [state, topic, last]);
 }
+
+/**
+ * WP11 — one declared metric, or several at once. The value is computed over every matching
+ * record by the metrics module, so what a tile shows and what a list totals cannot differ.
+ */
+export function useMetricState(controller, idOrIds, { filters = {} } = {}) {
+  const state = useCapabilityState(controller);
+  const ids = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
+  const key = JSON.stringify([ids, filters]);
+  useEffect(() => {
+    if (Array.isArray(idOrIds)) void controller.report(ids, { filters });
+    else void controller.value(ids[0], { filters });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [controller, key]);
+  return useMemo(() => {
+    const results = state?.results || {};
+    if (Array.isArray(idOrIds)) {
+      return { status: state?.status || "idle", error: state?.error || null, results: Object.fromEntries(ids.map((id) => [id, results[id] || null])) };
+    }
+    const result = results[ids[0]] || null;
+    return {
+      status: state?.status || "idle", error: state?.error || null,
+      value: result?.value ?? null, series: result?.series || [], total: result?.total ?? 0,
+      definition: controller.definition(ids[0]),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, controller, key]);
+}
+
+/** WP11 — one declared export: build the artifact, see what it holds, then hand it over. */
+export function useExportState(controller, id, { filters = {}, format = null } = {}) {
+  const state = useCapabilityState(controller);
+  return useMemo(() => ({
+    status: state?.status || "idle", error: state?.error || null, artifact: state?.artifact || null,
+    definition: controller.definition(id),
+    build: () => controller.build(id, { filters, format }),
+    download: (artifact) => controller.download(artifact || state?.artifact),
+    /** Build and hand over in one call, for a button that just exports. */
+    run: async () => {
+      const built = await controller.build(id, { filters, format });
+      return built.ok ? controller.download(built.artifact) : built;
+    },
+  }), [state, controller, id, JSON.stringify(filters), format]);
+}

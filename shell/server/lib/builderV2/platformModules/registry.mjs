@@ -786,11 +786,92 @@ const REALTIME_MODULE = platformModule({
   proof: "test/code-agent/builder-v2-files-notifications-realtime.test.mjs",
 });
 
+// WP11 — analytics and exports. Telemetry and domain metrics are DIFFERENT modules on purpose:
+// one is product usage, sampled and consent-gated and never carrying personal data; the other is
+// an exact authorised answer about the customer's own records. Conflating them is what leaked
+// domain values into a usage stream and answered "revenue" from a page of fifty rows.
+const ANALYTICS_EVENTS_MODULE = platformModule({
+  id: "thrallo.analyticsEvents", version: "1.0.0", title: "Analytics events",
+  clientAbi: "analyticsEvents@1", services: ["backend_sdk", "analytics"],
+  operations: [
+    clientOperation({ id: "track", effect: "external", stateOwner: "telemetry", errors: ["analytics_event_unknown", "analytics_property_not_allowed", "analytics_personal_data_refused"], hooks: ["an undeclared event cannot be sent"] }),
+  ],
+  entrypoints: [
+    { module: "src/lib/modules/analytics.js", exports: ["compileAnalyticsEvents", "createTelemetry", "sanitiseProperties", "AnalyticsError"] },
+    { module: "src/lib/capabilities/composed/analytics.js", exports: ["telemetry", "analyticsEvents"], composed: true },
+    { module: "src/lib/app/analytics.js", exports: ["telemetry", "analyticsEvents"], composed: true },
+  ],
+  artifacts: [
+    { path: "src/lib/modules/analytics.js", kind: "runtime" },
+    { path: "src/lib/capabilities/composed/analytics.js", kind: "composed" },
+    { path: "src/lib/app/analytics.js", kind: "composed" },
+  ],
+  deterministicTests: ["allow-listed properties", "personal data refused", "consent gate", "per-minute quota", "undeclared event refused"],
+  browserEvidence: ["nothing is sent before consent", "a declared event reaches the stream"],
+  proof: "test/code-agent/builder-v2-analytics-exports.test.mjs",
+});
+
+const ANALYTICS_QUERIES_MODULE = platformModule({
+  id: "thrallo.analyticsQueries", version: "1.0.0", title: "Analytics queries",
+  clientAbi: "metrics@1", services: ["backend_sdk", "entities"],
+  requires: [{ id: "thrallo.entities", range: "^1.1.0" }, { id: "thrallo.query", range: "^1.0.0" }],
+  operations: [
+    clientOperation({ id: "metric", stateOwner: "domain metrics", errors: ["metric_unknown", "metric_field_not_allowed", "forbidden"], hooks: ["a metric is computed over every matching record, never one page"] }),
+    clientOperation({ id: "report", stateOwner: "domain metrics", errors: ["metric_unknown", "forbidden"], hooks: ["a dashboard reads its metrics together"] }),
+  ],
+  entrypoints: [
+    { module: "src/lib/modules/analytics.js", exports: ["compileMetrics", "createMetrics", "aggregate", "AGGREGATIONS", "BUCKETS"] },
+    { module: "src/lib/modules/uiReact.js", exports: ["useMetricState"] },
+    { module: "src/lib/capabilities/composed/metrics.js", exports: ["metrics", "metricDefinitions"], composed: true },
+    { module: "src/lib/app/metrics.js", exports: ["useMetric", "useReport", "metricDefinitions"], composed: true },
+  ],
+  artifacts: [
+    { path: "src/lib/modules/analytics.js", kind: "runtime" },
+    { path: "src/lib/capabilities/composed/metrics.js", kind: "composed" },
+    { path: "src/lib/app/metrics.js", kind: "composed" },
+  ],
+  surfaceBindings: [
+    { state: "loading", required: true }, { state: "ready", required: true }, { state: "error", required: true },
+  ],
+  deterministicTests: ["known-fixture aggregates", "group and time buckets", "undeclared field refused at compile", "authorised metric"],
+  browserEvidence: ["a metric matches what the list shows", "an unauthorised metric is not rendered"],
+  proof: "test/code-agent/builder-v2-analytics-exports.test.mjs",
+});
+
+const EXPORTS_MODULE = platformModule({
+  id: "thrallo.exports", version: "1.0.0", title: "Exports/artifacts",
+  clientAbi: "exports@1", services: ["backend_sdk", "entities"],
+  requires: [{ id: "thrallo.entities", range: "^1.1.0" }],
+  operations: [
+    clientOperation({ id: "buildExport", stateOwner: "export artifacts", errors: ["export_unknown", "export_format_unknown", "export_not_authorized", "export_failed"], hooks: ["the artifact carries its own row count and byte size"] }),
+    clientOperation({ id: "download", effect: "external", stateOwner: "export artifacts", errors: ["export_empty"], hooks: ["a real file reaches the visitor, not a print dialogue"] }),
+  ],
+  entrypoints: [
+    { module: "src/lib/modules/exports.js", exports: ["compileExports", "createExports", "serialize", "escapeCell", "EXPORT_FORMATS", "ExportError"] },
+    { module: "src/lib/modules/uiReact.js", exports: ["useExportState"] },
+    { module: "src/lib/capabilities/composed/exports.js", exports: ["exports", "exportDefinitions"], composed: true },
+    { module: "src/lib/app/exports.js", exports: ["useExport", "exportDefinitions"], composed: true },
+  ],
+  artifacts: [
+    { path: "src/lib/modules/exports.js", kind: "runtime" },
+    { path: "src/lib/capabilities/composed/exports.js", kind: "composed" },
+    { path: "src/lib/app/exports.js", kind: "composed" },
+  ],
+  surfaceBindings: [
+    { state: "idle", required: false }, { state: "building", required: true },
+    { state: "ready", required: true }, { state: "empty", required: true }, { state: "error", required: true },
+  ],
+  deterministicTests: ["correct quoting", "formula injection neutralised", "declared columns only", "every matching record, not one page", "authorised export"],
+  browserEvidence: ["a downloaded file opens with the rows the screen showed"],
+  proof: "test/code-agent/builder-v2-analytics-exports.test.mjs",
+});
+
 const MODULES = [
   CORE_MODULE, ...LEGACY_WRAPPED.map(legacyCapabilityModule), IDENTITY_1_2, ACCOUNTS_MODULE, AUTHORIZATION_1_1,
   ADMIN_MODULE, ENTITIES_1_1, ROUTING_MODULE, QUERY_MODULE, FORMS_1_1, ASYNC_MODULE, SETTINGS_MODULE, AUDIT_MODULE,
   WORKFLOW_1_1, BOOKING_1_1, WORKSPACE_MODULE, EDITOR_MODULE,
   FILES_MODULE, NOTIFICATIONS_MODULE, REALTIME_MODULE,
+  ANALYTICS_EVENTS_MODULE, ANALYTICS_QUERIES_MODULE, EXPORTS_MODULE,
 ];
 
 /** id → every registered version of that module, highest last. */

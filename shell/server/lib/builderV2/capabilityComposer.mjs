@@ -571,6 +571,103 @@ export function useLive(topic, onEvent) { return useLiveState(realtime, topic, o
   return { files, interfaces, facades };
 }
 
+// WP11: declared telemetry events, declared domain metrics and declared exports.
+export const ANALYTICS_COMPOSED_PATH = `${COMPOSED_ROOT}/analytics.js`;
+export const METRICS_COMPOSED_PATH = `${COMPOSED_ROOT}/metrics.js`;
+export const EXPORTS_COMPOSED_PATH = `${COMPOSED_ROOT}/exports.js`;
+export const APP_FACADE_ANALYTICS_PATH = `${APP_FACADE_ROOT}/analytics.js`;
+export const APP_FACADE_METRICS_PATH = `${APP_FACADE_ROOT}/metrics.js`;
+export const APP_FACADE_EXPORTS_PATH = `${APP_FACADE_ROOT}/exports.js`;
+
+function insightFiles(insightPlan) {
+  const files = {};
+  const interfaces = [];
+  const facades = [];
+  const events = insightPlan?.telemetry?.events || [];
+  const metrics = insightPlan?.metrics || [];
+  const exportDefinitions = insightPlan?.exports || [];
+
+  if (events.length) {
+    files[ANALYTICS_COMPOSED_PATH] = `${banner("telemetry")}import { analytics as transport } from "../../backend/index.js";
+import { compileAnalyticsEvents, createTelemetry } from "../../modules/analytics.js";
+
+/**
+ * Product-usage telemetry ONLY. Domain values belong in metrics, never here: this stream is
+ * retained and read by whoever operates the product.
+ */
+export const analyticsEvents = compileAnalyticsEvents(${jsObject(events.map((event) => ({ id: event.id, properties: event.properties })))}, ${jsObject({ consentRequired: insightPlan?.telemetry?.consentRequired !== false, retentionDays: insightPlan?.telemetry?.retentionDays || 365 })});
+
+let consent = false;
+/** Telemetry sends nothing until the visitor agrees. The application decides when to ask. */
+export function setAnalyticsConsent(granted) { consent = granted === true; }
+export const telemetry = createTelemetry({ schema: analyticsEvents, transport, hasConsent: () => consent });
+`;
+    interfaces.push({ module: ANALYTICS_COMPOSED_PATH, exports: ["telemetry", "analyticsEvents", "setAnalyticsConsent"],
+      owns: ["telemetry"], operations: ["track"] });
+    files[APP_FACADE_ANALYTICS_PATH] = `${banner("public telemetry ABI")}import { analyticsEvents, setAnalyticsConsent, telemetry } from "../capabilities/composed/analytics.js";
+
+export { telemetry, analyticsEvents, setAnalyticsConsent };
+/** Record one declared event. A property outside its declared list never leaves the browser. */
+export const track = (event, properties) => telemetry.track(event, properties);
+`;
+    facades.push("analytics");
+  }
+
+  if (metrics.length) {
+    files[METRICS_COMPOSED_PATH] = `${banner("domain metrics")}import { compileMetrics, createMetrics } from "../../modules/analytics.js";
+import { entitySchema, repository } from "./entities.js";
+
+/** Every metric this application declared, checked against the compiled schema. */
+export const metricDefinitions = compileMetrics(${jsObject(metrics)}, { schema: entitySchema });
+
+export const metrics = createMetrics({
+  metrics: metricDefinitions,
+  // EVERY matching record, not one page. A metric over a page is a wrong answer told confidently.
+  read: (entity, filters) => repository(entity).list({ filters, limit: 10000 }),
+});
+`;
+    interfaces.push({ module: METRICS_COMPOSED_PATH, exports: ["metrics", "metricDefinitions"],
+      owns: ["domain metrics"], operations: ["metric", "report"] });
+    files[APP_FACADE_METRICS_PATH] = `${banner("public metrics ABI")}import { metricDefinitions, metrics } from "../capabilities/composed/metrics.js";
+import { useMetricState } from "../modules/uiReact.js";
+
+export { metrics, metricDefinitions };
+/** { value, series, status } for one declared metric. */
+export function useMetric(id, options = {}) { return useMetricState(metrics, id, options); }
+/** Several metrics together, so a dashboard does not fire one read per tile. */
+export function useReport(ids, options = {}) { return useMetricState(metrics, ids, options); }
+`;
+    facades.push("metrics");
+  }
+
+  if (exportDefinitions.length) {
+    files[EXPORTS_COMPOSED_PATH] = `${banner("exports")}import { compileExports, createExports } from "../../modules/exports.js";
+import { entitySchema, repository } from "./entities.js";
+
+/** What may be exported, and which columns leave. Declared, so nothing leaves by accident. */
+export const exportDefinitions = compileExports(${jsObject(exportDefinitions.map((row) => ({ id: row.id, entity: row.entity, columns: row.columns, format: row.format, filename: row.filename })))}, { schema: entitySchema });
+
+export const exports = createExports({
+  schema: exportDefinitions,
+  // The whole result set, re-read: an export of the page on screen is a wrong answer in a file.
+  read: (entity, filters) => repository(entity).list({ filters, limit: 10000 }),
+});
+`;
+    interfaces.push({ module: EXPORTS_COMPOSED_PATH, exports: ["exports", "exportDefinitions"],
+      owns: ["export artifacts"], operations: ["buildExport", "download"] });
+    files[APP_FACADE_EXPORTS_PATH] = `${banner("public exports ABI")}import { exportDefinitions, exports as exportController } from "../capabilities/composed/exports.js";
+import { useExportState } from "../modules/uiReact.js";
+
+export { exportController as exports, exportDefinitions };
+/** { build, download, artifact, status } for one declared export. */
+export function useExport(id, options = {}) { return useExportState(exportController, id, options); }
+`;
+    facades.push("exports");
+  }
+
+  return { files, interfaces, facades };
+}
+
 function facadeIndexSource(moduleLock, facadeModules) {
   return `${banner("public application ABI")}// The one import surface for generated application code. Everything here is deterministic and
 // protected; layout, styling, copy and domain logic remain entirely the application's.
@@ -584,7 +681,7 @@ export const THRALLO_APP_ABI = Object.freeze(${jsObject({
 `;
 }
 
-function capabilityFiles(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null } = {}) {
+function capabilityFiles(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null } = {}) {
   const nodes = new Map((graph?.nodes || []).map((node) => [node.id, node]));
   const files = {};
   const interfaces = [];
@@ -731,6 +828,12 @@ export const newsletterCapability = makeNewsletter({ entity: ${quote(entity)} })
       interfaces.push(...delivery.interfaces);
       facades.push(...delivery.facades);
     }
+    const insight = insightFiles(insightPlan);
+    if (Object.keys(insight.files).length) {
+      Object.assign(files, insight.files);
+      interfaces.push(...insight.interfaces);
+      facades.push(...insight.facades);
+    }
     files[APP_FACADE_INDEX_PATH] = facadeIndexSource(moduleLock, facades);
   }
   if (moduleLock) files[MODULE_LOCK_PATH] = lockFileSource(moduleLock);
@@ -754,8 +857,8 @@ export { CAPABILITY_COMPOSITION } from "./manifest.js";
   return { files, interfaces };
 }
 
-export function capabilityCompositionPlan(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null } = {}) {
-  const rendered = capabilityFiles(graph, { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan, deliveryPlan });
+export function capabilityCompositionPlan(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null } = {}) {
+  const rendered = capabilityFiles(graph, { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan, deliveryPlan, insightPlan });
   const extensionPoints = (graph?.nodes || []).filter((node) => node.type === "custom_behavior")
     .map((node) => ({ id: node.id, ...node.extension, inputs: node.requiredInputs, outputs: node.outputs,
       stateOwnership: node.stateOwnership, persistenceSemantics: node.persistenceSemantics }));
@@ -774,7 +877,7 @@ export function capabilityCompositionPlan(graph, { moduleLock = null, identityPl
 }
 
 /** Apply or refresh the foundation. Existing model-owned extension configuration is preserved. */
-export function composeCapabilityFoundation(tree, graph, { moduleLock = null, identityPlan = null, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null } = {}) {
+export function composeCapabilityFoundation(tree, graph, { moduleLock = null, identityPlan = null, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null } = {}) {
   // Production Builder V2 starts from the full React/Vite scaffold. Some retained unit/legacy
   // baselines intentionally predate the capability runtime; do not emit adapters with dangling
   // imports into those trees. They remain on the migration-compatible path until refreshed from
@@ -793,7 +896,7 @@ export function composeCapabilityFoundation(tree, graph, { moduleLock = null, id
   // A base tree without the module runtime (a legacy snapshot, a retained fixture) composes the
   // capability adapters exactly as before and simply does not receive the identity controller.
   const identityRuntime = typeof tree?.[IDENTITY_RUNTIME_PATH] === "string";
-  const options = { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan, deliveryPlan };
+  const options = { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan, deliveryPlan, insightPlan };
   const rendered = capabilityFiles(graph, options);
   const next = { ...(tree || {}), ...rendered.files };
   if (typeof next[CAPABILITY_CONFIGURATION_PATH] !== "string") {

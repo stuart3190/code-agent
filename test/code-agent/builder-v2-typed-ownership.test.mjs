@@ -86,9 +86,13 @@ test("WP2 — every operation is typed: owner, module operation and platform val
   assert.deepEqual(moduleOwnedOperations(contract).map((row) => row.id), ["sign-in", "create-plan", "list-plans"]);
   assert.deepEqual(generatedOperations(contract).map((row) => row.id), ["export-plan", "score-plan"]);
   assert.deepEqual(report.platformRequirements.map((row) => [row.type, row.status]),
-    [["identity", "resolved"], ["entities", "resolved"], ["exports", "unresolved"]]);
+    // WP11 resolved the exports requirement: the module exists, so an artifact operation names
+    // it rather than waiting for one.
+    [["identity", "resolved"], ["entities", "resolved"], ["exports", "resolved"]]);
   assert.deepEqual(ownershipProblems(contract), []);
-  assert.match(ownershipWarnings(contract).join(), /exports .*not yet module-owned/);
+  // No warning any more: every requirement this contract raises now names a module that exists.
+  assert.deepEqual(ownershipWarnings(contract), []);
+  assert.equal(contract.operations.find((row) => row.id === "export-plan").output.type, "artifact");
 });
 
 test("WP2 — normalisation is versioned and idempotent; a typed contract passes through unchanged", () => {
