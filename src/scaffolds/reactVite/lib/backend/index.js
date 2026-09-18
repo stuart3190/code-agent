@@ -66,6 +66,7 @@ function unconfigured() {
     knowledge: { search: fail },
     integrations: { meta: { overview: fail, start: fail, connect: fail, select: fail, disconnect: fail } },
     analytics: { track: fail, page: fail },
+    accounts: { me: fail, updateMe: fail, permissions: fail, member: fail, members: fail, invite: fail, provision: fail, setRole: fail, setStatus: fail },
     _client: null,
   };
 }
@@ -82,6 +83,7 @@ try {
     runtimeUrl: import.meta.env.VITE_RUNTIME_URL || null,
     connectorsUrl: import.meta.env.VITE_CONNECTORS_URL || null,
     analyticsUrl: import.meta.env.VITE_ANALYTICS_URL || null,
+    accountsUrl: import.meta.env.VITE_ACCOUNTS_URL || null,
   });
 } catch {
   backend = unconfigured();
@@ -97,4 +99,14 @@ export const usage = backend.usage;
 export const knowledge = backend.knowledge;
 export const integrations = backend.integrations;
 export const analytics = backend.analytics;
+// ACCOUNTS (WP4) — real memberships, profiles and administration behind the app-accounts service.
+// The actor is derived server-side from the session; a role on a business record is never authority.
+//   await accounts.me()                              -> { principal, membership, profile, profileFields, allowedActions }
+//   await accounts.updateMe(values)                  -> { profile }
+//   await accounts.permissions()                     -> { role, status, roles, allowedActions }
+//   await accounts.members()                         -> [membership]            (members.read)
+//   await accounts.invite({ email, role })           -> membership              (members.invite)
+//   await accounts.setRole({ email|userId, role })   -> membership              (members.role)
+//   await accounts.setStatus({ email|userId, status })-> membership             (members.status)
+export const accounts = backend.accounts;
 export default backend;

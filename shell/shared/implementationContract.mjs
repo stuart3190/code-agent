@@ -15,6 +15,11 @@
 
 export const CONTRACT_VERSION = 2;
 
+/** Modules whose records are platform-owned and never stored as generic application entities. */
+export const PLATFORM_RECORD_MODULES = new Set(["thrallo.identity", "thrallo.accounts", "thrallo.authorization", "thrallo.admin"]);
+/** Capabilities whose functional responsibilities output platform values rather than entity fields. */
+export const PLATFORM_OUTPUT_CAPABILITIES = new Set(["session", "auth", "accounts", "admin", "authorization"]);
+
 // The five stages PR5 generates in. Named here because the contract is what assigns work to them.
 export const STAGES = ["foundation", "data", "primary_journey", "supporting", "polish"];
 
@@ -66,6 +71,12 @@ export function operationUsesDurablePersistence(contract, operation) {
   if ((operation?.responsibilities || []).some((responsibility) => responsibility?.type === "persistence")) {
     return true;
   }
+  // WP4: an operation owned by a module whose records never live in the generic entities table
+  // (identity, accounts, authorization, admin) persists through that module's service — so no
+  // automatic entity persistence is derived for it, and no entity store is composed for the
+  // platform-owned entity it names. Booking, workflow and capture modules still persist through
+  // the generic backend and keep their derived persistence handoff.
+  if (operation?.owner === "module" && PLATFORM_RECORD_MODULES.has(operation?.module)) return false;
   if (entityPersistencePolicy(contract, operation?.entity) === "transient") return false;
   return PERSISTENCE_OPERATION_KINDS.has(operationKind(operation));
 }
@@ -597,8 +608,12 @@ export function validateContract(contract) {
         const inputlessSession = isSessionOperation(operation)
           && SESSION_METHODS_WITHOUT_INPUTS.has(String(responsibility.capabilityMethod || responsibility.method || ""));
         if (!responsibility.reads?.length && !inputlessSession) problems.push(`${label} has no declared functional inputs`);
+        // A responsibility bound to a platform-record capability (session, accounts, admin,
+        // authorization) outputs a platform value — a session, a membership, a decision — never a
+        // declared entity field; it needs no writes (WP2/WP4).
+        const platformOutput = PLATFORM_OUTPUT_CAPABILITIES.has(String(responsibility.capability || responsibility.capabilityId || "").toLowerCase());
         if (!responsibility.writes?.length && !functionalOutputEffect(operation, responsibility)
-            && !isSessionOperation(operation)) {
+            && !isSessionOperation(operation) && !platformOutput) {
           problems.push(`${label} has no declared functional outputs`);
         }
       }

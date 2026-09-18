@@ -23,6 +23,8 @@ import { MODULE_RESOLUTION_VERSION } from "../../shell/server/lib/builderV2/plat
 import { AVAILABILITY_VERSION } from "../../shell/server/lib/builderV2/platformModules/availability.mjs";
 import { IDENTITY_PLAN_VERSION } from "../../shell/server/lib/builderV2/platformModules/identityPlan.mjs";
 import { ABI_LINT_VERSION } from "../../shell/server/lib/builderV2/platformModules/abiLint.mjs";
+import { ACCOUNT_POLICY_VERSION } from "../../shell/server/lib/appAccounts/accountPolicyStore.mjs";
+import { ACCOUNT_SERVICE_VERSION } from "../../supabase/functions/app-accounts/accountService.mjs";
 import { CAPABILITIES } from "../../shell/server/lib/builderV2/capabilityRegistry.mjs";
 import { SCAFFOLDS, SCAFFOLD_REGISTRY_VERSION } from "../../shell/server/lib/builderV2/scaffoldRegistry.mjs";
 import { RUNTIME_CAPABILITY_OPERATIONS } from "../../shell/server/lib/capabilityRuntime.mjs";
@@ -101,6 +103,8 @@ test("WP0 — the baseline formats stay frozen and every live format equals the 
     deploymentAvailability: AVAILABILITY_VERSION,
     identityPlan: IDENTITY_PLAN_VERSION,
     abiLint: ABI_LINT_VERSION,
+    accountPolicy: ACCOUNT_POLICY_VERSION,
+    accountService: ACCOUNT_SERVICE_VERSION,
   }, CURRENT_FORMAT_VERSIONS);
 });
 
@@ -151,16 +155,17 @@ test("WP0 — every live registry, scaffold, SDK, runtime and signal entry is ma
   });
   assert.deepEqual({ unmapped: report.unmapped, stale: report.stale }, { unmapped: [], stale: [] });
   assert.equal(report.ok, true);
-  assert.equal(report.counts.capability, 8);
+  assert.equal(report.counts.capability, 11, "8 at the baseline + accounts, authorization, admin (WP4)");
   assert.equal(report.counts.scaffold_family, 12);
   assert.equal(report.counts.runtime_operation_family, 7);
   assert.equal(report.counts.requirement_signal, 9);
 });
 
 test("WP0 — no capability, scaffold family or runtime family was removed relative to the audit", () => {
-  assert.deepEqual(Object.keys(CAPABILITIES).sort(), [
-    "booking", "contact", "crud", "interaction-primitives", "newsletter", "roles", "session", "wizard",
-  ]);
+  const baselineCapabilities = ["booking", "contact", "crud", "interaction-primitives", "newsletter", "roles", "session", "wizard"];
+  for (const id of baselineCapabilities) assert.ok(CAPABILITIES[id], `baseline capability ${id} still registered`);
+  assert.deepEqual(Object.keys(CAPABILITIES).sort(), [...baselineCapabilities, "accounts", "admin", "authorization"].sort(),
+    "additions are ledgered (WP4: accounts, authorization, admin); nothing removed");
   assert.deepEqual(Object.keys(SCAFFOLDS).sort(), [
     "admin_management", "app_shell", "auth_account", "canvas_editor", "catalogue_detail",
     "content_navigation", "crud_resource", "dashboard", "export_output", "project_workspace",

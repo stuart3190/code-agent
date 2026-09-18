@@ -20,6 +20,7 @@ import { normaliseContract } from "../../shell/server/lib/appBuild/contractAgent
 import { composeCapabilityFoundation } from "../../shell/server/lib/builderV2/capabilityComposer.mjs";
 import { buildExecutionSpec } from "../../shell/server/lib/builderV2/executionSpec.mjs";
 import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
+import { declaredAvailability, legacyDeploymentAvailability } from "../../shell/server/lib/builderV2/platformModules/availability.mjs";
 
 const RETAINED = new URL("./fixtures/retained/", import.meta.url);
 const readJson = async (relative) => JSON.parse(await readFile(new URL(relative, RETAINED), "utf8"));
@@ -162,9 +163,11 @@ test("WP2 — the fresh Advanced and both Medium retained contracts type every o
     "medium-20260918-recessed/contract-7e74b401-attempt2.json",
     "lumen-advanced-20260916-contract.json",
   ];
+  // The Medium contracts need the accounts service (WP4): declared here, absent on the baseline.
+  const withAccounts = declaredAvailability({ backend_sdk: true, app_auth: true, entities: true, realtime: true, accounts: true });
   for (const fixture of fixtures) {
     const raw = contractOf(await readJson(fixture));
-    const spec = deriveBuildSpec(raw);
+    const spec = deriveBuildSpec(raw, { availability: withAccounts });
     assert.equal(spec.verdict.ok, true, `${fixture}: ${spec.verdict.problems.join(" | ")}`);
     for (const operation of spec.contract.operations) {
       assert.ok(["module", "generated"].includes(operation.owner), `${fixture}: ${operation.id} owner`);
@@ -173,12 +176,14 @@ test("WP2 — the fresh Advanced and both Medium retained contracts type every o
     const signIns = spec.contract.operations.filter((operation) => /sign-?in|authenticate/i.test(operation.id));
     for (const operation of signIns) assert.deepEqual([operation.module, operation.output.type], ["thrallo.identity", "session"], `${fixture}: ${operation.id}`);
   }
-  // The Medium contracts declare account-shaped entities: flagged as an unresolved accounts
-  // requirement (warn until WP4), never silently treated as real accounts.
-  const medium = deriveBuildSpec(contractOf(await readJson("medium-20260917-recessed/contract.json")));
+  // The Medium contracts declare account-shaped entities: resolved to the accounts module (WP4),
+  // never silently treated as generic records; on a deployment without the accounts service the
+  // contract blocks before generation with a configuration-required result.
+  const medium = deriveBuildSpec(contractOf(await readJson("medium-20260917-recessed/contract.json")), { availability: legacyDeploymentAvailability() });
   const accounts = medium.contract.ownership.platformRequirements.find((row) => row.type === "accounts");
-  assert.deepEqual([accounts.status, accounts.enforcement, accounts.source], ["unresolved", "warn", "entity:appUser"]);
-  assert.ok(medium.verdict.ownership.warnings.some((warning) => /accounts .*not yet module-owned/.test(warning)));
+  assert.deepEqual([accounts.status, accounts.enforcement, accounts.source, accounts.module], ["resolved", "block", "entity:appUser", "thrallo.accounts"]);
+  assert.equal(medium.verdict.ok, false);
+  assert.equal(medium.verdict.modules.configurationRequired, true);
   assert.equal(PLATFORM_REQUIREMENT_ENFORCEMENT.identity, "block");
 });
 

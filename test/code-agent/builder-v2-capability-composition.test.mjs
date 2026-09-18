@@ -62,8 +62,9 @@ const INTERACTIVE = base("interactive calculation workspace", [{ name: "project"
 ] }]);
 
 test("the authoritative registry is total only for capabilities that actually ship", () => {
+  // WP4 added accounts, authorization and admin (real accounts behind the app-accounts service).
   assert.deepEqual(Object.keys(CAPABILITIES).sort(), [
-    "booking", "contact", "crud", "interaction-primitives", "newsletter", "roles", "session", "wizard",
+    "accounts", "admin", "authorization", "booking", "contact", "crud", "interaction-primitives", "newsletter", "roles", "session", "wizard",
   ]);
   for (const capability of Object.values(CAPABILITIES)) {
     for (const key of [

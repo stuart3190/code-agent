@@ -53,6 +53,8 @@ export const CURRENT_FORMAT_VERSIONS = Object.freeze({
   deploymentAvailability: 1, // WP1: new
   identityPlan: 1,       // WP3: new — rendered into the composed identity module
   abiLint: 1,            // WP3: new — public-ABI import lint
+  accountPolicy: 1,      // WP4: new — app_account_policies row / composed policy
+  accountService: 1,     // WP4: new — app-accounts Edge Function + shell service
 });
 
 /** The immutable snapshot row as written by snapshotStore.createSnapshot(). */
@@ -184,6 +186,16 @@ export const COVERAGE_LEDGER = Object.freeze([
   row("capability", "newsletter", { status: "D/S/P", targetModule: "thrallo.newsletter", workPackage: 9,
     retains: "src/lib/capabilities/forms.js makeNewsletter",
     disposition: "subscription capture module; delivery separate" }),
+  // WP4 — real accounts (added; the audit's P0 "application roles/admin exceed the roles capability")
+  row("capability", "accounts", { status: "D/S", targetModule: "thrallo.accounts", workPackage: 4,
+    retains: "src/lib/modules/accounts.js createAccountsController; app-accounts Edge Function",
+    disposition: "profile reads/updates and membership state through the accounts service; replaces generic appUser records" }),
+  row("capability", "authorization", { status: "D/S", targetModule: "thrallo.authorization", workPackage: 4,
+    retains: "src/lib/modules/accounts.js createAuthorization + policy.js; roles.js ownership adapter retained",
+    disposition: "policy over server-derived memberships; client evaluation shapes UI only" }),
+  row("capability", "admin", { status: "D/S", targetModule: "thrallo.admin", workPackage: 4,
+    retains: "src/lib/modules/accounts.js createAdmin; app-accounts commands invite/provision/setRole/setStatus",
+    disposition: "authorized admin commands; replaces fake user CRUD and generated authority checks" }),
   row("capability", "interaction-primitives", { status: "D/S", targetModule: "thrallo.forms", workPackage: 7,
     retains: "src/lib/capabilities/react.js useCapabilityState/useCapabilityAction/useSemanticField/useSemanticSelection/useSemanticAction/useFlowAdvance/useStatusRegion",
     disposition: "headless form/action/semantic-binding module" }),
@@ -311,6 +323,9 @@ export const COVERAGE_LEDGER = Object.freeze([
     disposition: "module service, separate from Thrallo build-credit accounting" }),
   row("sdk_surface", "knowledge", { status: "D/S/P", targetModule: "thrallo.knowledge", workPackage: 13,
     members: ["search"], retains: "SDK search plus server ingest/search", disposition: "knowledge module" }),
+  row("sdk_surface", "accounts", { status: "D/S", targetModule: "thrallo.accounts", workPackage: 4,
+    members: ["me", "updateMe", "permissions", "member", "members", "invite", "provision", "setRole", "setStatus"],
+    retains: "src/lib/backend/index.js accounts → app-accounts Edge Function", disposition: "WP4 addition: the authoritative account/membership surface" }),
   row("sdk_surface", "integrations.meta", { status: "D/S/P", targetModule: "thrallo.metaConnector", workPackage: 13,
     members: ["overview", "start", "connect", "select", "disconnect"],
     retains: "SDK connection flow and metaConnector.mjs", disposition: "connector module" }),

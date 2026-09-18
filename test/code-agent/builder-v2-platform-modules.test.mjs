@@ -115,8 +115,8 @@ test("manifest — the schema rejects every malformed shape the audit forbids", 
 test("registry — every legacy capability is wrapped by a validated module; public imports are unchanged", () => {
   assert.deepEqual(validateModuleRegistry(), { ok: true, problems: [] });
   assert.deepEqual(registeredModuleIds(), [
-    "thrallo.authorization", "thrallo.booking", "thrallo.contact", "thrallo.core", "thrallo.entities",
-    "thrallo.forms", "thrallo.identity", "thrallo.newsletter", "thrallo.workflow",
+    "thrallo.accounts", "thrallo.admin", "thrallo.authorization", "thrallo.booking", "thrallo.contact", "thrallo.core",
+    "thrallo.entities", "thrallo.forms", "thrallo.identity", "thrallo.newsletter", "thrallo.workflow",
   ]);
   for (const [capabilityId, capability] of Object.entries(CAPABILITIES)) {
     const manifest = moduleForCapability(capabilityId);
@@ -130,8 +130,10 @@ test("registry — every legacy capability is wrapped by a validated module; pub
       assert.ok(manifest.provides.operations.some((row) => row.id === operation),
         `${capabilityId} module provides the registry operation ${operation}`);
     }
-    // The protected runtime artefact is the same file the capability registry has always shipped.
-    assert.equal(manifest.runtime.protectedArtifacts[0].path, capability.package);
+    // The protected runtime artefact is the same file the capability registry has always shipped
+    // (a module providing several capabilities lists every one of their packages).
+    assert.ok(manifest.runtime.protectedArtifacts.some((artifact) => artifact.path === capability.package),
+      `${manifest.id} protects ${capability.package}`);
     assert.ok(typeof REACT_VITE[capability.package] === "string", `${capability.package} still ships in the scaffold`);
     assert.ok(isProtectedPath(capability.package), `${capability.package} stays under the write guard`);
     assert.equal(manifest.lifecycle.uninstall, "retain_data");
@@ -159,7 +161,8 @@ test("resolver — selection is deterministic, dependency-complete and explainab
   assert.deepEqual(entities.reasons, ["capability:crud"]);
   const identity = first.modules.find((row) => row.id === "thrallo.identity");
   assert.deepEqual(identity.reasons, ["capability:session", "required by thrallo.authorization", "required by thrallo.entities"]);
-  assert.deepEqual(first.explanations, ["crud → thrallo.entities (^1.0.0)", "roles → thrallo.authorization (^1.0.0)", "session → thrallo.identity (^1.1.0)"]);
+  // roles resolves to authorization 1.1 (WP4), which still provides the legacy roles capability.
+  assert.deepEqual(first.explanations, ["crud → thrallo.entities (^1.0.0)", "roles → thrallo.authorization (^1.1.0)", "session → thrallo.identity (^1.1.0)"]);
   // The dependency closure is minimal: nothing the bindings did not ask for.
   assert.equal(first.modules.some((row) => row.id === "thrallo.booking"), false);
 });
@@ -211,8 +214,10 @@ test("availability — a missing required service is an explicit configuration-r
   assert.ok(resolvedModuleIds(resolution).includes("thrallo.identity"));
 
   assert.throws(() => declaredAvailability({ teleport: true }), /unknown deployment services/);
+  // The source baseline (what the platform can install) includes the WP4 accounts service; a
+  // deployment declares what it actually enabled through availabilityFromEnv.
   assert.deepEqual(Object.entries(baselineDeploymentAvailability().services).filter(([, on]) => on).map(([id]) => id),
-    ["backend_sdk", "app_auth", "entities", "realtime"]);
+    ["backend_sdk", "app_auth", "entities", "realtime", "accounts"]);
   const env = availabilityFromEnv({ SUPABASE_URL: "https://x.supabase.co", SUPABASE_ANON_KEY: "anon", THRALLO_APP_SERVICE_STORAGE: "1" });
   assert.equal(env.services.storage, true);
   assert.equal(env.services.payments, false, "optional services are never assumed");

@@ -43,6 +43,13 @@ export function deriveIdentityPlan(contract) {
     protectedRoutes,
     redirect: { signedOut: required ? signInRoute : null, signedIn: required ? homeRoute : null },
     roles: unique((contract?.auth?.roles || []).map(String)),
+    // WP4: the account policy the composed accounts module and the app-accounts service share —
+    // declared roles (never a business record's role field) and the self-editable profile fields
+    // an account-shaped entity contributed.
+    accountPolicy: {
+      roles: unique((contract?.auth?.roles || []).map((role) => String(role).trim().toLowerCase())),
+      profileFields: unique((contract?.ownership?.profileSchema || []).map((field) => field?.name || field)),
+    },
     verification: identityVerificationPlan({ mode, methods, protectedRoutes }),
   };
 }

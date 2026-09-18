@@ -19,6 +19,7 @@ export const MODULE_REGISTRY_VERSION = 1;
 export const SERVICES = Object.freeze([
   "backend_sdk", "app_auth", "entities", "storage", "payments", "notifications", "analytics",
   "runtime_actions", "knowledge", "meta_connector", "realtime",
+  "accounts", // WP4: the app-accounts Edge Function plus the memberships migration
 ]);
 
 const CAPABILITY_MODULE_IDS = Object.freeze({
@@ -30,6 +31,10 @@ const CAPABILITY_MODULE_IDS = Object.freeze({
   contact: "thrallo.contact",
   newsletter: "thrallo.newsletter",
   "interaction-primitives": "thrallo.forms",
+  // WP4
+  accounts: "thrallo.accounts",
+  authorization: "thrallo.authorization",
+  admin: "thrallo.admin",
 });
 
 const REQUIRED_SERVICES = Object.freeze({
@@ -41,13 +46,20 @@ const REQUIRED_SERVICES = Object.freeze({
   contact: ["backend_sdk", "entities"],
   newsletter: ["backend_sdk", "entities"],
   "interaction-primitives": [],
+  accounts: ["backend_sdk", "app_auth", "accounts"],
+  authorization: [],
+  admin: ["backend_sdk", "app_auth", "accounts"],
 });
 
 const SERVER_ABI = Object.freeze({
   crud: "entities-jsonb@1", session: "app-auth@1", roles: null, booking: "entities-jsonb@1",
   wizard: "entities-jsonb@1", contact: "entities-jsonb@1", newsletter: "entities-jsonb@1",
   "interaction-primitives": null,
+  accounts: "app-accounts@1", authorization: "app-accounts@1", admin: "app-accounts@1",
 });
+
+// Capabilities wrapped one-to-one by legacyCapabilityModule(); the rest are composed below.
+const LEGACY_WRAPPED = Object.freeze(["crud", "session", "roles", "booking", "wizard", "contact", "newsletter", "interaction-primitives"]);
 
 const QUERY_OPERATIONS = new Set([
   "list", "get", "count", "subscribe", "getBooking", "listBookings", "remaining", "getState",
@@ -255,7 +267,63 @@ const IDENTITY_1_2 = (() => {
   });
 })();
 
-const MODULES = [CORE_MODULE, ...Object.keys(CAPABILITY_MODULE_IDS).map(legacyCapabilityModule), IDENTITY_1_2];
+// WP4: accounts, authorization 1.1 (the ownership adapter plus real policy over memberships)
+// and admin management. Every command is enforced by the app-accounts service; the deployment
+// must declare the "accounts" service or a contract that needs these blocks before generation.
+const ACCOUNT_ARTIFACTS = [
+  { path: "src/lib/modules/policy.js", kind: "runtime" },
+  { path: "src/lib/modules/accounts.js", kind: "runtime" },
+  { path: "src/lib/modules/accountsReact.js", kind: "runtime" },
+];
+const accountsModule = (capabilityId, extra = {}) => {
+  const base = legacyCapabilityModule(capabilityId);
+  return defineModule({
+    ...base,
+    title: extra.title || base.title,
+    provides: { capabilities: [capabilityId, ...(extra.alsoProvides || [])], operations: [...base.provides.operations, ...(extra.operations || [])] },
+    runtime: {
+      ...base.runtime,
+      clientEntrypoints: [
+        ...base.runtime.clientEntrypoints,
+        ...(extra.clientEntrypoints || []),
+      ],
+      serverHandlers: [{ handler: "supabase/functions/app-accounts", actions: ["me", "updateMe", "permissions", "member", "members", "invite", "provision", "setRole", "setStatus"] }],
+      protectedArtifacts: [...new Map([...base.runtime.protectedArtifacts, ...ACCOUNT_ARTIFACTS, ...(extra.protectedArtifacts || [])]
+        .map((artifact) => [artifact.path, artifact])).values()],
+    },
+    permissions: [
+      { id: "members.read", scope: "application", enforcedBy: "app-accounts", description: "list memberships" },
+      { id: "members.invite", scope: "application", enforcedBy: "app-accounts", description: "invite a member" },
+      { id: "members.provision", scope: "application", enforcedBy: "app-accounts", description: "provision an account" },
+      { id: "members.role", scope: "membership", enforcedBy: "app-accounts", description: "change a member's role; never one's own" },
+      { id: "members.status", scope: "membership", enforcedBy: "app-accounts", description: "suspend or reinstate; never one's own; never the last admin" },
+      { id: "profile.read", scope: "self", enforcedBy: "app-accounts", description: "read own profile" },
+      { id: "profile.write", scope: "self", enforcedBy: "app-accounts", description: "write allow-listed profile fields" },
+    ],
+    migrations: [{ id: "20260918120000_app_accounts_memberships", additive: true, destructive: false }],
+    qualification: { basis: "module_suite", proof: "test/code-agent/builder-v2-accounts-module.test.mjs" },
+  });
+};
+const ACCOUNTS_MODULE = accountsModule("accounts", { title: "Accounts/profiles", clientEntrypoints: [
+  { module: "src/lib/capabilities/composed/accounts.js", exports: ["accountsController", "accountPolicy"], composed: true },
+  { module: "src/lib/app/accounts.js", exports: ["useProfile", "usePermissions", "useAdminMembers", "useAdminOperation"], composed: true },
+], protectedArtifacts: [{ path: "src/lib/capabilities/composed/accounts.js", kind: "composed" }, { path: "src/lib/app/accounts.js", kind: "composed" }] });
+const AUTHORIZATION_1_1 = (() => {
+  const roles = legacyCapabilityModule("roles");
+  const manifest = accountsModule("authorization", { title: "Authorization (ownership adapter + membership policy)", alsoProvides: ["roles"],
+    operations: roles.provides.operations.filter((row) => !["isOwner", "requireOwner"].includes(row.id)),
+    clientEntrypoints: [...roles.runtime.clientEntrypoints,
+      { module: "src/lib/capabilities/composed/authorization.js", exports: ["authorization"], composed: true }],
+    protectedArtifacts: [...roles.runtime.protectedArtifacts, { path: "src/lib/capabilities/composed/authorization.js", kind: "composed" }] });
+  // The ownership adapter needs no accounts service; policy over memberships does. The module
+  // itself stays installable everywhere; admin (which needs grants) declares the service.
+  return defineModule({ ...manifest, requires: { ...manifest.requires, services: [] }, compatibility: { ...manifest.compatibility, serverAbi: "app-accounts@1|rls-owner@1" } });
+})();
+const ADMIN_MODULE = accountsModule("admin", { title: "Admin management", clientEntrypoints: [
+  { module: "src/lib/capabilities/composed/admin.js", exports: ["admin"], composed: true },
+], protectedArtifacts: [{ path: "src/lib/capabilities/composed/admin.js", kind: "composed" }] });
+
+const MODULES = [CORE_MODULE, ...LEGACY_WRAPPED.map(legacyCapabilityModule), IDENTITY_1_2, ACCOUNTS_MODULE, AUTHORIZATION_1_1, ADMIN_MODULE];
 
 /** id → every registered version of that module, highest last. */
 const byId = new Map();

@@ -78,16 +78,84 @@ export function useConfirmReset() { return useIdentityAction(identity, "confirmR
 /** { allowed, reason, pending } for a surface that needs "member", "visitor" or "any". */
 export function useSessionGuard(requirement = "member") { return useIdentityGuard(identity, requirement); }
 `;
-  files[APP_FACADE_INDEX_PATH] = `${banner("public application ABI")}// The one import surface for generated application code. Everything here is deterministic and
+  return files;
+}
+
+// WP4: accounts, authorization and admin are composed over the identity controller. The account
+// policy (declared roles, self-editable profile fields) comes from the identity plan; the server
+// holds the same policy and enforces it independently of anything rendered here.
+export const ACCOUNTS_COMPOSED_PATH = `${COMPOSED_ROOT}/accounts.js`;
+export const AUTHORIZATION_COMPOSED_PATH = `${COMPOSED_ROOT}/authorization.js`;
+export const ADMIN_COMPOSED_PATH = `${COMPOSED_ROOT}/admin.js`;
+export const APP_FACADE_ACCOUNTS_PATH = `${APP_FACADE_ROOT}/accounts.js`;
+
+function accountFiles(nodes, identityPlan) {
+  const files = {};
+  const interfaces = [];
+  const policy = identityPlan?.accountPolicy || { roles: [], profileFields: [] };
+  const hasAccounts = nodes.has("capability:accounts");
+  const hasAuthorization = nodes.has("capability:authorization");
+  const hasAdmin = nodes.has("capability:admin");
+  if (!hasAccounts && !hasAuthorization && !hasAdmin) return { files, interfaces };
+  files[ACCOUNTS_COMPOSED_PATH] = `${banner("accounts")}import { accounts } from "../../backend/index.js";
+import { identity } from "./identity.js";
+import { createAccountsController } from "../../modules/accounts.js";
+import { buildPolicy } from "../../modules/policy.js";
+
+export const accountPolicy = buildPolicy(${jsObject({ roles: policy.roles })});
+export const accountProfileFields = Object.freeze(${jsObject(policy.profileFields)});
+export const accountsController = createAccountsController({ accounts, identity });
+`;
+  interfaces.push({ module: ACCOUNTS_COMPOSED_PATH, exports: ["accountsController", "accountPolicy", "accountProfileFields"], owns: ["account"],
+    operations: [...CAPABILITIES.accounts.supportedOperations] });
+  if (hasAuthorization || hasAdmin) {
+    files[AUTHORIZATION_COMPOSED_PATH] = `${banner("authorization")}import { accountPolicy, accountsController } from "./accounts.js";
+import { createAuthorization } from "../../modules/accounts.js";
+
+export const authorization = createAuthorization({ policy: accountPolicy, accountsController });
+`;
+    interfaces.push({ module: AUTHORIZATION_COMPOSED_PATH, exports: ["authorization"], operations: [...CAPABILITIES.authorization.supportedOperations] });
+  }
+  if (hasAdmin) {
+    files[ADMIN_COMPOSED_PATH] = `${banner("admin")}import { accounts } from "../../backend/index.js";
+import { authorization } from "./authorization.js";
+import { createAdmin } from "../../modules/accounts.js";
+
+export const admin = createAdmin({ accounts, authorization });
+`;
+    interfaces.push({ module: ADMIN_COMPOSED_PATH, exports: ["admin"], operations: [...CAPABILITIES.admin.supportedOperations] });
+  }
+  files[APP_FACADE_ACCOUNTS_PATH] = `${banner("public accounts ABI")}import { accountsController } from "../capabilities/composed/accounts.js";
+${hasAuthorization || hasAdmin ? 'import { authorization } from "../capabilities/composed/authorization.js";\n' : ""}${hasAdmin ? 'import { admin } from "../capabilities/composed/admin.js";\n' : ""}import {
+  useProfile as useProfileState, usePermissions as usePermissionsState,
+  useAdminMembers as useAdminMembersState, useAdminOperation as useAdminOperationState,
+} from "../modules/accountsReact.js";
+
+/** { status, principal, membership, profile, profileFields, allowedActions, error } of the signed-in member. */
+export function useProfile() { return useProfileState(accountsController); }
+export const updateProfile = (values) => accountsController.updateMe(values);
+${hasAuthorization || hasAdmin ? `/** { can(action, target?), explain, allowedActions, role } over the server-derived actor. */
+export function usePermissions() { return usePermissionsState(authorization, accountsController); }
+export const can = (action, target = null) => authorization.can(action, target).allowed;
+` : ""}${hasAdmin ? `/** { members, status, error, reload } for an administration surface. */
+export function useAdminMembers() { return useAdminMembersState(admin); }
+/** { run, pending, error, result } for inviteMember | provisionMember | setMemberRole | setMemberStatus. */
+export function useAdminOperation(operation) { return useAdminOperationState(admin, operation); }
+` : ""}`;
+  return { files, interfaces };
+}
+
+function facadeIndexSource(moduleLock, facadeModules) {
+  return `${banner("public application ABI")}// The one import surface for generated application code. Everything here is deterministic and
 // protected; layout, styling, copy and domain logic remain entirely the application's.
 export * from "../capabilities/composed/index.js";
-export * from "./identity.js";
+${facadeModules.map((name) => `export * from "./${name}.js";`).join("\n")}
 export const THRALLO_APP_ABI = Object.freeze(${jsObject({
     version: 1,
     modules: (moduleLock?.modules || []).map((row) => `${row.id}@${row.version}`),
+    facades: facadeModules,
   })});
 `;
-  return files;
 }
 
 function capabilityFiles(graph, { moduleLock = null, identityPlan = null, identityRuntime = true } = {}) {
@@ -200,6 +268,14 @@ export const newsletterCapability = makeNewsletter({ entity: ${quote(entity)} })
     Object.assign(files, identityFiles(moduleLock, identityPlan));
     interfaces.push({ module: IDENTITY_COMPOSED_PATH, exports: ["identity", "identityPlan"], owns: ["session"],
       operations: identityPlan.methods });
+    const facades = ["identity"];
+    const account = accountFiles(nodes, identityPlan);
+    if (Object.keys(account.files).length) {
+      Object.assign(files, account.files);
+      interfaces.push(...account.interfaces);
+      facades.push("accounts");
+    }
+    files[APP_FACADE_INDEX_PATH] = facadeIndexSource(moduleLock, facades);
   }
   if (moduleLock) files[MODULE_LOCK_PATH] = lockFileSource(moduleLock);
 

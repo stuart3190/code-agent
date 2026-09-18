@@ -19,17 +19,26 @@ export function declaredAvailability(services = {}, { source = "declared" } = {}
 }
 
 /**
- * What the baseline runtime ships everywhere Builder V2 runs: the backend SDK, app-scoped auth
- * (app-auth is deployed and proven), generic entities and the entity change subscription. Every
- * optional service is NOT assumed. A deployment that provides more declares it explicitly.
+ * What the SOURCE ships as platform-owned runtime: the backend SDK, app-scoped auth, generic
+ * entities, the entity change subscription and — since WP4 — the app-accounts service. This is
+ * the derivation default (tests, offline replays, compilation) and says what the platform CAN
+ * install. It is not a claim about any deployment: the orchestrator resolves against
+ * availabilityFromEnv(), where every optional service must be declared explicitly.
  */
 export function baselineDeploymentAvailability() {
-  return declaredAvailability({ backend_sdk: true, app_auth: true, entities: true, realtime: true }, { source: "baseline" });
+  return declaredAvailability({ backend_sdk: true, app_auth: true, entities: true, realtime: true, accounts: true }, { source: "source_baseline" });
+}
+
+/** A deployment that has not enabled any WP4+ service: the pre-migration production shape. */
+export function legacyDeploymentAvailability() {
+  return declaredAvailability({ backend_sdk: true, app_auth: true, entities: true, realtime: true }, { source: "legacy_deployment" });
 }
 
 /**
- * Availability read from the shell environment. The public runtime configuration decides the
- * core trio; optional services are enabled only by an explicit THRALLO_APP_SERVICE_<NAME>=1.
+ * Availability read from the shell environment — the deployment's own declaration, and what a
+ * live build resolves against. The public runtime configuration decides the core services;
+ * every other service (the app-accounts function, storage, payments, …) is enabled only by an
+ * explicit THRALLO_APP_SERVICE_<NAME>=1 once it has been deployed and its migration applied.
  */
 export function availabilityFromEnv(env = process.env) {
   const url = String(env.SUPABASE_URL || "").trim();
@@ -38,7 +47,7 @@ export function availabilityFromEnv(env = process.env) {
   const flag = (name) => String(env[`THRALLO_APP_SERVICE_${name.toUpperCase()}`] || "").trim() === "1";
   return declaredAvailability({
     backend_sdk: core, app_auth: core, entities: core, realtime: core,
-    ...Object.fromEntries(["storage", "payments", "notifications", "analytics", "runtime_actions", "knowledge", "meta_connector"]
+    ...Object.fromEntries(["storage", "payments", "notifications", "analytics", "runtime_actions", "knowledge", "meta_connector", "accounts"]
       .map((service) => [service, core && flag(service)])),
   }, { source: "env" });
 }

@@ -96,7 +96,7 @@ export async function ensureAppVisitorSession({
   }
 }
 
-export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null, paymentsUrl = null, actionsUrl = null, runtimeUrl = null, connectorsUrl = null, analyticsUrl = null, fetchImpl = globalThis.fetch, visitorStorage = globalThis.localStorage } = {}) {
+export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null, paymentsUrl = null, actionsUrl = null, runtimeUrl = null, connectorsUrl = null, analyticsUrl = null, accountsUrl = null, fetchImpl = globalThis.fetch, visitorStorage = globalThis.localStorage } = {}) {
   if (!url || !anonKey) {
     throw new Error(
       "createSupabaseBackend: `url` and `anonKey` are required (set VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)."
@@ -447,6 +447,31 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     },
   };
   const usage = { async getBalance() { return (await runtimePost("usage")).balance; } };
+
+  // WP4: accounts — memberships, profiles and administration through the app-accounts service.
+  // Every command carries the signed-in user's JWT; the service derives the actor and enforces
+  // the app's policy. Nothing the client sends about itself (role, appId) grants anything.
+  const accountsPost = async (command, payload = {}) => {
+    if (!accountsUrl || !appId) throw Object.assign(new Error("Accounts are not configured for this app."), { code: "accounts_unavailable" });
+    const session = (await client.auth.getSession()).data.session;
+    if (!session?.access_token) throw Object.assign(new Error("Sign in before using account features."), { code: "unauthenticated" });
+    const response = await fetchImpl(accountsUrl, { method: "POST", headers: { "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`, apikey: anonKey }, body: JSON.stringify({ command, appId, ...payload }) });
+    const out = await response.json().catch(() => ({}));
+    if (!response.ok) { const error = new Error(out.error || `Account request failed (${response.status}).`); error.code = out.code || "forbidden"; error.status = response.status; error.details = out.details; throw error; }
+    return out;
+  };
+  const accounts = {
+    async me() { return accountsPost("me"); },
+    async updateMe(values = {}) { return accountsPost("updateMe", { values }); },
+    async permissions() { return accountsPost("permissions"); },
+    async member({ userId = null, email = null } = {}) { return accountsPost("member", { userId, email }); },
+    async members() { return (await accountsPost("members")).members; },
+    async invite({ email, role = null } = {}) { return accountsPost("invite", { email, role }); },
+    async provision({ email, role = null } = {}) { return accountsPost("provision", { email, role }); },
+    async setRole({ userId = null, email = null, role } = {}) { return accountsPost("setRole", { userId, email, role }); },
+    async setStatus({ userId = null, email = null, status } = {}) { return accountsPost("setStatus", { userId, email, status }); },
+  };
   const knowledge = { async search(actionKey, query, options = {}) {
     const job = await actions.invoke(actionKey, { query, ...options }); return actions.wait(job.id);
   } };
@@ -523,5 +548,5 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     }).catch(() => {}));
   }
 
-  return { auth, db, storage, payments, notifications, actions, usage, knowledge, integrations, analytics, _client: client };
+  return { auth, db, storage, payments, notifications, actions, usage, knowledge, integrations, analytics, accounts, _client: client };
 }

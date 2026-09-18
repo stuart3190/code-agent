@@ -67,6 +67,23 @@ const LEGACY_CAPABILITIES = Object.freeze({
     interface: ["makeNewsletter"], entities: ["newsletterSignup"],
     uiContract: ["idle", "invalid", "success", "duplicate"], upgradePolicy: "replace-on-iterate",
   },
+  // WP4 — real accounts. Profiles, memberships, roles and administration are platform-owned
+  // through the app-accounts service; a role field on a business record is never authority.
+  accounts: {
+    name: "accounts", version: "1.0.0", package: "src/lib/modules/accounts.js",
+    interface: ["createAccountsController"], entities: [],
+    uiContract: ["idle", "loading", "ready", "error"], upgradePolicy: "replace-on-iterate",
+  },
+  authorization: {
+    name: "authorization", version: "1.1.0", package: "src/lib/modules/accounts.js",
+    interface: ["createAuthorization"], entities: [],
+    uiContract: [], upgradePolicy: "replace-on-iterate",
+  },
+  admin: {
+    name: "admin", version: "1.0.0", package: "src/lib/modules/accounts.js",
+    interface: ["createAdmin"], entities: [],
+    uiContract: ["idle", "loading", "ready", "error", "denied"], upgradePolicy: "replace-on-iterate",
+  },
 });
 
 const metadata = Object.freeze({
@@ -143,6 +160,39 @@ const metadata = Object.freeze({
     verificationSemantics: { actions: ["validate", "subscribe", "reject_duplicate"], stateChange: "signup result and record", durableMutation: true, observe: ["invalid", "success", "duplicate"] },
     testContract: ["invalid refused", "valid persisted", "duplicate refused"],
   },
+  accounts: {
+    supportedOperations: ["ensure", "reload", "getMe", "updateMe", "getMember"],
+    requiredInputs: { factory: [], operations: { updateMe: ["values"], getMember: ["email"] } },
+    operationOutputs: { ensure: ["account"], reload: ["account"], getMe: ["account"], updateMe: ["profile"], getMember: ["member"] },
+    outputs: { account: "principal, membership (role/status), profile and allowed actions of the signed-in member", profile: "the member's self-editable profile", member: "one membership (email, role, status)" },
+    stateOwnership: { owns: "account profile and membership state", scope: "signed-in member of this application" },
+    persistenceSemantics: { durable: true, owner: "app-accounts service (app_profiles, app_memberships)", browserStorage: false },
+    dependencies: ["session"], compatibleUiInteractionPrimitives: ["field", "action", "status"],
+    verificationSemantics: { actions: ["load", "updateProfile", "lookup"], stateChange: "profile and membership", durableMutation: true, observe: ["profile after reload", "membership role and status", "allowed actions"] },
+    testContract: ["me", "updateMe allow-listed", "reload keeps profile", "suspended denied"],
+  },
+  authorization: {
+    supportedOperations: ["can", "authorize", "explainAllowedActions", "role", "isOwner", "requireOwner"],
+    requiredInputs: { factory: [], operations: { can: ["action"], authorize: ["action"], isOwner: ["record", "user"], requireOwner: ["record", "user"] } },
+    operationOutputs: { can: ["decision"], authorize: ["decision"], explainAllowedActions: ["allowedActions"], role: ["role"] },
+    outputs: { decision: "allowed with a reason when denied", allowedActions: "actions the policy grants the actor", role: "the actor's membership role", authorization: "boolean or authorized record" },
+    stateOwnership: { owns: "no state", scope: "policy decision over the server-derived actor" },
+    persistenceSemantics: { durable: false, owner: "server policy (app-accounts) plus RLS; the client evaluation only shapes UI", browserStorage: false },
+    dependencies: ["session"], compatibleUiInteractionPrimitives: ["action", "status"],
+    verificationSemantics: { actions: ["authorize", "reject"], stateChange: "none", durableMutation: false, observe: ["allowed action visible", "denied action absent or refused", "server denial"] },
+    testContract: ["member allowed", "member denied", "admin allowed", "visitor denied", "own membership immutable"],
+  },
+  admin: {
+    supportedOperations: ["listMembers", "inviteMember", "provisionMember", "setMemberRole", "setMemberStatus"],
+    requiredInputs: { factory: [], operations: { inviteMember: ["email", "role"], provisionMember: ["email", "role"], setMemberRole: ["email", "role"], setMemberStatus: ["email", "status"] } },
+    operationOutputs: { listMembers: ["members"], inviteMember: ["member"], provisionMember: ["member"], setMemberRole: ["member"], setMemberStatus: ["member"] },
+    outputs: { members: "every membership of the application", member: "the membership after the command" },
+    stateOwnership: { owns: "memberships: invitations, roles and status", scope: "application, administered by a member the policy grants members.* actions" },
+    persistenceSemantics: { durable: true, owner: "app-accounts service (app_memberships, app_membership_events)", browserStorage: false },
+    dependencies: ["session", "accounts", "authorization"], compatibleUiInteractionPrimitives: ["field", "selection", "action", "status"],
+    verificationSemantics: { actions: ["list", "invite", "provision", "changeRole", "suspend", "reinstate"], stateChange: "membership rows", durableMutation: true, observe: ["member listed", "role after reload", "suspended member denied", "non-admin denied"] },
+    testContract: ["non-admin denied", "admin invites", "role change persists", "suspension denies sign-in", "cross-app isolation", "last admin protected"],
+  },
   "interaction-primitives": {
     supportedOperations: ["subscribe_state", "run_action", "field", "selection", "action", "flow_advance", "status"],
     requiredInputs: { factory: [], operations: { field: ["name", "value", "onChange"], selection: ["name", "value", "onSelect"], action: ["name", "onActivate"] } },
@@ -185,6 +235,18 @@ const RESPONSIBILITY_SEMANTICS = Object.freeze({
   }),
   contact: Object.freeze({ persistence: Object.freeze(["submitContact"]), functional: Object.freeze(["submitContact"]) }),
   newsletter: Object.freeze({ persistence: Object.freeze(["subscribe"]), functional: Object.freeze(["subscribe"]) }),
+  accounts: Object.freeze({
+    persistence: Object.freeze(["updateMe"]),
+    functional: Object.freeze(["ensure", "reload", "getMe", "updateMe", "getMember"]),
+  }),
+  authorization: Object.freeze({
+    persistence: Object.freeze([]),
+    functional: Object.freeze(["can", "authorize", "explainAllowedActions", "role", "isOwner", "requireOwner"]),
+  }),
+  admin: Object.freeze({
+    persistence: Object.freeze(["inviteMember", "provisionMember", "setMemberRole", "setMemberStatus"]),
+    functional: Object.freeze(["listMembers", "inviteMember", "provisionMember", "setMemberRole", "setMemberStatus"]),
+  }),
   "interaction-primitives": Object.freeze({
     persistence: Object.freeze([]),
     functional: Object.freeze(["subscribe_state", "run_action", "field", "selection", "action", "flow_advance", "status"]),
@@ -349,6 +411,9 @@ const INSTANCE_METHODS = Object.freeze({
   wizard: "makeWizardMachine({ id, steps, onConfirm }) → durable app-scoped state that HYDRATES ITSELF on first subscribe; getState()/subscribe snapshots expose canonical { stepId, stepIndex, values } plus compatible step/currentStep/current aliases; restore() reloads durable state and restore({ stepId, values, ... }) atomically adopts and saves a compatible state; methods { getState, subscribe, hydrate, restore, setValue, select, validateCurrent, next, back, goTo, confirm, cancel, reset }",
   contact: "makeContactForm(...) → { submitContact(fields) }   // NOT .submit",
   newsletter: "makeNewsletter(...) → { subscribe(email) }",
+  accounts: "composed `accountsController` → { ensure, reload, updateMe(values), getMember({ email }), getState, subscribe } — the signed-in member's profile/membership; never a generic entity store",
+  authorization: "composed `authorization` → { can(action, target?) → { allowed, reason }, authorize(action), explainAllowedActions(), role() } plus isOwner/requireOwner — the server enforces independently",
+  admin: "composed `admin` → { listMembers(), inviteMember({ email, role }), provisionMember({ email, role }), setMemberRole({ email, role }), setMemberStatus({ email, status }), getState, subscribe }",
 });
 
 /** The interface brief a build prompt carries — small, byte-stable, sorted. */

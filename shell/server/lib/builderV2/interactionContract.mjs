@@ -64,7 +64,7 @@ export function draftStateOwner(bindings = []) {
 }
 
 const SOURCE = /^src\/.*\.(?:jsx?|tsx?)$/;
-const PLATFORM = /^src\/lib\/(?:capabilities\/|backend\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
+const PLATFORM = /^src\/lib\/(?:capabilities\/|backend\/|modules\/|app\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
 const AST_SKIP = new Set(["loc", "start", "end", "extra", "errors", "comments", "tokens"]);
 const STOP = IDENTITY_STOP_WORDS;
 
