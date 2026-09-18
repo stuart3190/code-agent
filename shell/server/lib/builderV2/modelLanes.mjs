@@ -36,6 +36,7 @@ import { journeySurfaceBrief, journeySurfaceContext } from "./surfaceIntegration
 import { scopeScaffoldGraph } from "./scaffoldGraph.mjs";
 import { scaffoldCompositionBrief } from "./scaffoldComposer.mjs";
 import { buildExecutionSpec, compactInteractionFlow, renderExecutionSpecSection } from "./executionSpec.mjs";
+import { CONTRACT_GATE_REPAIR_OUTPUT_TOKENS, CONTRACT_WORKFLOW_PHASE } from "./contractStageBudget.mjs";
 
 /** Same shape as buildJobs' private bucket: one accumulator for the whole job. */
 /** The exact system prompt of a full generation dispatch, so an offline estimate equals production's. */
@@ -1370,6 +1371,29 @@ export function repairOutputEnvelope({
 }
 
 /**
+ * The contract-stage workflow priced on one wire: the reservation a full contract turn needs,
+ * and the reservation the planner would need to admit a gate repair on the same wire (its
+ * output allowance comes from measured gate repairs, see contractStageBudget.mjs). The sum is
+ * the recovery capacity the workflow must hold before the correction may be dispatched.
+ */
+export function contractWorkflowReservation(options, model, {
+  maxOutputTokens, gateRepairOutputTokens = CONTRACT_GATE_REPAIR_OUTPUT_TOKENS,
+} = {}) {
+  const inputTokens = estimatePromptTokens(options);
+  const correctionCredits = conservativeCallReservation(options, model, {
+    maxOutputTokens: Math.max(1, Math.floor(Number(maxOutputTokens || 0))), inputTokens,
+  });
+  const gateRepairReserveCredits = conservativeCallReservation(options, model, {
+    maxOutputTokens: Math.max(1, Math.floor(Number(gateRepairOutputTokens || 0))), inputTokens,
+  });
+  const r4 = (value) => Math.round(Number(value || 0) * 10_000) / 10_000;
+  return {
+    inputTokens, correctionCredits: r4(correctionCredits), gateRepairReserveCredits: r4(gateRepairReserveCredits),
+    workflowCredits: r4(correctionCredits + gateRepairReserveCredits),
+  };
+}
+
+/**
  * Fit a provider call into both its per-call limit and the live build headroom. A repair's nominal
  * allowance informs policy/evidence but is not another hard ceiling; its retrieved scope sizes the
  * output envelope. Reducing maxOutputTokens makes the reservation a real upper bound rather than
@@ -1382,6 +1406,7 @@ export function planCallReservation(options, model, {
   repairAllowanceCredits = null,
   repairSizing = null,
   fundingPolicy = "request_owner",
+  minimumUsefulOutputTokens: requiredOutputTokens = null,
   budget,
 } = {}) {
   const remaining = Number(budget?.remainingCredits || 0);
@@ -1405,7 +1430,8 @@ export function planCallReservation(options, model, {
   }) : null;
   const requested = sizing?.plannedOutputTokens
     ?? Math.max(0, Math.floor(Number(requestedMaxOutputTokens || 0)));
-  const minimumUsefulOutputTokens = sizing?.minimumUsefulOutputTokens || 1;
+  const minimumUsefulOutputTokens = sizing?.minimumUsefulOutputTokens
+    || Math.max(1, Math.floor(Number(requiredOutputTokens || 0)));
   const estimatedInputTokens = estimatePromptTokens(options);
   let low = 0;
   let high = requested;
@@ -1491,6 +1517,7 @@ export async function runReservedDispatch({
   scopedDispatch = false, affectedModules = 1, retrievalTokens = 0, problems = [],
   expectedPatchTokens = null, maxOutputTokens = 16_000, beforeDispatch = null,
   signal = null, causalFiles = [], checkpointId = null, completionReserveCredits = 0,
+  minimumUsefulOutputTokens = null,
   transportRetries = 0,
 } = {}) {
   const dispatchArguments = arguments[0];
@@ -1517,6 +1544,7 @@ export async function runReservedDispatch({
       minimumCredits: scopedDispatch ? 0 : decision?.estimatedCredits || 0,
       callCeilingCredits: callCeiling,
       repairAllowanceCredits: decision?.repairAllowanceCredits,
+      minimumUsefulOutputTokens,
       repairSizing: scopedDispatch ? {
         retrievedFileCount: Number(affectedModules || 1),
         retrievalTokens: Number(retrievalTokens || 0),
@@ -1530,7 +1558,8 @@ export async function runReservedDispatch({
   } catch (error) {
     error.fundingPool = resolvedPool;
     if (error.code === "budget_ceiling") {
-      error.code = protectedCredits > 0 ? "customer_completion_reserve"
+      error.code = protectedCredits > 0
+        ? (resolvedPool === FUNDING_POOL.RECOVERY ? "recovery_completion_reserve" : "customer_completion_reserve")
         : resolvedPool === FUNDING_POOL.RECOVERY
           ? "recovery_envelope_exhausted" : "customer_envelope_exhausted";
       error.completionReserveCredits = protectedCredits;
@@ -1683,6 +1712,9 @@ export function createModelLanes({
   if ((!provider && !providerForStep) || !ceilingCredits) throw new Error("model lanes need a provider and a ceiling");
   const legacyGuard = reservations ? null : managedUsageGuard(Number(ceilingCredits), provider.model, bucket);
   let callSequence = 0;
+  // The workflow price a protocol correction was admitted under, so its gate repair is planned
+  // against a ceiling at least that high even though the two wires differ by a few bytes.
+  const contractWorkflowByBuild = new Map();
   const choose = async (step, context) => {
     const selected = providerForStep ? await providerForStep({ step, ...context }) : { provider, decision: null };
     const selectedProvider = selected?.provider?.runTurn ? selected.provider : selected;
@@ -1727,6 +1759,7 @@ export function createModelLanes({
             beforeDispatch, signal: context.signal || options.signal,
             causalFiles: context.causalFiles || [], checkpointId: context.checkpointId || null,
             completionReserveCredits,
+            minimumUsefulOutputTokens: context.minimumUsefulOutputTokens || null,
           });
         },
       },
@@ -1786,10 +1819,33 @@ export function createModelLanes({
           contractAttempt += 1;
           // Retry/correction work is Thrallo-funded even when the first planned contract call was
           // customer-funded. A gate-repair invocation is recovery-funded from its first call.
+          // THE WORKFLOW IS PRICED BEFORE THE CORRECTION: the correction may only take what
+          // leaves a gate repair on this same wire affordable, and it runs with its full output
+          // plan or not at all - a squeezed contract turn is a paid truncation
+          // (contractStageBudget.mjs).
+          const plannedOutputTokens = Number(selected.decision?.maxOutputTokens || maxOutputTokens);
           if (!repair && contractAttempt > 1) {
+            const workflow = contractWorkflowReservation(options, selected.provider.model, {
+              maxOutputTokens: plannedOutputTokens,
+            });
+            log(`contract: protocol correction ${contractAttempt - 1} priced at ${workflow.correctionCredits} credits `
+              + `with ${workflow.gateRepairReserveCredits} protected for a gate repair (${workflow.inputTokens} input tokens)`);
+            contractWorkflowByBuild.set(buildId, Math.max(contractWorkflowByBuild.get(buildId) || 0, workflow.workflowCredits));
             selected = await reservedProvider("contract", {
               ...selectionContext, recoveryDispatch: true,
+              workflowPhase: CONTRACT_WORKFLOW_PHASE.PROTOCOL_CORRECTION,
+              contractWorkflowCredits: workflow.workflowCredits,
+              gateRepairReserveCredits: workflow.gateRepairReserveCredits,
+              minimumUsefulOutputTokens: plannedOutputTokens,
               logicalDispatchId: `${buildId}:contract_protocol_correction:${contractAttempt - 1}`,
+            });
+          } else if (repair && contractAttempt === 1) {
+            const workflow = contractWorkflowReservation(options, selected.provider.model, {
+              maxOutputTokens: plannedOutputTokens,
+            });
+            Object.assign(selectionContext, {
+              workflowPhase: CONTRACT_WORKFLOW_PHASE.GATE_REPAIR,
+              contractWorkflowCredits: Math.max(workflow.workflowCredits, contractWorkflowByBuild.get(buildId) || 0),
             });
           }
           return selected.provider.runTurn(options);

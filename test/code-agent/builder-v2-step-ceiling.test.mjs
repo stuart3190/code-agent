@@ -42,6 +42,7 @@ test("a fit failure names the input it estimated, the ceiling it hit and the out
   assert.ok(thrown, "a 0.5-credit ceiling cannot hold a 40k-token prompt");
   assert.match(thrown.message, /^Builder V2 call cannot fit a useful response inside approved headroom \(estimated input \d+ tokens, per-call ceiling 0\.5 credits, remaining 60 credits: at most \d+ output tokens fit, \d+ are needed\)$/);
   assert.equal(thrown.dispatchState, "before_dispatch");
-  assert.equal(thrown.estimatedInputTokens > 40_000, true);
+  // 120k prompt bytes at the calibrated 3.8 bytes per token (builder-v2-generation-envelope) is ~31.6k tokens.
+  assert.equal(thrown.estimatedInputTokens > 30_000, true);
   assert.equal(thrown.callCeiling, 0.5);
 });

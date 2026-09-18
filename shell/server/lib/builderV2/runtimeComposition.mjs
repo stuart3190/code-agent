@@ -29,6 +29,7 @@ import { createAssetService } from "./assets/assetService.mjs";
 import { createOptimiser } from "./assets/optimiser.mjs";
 import { pexelsProvider } from "./assets/pexelsProvider.mjs";
 import { persistContract, tierContract } from "./contractTiering.mjs";
+import { contractWorkflowRecoveryAuthority } from "./contractStageBudget.mjs";
 import { compareGraphIndexes, manifestOf } from "./graphParity.mjs";
 import { indexTree, INDEXER_VERSION } from "./indexer.mjs";
 import { createModelLanes } from "./modelLanes.mjs";
@@ -103,7 +104,12 @@ export const STEP_CEILING_SCALE = Object.freeze({ simple: 1, medium: 1.5, advanc
 
 export function stepOutputPolicy(step, { profile = null } = {}) {
   const base = {
-    contract: { estimatedCredits: 0.5, maxOutputTokens: 6_000, callCeilingCredits: 3 },
+    // A contract is one JSON document the model must finish: 224 settled first calls (30 days to
+    // 2026-09-18) produced p50 4,524 / p90 8,095 / max 12,010 output tokens and 110 protocol
+    // corrections up to 12,360. The 6,000-token plan those calls reserved against understated the
+    // correction that emptied the recovery pool on 7e74b401; the plan now covers what contracts
+    // actually produce, so a reservation is an upper bound rather than an optimistic estimate.
+    contract: { estimatedCredits: 0.5, maxOutputTokens: 12_000, callCeilingCredits: 3 },
     core: { estimatedCredits: 2, maxOutputTokens: 16_000, callCeilingCredits: 6 },
     // repairAllowanceCredits is the nominal planning target, not a hard reservation ceiling.
     // modelLanes sizes a targeted output envelope and caps it at the live whole-build headroom.
@@ -737,9 +743,12 @@ export function createBuilderV2Runtime({
         recordRetrieval, accountCreditResolver, maxRepairs,
         maxCorrections: generationPolicy.maxCandidateCorrections,
         defaultUsageResponsibility: defaultUsageResponsibilityFor(workJob.payload),
-        poolCeilingResolver: async ({ fundingPool, step }) => {
+        poolCeilingResolver: async ({ fundingPool, step, context }) => {
           if (fundingPool === FUNDING_POOL.RECOVERY) {
-            if (!activeEnvelope) return preliminaryRecoveryCredits;
+            // Before an envelope exists the contract workflow is the only recovery consumer:
+            // its correction is planned beside a protected gate-repair reserve, and the
+            // preliminary capacity grows (bounded) to what that workflow needs.
+            if (!activeEnvelope) return contractWorkflowRecoveryAuthority({ preliminaryRecoveryCredits, context });
             const current = activeBuildId ? await envelopeStore.get(owner, activeBuildId) : null;
             activeEnvelope = current?.envelope || activeEnvelope;
             return envelopePoolCeiling(activeEnvelope, FUNDING_POOL.RECOVERY);
