@@ -13,7 +13,7 @@ import {
 } from "./contractTiering.mjs";
 
 const GENERATED_SOURCE = /^src\/.*\.(?:jsx?|tsx?)$/;
-const PLATFORM_SOURCE = /^src\/lib\/(?:capabilities\/|backend\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
+const PLATFORM_SOURCE = /^src\/lib\/(?:capabilities\/|backend\/|modules\/|app\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
 const AST_SKIP = new Set(["loc", "start", "end", "extra", "errors", "comments", "tokens"]);
 const BROWSER_STORES = new Set(["localStorage", "sessionStorage", "indexedDB", "IndexedDB"]);
 const MEMORY_NAME = /(?:booking|reservation|wizard|persist|record|state|store|cache|database|rows?)/i;

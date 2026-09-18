@@ -34,7 +34,10 @@ export const REPAIR_STRATEGY_ORDER = Object.freeze([
 const unique = (values) => [...new Set((values || []).filter(Boolean))];
 const SOURCE = /\.(?:jsx?|tsx?|mjs)$/;
 // Platform-owned runtime modules: read context for a repair, never something it may rewrite.
-const PLATFORM_PATH = /(?:^|\/)lib\/(?:capabilities|scaffolds|backend)\//;
+// Repair may never rewrite platform code. WP3+ put the module runtime (lib/modules) and the
+// composed public facade (lib/app) inside that boundary: a module fault is platform remediation
+// or a versioned module upgrade, never an application patch (audit §14).
+const PLATFORM_PATH = /(?:^|\/)lib\/(?:capabilities|scaffolds|backend|modules|app)\//;
 const generatedSource = (path) => SOURCE.test(String(path || "")) && !PLATFORM_PATH.test(String(path || ""));
 
 const PACKAGING_SIGNS = /ERR_MODULE_NOT_FOUND|Cannot find (?:module|package)|sandbox_version_mismatch|sandbox (?:image|identity)|not copied|does not support|ENOENT.*node_modules/i;

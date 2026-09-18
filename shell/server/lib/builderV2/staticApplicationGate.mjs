@@ -14,7 +14,11 @@ import { journeySurfaceContext } from "./surfaceIntegration.mjs";
 
 const SOURCE = /^src\/.*\.(?:jsx?|tsx?|mjs|cjs)$/;
 const ENTRY = /^src\/(?:main|index|App)\.(?:jsx?|tsx?)$/;
-const PLATFORM = /^src\/lib\/(?:backend\/|capabilities\/|scaffolds\/composed\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
+// Platform infrastructure is never judged as generated application source. WP3+ added the module
+// runtime (src/lib/modules) and the composed public facade (src/lib/app) to that infrastructure:
+// they are protected, qualified by their own module suites, and shipped identically to every
+// application, so gating them here would report the platform's own code as an application defect.
+const PLATFORM = /^src\/lib\/(?:backend\/|capabilities\/|modules\/|app\/|scaffolds\/composed\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
 const unique = (values) => [...new Set((values || []).filter(Boolean))];
 
 const GLOBALS = new Set([

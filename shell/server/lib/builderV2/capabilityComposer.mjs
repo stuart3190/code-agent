@@ -172,14 +172,52 @@ export { queryableFields, validateValues };
 `;
   interfaces.push({ module: ENTITIES_COMPOSED_PATH, exports: ["entityDefinitions", "entitySchema", "repositories", "repository", "queryableFields", "validateValues"],
     owns: [...entitySchema.entities], operations: ["create", "get", "update", "remove", "list", "count", "subscribe"] });
-  files[APP_FACADE_ENTITIES_PATH] = `${banner("public entities ABI")}import { entitySchema, repositories, repository } from "../capabilities/composed/entities.js";
+  files[APP_FACADE_ENTITIES_PATH] = `${banner("public entities ABI")}import { entitySchema, queryableFields, repositories, repository } from "../capabilities/composed/entities.js";
 import { useEntity as useEntityState, useEntityMutation as useEntityMutationState } from "../modules/entitiesReact.js";
+import { createCollection as makeCollection } from "../modules/collections.js";
+import { createForm as makeForm } from "../modules/forms.js";
+import { createMutation as makeMutation, createResource as makeResource } from "../modules/asyncState.js";
+import {
+  useCollectionState, useFormState, useMutationState, useResourceState,
+} from "../modules/uiReact.js";
+import React from "react";
 
-export { entitySchema, repositories, repository };
+export { entitySchema, repositories, repository, queryableFields };
 /** { status: loading|ready|not_found|error, record: { id, version, createdAt, updatedAt, values }, reload } by canonical id. */
 export function useEntity(entity, id) { return useEntityState(repository(entity), id); }
 /** { create, update, remove, pending, error, result } bound to one entity's repository. */
 export function useEntityMutation(entity) { return useEntityMutationState(repository(entity)); }
+
+/** A query-state controller over one entity: the server runs the specification, never a page filter. */
+export const createCollection = (entity, initialQuery = {}) => makeCollection({ repository: repository(entity), schema: entitySchema, entity, initialQuery });
+/** A headless form over one entity's schema (or a free form when entity is null). */
+export const createForm = (entity, options = {}) => makeForm({ schema: entitySchema, entity, ...options });
+export const createResource = (options = {}) => makeResource(options);
+export const createMutation = (options = {}) => makeMutation(options);
+
+/**
+ * { items, count, status, error, nextCursor, filter, search, sort, clear, more, refresh } for one
+ * entity. The fields a screen may filter and sort on are the schema's; anything else is refused.
+ */
+export function useCollection(entity, initialQuery = {}) {
+  const collection = React.useMemo(() => createCollection(entity, initialQuery), [entity, JSON.stringify(initialQuery)]);
+  return useCollectionState(collection);
+}
+/** { values, errors, touched, status, field, setValue, submit, reset } for one entity's schema. */
+export function useForm(entity, options = {}) {
+  const form = React.useMemo(() => createForm(entity, options), [entity, options.submit]);
+  return useFormState(form);
+}
+/** { status: idle|loading|ready|empty|error, data, error, load, invalidate } for one async read. */
+export function useResource(fetcher, options = {}) {
+  const resource = React.useMemo(() => createResource(options), [options.key]);
+  return useResourceState(resource, fetcher);
+}
+/** { status, result, error, run, reset } for one operation, with optimistic rollback when bound. */
+export function useMutation(options = {}) {
+  const mutation = React.useMemo(() => createMutation(options), [options.operation]);
+  return useMutationState(mutation);
+}
 `;
   return { files, interfaces };
 }

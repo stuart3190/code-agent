@@ -223,6 +223,24 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     return entitySessionFlight;
   }
 
+  // One predicate builder for list and count. A field is matched on its JSONB path unless it is
+  // row metadata; an object value carries operators (eq/neq/gte/lte/ilike/in), a bare value is eq.
+  const applyEntityFilters = (query, filters = {}) => {
+    let next = query;
+    for (const [field, value] of Object.entries(filters || {})) {
+      const column = field === "id" || field === "created_at" ? field : `data->>${field}`;
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        if (value.eq !== undefined) next = next.eq(column, value.eq);
+        if (value.neq !== undefined) next = next.neq(column, value.neq);
+        if (value.gte !== undefined) next = next.gte(column, value.gte);
+        if (value.lte !== undefined) next = next.lte(column, value.lte);
+        if (value.ilike !== undefined) next = next.ilike(column, value.ilike);
+        if (Array.isArray(value.in)) next = next.in(column, value.in);
+      } else next = next.eq(column, value);
+    }
+    return next;
+  };
+
   // db.entity(type) — CRUD over the generic `entities` table, scoped to one `type`.
   // Records are returned flat: { id, type, data, owner, created_at }.
   const db = {
@@ -240,26 +258,29 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
         },
         async list({ filters = {}, order = "created_at", ascending = false, limit = 100, cursor = null } = {}) {
           await ensureEntitySession();
-          let query = scoped(table().select("*").eq("type", type));
-          for (const [field, value] of Object.entries(filters || {})) {
-            const column = field === "id" || field === "created_at" ? field : `data->>${field}`;
-            if (value && typeof value === "object" && !Array.isArray(value)) {
-              if (value.eq !== undefined) query = query.eq(column, value.eq);
-              if (value.neq !== undefined) query = query.neq(column, value.neq);
-              if (value.gte !== undefined) query = query.gte(column, value.gte);
-              if (value.lte !== undefined) query = query.lte(column, value.lte);
-              if (value.ilike !== undefined) query = query.ilike(column, value.ilike);
-              if (Array.isArray(value.in)) query = query.in(column, value.in);
-            } else query = query.eq(column, value);
-          }
-          if (cursor) query = ascending ? query.gt("created_at", cursor) : query.lt("created_at", cursor);
           const safeOrder = ["created_at", "id", "type"].includes(order) ? order : "created_at";
-          return unwrap(await query.order(safeOrder, { ascending }).limit(Math.max(1, Math.min(500, limit))));
+          let query = applyEntityFilters(scoped(table().select("*").eq("type", type)), filters);
+          // A composite cursor is a KEYSET condition: strictly past the last row's sort value, or
+          // equal to it and past its id. The id tie-breaker is what stops rows sharing a
+          // created_at from being skipped or repeated across pages. A bare value stays supported
+          // for callers written against the original single-column cursor.
+          if (cursor && typeof cursor === "object") {
+            const at = cursor[safeOrder] ?? cursor.createdAt ?? cursor.value;
+            const beyond = ascending ? "gt" : "lt";
+            if (at !== undefined && at !== null) {
+              query = cursor.id
+                ? query.or(`${safeOrder}.${beyond}.${at},and(${safeOrder}.eq.${at},id.${beyond}.${cursor.id})`)
+                : query[beyond](safeOrder, at);
+            }
+          } else if (cursor) query = ascending ? query.gt(safeOrder, cursor) : query.lt(safeOrder, cursor);
+          return unwrap(await query.order(safeOrder, { ascending }).order("id", { ascending })
+            .limit(Math.max(1, Math.min(500, limit))));
         },
+        // Count applies the SAME predicate as list — including operators — so a total can never
+        // disagree with the page it describes.
         async count(filters = {}) {
           await ensureEntitySession();
-          let query = scoped(table().select("id", { count: "exact", head: true }).eq("type", type));
-          for (const [field, value] of Object.entries(filters || {})) query = query.eq(field === "id" ? field : `data->>${field}`, value);
+          const query = applyEntityFilters(scoped(table().select("id", { count: "exact", head: true }).eq("type", type)), filters);
           const { count, error } = await query; if (error) throw error; return count || 0;
         },
         async get(id) {

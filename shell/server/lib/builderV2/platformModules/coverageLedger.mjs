@@ -59,6 +59,7 @@ export const CURRENT_FORMAT_VERSIONS = Object.freeze({
   recordShapeLint: 1,    // WP5: new — generated record-shape wrapper lint
   routePlan: 1,          // WP6: new — typed route plan stamped onto the scaffold graph
   platformSelection: 1,  // WP6: new — contract-structure selection of non-capability modules
+  queryLint: 1,          // WP7: new — generated query-binding lint
 });
 
 /** The immutable snapshot row as written by snapshotStore.createSnapshot(). */

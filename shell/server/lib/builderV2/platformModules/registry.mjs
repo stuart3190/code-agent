@@ -427,7 +427,92 @@ const ROUTING_MODULE = platformModule({
   proof: "test/code-agent/builder-v2-routing-module.test.mjs",
 });
 
-const MODULES = [CORE_MODULE, ...LEGACY_WRAPPED.map(legacyCapabilityModule), IDENTITY_1_2, ACCOUNTS_MODULE, AUTHORIZATION_1_1, ADMIN_MODULE, ENTITIES_1_1, ROUTING_MODULE];
+// WP7 — the query, form and async-state runtimes. Each replaces a category of repeated generated
+// controller work (audit §5) and is selected from the contract's structure, not from a capability.
+const QUERY_MODULE = platformModule({
+  id: "thrallo.query", version: "1.0.0", title: "Query/collections",
+  clientAbi: "query@1",
+  requires: [{ id: "thrallo.entities", range: "^1.1.0" }],
+  operations: [
+    clientOperation({ id: "query", stateOwner: "collection state", errors: ["query_field_not_allowed", "query_operator_not_allowed", "query_value_invalid", "query_cursor_mismatch"], hooks: ["a search control changes the visible result set"] }),
+    clientOperation({ id: "count", stateOwner: "collection state", errors: ["query_field_not_allowed"], hooks: ["the total agrees with the page it describes"] }),
+    clientOperation({ id: "page", stateOwner: "collection state", errors: ["query_cursor_invalid", "query_cursor_mismatch"], hooks: ["paging never skips or repeats a row"] }),
+  ],
+  entrypoints: [
+    { module: "src/lib/modules/query.js", exports: ["compileQuery", "runQuery", "backendOptions", "matchesQuery", "encodeCursor", "decodeCursor", "QueryError"] },
+    { module: "src/lib/modules/collections.js", exports: ["createCollection"] },
+    { module: "src/lib/modules/uiReact.js", exports: ["useCollectionState"] },
+  ],
+  artifacts: [
+    { path: "src/lib/modules/query.js", kind: "runtime" },
+    { path: "src/lib/modules/collections.js", kind: "runtime" },
+  ],
+  deterministicTests: ["allow-listed fields and operators", "normalised values", "stable composite cursor", "count matches the predicate", "cursor bound to its query"],
+  browserEvidence: ["search controls change the visible result set", "paging shows the next rows"],
+  proof: "test/code-agent/builder-v2-query-forms-async.test.mjs",
+});
+
+// The form runtime belongs to the SAME module as the legacy interaction primitives — the audit's
+// "Forms/interactions" — so it is a new VERSION of that wrapper, not a second module claiming the
+// same id. 1.0.0 stays registered for snapshots locked to it.
+const FORMS_1_1 = (() => {
+  const legacy = legacyCapabilityModule("interaction-primitives");
+  const formOperations = [
+    clientOperation({ id: "setValue", effect: "mutation", stateOwner: "form draft", hooks: ["a typed value reaches the draft, never a DOM event"] }),
+    clientOperation({ id: "validate", stateOwner: "form draft", errors: ["validation_failed"], hooks: ["field problems are visible"] }),
+    clientOperation({ id: "submit", effect: "mutation", stateOwner: "form draft", idempotency: "none", errors: ["validation_failed", "submit_failed"], hooks: ["an invalid submission never reaches the operation"] }),
+    clientOperation({ id: "resetForm", effect: "mutation", stateOwner: "form draft", hooks: ["a reset draft is empty"] }),
+  ];
+  return defineModule({
+    ...legacy,
+    version: "1.1.0",
+    title: "Forms/interactions (headless form runtime)",
+    compatibility: { ...legacy.compatibility, clientAbi: "forms@1" },
+    provides: { capabilities: [...legacy.provides.capabilities], operations: [...legacy.provides.operations, ...formOperations] },
+    runtime: {
+      ...legacy.runtime,
+      clientEntrypoints: [
+        ...legacy.runtime.clientEntrypoints,
+        { module: "src/lib/modules/forms.js", exports: ["createForm", "coerceFieldValue"] },
+        { module: "src/lib/modules/uiReact.js", exports: ["useFormState"] },
+      ],
+      protectedArtifacts: [...legacy.runtime.protectedArtifacts, { path: "src/lib/modules/forms.js", kind: "runtime" }],
+    },
+    surfaceBindings: [
+      { state: "idle", required: true }, { state: "invalid", required: true },
+      { state: "submitting", required: true }, { state: "submitted", required: true }, { state: "error", required: true },
+    ],
+    verification: {
+      deterministicTests: [...legacy.verification.deterministicTests, "schema coercion", "schema and custom validation", "one submission path", "stale submit protection", "reset"],
+      browserEvidence: [...legacy.verification.browserEvidence, "an invalid form shows its field problems", "a valid submission reports its outcome"],
+    },
+    qualification: { basis: "module_suite", proof: "test/code-agent/builder-v2-query-forms-async.test.mjs" },
+  });
+})();
+
+const ASYNC_MODULE = platformModule({
+  id: "thrallo.async", version: "1.0.0", title: "Async resource state",
+  clientAbi: "async@1",
+  operations: [
+    clientOperation({ id: "load", stateOwner: "resource state", errors: ["load_failed"], hooks: ["loading, empty and error states are observable"] }),
+    clientOperation({ id: "mutate", effect: "mutation", stateOwner: "mutation state", idempotency: "none", errors: ["mutation_failed"], hooks: ["a failed optimistic change is rolled back"] }),
+    clientOperation({ id: "invalidate", effect: "mutation", stateOwner: "resource cache", hooks: ["a dependent list reloads after a write"] }),
+  ],
+  entrypoints: [
+    { module: "src/lib/modules/asyncState.js", exports: ["createResource", "createMutation", "createResourceCache"] },
+    { module: "src/lib/modules/uiReact.js", exports: ["useResourceState", "useMutationState"] },
+  ],
+  artifacts: [{ path: "src/lib/modules/asyncState.js", kind: "runtime" }],
+  surfaceBindings: [
+    { state: "idle", required: false }, { state: "loading", required: true },
+    { state: "ready", required: true }, { state: "empty", required: true }, { state: "error", required: true },
+  ],
+  deterministicTests: ["superseded loads discarded", "empty distinguished from ready", "optimistic rollback", "cache invalidation by key"],
+  browserEvidence: ["loading and empty states are usable", "a failed save leaves the previous state"],
+  proof: "test/code-agent/builder-v2-query-forms-async.test.mjs",
+});
+
+const MODULES = [CORE_MODULE, ...LEGACY_WRAPPED.map(legacyCapabilityModule), IDENTITY_1_2, ACCOUNTS_MODULE, AUTHORIZATION_1_1, ADMIN_MODULE, ENTITIES_1_1, ROUTING_MODULE, QUERY_MODULE, FORMS_1_1, ASYNC_MODULE];
 
 /** id → every registered version of that module, highest last. */
 const byId = new Map();

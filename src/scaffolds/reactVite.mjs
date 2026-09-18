@@ -339,6 +339,10 @@ export default function HomePage() {
   "src/lib/modules/entitiesReact.js": sdk("lib/modules/entitiesReact.js"),
   "src/lib/modules/routing.js": sdk("lib/modules/routing.js"),
   "src/lib/modules/router.js": sdk("lib/modules/router.js"),
+  "src/lib/modules/query.js": sdk("lib/modules/query.js"),
+  "src/lib/modules/collections.js": sdk("lib/modules/collections.js"),
+  "src/lib/modules/forms.js": sdk("lib/modules/forms.js"),
+  "src/lib/modules/asyncState.js": sdk("lib/modules/asyncState.js"),
   "src/lib/modules/uiReact.js": sdk("lib/modules/uiReact.js"),
 
   // Asset helpers (Builder v2, master plan Part 18): picture/srcset/lazy/blur rendering

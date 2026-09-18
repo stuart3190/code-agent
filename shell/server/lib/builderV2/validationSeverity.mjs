@@ -97,6 +97,9 @@ export const ADVISORY_CODES = Object.freeze({
   // WP6: a literal ":param" destination navigates to the pattern rather than a record. Reported,
   // not enforced: the browser journey proves whether the link opens the right record.
   route_parameter_literal: "a generated destination carries an unbound route parameter instead of a built href",
+  // WP7: the query module refuses an undeclared field at runtime, which is the real boundary.
+  // Reported here so the gap is named before the browser shows an empty list.
+  query_field_not_declared: "a generated collection filters on a field the entity schema does not declare",
   generated_session_orchestration: "generated code drives the session directly where the identity module owns it; the browser decides whether the surface still works",
   contract_control_unbound: "a contracted control appears hand-wired; verification may not be able to address it",
   contract_control_missing: "no element in the tree names this contracted control",

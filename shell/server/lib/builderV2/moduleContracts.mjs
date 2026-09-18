@@ -15,11 +15,13 @@ import { lintInteractiveWorkflow } from "./interactionContract.mjs";
 import { FILE_MAX_TOKENS, APP_SHELL_MAX_TOKENS } from "../appBuild/modularity.mjs";
 import { MODULE_LOCK_PATH, capabilityCompositionPlan, validateCapabilityComposition } from "./capabilityComposer.mjs";
 import { lintPlatformAbi } from "./platformModules/abiLint.mjs";
+import { lintQueryBindings } from "./platformModules/queryLint.mjs";
+import { compileEntitySchema } from "./platformModules/schema.mjs";
 import { scaffoldCompositionPlanFor, validateScaffoldComposition } from "./scaffoldComposer.mjs";
 import { reachableSourcePaths } from "./surfaceIntegration.mjs";
 
 const SOURCE = /^src\/.*\.(?:jsx?|tsx?)$/;
-const PLATFORM_SOURCE = /^src\/lib\/(?:capabilities\/|scaffolds\/composed\/|backend\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
+const PLATFORM_SOURCE = /^src\/lib\/(?:capabilities\/|scaffolds\/composed\/|backend\/|modules\/|app\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
 const FACTORY_TO_CAPABILITY = new Map(Object.entries(CAPABILITIES).flatMap(([name, capability]) =>
   (capability.interface || []).filter((entry) => /^make[A-Z]/.test(entry)).map((factory) => [factory, name])));
 
@@ -552,6 +554,12 @@ export function validateModuleConformance(tree, {
   // WP3: generated code stays behind the public ABI. Blocking on a locked tree, advisory on a
   // legacy one, so retained candidates keep judging exactly as they did.
   for (const issue of lintPlatformAbi(tree, { locked: typeof tree?.[MODULE_LOCK_PATH] === "string" }).findings) add(issue);
+  // WP7: a collection filtering on a field the schema never declared is refused by the query
+  // module at runtime; naming it here means the gap is visible before the browser shows an
+  // empty list. Advisory — the binding inference abstains wherever it cannot be sure.
+  if (contract) {
+    for (const issue of lintQueryBindings(tree, { entitySchema: compileEntitySchema(contract) }).findings) add(issue);
+  }
 
   // The composition contract is structural authority, not source inference: protected modules
   // must exist and every explicitly custom node must expose its declared bounded interface.
