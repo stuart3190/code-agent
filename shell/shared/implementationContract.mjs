@@ -267,7 +267,9 @@ export const AUTH_CREDENTIAL_FIELDS = Object.freeze([
 ]);
 // "auth" is the legacy kind that pre-vocabulary contracts used for a platform sign-in; it names the
 // same session operation and carries no entity records of its own.
-const SESSION_OPERATION_KIND = /^(?:auth|sign ?in|sign ?up|sign ?out|log ?in|log ?out|authenticate|register)$/i;
+const SESSION_OPERATION_KIND = /^(?:auth|sign ?in|sign ?up|sign ?out|log ?in|log ?out|authenticate|register|signIn|signUp|signOut|resetPassword|confirmReset)$/i;
+/** Session methods that consume no contract input (the registry declares no required inputs). */
+export const SESSION_METHODS_WITHOUT_INPUTS = new Set(["signOut", "current", "ensure", "recover"]);
 
 export function isSessionOperation(operation) {
   if (!operation || typeof operation !== "object") return false;
@@ -590,7 +592,11 @@ export function validateContract(contract) {
         if (!String(responsibility.behavior || operation.description || "").trim()) {
           problems.push(`${label} does not name the functional behavior`);
         }
-        if (!responsibility.reads?.length) problems.push(`${label} has no declared functional inputs`);
+        // A session method that consumes nothing (sign-out, current, ensure, recover) has no
+        // inputs to declare; the prompt teaches exactly that shape for sign-out.
+        const inputlessSession = isSessionOperation(operation)
+          && SESSION_METHODS_WITHOUT_INPUTS.has(String(responsibility.capabilityMethod || responsibility.method || ""));
+        if (!responsibility.reads?.length && !inputlessSession) problems.push(`${label} has no declared functional inputs`);
         if (!responsibility.writes?.length && !functionalOutputEffect(operation, responsibility)
             && !isSessionOperation(operation)) {
           problems.push(`${label} has no declared functional outputs`);

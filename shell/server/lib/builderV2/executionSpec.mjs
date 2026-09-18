@@ -190,6 +190,8 @@ export function buildExecutionSpec({
   const operations = (graph?.operationResponsibilities || []).map((row) => prune({
     operationId: row.operationId, journeyId: row.journeyId, stepIndex: row.stepIndex ?? null,
     entity: row.entity || null,
+    owner: row.owner || null, module: row.module || null, moduleOperation: row.moduleOperation || null,
+    output: row.output?.type || null,
     responsibilities: (row.responsibilities || []).map(compactResponsibility),
   }));
 

@@ -39,6 +39,10 @@ import {
 import { resolveModules } from "./platformModules/resolver.mjs";
 import { buildModuleLock } from "./platformModules/lock.mjs";
 import { baselineDeploymentAvailability } from "./platformModules/availability.mjs";
+import { moduleManifest } from "./platformModules/registry.mjs";
+import {
+  normalizeContractOwnership, ownershipProblems, ownershipWarnings,
+} from "../../../shared/contractOwnership.mjs";
 
 // v4 (WP1): the spec carries a deterministic module resolution and an immutable module lock.
 // Consumers of v3 specs keep working: every v3 field is present and unchanged; the lock is an
@@ -55,7 +59,14 @@ export const BUILD_SPEC_VERSION = 4;
 export function deriveBuildSpec(rawContract, { userCritical = [], journeys = null, availability = null } = {}) {
   // Producer declarations made under durableState become dependsOn here, once, so the gate, the
   // verifier's prerequisite replay and the execution specification all see one declared chain.
-  const contract = withDeclaredProducerDependencies(rawContract);
+  // WP2: ownership is typed FIRST — session entities leave the schema, session operations bind to
+  // the identity module, every operation names its owner and platform value type — so every
+  // derivation below reasons about platform values rather than about prose-shaped records. A
+  // contract already typed by the contract agent is returned unchanged; a historical contract is
+  // normalised on the way in with its originals preserved under `ownership`.
+  const contract = normalizeContractOwnership(withDeclaredProducerDependencies(rawContract), {
+    buildProfile: rawContract?.buildProfile || null,
+  }).contract;
   const declaredById = new Map((contract?.journeys || []).map((journey) => [journey?.id, journey]));
   journeys = (journeys || contract?.journeys || []).map((journey) => declaredById.get(journey?.id) || journey);
   // The profile the contract was GENERATED and validated against is authoritative here. Inferring
@@ -131,6 +142,9 @@ export function deriveBuildSpec(rawContract, { userCritical = [], journeys = nul
     issues: moduleResolution.problems,
     configurationRequired: moduleResolution.problems.some((problem) => problem.configurationRequired === true),
   };
+  // WP2: typed ownership must agree with the registry — a module-owned operation names an
+  // operation its module actually provides — and a blocked platform requirement fails here.
+  const ownershipVerdict = validateTypedOwnership(enriched);
   return {
     version: BUILD_SPEC_VERSION,
     contract: enriched,
@@ -153,16 +167,41 @@ export function deriveBuildSpec(rawContract, { userCritical = [], journeys = nul
     persistencePlan: persistenceOwnershipPlan(enriched, journeys, finalModulePlan),
     imageIntents: imageIntents(plannedContract),
     verdict: {
-      ok: interactionVerdict.ok && graphVerdict.ok && scaffoldVerdict.ok && profileVerdict.ok && moduleVerdict.ok,
+      ok: interactionVerdict.ok && graphVerdict.ok && scaffoldVerdict.ok && profileVerdict.ok && moduleVerdict.ok
+        && ownershipVerdict.ok,
       problems: [...interactionVerdict.problems, ...graphVerdict.problems,
-        ...scaffoldVerdict.problems, ...profileVerdict.problems, ...moduleVerdict.problems],
+        ...scaffoldVerdict.problems, ...profileVerdict.problems, ...moduleVerdict.problems, ...ownershipVerdict.problems],
       interaction: interactionVerdict,
       capabilityGraph: graphVerdict,
       scaffoldGraph: scaffoldVerdict,
       buildProfile: profileVerdict,
       modules: moduleVerdict,
+      ownership: ownershipVerdict,
     },
   };
+}
+
+/**
+ * Typed ownership against the registry: every module-owned operation names an operation the
+ * locked module version provides; every generated operation's module bindings do too; blocked
+ * platform requirements are problems, warn-level ones are surfaced as warnings.
+ */
+export function validateTypedOwnership(contract) {
+  const problems = [...ownershipProblems(contract)];
+  const warnings = [...ownershipWarnings(contract)];
+  const check = (operationId, moduleId, operationName) => {
+    const manifest = moduleManifest(moduleId);
+    if (!manifest) { problems.push(`operation ${operationId} names unregistered module ${moduleId}`); return; }
+    if (operationName && !(manifest.provides.operations || []).some((row) => row.id === operationName)) {
+      problems.push(`operation ${operationId} names ${moduleId}.${operationName}, which ${moduleId}@${manifest.version} does not provide`);
+    }
+  };
+  for (const operation of contract?.operations || []) {
+    const id = operation?.id || operation?.name;
+    if (operation?.owner === "module") check(id, operation.module, operation.moduleOperation);
+    for (const binding of operation?.moduleBindings || []) check(id, binding.module, binding.operation);
+  }
+  return { ok: problems.length === 0, problems, warnings };
 }
 
 /**

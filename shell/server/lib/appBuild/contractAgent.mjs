@@ -11,6 +11,7 @@
 
 import { runAgent } from "../../../../src/engine/runAgent.mjs";
 import { AUTH_CREDENTIAL_FIELDS as RESERVED_CREDENTIAL_FIELDS } from "../../../shared/implementationContract.mjs";
+import { normalizeContractOwnership } from "../../../shared/contractOwnership.mjs";
 const isReservedCredentialField = (name) => [...RESERVED_CREDENTIAL_FIELDS]
   .some((field) => String(field?.name ?? field).toLowerCase() === String(name || "").toLowerCase());
 import {
@@ -313,7 +314,11 @@ export function normaliseContract(contract, { prompt, buildProfile = null, legac
       typeof entry === "string" ? entry : JSON.stringify(entry),
     ));
   }
-  return c;
+  // WP2: the contract leaves the agent TYPED. Session-shaped entities the model still declares
+  // are removed (and preserved under ownership.removedEntities), session operations bind to the
+  // identity module, and every operation names its owner and platform value type. The validator
+  // and every derivation downstream then see one vocabulary.
+  return normalizeContractOwnership(c, { buildProfile: c.buildProfile }).contract;
 }
 
 const DEPENDENCY_ISSUE = "interaction_state_dependency_missing";
