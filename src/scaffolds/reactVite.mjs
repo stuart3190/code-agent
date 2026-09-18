@@ -334,6 +334,12 @@ export default function HomePage() {
   "src/lib/modules/policy.js": sdk("lib/modules/policy.js"),
   "src/lib/modules/accounts.js": sdk("lib/modules/accounts.js"),
   "src/lib/modules/accountsReact.js": sdk("lib/modules/accountsReact.js"),
+  "src/lib/modules/schema.js": sdk("lib/modules/schema.js"),
+  "src/lib/modules/entities.js": sdk("lib/modules/entities.js"),
+  "src/lib/modules/entitiesReact.js": sdk("lib/modules/entitiesReact.js"),
+  "src/lib/modules/routing.js": sdk("lib/modules/routing.js"),
+  "src/lib/modules/router.js": sdk("lib/modules/router.js"),
+  "src/lib/modules/uiReact.js": sdk("lib/modules/uiReact.js"),
 
   // Asset helpers (Builder v2, master plan Part 18): picture/srcset/lazy/blur rendering
   // for the imagery the Asset Service resolves. Headless props-builders, no JSX.

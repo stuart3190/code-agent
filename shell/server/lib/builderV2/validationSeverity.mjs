@@ -90,6 +90,13 @@ export const ADVISORY_CODES = Object.freeze({
   // WP3: on a tree that predates the module lock, a private platform import is reported, not
   // enforced — retained candidates and legacy snapshots keep judging exactly as they did.
   private_platform_import_legacy: "a legacy (unlocked) tree imports a private platform path; reported so the migration can measure it",
+  // WP5: the entities module owns identity and record shape. A generated wrapper that re-derives
+  // them from raw rows still runs, so the browser decides; it is reported so repair can replace
+  // the wrapper with the module's record instead of patching it.
+  generated_record_shape_wrapper: "generated code re-derives record shape from raw backend rows where the entities module owns it",
+  // WP6: a literal ":param" destination navigates to the pattern rather than a record. Reported,
+  // not enforced: the browser journey proves whether the link opens the right record.
+  route_parameter_literal: "a generated destination carries an unbound route parameter instead of a built href",
   generated_session_orchestration: "generated code drives the session directly where the identity module owns it; the browser decides whether the surface still works",
   contract_control_unbound: "a contracted control appears hand-wired; verification may not be able to address it",
   contract_control_missing: "no element in the tree names this contracted control",

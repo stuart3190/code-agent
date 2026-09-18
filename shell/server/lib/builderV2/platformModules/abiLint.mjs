@@ -24,6 +24,8 @@ const PRIVATE_MODULE_IMPORT = /^src\/lib\/modules\//;
 const GENERATED_SOURCE = /^src\/.*\.(?:jsx?|tsx?)$/;
 const IMPORT_SPECIFIER = /(?:\bimport\s+(?:[^"'`;]*?\s+from\s*)?|\bexport\s+(?:\*|\{[^}]*\})\s*from\s*|\bimport\s*\(\s*)["']([^"'`]+)["']/g;
 const SESSION_ORCHESTRATION = /\bauth\.(?:signIn|signUp|signOut|currentUser|resetPassword|confirmReset)\s*\(|\bensureVisitorSession\s*\(/;
+// A destination that still carries a ":param" segment: to=/href=/navigate( with a literal path.
+const LITERAL_ROUTE_PARAM = /(?:\b(?:to|href)\s*=\s*|\bnavigate\s*\(\s*)["'](\/[^"'`]*?\/:([A-Za-z_$][\w$]*)[^"'`]*)["']/g;
 
 function resolveRelative(from, specifier) {
   if (!specifier.startsWith(".")) return null;
@@ -58,6 +60,16 @@ export function lintPlatformAbi(tree, { locked = false, identityInstalled = null
         module: file, line: lineOf(source, match.index), forbidden: true,
         target: match[1],
         message: `${file} imports private platform path "${match[1]}"; generated code imports the public application facade (src/lib/app) or the composed capability surface only`,
+      });
+    }
+    // WP6: a parameterised route is reachable only through routeHref(id, params) / <Link to={id}
+    // params={…}>. A literal "/projects/:projectId" navigates to the pattern itself — the defect
+    // the audit names in §10 — so it is reported wherever it appears as a destination.
+    for (const match of source.matchAll(LITERAL_ROUTE_PARAM)) {
+      findings.push({
+        code: "route_parameter_literal", module: file, line: lineOf(source, match.index), forbidden: true,
+        target: match[2],
+        message: `${file} navigates to the literal route pattern "${match[2]}"; build the destination with routeHref("<routeId>", { … }) so the parameter is bound`,
       });
     }
     if (hasIdentity) {

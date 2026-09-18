@@ -145,6 +145,112 @@ export function useAdminOperation(operation) { return useAdminOperationState(adm
   return { files, interfaces };
 }
 
+// WP5: typed repositories over the schema the platform compiled. The generated application
+// compiles the embedded declarations with the same schema module, so both validate one schema.
+export const ENTITIES_COMPOSED_PATH = `${COMPOSED_ROOT}/entities.js`;
+export const APP_FACADE_ENTITIES_PATH = `${APP_FACADE_ROOT}/entities.js`;
+
+function entityFiles(nodes, entitySchema) {
+  const files = {};
+  const interfaces = [];
+  if (!nodes.has("capability:crud") || !(entitySchema?.definitions || []).length) return { files, interfaces };
+  files[ENTITIES_COMPOSED_PATH] = `${banner("entities")}import { db } from "../../backend/index.js";
+import { compileSchema, queryableFields, validateValues } from "../../modules/schema.js";
+import { createEntityRepositories } from "../../modules/entities.js";
+
+export const entityDefinitions = Object.freeze(${jsObject(entitySchema.definitions)});
+export const entitySchema = compileSchema(entityDefinitions);
+export const repositories = createEntityRepositories({ db, schema: entitySchema });
+
+/** The typed repository for one declared entity: { create, get, update, remove, list, count, subscribe }. */
+export function repository(entity) {
+  const found = repositories[String(entity)];
+  if (!found) throw new Error(\`No entity "\${entity}" is declared for this application\`);
+  return found;
+}
+export { queryableFields, validateValues };
+`;
+  interfaces.push({ module: ENTITIES_COMPOSED_PATH, exports: ["entityDefinitions", "entitySchema", "repositories", "repository", "queryableFields", "validateValues"],
+    owns: [...entitySchema.entities], operations: ["create", "get", "update", "remove", "list", "count", "subscribe"] });
+  files[APP_FACADE_ENTITIES_PATH] = `${banner("public entities ABI")}import { entitySchema, repositories, repository } from "../capabilities/composed/entities.js";
+import { useEntity as useEntityState, useEntityMutation as useEntityMutationState } from "../modules/entitiesReact.js";
+
+export { entitySchema, repositories, repository };
+/** { status: loading|ready|not_found|error, record: { id, version, createdAt, updatedAt, values }, reload } by canonical id. */
+export function useEntity(entity, id) { return useEntityState(repository(entity), id); }
+/** { create, update, remove, pending, error, result } bound to one entity's repository. */
+export function useEntityMutation(entity) { return useEntityMutationState(repository(entity)); }
+`;
+  return { files, interfaces };
+}
+
+// WP6: the compiled route table and the router, rendered from the route plan. The application
+// owns navigation placement, layout and the appearance of every route state.
+export const ROUTES_COMPOSED_PATH = `${COMPOSED_ROOT}/routes.js`;
+export const APP_FACADE_ROUTING_PATH = `${APP_FACADE_ROOT}/routing.js`;
+
+function routeFiles(nodes, routePlan, { entitySchema = null } = {}) {
+  const files = {};
+  const interfaces = [];
+  if (!(routePlan?.routes || []).length) return { files, interfaces };
+  const definitions = routePlan.routes.map((route) => ({
+    id: route.id, path: route.path, name: route.name, params: route.params,
+    guard: route.guard, loader: route.loader, states: route.states, screen: route.screen,
+  }));
+  // A loader is bound only when its entity really is a declared durable record; anything else
+  // would name a repository the application does not have.
+  const loaderEntities = unique(definitions.map((route) => route.loader?.entity)
+    .filter((entity) => entity && (entitySchema?.entities || []).includes(entity)));
+  const identity = nodes.has("capability:session");
+  files[ROUTES_COMPOSED_PATH] = `${banner("routes")}import { compileRoutes } from "../../modules/routing.js";
+import { createRouter } from "../../modules/router.js";
+${identity ? 'import { identity } from "./identity.js";\n' : ""}${loaderEntities.length ? 'import { repository } from "./entities.js";\n' : ""}
+export const routePlan = Object.freeze(${jsObject({ version: routePlan.version, order: routePlan.order, redirect: routePlan.redirect, parameterised: routePlan.parameterised, guarded: routePlan.guarded })});
+export const routeDefinitions = Object.freeze(${jsObject(definitions)});
+export const routeTable = compileRoutes(routeDefinitions);
+
+/** Route loaders: a detail route reads its record through the entity module, by canonical id. */
+export const routeLoaders = Object.freeze({
+${loaderEntities.map((entity) => `  ${quote(`${entity}.get`)}: async ({ id }) => repository(${quote(entity)}).get(id),`).join("\n")}
+});
+
+export const router = createRouter({
+  table: routeTable,
+  ${identity ? "identity," : "identity: null,"}
+  loaders: routeLoaders,
+  signInRoute: ${JSON.stringify(routePlan.redirect?.signedOut || null)},
+});
+`;
+  interfaces.push({ module: ROUTES_COMPOSED_PATH, exports: ["routePlan", "routeDefinitions", "routeTable", "routeLoaders", "router"],
+    owns: ["active route"], operations: ["resolve", "href", "navigate", "guard", "load"] });
+  files[APP_FACADE_ROUTING_PATH] = `${banner("public routing ABI")}import React from "react";
+import { router, routeTable } from "../capabilities/composed/routes.js";
+import { useRouterState } from "../modules/uiReact.js";
+
+/** The matched route: { path, route, params, state: loading|ready|not_found|forbidden|error, data, navigate, href }. */
+export function useRoute() { return useRouterState(router); }
+/** A concrete href for a route id. Every declared parameter must be supplied. */
+export const routeHref = (id, params = {}) => router.href(id, params);
+export const navigate = (target, options) => router.navigate(target, options);
+export const routeIds = Object.freeze(routeTable.routes.map((route) => route.id));
+
+/** An anchor bound to a route id, so a parameterised path is never written by hand. */
+export function Link({ to, params = {}, replace = false, children, onClick, ...rest }) {
+  const href = routeHref(to, params);
+  return React.createElement("a", {
+    ...rest, href,
+    onClick: (event) => {
+      onClick?.(event);
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      void navigate(href, { replace });
+    },
+  }, children);
+}
+`;
+  return { files, interfaces };
+}
+
 function facadeIndexSource(moduleLock, facadeModules) {
   return `${banner("public application ABI")}// The one import surface for generated application code. Everything here is deterministic and
 // protected; layout, styling, copy and domain logic remain entirely the application's.
@@ -158,7 +264,7 @@ export const THRALLO_APP_ABI = Object.freeze(${jsObject({
 `;
 }
 
-function capabilityFiles(graph, { moduleLock = null, identityPlan = null, identityRuntime = true } = {}) {
+function capabilityFiles(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null } = {}) {
   const nodes = new Map((graph?.nodes || []).map((node) => [node.id, node]));
   const files = {};
   const interfaces = [];
@@ -275,6 +381,18 @@ export const newsletterCapability = makeNewsletter({ entity: ${quote(entity)} })
       interfaces.push(...account.interfaces);
       facades.push("accounts");
     }
+    const entity = entityFiles(nodes, entitySchema);
+    if (Object.keys(entity.files).length) {
+      Object.assign(files, entity.files);
+      interfaces.push(...entity.interfaces);
+      facades.push("entities");
+    }
+    const route = routeFiles(nodes, routePlan, { entitySchema });
+    if (Object.keys(route.files).length) {
+      Object.assign(files, route.files);
+      interfaces.push(...route.interfaces);
+      facades.push("routing");
+    }
     files[APP_FACADE_INDEX_PATH] = facadeIndexSource(moduleLock, facades);
   }
   if (moduleLock) files[MODULE_LOCK_PATH] = lockFileSource(moduleLock);
@@ -298,8 +416,8 @@ export { CAPABILITY_COMPOSITION } from "./manifest.js";
   return { files, interfaces };
 }
 
-export function capabilityCompositionPlan(graph, { moduleLock = null, identityPlan = null, identityRuntime = true } = {}) {
-  const rendered = capabilityFiles(graph, { moduleLock, identityPlan, identityRuntime });
+export function capabilityCompositionPlan(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null } = {}) {
+  const rendered = capabilityFiles(graph, { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan });
   const extensionPoints = (graph?.nodes || []).filter((node) => node.type === "custom_behavior")
     .map((node) => ({ id: node.id, ...node.extension, inputs: node.requiredInputs, outputs: node.outputs,
       stateOwnership: node.stateOwnership, persistenceSemantics: node.persistenceSemantics }));
@@ -318,7 +436,7 @@ export function capabilityCompositionPlan(graph, { moduleLock = null, identityPl
 }
 
 /** Apply or refresh the foundation. Existing model-owned extension configuration is preserved. */
-export function composeCapabilityFoundation(tree, graph, { moduleLock = null, identityPlan = null } = {}) {
+export function composeCapabilityFoundation(tree, graph, { moduleLock = null, identityPlan = null, entitySchema = null, routePlan = null } = {}) {
   // Production Builder V2 starts from the full React/Vite scaffold. Some retained unit/legacy
   // baselines intentionally predate the capability runtime; do not emit adapters with dangling
   // imports into those trees. They remain on the migration-compatible path until refreshed from
@@ -337,7 +455,7 @@ export function composeCapabilityFoundation(tree, graph, { moduleLock = null, id
   // A base tree without the module runtime (a legacy snapshot, a retained fixture) composes the
   // capability adapters exactly as before and simply does not receive the identity controller.
   const identityRuntime = typeof tree?.[IDENTITY_RUNTIME_PATH] === "string";
-  const options = { moduleLock, identityPlan, identityRuntime };
+  const options = { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan };
   const rendered = capabilityFiles(graph, options);
   const next = { ...(tree || {}), ...rendered.files };
   if (typeof next[CAPABILITY_CONFIGURATION_PATH] !== "string") {

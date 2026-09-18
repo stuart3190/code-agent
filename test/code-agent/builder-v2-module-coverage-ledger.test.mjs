@@ -25,6 +25,10 @@ import { IDENTITY_PLAN_VERSION } from "../../shell/server/lib/builderV2/platform
 import { ABI_LINT_VERSION } from "../../shell/server/lib/builderV2/platformModules/abiLint.mjs";
 import { ACCOUNT_POLICY_VERSION } from "../../shell/server/lib/appAccounts/accountPolicyStore.mjs";
 import { ACCOUNT_SERVICE_VERSION } from "../../supabase/functions/app-accounts/accountService.mjs";
+import { ENTITY_SCHEMA_VERSION } from "../../shell/server/lib/builderV2/platformModules/schema.mjs";
+import { RECORD_SHAPE_LINT_VERSION } from "../../shell/server/lib/builderV2/platformModules/recordShapeLint.mjs";
+import { ROUTE_PLAN_VERSION } from "../../shell/server/lib/builderV2/platformModules/routePlan.mjs";
+import { PLATFORM_SELECTION_VERSION } from "../../shell/server/lib/builderV2/platformModules/selection.mjs";
 import { CAPABILITIES } from "../../shell/server/lib/builderV2/capabilityRegistry.mjs";
 import { SCAFFOLDS, SCAFFOLD_REGISTRY_VERSION } from "../../shell/server/lib/builderV2/scaffoldRegistry.mjs";
 import { RUNTIME_CAPABILITY_OPERATIONS } from "../../shell/server/lib/capabilityRuntime.mjs";
@@ -105,6 +109,10 @@ test("WP0 — the baseline formats stay frozen and every live format equals the 
     abiLint: ABI_LINT_VERSION,
     accountPolicy: ACCOUNT_POLICY_VERSION,
     accountService: ACCOUNT_SERVICE_VERSION,
+    entitySchema: ENTITY_SCHEMA_VERSION,
+    recordShapeLint: RECORD_SHAPE_LINT_VERSION,
+    routePlan: ROUTE_PLAN_VERSION,
+    platformSelection: PLATFORM_SELECTION_VERSION,
   }, CURRENT_FORMAT_VERSIONS);
 });
 

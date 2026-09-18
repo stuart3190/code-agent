@@ -116,7 +116,7 @@ test("registry — every legacy capability is wrapped by a validated module; pub
   assert.deepEqual(validateModuleRegistry(), { ok: true, problems: [] });
   assert.deepEqual(registeredModuleIds(), [
     "thrallo.accounts", "thrallo.admin", "thrallo.authorization", "thrallo.booking", "thrallo.contact", "thrallo.core",
-    "thrallo.entities", "thrallo.forms", "thrallo.identity", "thrallo.newsletter", "thrallo.workflow",
+    "thrallo.entities", "thrallo.forms", "thrallo.identity", "thrallo.newsletter", "thrallo.routing", "thrallo.workflow",
   ]);
   for (const [capabilityId, capability] of Object.entries(CAPABILITIES)) {
     const manifest = moduleForCapability(capabilityId);
@@ -140,8 +140,9 @@ test("registry — every legacy capability is wrapped by a validated module; pub
   }
   assert.equal(moduleForCapability("auth").id, "thrallo.identity", "the auth alias resolves to identity");
   assert.deepEqual(capabilityIdsForModule("thrallo.identity"), ["session", "auth"]);
-  // Legacy crud.update is honestly declared: not versioned, not transactional.
-  const update = moduleManifest("thrallo.entities").provides.operations.find((row) => row.id === "update");
+  // Legacy crud.update is honestly declared: not versioned, not transactional. (WP5 adds
+  // entities 1.1.0 with a real compare-and-set; 1.0.0 must keep telling the truth about itself.)
+  const update = moduleManifest("thrallo.entities", ["1.0.0"]).provides.operations.find((row) => row.id === "update");
   assert.equal(update.concurrency, null);
   assert.equal(update.effect, "mutation");
   const signIn = moduleManifest("thrallo.identity").provides.operations.find((row) => row.id === "signIn");
@@ -171,7 +172,7 @@ test("resolver — negative controls: range conflict, declared conflict, duplica
   const conflict = resolveModules({ bindings: [{ name: "crud", version: "2.0.0" }] });
   assert.equal(conflict.ok, false);
   assert.equal(conflict.problems[0].code, RESOLUTION_PROBLEMS.RANGE_CONFLICT);
-  assert.deepEqual(conflict.problems[0].available, ["1.0.0"]);
+  assert.deepEqual(conflict.problems[0].available, ["1.0.0", "1.1.0"], "the problem names every registered version, so the gap is actionable");
 
   const rival = defineModule(baseManifest({ id: "thrallo.rivalEntities", status: "qualified",
     qualification: { basis: "test" }, provides: { capabilities: ["crud"], operations: [] } }));
@@ -274,10 +275,14 @@ test("build spec v4 — the spec carries the resolution and lock; v3 consumers s
   const spec = deriveBuildSpec(CONTRACT);
   assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
   assert.equal(spec.verdict.modules.ok, true);
-  // Dependencies first, id tie-break: the exact set the composer emits, interaction primitives included.
+  // Dependencies first, id tie-break: the exact set the composer emits, interaction primitives
+  // included, plus the platform modules the contract's own structure implies (WP6: it declares
+  // routes, so it needs the route compiler).
   assert.deepEqual(resolvedModuleIds(spec.moduleResolution), [
-    "thrallo.core", "thrallo.identity", "thrallo.booking", "thrallo.entities", "thrallo.forms", "thrallo.newsletter", "thrallo.workflow",
+    "thrallo.core", "thrallo.identity", "thrallo.booking", "thrallo.entities", "thrallo.forms", "thrallo.newsletter",
+    "thrallo.routing", "thrallo.workflow",
   ]);
+  assert.deepEqual(spec.moduleResolution.modules.find((row) => row.id === "thrallo.routing").reasons, ["routes declared"]);
   assert.deepEqual(spec.compositionPlan.protectedFiles.filter((path) => path.endsWith("lock.js")), [MODULE_LOCK_PATH]);
   assert.equal(spec.contract.moduleLock, spec.moduleLock, "the enriched contract carries the lock so it is persisted with the contract");
   for (const key of ["tiers", "bindings", "modulePlan", "interactionContract", "moduleContracts", "persistencePlan", "imageIntents", "verdict",
@@ -344,8 +349,14 @@ test("old-spec adapter — a v3 spec or persisted contract gains a legacy-flagge
   const adapted = lockFromLegacySpec(v3);
   assert.equal(adapted.legacy, true);
   assert.equal(adapted.basis, "host_scaffold");
-  assert.deepEqual(adapted.modules.map((row) => `${row.id}@${row.version}`), fresh.moduleLock.modules.map((row) => `${row.id}@${row.version}`));
-  assert.deepEqual(adapted.modules.map((row) => row.artifactHash), fresh.moduleLock.modules.map((row) => row.artifactHash));
+  // The adapter describes what the SNAPSHOT has, not what a fresh derivation would select. A v3
+  // snapshot was composed from capability bindings alone, so its lock carries exactly the
+  // capability-derived modules — and must NOT claim a platform module (the route compiler) whose
+  // bytes that snapshot never contained.
+  const capabilityDerived = fresh.moduleLock.modules.filter((row) => row.id !== "thrallo.routing");
+  assert.deepEqual(adapted.modules.map((row) => `${row.id}@${row.version}`), capabilityDerived.map((row) => `${row.id}@${row.version}`));
+  assert.deepEqual(adapted.modules.map((row) => row.artifactHash), capabilityDerived.map((row) => row.artifactHash));
+  assert.equal(adapted.modules.some((row) => row.id === "thrallo.routing"), false);
   // With a snapshot tree the hashes are the snapshot's own bytes.
   const snapshotTree = { ...REACT_VITE, "src/lib/capabilities/crud.js": "// an older crud runtime\n" };
   const fromTree = lockFromLegacySpec(v3, { tree: snapshotTree });

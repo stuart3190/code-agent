@@ -41,6 +41,9 @@ import { buildModuleLock } from "./platformModules/lock.mjs";
 import { baselineDeploymentAvailability } from "./platformModules/availability.mjs";
 import { moduleManifest } from "./platformModules/registry.mjs";
 import { deriveIdentityPlan } from "./platformModules/identityPlan.mjs";
+import { compileEntitySchema } from "./platformModules/schema.mjs";
+import { deriveRoutePlan } from "./platformModules/routePlan.mjs";
+import { platformModuleRequests } from "./platformModules/selection.mjs";
 import {
   normalizeContractOwnership, ownershipProblems, ownershipWarnings,
 } from "../../../shared/contractOwnership.mjs";
@@ -113,8 +116,14 @@ export function deriveBuildSpec(rawContract, { userCritical = [], journeys = nul
   const moduleBindings = (capabilityGraph.nodes || [])
     .filter((node) => node.type === "deterministic_capability")
     .map((node) => ({ name: node.capabilityId, version: node.version, configuration: node.configuration || null }));
+  // WP5: the durable domain entities compile once into the schema the entities module validates
+  // against and the composer renders; platform-owned and transient entities are not records.
+  const entitySchema = compileEntitySchema(plannedContract);
+  // WP6/WP7: the modules no capability names — routing, query, forms, async state — are implied
+  // by the contract's structure, with the reason recorded so the resolution stays explainable.
+  const requestedModules = platformModuleRequests(plannedContract, { entitySchema });
   const moduleResolution = resolveModules({
-    bindings: moduleBindings, availability: availability || baselineDeploymentAvailability(),
+    bindings: moduleBindings, requestedModules, availability: availability || baselineDeploymentAvailability(),
   });
   const moduleLock = moduleResolution.ok
     ? buildModuleLock({ resolution: moduleResolution, contract: plannedContract, bindings: moduleBindings })
@@ -122,8 +131,16 @@ export function deriveBuildSpec(rawContract, { userCritical = [], journeys = nul
   // WP3: the identity installation plan — mode, methods, protected routes, redirects and the
   // deterministic probes — derived once here and rendered by the composer.
   const identityPlan = deriveIdentityPlan(plannedContract);
-  const compositionPlan = capabilityCompositionPlan(capabilityGraph, { moduleLock, identityPlan });
   const scaffoldGraph = deriveScaffoldGraph(plannedContract, capabilityGraph, { modulePlan, routeResolution });
+  // WP6: the typed route plan — stable ids, typed parameters, guards, loaders, states and the
+  // deterministic probes. Derived after the scaffold graph so each route names the screen that
+  // is actually mounted for it; the composer renders the table and the router from it.
+  const routePlan = deriveRoutePlan(plannedContract, { identityPlan, entitySchema, screens: scaffoldGraph.screens });
+  // Stamped onto the graph, as the route resolution already is, so every consumer that recomputes
+  // a composition plan from the graph alone renders the same files (the static gate, the module
+  // conformance validator and the execution specification all do exactly that).
+  scaffoldGraph.routePlan = routePlan;
+  const compositionPlan = capabilityCompositionPlan(capabilityGraph, { moduleLock, identityPlan, entitySchema, routePlan });
   const finalModulePlan = scaffoldModulePlan(scaffoldGraph, modulePlan);
   const finalInteractionContract = bindInteractionModulePlan(interactionContract, finalModulePlan);
   const scaffoldPlan = scaffoldCompositionPlan(scaffoldGraph);
@@ -149,6 +166,8 @@ export function deriveBuildSpec(rawContract, { userCritical = [], journeys = nul
   // WP2: typed ownership must agree with the registry — a module-owned operation names an
   // operation its module actually provides — and a blocked platform requirement fails here.
   const ownershipVerdict = validateTypedOwnership(enriched);
+  const schemaVerdict = { ok: entitySchema.verdict.ok, problems: entitySchema.verdict.problems.map((problem) => `entity_schema: ${problem}`) };
+  const routeVerdict = { ok: routePlan.verdict.ok, problems: routePlan.verdict.problems.map((problem) => `route_plan: ${problem}`) };
   return {
     version: BUILD_SPEC_VERSION,
     contract: enriched,
@@ -161,6 +180,8 @@ export function deriveBuildSpec(rawContract, { userCritical = [], journeys = nul
     moduleResolution,
     moduleLock,
     identityPlan,
+    entitySchema,
+    routePlan,
     dependencyPlan,
     modulePlan: finalModulePlan,
     interactionContract: finalInteractionContract,
@@ -173,9 +194,12 @@ export function deriveBuildSpec(rawContract, { userCritical = [], journeys = nul
     imageIntents: imageIntents(plannedContract),
     verdict: {
       ok: interactionVerdict.ok && graphVerdict.ok && scaffoldVerdict.ok && profileVerdict.ok && moduleVerdict.ok
-        && ownershipVerdict.ok,
+        && ownershipVerdict.ok && schemaVerdict.ok && routeVerdict.ok,
       problems: [...interactionVerdict.problems, ...graphVerdict.problems,
-        ...scaffoldVerdict.problems, ...profileVerdict.problems, ...moduleVerdict.problems, ...ownershipVerdict.problems],
+        ...scaffoldVerdict.problems, ...profileVerdict.problems, ...moduleVerdict.problems, ...ownershipVerdict.problems,
+        ...schemaVerdict.problems, ...routeVerdict.problems],
+      schema: schemaVerdict,
+      routes: routeVerdict,
       interaction: interactionVerdict,
       capabilityGraph: graphVerdict,
       scaffoldGraph: scaffoldVerdict,
@@ -251,7 +275,7 @@ export function scopeBuildSpec(spec, journeys = []) {
     modulePlan,
     interactionContract,
     capabilityGraph,
-    compositionPlan: capabilityCompositionPlan(capabilityGraph, { moduleLock: spec.moduleLock || null, identityPlan: spec.identityPlan || null }),
+    compositionPlan: capabilityCompositionPlan(capabilityGraph, { moduleLock: spec.moduleLock || null, identityPlan: spec.identityPlan || null, entitySchema: spec.entitySchema || null, routePlan: spec.routePlan || null }),
     scaffoldGraph,
     scaffoldCompositionPlan: scaffoldCompositionPlan(scaffoldGraph),
     moduleContracts: buildModuleGenerationContracts({

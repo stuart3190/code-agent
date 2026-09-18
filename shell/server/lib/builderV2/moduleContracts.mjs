@@ -15,7 +15,7 @@ import { lintInteractiveWorkflow } from "./interactionContract.mjs";
 import { FILE_MAX_TOKENS, APP_SHELL_MAX_TOKENS } from "../appBuild/modularity.mjs";
 import { MODULE_LOCK_PATH, capabilityCompositionPlan, validateCapabilityComposition } from "./capabilityComposer.mjs";
 import { lintPlatformAbi } from "./platformModules/abiLint.mjs";
-import { scaffoldCompositionPlan, validateScaffoldComposition } from "./scaffoldComposer.mjs";
+import { scaffoldCompositionPlanFor, validateScaffoldComposition } from "./scaffoldComposer.mjs";
 import { reachableSourcePaths } from "./surfaceIntegration.mjs";
 
 const SOURCE = /^src\/.*\.(?:jsx?|tsx?)$/;
@@ -573,7 +573,7 @@ export function validateModuleConformance(tree, {
   if (scaffoldGraph && typeof tree?.["src/lib/scaffolds/composed/manifest.js"] === "string") {
     const scopedJourneyIds = unique((modulePlan || []).flatMap((module) => module.journeyIds || []));
     const composition = validateScaffoldComposition(tree, scaffoldGraph,
-      scaffoldCompositionPlan(scaffoldGraph), { requireExtensions: true, rejectScreenSlots: true,
+      scaffoldCompositionPlanFor(tree, scaffoldGraph), { requireExtensions: true, rejectScreenSlots: true,
         journeyIds: scopedJourneyIds.length ? scopedJourneyIds : null });
     for (const problem of composition.problems) {
       const module = String(problem).match(/src\/[^\s:]+/)?.[0] || null;

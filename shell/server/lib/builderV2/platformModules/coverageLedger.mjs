@@ -55,6 +55,10 @@ export const CURRENT_FORMAT_VERSIONS = Object.freeze({
   abiLint: 1,            // WP3: new — public-ABI import lint
   accountPolicy: 1,      // WP4: new — app_account_policies row / composed policy
   accountService: 1,     // WP4: new — app-accounts Edge Function + shell service
+  entitySchema: 1,       // WP5: new — compiled entity schema carried on the build spec
+  recordShapeLint: 1,    // WP5: new — generated record-shape wrapper lint
+  routePlan: 1,          // WP6: new — typed route plan stamped onto the scaffold graph
+  platformSelection: 1,  // WP6: new — contract-structure selection of non-capability modules
 });
 
 /** The immutable snapshot row as written by snapshotStore.createSnapshot(). */
@@ -296,7 +300,9 @@ export const COVERAGE_LEDGER = Object.freeze([
     members: ["ensureAppVisitorSession", "invalidateAppVisitorSession"],
     retains: "src/lib/visitorSession.js ensureVisitorSession", disposition: "explicit visitor mode" }),
   row("sdk_surface", "db.entity", { status: "D/S", targetModule: "thrallo.entities", workPackage: 5,
-    members: ["create", "get", "list", "count", "update", "delete", "subscribe"],
+    // updateVersioned is the WP5 addition: a conditional update on the stored version, which is
+    // what makes an atomic merge possible without leaving the generic JSONB table.
+    members: ["create", "get", "list", "count", "update", "updateVersioned", "delete", "subscribe"],
     retains: "src/lib/backend/index.js db.entity(type)", disposition: "generic entities JSONB table behind an adapter; typed record shape" }),
   row("sdk_surface", "db.entity.list-options", { status: "D/S/P", targetModule: "thrallo.query", workPackage: 7,
     members: ["filters", "order", "ascending", "limit", "cursor"],

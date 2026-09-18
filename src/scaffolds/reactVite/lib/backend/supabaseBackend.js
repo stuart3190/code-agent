@@ -273,6 +273,14 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
           );
           return rows[0];
         },
+        // WP5: compare-and-set. The row is replaced only while its stored version still equals
+        // `expectedVersion` (data->__meta->>version); zero rows means another writer moved it.
+        async updateVersioned(id, data, expectedVersion) {
+          await ensureEntitySession();
+          const rows = unwrap(await scoped(table().update({ data }).eq("type", type).eq("id", id)
+            .eq("data->__meta->>version", String(expectedVersion))).select());
+          return rows[0] || null;
+        },
         async delete(id) {
           await ensureEntitySession();
           const { error } = await scoped(table().delete().eq("type", type).eq("id", id));

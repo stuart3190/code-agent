@@ -8,7 +8,7 @@ import path from "node:path";
 
 import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
-import { scaffoldCompositionPlan, validateScaffoldComposition,
+import { scaffoldCompositionPlan, scaffoldCompositionPlanFor, validateScaffoldComposition,
   SCAFFOLD_MANIFEST_PATH } from "./scaffoldComposer.mjs";
 import { journeySurfaceContext } from "./surfaceIntegration.mjs";
 
@@ -652,7 +652,7 @@ export function runStaticApplicationGate(tree, { contract = null, modulePlan = [
   const blocking = [];
   const advisory = [];
   const checks = [];
-  const composition = validateScaffoldComposition(tree, scaffoldGraph, scaffoldCompositionPlan(scaffoldGraph), {
+  const composition = validateScaffoldComposition(tree, scaffoldGraph, scaffoldCompositionPlanFor(tree, scaffoldGraph), {
     requireExtensions, rejectScreenSlots, journeyIds: (journeys || []).map((journey) => journey?.id).filter(Boolean),
   });
   checks.push({ name: "scaffold_composition", ok: composition.ok, detail: composition.problems });

@@ -7,6 +7,7 @@
 import { parse } from "@babel/parser";
 
 import { CAPABILITIES } from "./capabilityRegistry.mjs";
+import { lintRecordShapeWrappers } from "./platformModules/recordShapeLint.mjs";
 import {
   FORBIDDEN_DURABLE_PERSISTENCE, durablePersistenceJourneys, persistenceOwnershipPlan,
 } from "./contractTiering.mjs";
@@ -95,10 +96,14 @@ function finding({ code = "forbidden_persistence", path, node, api, journeys, ow
  */
 export function lintDurablePersistence(tree, { contract = null, journeys = contract?.journeys || [], modulePlan = [] } = {}) {
   const durable = durablePersistenceJourneys(contract, journeys);
-  if (!durable.length) return { ok: true, findings: [], plan: null };
+  // WP5: where the typed entities module is installed, generated code that re-derives record
+  // shape from raw backend rows is reported (advisory) whether or not the contract has a durable
+  // journey — the module owns identity and shape either way.
+  const recordShape = lintRecordShapeWrappers(tree).findings;
+  if (!durable.length) return { ok: recordShape.length === 0, findings: recordShape, plan: null };
   const plan = persistenceOwnershipPlan(contract, journeys, modulePlan);
   const journeyIds = durable.map((journey) => journey.id);
-  const findings = [];
+  const findings = [...recordShape];
   const seen = new Set();
 
   for (const [path, source] of Object.entries(tree || {})) {

@@ -323,7 +323,111 @@ const ADMIN_MODULE = accountsModule("admin", { title: "Admin management", client
   { module: "src/lib/capabilities/composed/admin.js", exports: ["admin"], composed: true },
 ], protectedArtifacts: [{ path: "src/lib/capabilities/composed/admin.js", kind: "composed" }] });
 
-const MODULES = [CORE_MODULE, ...LEGACY_WRAPPED.map(legacyCapabilityModule), IDENTITY_1_2, ACCOUNTS_MODULE, AUTHORIZATION_1_1, ADMIN_MODULE];
+// WP5: entities 1.1.0 — the legacy crud wrapper plus schema-validated typed repositories with
+// optimistic concurrency at the persistence boundary. 1.0.0 stays registered for old locks.
+const ENTITIES_1_1 = (() => {
+  const legacy = legacyCapabilityModule("crud");
+  const operations = legacy.provides.operations.map((operation) => (operation.id === "update"
+    ? { ...operation, concurrency: "versioned", errors: [...operation.errors, "version_conflict", "validation_failed", "reference_not_found"] }
+    : operation.id === "create" ? { ...operation, errors: [...operation.errors, "validation_failed", "reference_not_found"] }
+      : operation.id === "remove" ? { ...operation, errors: [...operation.errors, "reference_restricted"] } : operation));
+  return defineModule({
+    ...legacy,
+    version: "1.1.0",
+    title: "entities (schema-validated typed repositories over the generic entities backend)",
+    compatibility: { ...legacy.compatibility, clientAbi: "entities@1" },
+    provides: { capabilities: [...legacy.provides.capabilities], operations },
+    runtime: {
+      ...legacy.runtime,
+      clientEntrypoints: [
+        ...legacy.runtime.clientEntrypoints,
+        { module: "src/lib/modules/schema.js", exports: ["compileSchema", "validateValues", "queryableFields", "RESERVED_FIELDS"] },
+        { module: "src/lib/modules/entities.js", exports: ["createEntityRepository", "createEntityRepositories", "toRecord", "toLegacyRecord", "EntityError", "ENTITY_ERROR"] },
+        { module: "src/lib/modules/entitiesReact.js", exports: ["useEntity", "useEntityMutation"] },
+        { module: "src/lib/capabilities/composed/entities.js", exports: ["entitySchema", "repositories", "repository"], composed: true },
+        { module: "src/lib/app/entities.js", exports: ["repository", "useEntity", "useEntityMutation"], composed: true },
+      ],
+      protectedArtifacts: [
+        ...legacy.runtime.protectedArtifacts,
+        { path: "src/lib/modules/schema.js", kind: "runtime" },
+        { path: "src/lib/modules/entities.js", kind: "runtime" },
+        { path: "src/lib/modules/entitiesReact.js", kind: "runtime" },
+        { path: "src/lib/capabilities/composed/entities.js", kind: "composed" },
+        { path: "src/lib/app/entities.js", kind: "composed" },
+      ],
+    },
+    entityContributions: [{ name: "*", storage: "entities-jsonb", ownership: "generic_owner_policy", metadata: "data.__meta { version, createdAt, updatedAt }" }],
+    verification: {
+      deterministicTests: ["create with server identity", "validated patch", "compare-and-set conflict", "reference check", "restrict on delete", "canonical reload", "legacy adapter"],
+      browserEvidence: [...legacy.verification.browserEvidence, "saved record survives reload by canonical id"],
+    },
+    qualification: { basis: "module_suite", proof: "test/code-agent/builder-v2-entities-module.test.mjs" },
+  });
+})();
+
+/**
+ * A platform module with no legacy capability to wrap (WP6/WP7). These are selected by the
+ * compiler from the contract's own structure — declared routes, a search operation, a form —
+ * rather than by a capability binding, so they carry no `provides.capabilities` entry.
+ */
+const platformModule = ({ id, version, title, requires = [], services = [], clientAbi, operations, entrypoints, artifacts, deterministicTests, browserEvidence, proof, surfaceBindings = [] }) => defineModule({
+  schemaVersion: MANIFEST_SCHEMA_VERSION,
+  id, version, status: "qualified", title,
+  compatibility: { contractVersions: [1, 2], clientAbi, serverAbi: null, runtimeRange: "^1.0.0" },
+  requires: { modules: [{ id: "thrallo.core", range: "^1.0.0" }, ...requires], capabilities: [], services },
+  provides: { capabilities: [], operations },
+  conflicts: [],
+  configSchema: { type: "object" },
+  entityContributions: [], routeContributions: [], surfaceBindings,
+  runtime: { clientEntrypoints: entrypoints, serverHandlers: [], protectedArtifacts: artifacts, packageDependencies: [] },
+  permissions: [], migrations: [],
+  lifecycle: { install: "compose", uninstall: "retain_data" },
+  verification: { deterministicTests, browserEvidence },
+  qualification: { basis: "module_suite", proof },
+});
+
+const clientOperation = ({ id, effect = "query", stateOwner, errors = [], hooks = [], input = { type: "object" }, output = { type: "object" }, idempotency = "supported", concurrency = null }) => ({
+  id, input, output, execution: "client", transport: "in_process", effect, stateOwner,
+  authorization: null, idempotency, concurrency, errors, verificationHooks: hooks,
+});
+
+// WP6 — the deterministic route compiler: matching precedence, typed parameters, hrefs, guards,
+// loaders and not-found. Navigation placement and every route state's appearance stay generated.
+const ROUTING_MODULE = platformModule({
+  id: "thrallo.routing", version: "1.0.0", title: "Routing (deterministic route compiler)",
+  clientAbi: "routing@1",
+  requires: [{ id: "thrallo.identity", range: "^1.2.0" }],
+  operations: [
+    clientOperation({ id: "resolve", stateOwner: "active route", errors: ["route_param_invalid"], hooks: ["the bound record opens on a direct load"] }),
+    clientOperation({ id: "href", stateOwner: "active route", errors: ["route_param_missing", "route_unknown"], hooks: ["no literal :param is ever a destination"] }),
+    clientOperation({ id: "navigate", effect: "mutation", stateOwner: "active route", idempotency: "supported", hooks: ["back and forward restore the previous screen"] }),
+    clientOperation({ id: "guard", stateOwner: "route admission", errors: ["member_required"], hooks: ["a visitor is refused a member route"] }),
+    clientOperation({ id: "load", stateOwner: "route data", errors: ["not_found", "loader_missing"], hooks: ["an unknown id renders not_found"] }),
+  ],
+  entrypoints: [
+    { module: "src/lib/modules/routing.js", exports: ["compileRoutes", "matchRoute", "routeHref", "evaluateGuard", "loaderArgs", "normalizePath", "ROUTE_STATES"] },
+    { module: "src/lib/modules/router.js", exports: ["createRouter"] },
+    { module: "src/lib/modules/uiReact.js", exports: ["useRouterState"] },
+    { module: "src/lib/capabilities/composed/routes.js", exports: ["routeTable", "router", "routePlan"], composed: true },
+    { module: "src/lib/app/routing.js", exports: ["useRoute", "routeHref", "navigate", "Link"], composed: true },
+  ],
+  artifacts: [
+    { path: "src/lib/modules/routing.js", kind: "runtime" },
+    { path: "src/lib/modules/router.js", kind: "runtime" },
+    { path: "src/lib/modules/uiReact.js", kind: "runtime" },
+    { path: "src/lib/capabilities/composed/routes.js", kind: "composed" },
+    { path: "src/lib/app/routing.js", kind: "composed" },
+  ],
+  surfaceBindings: [
+    { state: "loading", required: true }, { state: "ready", required: true },
+    { state: "not_found", required: true }, { state: "forbidden", required: true }, { state: "error", required: true },
+  ],
+  deterministicTests: ["matching precedence", "ambiguity rejected", "typed parameters", "href requires parameters", "guard outcomes", "loader not-found", "history navigation"],
+  browserEvidence: ["a detail link opens the right record", "an unknown path renders the application's not-found surface", "a visitor is refused a member route"],
+  proof: "test/code-agent/builder-v2-routing-module.test.mjs",
+});
+
+const MODULES = [CORE_MODULE, ...LEGACY_WRAPPED.map(legacyCapabilityModule), IDENTITY_1_2, ACCOUNTS_MODULE, AUTHORIZATION_1_1, ADMIN_MODULE, ENTITIES_1_1, ROUTING_MODULE];
 
 /** id → every registered version of that module, highest last. */
 const byId = new Map();

@@ -212,7 +212,8 @@ test("WP2 — negative controls: a blocked requirement or an unknown module oper
     ? { ...operation, moduleOperation: "upsert" } : operation) };
   const verdict = validateTypedOwnership(forged);
   assert.equal(verdict.ok, false);
-  assert.match(verdict.problems.join(), /create-plan names thrallo\.entities\.upsert, which thrallo\.entities@1\.0\.0 does not provide/);
+  // The message names the resolved version, so the operator sees which module version was checked.
+  assert.match(verdict.problems.join(), /create-plan names thrallo\.entities\.upsert, which thrallo\.entities@1\.\d+\.\d+ does not provide/);
   const untyped = { ...typed, operations: typed.operations.map(({ owner: _owner, output: _output, ...rest }) => rest) };
   assert.ok(ownershipProblems(untyped).some((problem) => /has no owner/.test(problem)));
   const blocked = { ...typed, ownership: { ...typed.ownership, platformRequirements: [

@@ -12,6 +12,10 @@ const LEGACY_CAPABILITIES = Object.freeze({
     name: "crud",
     version: "1.0.0",
     package: "src/lib/capabilities/crud.js",
+    // WP5 named this capability `entities` (audit §7.1). It is the same capability and the same
+    // module, so the new name is an ALIAS — exactly as `auth` aliases `session` — rather than a
+    // second registry entry that could drift from this one.
+    aliases: ["entities"],
     interface: ["makeEntityStore"],
     storeInterface: ["list", "get", "create", "update", "remove", "count", "subscribe"],
     entities: [],            // generic — binds to whatever the contract declares
