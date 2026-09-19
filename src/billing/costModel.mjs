@@ -57,7 +57,7 @@ export const RECORDED_COST_PER_CREDIT = {
 const blendedUsdPerToken = (rates) =>
   INPUT_FRACTION * rates.usdPerMInput + OUTPUT_FRACTION * rates.usdPerMOutput; // $/MTok, ratio use only
 
-export const WEIGHT_ANCHOR_MODEL = "claude-sonnet-4-6";
+export const WEIGHT_ANCHOR_MODEL = "claude-sonnet-5";
 
 export function modelWeight(model) {
   const rates = ALL_RATES[model];
@@ -272,7 +272,7 @@ export function buildModel(opts = {}) {
     },
     weights: {
       "claude-sonnet-4-6": modelWeight("claude-sonnet-4-6"),
-      "claude-haiku-4-5": modelWeight("claude-haiku-4-5"),
+      "claude-haiku-4-5-20251001": modelWeight("claude-haiku-4-5-20251001"),
       "claude-opus-4-8": modelWeight("claude-opus-4-8"),
     },
     runtime: {

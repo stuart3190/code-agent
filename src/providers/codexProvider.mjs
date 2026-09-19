@@ -11,6 +11,7 @@
 //   { name, description, parameters }   // parameters = JSON schema object
 
 import { getAccessToken } from "./auth.mjs";
+import { DISPATCH_STATES, providerFailure } from "../../shell/server/lib/providerOutcome.mjs";
 
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 const MODEL = "gpt-5.5"; // proven working for ChatGPT-account auth ("-codex" is rejected)
@@ -53,8 +54,9 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
   // The field lives ONLY here, behind the seam; the engine passes a neutral `promptCacheKey`.
   // fetchImpl/tokenProvider are injectable so the identifier plumbing is provable without a
   // ChatGPT account; production always uses the defaults.
-  async function runTurn({ systemPrompt, messages, tools, promptCacheKey, toolChoice, reasoningEffort }) {
-    const { accessToken, accountId } = await tokenProvider();
+  async function runTurn({ systemPrompt, messages, tools, promptCacheKey, toolChoice, reasoningEffort,
+    signal = null, maxOutputTokens = null }) {
+    let auth = await tokenProvider();
 
     const body = {
       model: MODEL,
@@ -63,6 +65,10 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
       stream: true,
       store: false, // backend rejects store:true/stream:false; no `metadata` (would 400)
     };
+    // The ChatGPT Codex backend rejects `max_output_tokens` even though the public Responses API
+    // accepts it. V2 still reserves against the bounded output policy before dispatch and stops at
+    // its shared usage ceiling after each turn; do not lie by sending an unsupported wire field.
+    void maxOutputTokens;
     if (promptCacheKey) body.prompt_cache_key = promptCacheKey;
     // Optional reasoning-effort override (codex_cli_rs sends the same field shape). Omitted
     // entirely when unset — existing callers' wire bodies are byte-identical.
@@ -76,7 +82,7 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
       body.parallel_tool_calls = toolChoice ? false : true;
     }
 
-    const res = await fetchImpl(CODEX_RESPONSES_URL, {
+    const dispatch = async ({ accessToken, accountId }) => fetchImpl(CODEX_RESPONSES_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -87,7 +93,26 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
         Accept: "text/event-stream",
       },
       body: JSON.stringify(body),
+      ...(signal ? { signal } : {}),
     });
+    let res;
+    let preReadErrorBody = null;
+    try { res = await dispatch(auth); } catch (error) {
+      throw providerFailure(error, { state: DISPATCH_STATES.ambiguous });
+    }
+    if (res.status === 401) {
+      preReadErrorBody = await res.text();
+      if (/token_expired|authentication token is expired/i.test(preReadErrorBody)) {
+        // The rejected request did not execute a model turn. Opaque ChatGPT access tokens do not
+        // expose a JWT expiry, so refresh only on this explicit rejection and retry once. No other
+        // response or ambiguous transport failure is replayed here.
+        auth = await tokenProvider({ forceRefresh: true });
+        try { res = await dispatch(auth); } catch (error) {
+          throw providerFailure(error, { state: DISPATCH_STATES.ambiguous });
+        }
+        preReadErrorBody = null;
+      }
+    }
 
     // The strongest STABLE identifiers this transport actually exposes, typed so a billing row
     // can never be mistaken for an OpenAI-platform request id:
@@ -98,11 +123,12 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
     let providerRequestId = headerRequestId ? `codex:request:${headerRequestId}` : null;
 
     if (!res.ok) {
-      const errBody = await res.text();
+      const errBody = preReadErrorBody ?? await res.text();
       const error = new Error(`Codex responses HTTP ${res.status}${providerRequestId ? ` (${providerRequestId})` : ""}: ${errBody}`);
       // A failed call that the backend received still has an identity — keep it for incident logs.
       error.providerRequestId = providerRequestId;
-      throw error;
+      throw providerFailure(error, { state: res.status < 500 ? DISPATCH_STATES.rejected : DISPATCH_STATES.ambiguous,
+        providerRequestId, retrySafe: [408, 409, 425, 429].includes(res.status) });
     }
 
     // Parse SSE. Accumulate text from deltas (final output[] can be empty); collect
@@ -110,6 +136,7 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
     let text = "";
     const toolCalls = [];
     let usage = null;
+    let responseCompleted = false;
     let buf = "";
     const decoder = new TextDecoder();
     try {
@@ -142,16 +169,27 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
               args = { __raw: it.arguments };
             }
             toolCalls.push({ id: it.call_id, name: it.name, rawArguments: it.arguments, arguments: args });
-          } else if (evt.type === "response.completed" && evt.response?.usage) {
-            usage = evt.response.usage;
+          } else if (evt.type === "response.completed") {
+            responseCompleted = true;
+            if (evt.response?.usage) usage = evt.response.usage;
           }
         }
       }
     } catch (streamError) {
+      // Undici can report an unclean transport EOF after the backend has already emitted the
+      // authoritative response.completed event. The model turn and its output are complete in
+      // that case; treating the trailing socket error as ambiguous discards a usable tool call
+      // and strands its durable reservation even though no replay is needed. Only the protocol's
+      // terminal event permits this recovery. Any earlier interruption remains fail-closed.
+      if (responseCompleted) {
+        return { text: text.trim(), toolCalls,
+          usage: { ...normalizeUsage(usage), providerRequestId } };
+      }
       // The backend opened a response and the stream died mid-flight: the turn happened, tokens
       // may have been consumed, and its identifier is the only handle support has. Retain it.
       streamError.providerRequestId = providerRequestId;
-      throw streamError;
+      if (usage) streamError.usage = { ...normalizeUsage(usage), providerRequestId };
+      throw providerFailure(streamError, { state: DISPATCH_STATES.ambiguous, providerRequestId });
     }
 
     return { text: text.trim(), toolCalls, usage: { ...normalizeUsage(usage), providerRequestId } };
@@ -161,7 +199,7 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
   // Codex usage row price at the default rate and classify by guesswork. `model` is the REAL wire
   // model (the ChatGPT-account backend rejects "-codex"-suffixed names), and `providerId` names
   // the lane so billing rows are attributable without inference.
-  return { runTurn, model: MODEL, providerId: "codex" };
+  return { runTurn, model: MODEL, provider: "codex", providerId: "codex" };
 }
 
 // Codex usage shape -> neutral blended shape a BYOK adapter could also fill.

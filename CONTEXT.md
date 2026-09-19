@@ -1,5 +1,154 @@
 # Thrallo handoff
 
+## Package 10E infrastructure recovery — FAIL (2026-08-08)
+
+The exposed new-format Supabase runtime secret used only by `thrallo-shell` and
+`thrallo-build-worker` was replaced through the supported Management API and revoked. The old key
+now returns 401 and the replacement returns 200. Four CAS-verified plaintext backup/transient copies
+were removed; full streamed scans of the two previously skipped large logs found zero matches.
+Shell and worker were the only restarted services. Provisiond/Caddy, routing, flags, migrations,
+customer state, model providers, and Stripe were untouched.
+
+Postgres itself was healthy, but the managed PostgREST pool had wedged with idle/aborted sessions.
+Terminating only nine stale PostgREST backends restored access; a 150-request/73-second mixed
+table/RPC proof then passed with zero 504s. The complete fixed-ID canary nevertheless reproduced a
+504 specifically on the stale `request_publish_activation` proof. Historical API logs show the
+immediately preceding activation at 200 and the stale request at 504. The RPC currently uses
+reserved serialization SQLSTATE `40001` for a business CAS conflict; the canary now requires the
+exact code/message and therefore fails closed instead of accepting a pool timeout.
+
+All proof data was removed, the eight customer hashes match, counts remain 11 projects / 31 build
+jobs / 1 published site / 5 deployments / 188 AI requests / 284 usage rows, ledger remains 67,
+and V2 flags/customer dispatch remain off. Package 10E is not complete. The exact next action is a
+separately approved additive C8 error-signaling forward repair followed by the same production
+canary; no later V2-only package may start first. Evidence is in
+`docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-10E-INFRASTRUCTURE-RECOVERY.md` and incident
+`docs/incidents/2026-08-08-package10e-supabase-credential-and-data-api.md`.
+
+## V2-only plan consolidation and database proof (2026-08-08)
+
+`docs/BUILDER-V2-V2-ONLY-CUTOVER.md` is now the sole active finish plan. The old master plan,
+finish plan and v1.0 release verdict are explicitly historical; calendar shadow, allowlist, broad
+rollout and elapsed-time V1 retirement gates are obsolete. No model spend, production migration,
+deployment, flag change or service restart occurred in this package.
+
+The two pending migrations were rebuilt from zero on the network-isolated VPS disposable Supabase
+17 stack with CLI `2.111.0`. The first reset exposed an incompatible `build_jobs.project_id text`
+to V2 `project_id uuid` composite FK. The unapplied runtime migration now preserves the V1 text API
+and uses generated parent `project_id_text` compatibility keys; the final 67-migration reset, DB
+lint, zero schema diff and database-level reservation/retry proof pass. The linked dry-run proposes
+only `20260807213500` and `20260807221000`; production remains at 65 migrations.
+
+Production application is NOT approved or currently safe. Read-only preflight found 13 V2 builds,
+12 verification-cache rows, two snapshots and one green pointer whose project parents no longer
+exist. They belong to one still-existing owner and predate relational cascade enforcement. Do not
+delete them, restore invented parents, use `NOT VALID`, or weaken owner/project FKs. The exact next
+phase is an approval-gated provenance and reconciliation pass using backup/history evidence,
+followed by the same preflight and a new backup/restore before any migration application.
+
+## Builder V2-only launch direction (2026-08-07)
+
+The product no longer has a staged V1-to-V2 customer rollout requirement. The active objective is
+to finish and deterministically qualify Builder V2, cut production to V2, then remove V1 and launch.
+The current V1 route remains only as an engineering rollback mechanism until cutover proof.
+
+The shadow window below is preserved as operational/forensic evidence, but it is not a launch gate
+and Thrallo will not wait for seven elapsed days or artificial V1 traffic. The authoritative package
+order, deterministic gates, cutover procedure and V1 retirement boundary are in
+`docs/BUILDER-V2-V2-ONLY-CUTOVER.md`. Model spend, production mutation, managed-settlement unpause,
+destructive V1 deletion and final cutover still require separate explicit approvals.
+
+The zero-credit V2 composition package is now implemented locally: durable pre-dispatch model
+reservations, cache-aware settlement, per-step routing, strict diagnostics, persistent project
+knowledge/retrieval traces, atomic graph/snapshot promotion, C7 worker-only execution,
+snapshot-authoritative preview/export/QA, C8-only publishing guards, legacy adoption, and a headless
+wizard capability. Worker lease recovery restarts only before provider dispatch, recovers an
+already-durable completion, and fails closed as `provider_replay_unsafe` when dispatch may have
+occurred. Two additive migrations (`20260807213500`, `20260807221000`) are local and unapplied.
+They still require a full isolated reset/lint/diff/RPC proof before any production approval.
+
+## Builder V2 shadow week restarted from zero (2026-08-07)
+
+The authoritative C4 full-graph observation window started at
+`2026-08-07T20:51:22.594832Z` and cannot complete before
+`2026-08-14T20:51:22.594832Z`. Production stores this in
+`bv2_feature_flags['bv2.shadow.window']`; the prior 2026-08-06 boundary is preserved there as
+`invalid_pre_remediation` for non-atomic persistence, incomplete graph validation and supersession
+by C4. It was not deleted and cannot count toward the replacement window.
+
+Commit `ab91a933297b436059296371d7e4386aa6e6157f` hardens the daily checker so a completed V1
+build whose shadow callback creates no migration-state row is blocking rather than silently absent.
+The `09:00 UTC` persistent timer records expected/checked/CLEAN/drift/missing/stale/parity counts,
+versions, duration and errors. Production disposable-owner proofs produced exit 0 for full parity
+and exit 1 for graph drift, stale evidence and a missing run; systemd exposed failures as
+`Result=exit-code`, `ExecMainStatus=1`, and the append log retained exact JSON. Cleanup returned all
+graph/shadow/proof-owner counts to zero. No natural V1 build has completed after the boundary yet,
+so the first real shadow record is awaiting ordinary traffic—do not manufacture a paid build.
+
+Builder V1 remains the customer default; `bv2.enabled` is absent/false, `bv2.owners` is
+absent/empty, managed settlement is paused, customer worker and atomic-publish dispatch remain off,
+and shared Caddy is unchanged. The next daily check is `2026-08-08T09:00:00Z`. The remaining
+hostname/certificate Caddy canary is independent and still needs separate approval.
+
+## C8 atomic unpublish forward repair (2026-08-07)
+
+Production migration `20260807174720_c8_atomic_unpublish_deployment_retirement.sql` is applied as
+ledger row 65. It fixes the production-proven stale-live-deployment defect by retiring the one live
+deployment for the site's owner/canonical scope before unpublish clears the active release pointer.
+The expanded matrix also proved the same scoped retirement is required when replacing a release
+activated through a rollback deployment. Fresh 65-migration reset, lint, zero diff, 24/24 Linux C8
+tests, disposable transaction fault injection and the complete production test-owner matrix pass.
+All proof rows were removed and the existing publishing/deployment/domain counts and hashes match
+the pre-proof baseline exactly. See
+`docs/evidence/atomic-publishing/2026-08-07/FORWARD-REPAIR.md`.
+
+No C7/C8 application code was deployed. Builder V1 remains the default; Builder V2 remains paused;
+managed settlement is paused; worker and atomic publish flags are off; worker is inactive; Caddy is
+unchanged; the shadow week was not restarted. The next separately approved step is the combined
+C4/C7/C8 dark code deployment and production canary.
+
+## Production isolation prerequisite (2026-08-07)
+
+Phase 0's failed disposable-restore isolation has been repaired without applying migrations or
+deploying C4/C7/C8. Supabase CLI `2.111.0` has no bind-address control, so the VPS now has a
+boot-enabled, reversible IPv4/IPv6 `DOCKER-USER` guard for original destination TCP `55320-55327`.
+An empty stack produced 0/72 successful external probes; the repeated restore of
+`thrallo-2026-08-07T090615` produced 0/472 while full parity passed (72 tables, 36,862 rows, Auth,
+Storage, filesystem, blobs, snapshots, pointers/cache and two-owner isolation). Disposable
+containers, volumes, restored files and plaintext evidence were destroyed; the encrypted evidence
+archive and source backup remain. Incident `SEC-20260807-DISPOSABLE-SUPABASE` records the prior
+107-second event as potential exposure, not confirmed breach, with notification assessment still
+requiring security/privacy ownership. Builder V1 remains default; V2, shadow restart, build worker,
+atomic publishing and managed settlement remain off/paused. Stop here: migration dry-run requires
+separate approval.
+
+## Builder V2 production remediation (2026-08-06)
+
+Work is active on branch `remediation/builder-v2-production`; C7 started from Phase B HEAD
+`9f05aa8310c066f96b1002d1cd436ae67beda318`. The durable build-worker phase is implemented
+locally but is not deployed or enabled. The additive migration is
+`20260806230625_durable_build_work_queue.sql`; disposable reset, lint, zero-diff, live RPC lease
+proof and an actual Playwright sandbox image proof pass. Expensive dependency install, compile,
+browser verification, generated-app packaging, Android packaging and image optimisation now have
+a separate worker boundary when `THRALLO_BUILD_WORKER_ENABLED=1`; with the flag absent/off the
+existing Builder V1 path is unchanged. Operations, incident and deployment procedures are in
+`docs/BUILD-WORKER-*.md`, and proof evidence is under
+`docs/evidence/build-worker/2026-08-06/`. Production has not been changed, the worker has not been
+started, Builder V2 and shadow remain paused, and managed settlement remains paused.
+
+Earlier remediation started from audited main `92e4c9fe5c864799eee228f304849064bacb0190`.
+PR-01 baseline is commit `c4c530a`; the C2
+essential-attribution fix is `a5be84a`; C3 cache hardening is `57cfbaa`; C5 snapshot integrity is
+`7ebceae`; C6 app-auth hardening is `1be62c2`; asset ingestion/Pexels hardening is `9d71704`;
+diagnostics redaction is `b6808ee`; later units fix typed retrieval, remove the
+nonexistent `read_file` claim, and integrates capability/project-knowledge context. Sharp process
+isolation is now implemented behind the disabled build-worker flag. Builder V1
+remains the default, Builder V2 rollout remains paused, and no production action, model spend,
+provider call, Stripe action or migration has been performed. The full local code-agent suite is
+green at 1,186 tests; static and HTTP security checks and the web build also pass. Continue from
+`docs/PRODUCTION-AUDIT-REMEDIATION.md`; PR-02 migration-history
+repair still requires explicitly approved read-only production evidence and must not be guessed.
+
 ## Current milestone
 
 **The v2 pivot is approved and underway.** `docs/PRINCIPLES.md` (12 principles +
@@ -904,6 +1053,46 @@ gated — NO paid run without Stuart), `ops/bv2-dual-run.mjs` (zero-credit compa
 Diagnostics: v2 runs appear in DiagnosticsView with a Builder v2 panel (per-step spend,
 snapshot lineage, pointers) via `/api/v1/diagnostics/:id/bv2`.
 
+Phase B atomic graph remediation is locally complete on `remediation/builder-v2-production`.
+Pending migration `20260806221153_bv2_atomic_graph_and_full_shadow.sql` replaces per-child
+PostgREST writes with one service-only transaction per file, quarantines incomplete revisions,
+serializes duplicate writers and records exact shadow manifests/checks. The complete shadow proof
+now compares paths, hashes, opaque state, symbols/spans/hashes, refs/resolution, edges,
+callers/importers/imports and ownership answers; stale/incomplete/missing/extra state is non-zero
+drift. Fresh reset, lint, zero diff, real Postgres fault injection, concurrent/owner/browser
+isolation, stored production-fixture parity and GC pin proofs pass. No production migration or flag
+change occurred. Runbook: `docs/BUILDER-V2-SHADOW-RUNBOOK.md`; evidence:
+`docs/evidence/builder-v2-graph/2026-08-06/PROOF.md`.
+
+The 2026-08-06 shadow week remains invalid and has NOT restarted. Before restart: approve/apply
+pending migrations in order after production upgrade proof, deploy the matching app, re-confirm V1
+default/V2 paused/settlement paused, take and isolate-restore a post-migration backup, prove one
+real V1 completion writes an immediate CLEAN check, then record a new timestamp from zero.
+
+Update 2026-08-07: C4/C7/C8 code is now deployed dark and its production canaries are green.
+The worker account-home/artifact-root overlap was repaired: private home is
+`/var/lib/thrallo-build-worker-home`, canonical backup data remains
+`/var/lib/thrallo-build-worker`, and symlink rejection remains fail-closed. One zero-model job
+passed after the move and cleaned its DB/workspace/container state. Final backup
+`thrallo-2026-08-07T201226` embeds the current 65-row migration ledger and passed a fully isolated
+restore (82 tables / 36,862 rows, 31 auth users, 2 Storage objects, 163 files, 46 directory modes,
+blob/snapshot/cache/graph/queue/publish and two-owner checks). External ports `55320-55327` had
+zero successful probes throughout; disposable data was destroyed. Customer hashes and Caddy are
+unchanged; V1 is healthy; settlement is paused; worker dispatch and atomic publishing remain off.
+All technical gates say the shadow week is ready to restart, but it has NOT been restarted because
+that requires the next explicit approval. The real hostname/certificate Caddy canary remains an
+independent ingress approval, not a shadow prerequisite.
+
+C8 atomic publishing is locally complete on the same remediation branch and remains undeployed.
+Pending migration `20260807072455_atomic_immutable_releases.sql` adds service-only immutable
+release and activation-intent state. Provisiond finalises read-only byte-hashed releases, switches a
+stable per-site symlink atomically, and exposes deterministic integrity/adoption operations. The
+shell uses CAS/outbox reconciliation; rollback activates retained bytes without compiling. Existing
+live directories require the paused, byte-identical adoption and Caddy cutover in
+`docs/PUBLISHING-OPERATIONS.md`; do not enable the shell flag before that proof. Fresh 64-migration
+reset, lint, zero diff, Postgres races and 23/23 Linux publishing proofs pass. Production migration,
+Caddy reload, flags, services, shadow state and customer traffic are unchanged.
+
 ## Next implementation slice
 
 Phase 24 completion: Stuart's steps 1-2 (Meta ad, Stripe audit — YOU_NEED_TO_DO.md), then
@@ -916,6 +1105,82 @@ User-owned setup and billing actions are tracked in `YOU_NEED_TO_DO.md`. Flippin
 live is Stuart-owned: approve prices, create the dedicated Thrallo Stripe products and webhook,
 and set the `THRALLO_STRIPE_*` environment.
 
+## Builder V2 production remediation (2026-08-06)
+
+Implementation is on `remediation/builder-v2-production`, based on audited/current `origin/main`
+`92e4c9fe5c864799eee228f304849064bacb0190`. The approved programme is tracked in
+`docs/PRODUCTION-AUDIT-REMEDIATION.md`. PR-01's local implementation is complete: its five focused
+tests, full code-agent suite, production web build, and 118 browser tests pass. The approved live
+read remains outstanding. The 2026-08-06 shadow period is diagnostic history and must restart
+after PR-04 because the current persistence/drift path cannot prove a complete graph.
+
+Hard stops remain: no model-powered build/provider spend, Stripe call, production mutation,
+migration/history repair, or rollout flag change without its explicit approval. Builder V1 remains
+the customer default. `THRALLO_MANAGED_SETTLEMENT_PAUSED=1` must stay armed; V2 customer flags stay
+off and the environment kill remains armed until the approved internal-pilot gate. Next after PR-01
+proof is PR-02 migration reproducibility; do not rename duplicate migration versions before a
+read-only comparison with the real production migration history and schema.
+
+## Package 10E recovery hard stop (2026-08-08)
+
+The 67-migration backup and isolated restore are green and the Builder V2 composition remains
+deployed dark, but Package 10E is **not complete**. Two fixed-ID recovery attempts stopped before
+creating any test data because production PostgREST returned connection-pool 504s; API and service
+logs show the outage also affects unrelated shell background paths and the dark worker. Final
+read-only proof found zero canary residue and unchanged counts (projects/build jobs/published
+sites/deployments `11/31/1/5`, AI requests/usage `188/284`, ledger `67`). All public origins and
+services were healthy at the HTTP/systemd layer, V2 flags remained off, and managed settlement
+remained paused.
+
+No provisiond or Caddy operation occurred during recovery. A diagnostic command exposed one
+Supabase service credential in captured tool output without writing it to the repo/evidence; rotate
+that credential and restore/prove the Data API before retrying the canary. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-10E-CANARY-RECOVERY.md`.
+
+## Package 10E-F complete (2026-08-08)
+
+Package 10E is now **PASS**. Production migration 68,
+`20260808164259_c8_nonretryable_stale_cas`, maps expected C8 stale/pending CAS conflicts to
+PostgREST `PT412` without weakening CAS or masking real `40001`/`40P01` failures. An 80-request
+production conflict stress returned 80 HTTP 412s, zero 504/PGRST003/5xx, p95 87.26 ms and no pool
+growth/persistent aborted session. The complete fixed-ID zero-model composition canary passed
+lifecycle through cleanup, including worker recovery/cancellation, snapshots, graph/retrieval,
+provider replay boundaries, C8 rollback/unpublish/republish and legacy adoption. All eight customer
+hashes were unchanged and proof residue is zero. Caddy/provisiond were untouched; V1 remains the
+customer default; V2/customer worker/customer atomic publish remain off; settlement remains paused.
+Evidence: `docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-10E-F-C8-CAS-REPAIR.md`.
+
+The exposed legacy JWT service-role key was assessed but not rotated: deployed `app-auth` v7 is the
+only confirmed active consumer and requires a separately approved Edge Function code/auth/deploy
+canary to migrate to `SUPABASE_SECRET_KEYS`. The next authoritative package is Package 12: close
+platform launch blockers at zero model cost; do not start it without approval.
+
+## Package 12 complete (2026-08-08)
+
+Package 12A-12G is **PASS**. Production ledger is 70 with zero pending migrations. Cross-store
+project/account erasure, shared atomic rate limiting, authenticated browser log streaming, public
+analytics CORS/app validation, immutable release provenance, fast/release CI gates and practical
+DR/SLO automation are implemented and production-proven with disposable owners only.
+
+Production app identity remains the dark V2 composition artifact at commit
+`a702cf136fd1e25215b66561440795172995d591`, manifest identity
+`7692155a5231978f7fb698e3406b59b59de8bb2991634e6f0f064c0b6a4b1753`. Package 12 code is in the
+same deployed source artifact; later commits are proof, restore-compatibility and documentation
+only. Shell/worker/provisiond are healthy, Caddy hash is unchanged, V1 remains the default, V2
+customer flags remain absent/off, managed settlement remains paused and no model or Stripe call ran.
+
+The post-migration backup is `/home/ubuntu/thrallo-backups/thrallo-2026-08-08T194910`, manifest
+SHA-256 `88e436df7de0322869143cfda6c3b1ef2109721a49ae9a2f5c0c64439a2098e1`. Its isolated restore passed
+85 canonical application tables / 36,705 rows, 19 Auth users, two Storage objects, 170 files plus
+51 directory records, runtime links and owner isolation. A Windows-host monitor made 212 probes on
+55320-55327 with zero connections; the disposable stack/data were destroyed afterward.
+
+The five-minute DR health timer is active. The off-host backup and monthly restore timers are
+installed but intentionally disabled until external storage credentials and an independent probe
+command are supplied; the tooling fails closed and no paid provider was configured. The next
+authoritative package is Package 13, provider/billing closure and executable model catalogue. It
+starts with zero-model synthetic proofs and does not authorise managed settlement or live spend.
+
 ## Important boundaries
 
 - Browser: publishable Supabase key only.
@@ -926,3 +1191,181 @@ and set the `THRALLO_STRIPE_*` environment.
   it never receives the platform service role or encryption key.
 - Imported Buildr generation routes remain in the server temporarily for compatibility but are not
   linked from the Thrallo UI. Remove them as the standalone control plane absorbs shared needs.
+## Package 13 provider/billing closure (2026-08-08)
+
+Builder V2 now has one executable model catalogue and canonical `lane:provider:model` identity.
+Managed OpenAI, provider-specific BYOK (OpenAI/Anthropic/Gemini/xAI), and connected Codex allowance
+are distinct lanes; manual selection cannot cross them and invalid environment model ids fail
+closed. Provider failures carry explicit dispatch state: only proven pre-dispatch/rejected work may
+retry, partial usage settles once, and ambiguous dispatch is held as `provider_replay_unsafe`.
+Per-step ceilings fail before dispatch. Managed settlement remains paused. The five Edge Functions
+still use the legacy service-role environment variable; their new-secret-key transition is planned
+but not executed in `docs/LEGACY-SERVICE-KEY-MIGRATION.md`.
+
+Package 13 is **PASS** and deployed dark at
+`3c0164ddfe5fdbc26ec199f09267342addfbd358`. Its production zero-model canary made no provider or
+Stripe request, proved BYOK/Codex/managed lane pinning and idempotent accounting, cleaned all test
+state and preserved every customer hash. Production remains at 70 migrations; V1 is the customer
+default, V2 customer flags are off and managed settlement is paused. The next package is Package
+14, the minimum live generation/edit/repair/provider-failure/booking matrix, and requires explicit
+model-spend approval.
+
+## Package 14 live quality qualification failed (2026-08-08)
+
+Package 14 stopped at 6.6273 of the approved 15-credit ceiling. Provider failure handling passed,
+but the simple build never reached a green snapshot, so its required edit was blocked. The booking
+attempt used `makeBookingSystem` but bypassed `makeWizardMachine`; one retrieval-scoped repair
+improved selection behaviour but review, confirmation and refresh recovery stayed red. No repeat
+booking attempt ran.
+
+The package fixed live-only worker credential authority, opaque Codex token refresh, unsupported
+Codex wire parameters, canonical model selection, provider request-id diagnostics and bounded
+repair headroom. Full tests are green (1,337 pass, 17 intentional skips). The worker is restored to
+dark `proof_slow,publish_package` mode; V1 remains the default, V2 flags are off, settlement is
+paused, and there are zero active worker jobs. Package 15 is blocked. Next is separately approved
+Package 14R; see `docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-14-LIVE-QUALITY.md`.
+
+## Package 14R quality requalification failed (2026-08-09)
+
+Package 14R repaired mandatory capability binding, reusable repair headroom, immutable pre-green
+working checkpoints, repair-only resume, and durable wizard review/confirmation/cancel recovery.
+The deterministic V2 gate was green before live spend. One additive snapshot identity repair was
+required after the targeted repair produced exact prior bytes with a distinct asset manifest:
+`20260808235700_bv2_snapshot_asset_identity.sql`. Production is at 71 migrations.
+
+The single approved live run spent 8.2934/12 credits over ten AUTO-routed Codex calls. The targeted
+repair passed. The simple/edit runtime states were green but their final diagnostics still showed
+the contracted contact-persistence journey red with no backend mutation, so they are quality
+failures. The only booking build was blocked after three core attempts repeatedly generated an
+oversized three-journey HomePage; it was not rerun. Generation quality is not qualified.
+
+Cleanup is complete: both projects and every scoped V2 build, reservation, worker job, snapshot,
+diagnostic and AI request were erased; production counts returned to the pre-run baseline. The
+worker is restored to `proof_slow,publish_package`, qualification-only authority was removed, V1 is
+default, V2 flags are off, settlement is paused, Caddy is unchanged, and no Stripe transaction ran.
+Package 15 is blocked. Exact next work is Package 14S: deterministic contracted-journey completion
+gating, booking module-plan enforcement and booking complexity classification, then a separately
+approved booking-only proof. Evidence is in
+`docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-14R-DETERMINISTIC-QUALITY-REPAIR.md`.
+
+## Package 14S deterministic gate passed (2026-08-09)
+
+Builder V2 now refuses final `green` completion when any required contracted journey is red or
+missing. Core/increment work stays as immutable `working:*` repair input until the whole contract
+passes. Multi-step booking is classified medium, receives an exact behavior-only module plan before
+generation, and must bind both `makeBookingSystem` and `makeWizardMachine`; missing planned modules
+or bindings fail before compile/browser verification. One-step booking remains simple and the
+previously approved modularity thresholds were not changed.
+
+Package 14S focused fixtures passed 6/6 and 238/238 relevant zero-model V2 tests passed. No provider
+call or production mutation occurred. The only remaining Package 14S step is one separately approved
+live booking proof; Package 15 remains blocked until that proof passes. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-08/PACKAGE-14S-DETERMINISTIC-GATE.md`.
+
+## Package 14S live booking proof failed (2026-08-09)
+
+The single AUTO-routed booking lifecycle ran from deployed commit `c2ad218` on connected Codex and
+used 4.4655/9 credits across one contract and three bounded core calls. Complexity was correctly
+`medium`; every candidate contained the enforced booking modules plus `makeBookingSystem` and
+`makeWizardMachine`. Compile and browser journeys were never reached because the capability linter
+only recognizes direct `instance.method(...)` calls and rejected valid destructured exports of all
+eleven required methods on every attempt. No working checkpoint existed, so the permitted targeted
+repair would have required forbidden full regeneration and was not run.
+
+Cleanup and canonical customer parity passed. The worker is dark again, V1 is default, V2 flags and
+customer C7/C8 routing remain off, settlement is paused, and Caddy was untouched. Package 15 remains
+blocked by this narrow capability-lint contract defect. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-LIVE-BOOKING.md`.
+
+## Package 14S AST linter repair passed; live quality remains red (2026-08-09)
+
+Commit `6261a03` adds fail-closed Babel AST provenance for direct, destructured, aliased, exported
+and imported capability methods, with bound and invoked state tracked separately. Matching local
+functions, unrelated objects/imports, unused aliases, invalid factories and ambiguous identifiers
+do not pass. Focused tests passed 33/33 and the relevant zero-model suite passed 255/255.
+
+The one new AUTO booking build spent 3.099/9 credits over three connected Codex calls. It was
+correctly medium, produced the exact modular plan, passed live capability lint on core attempt 2,
+compiled and reached an immutable working checkpoint plus browser verification. The essential
+journey failed at contact entry, review, durable confirmation and reload; the other three journeys
+were not run. The sole allowed checkpoint repair made zero provider calls because its six-credit
+call ceiling could not fit a useful response inside the remaining 5.901 build credits.
+
+Cleanup and customer parity passed; worker/V1/flags/settlement/Caddy safety state is unchanged.
+Package 15 remains blocked. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-CAPABILITY-LINT-REPAIR.md`.
+
+## Package 14S registry-total capability aggregation passed; live quality remains red (2026-08-09)
+
+Commit `6677361` derives the recognised factory inventory from the capability registry and creates
+aggregate provenance facts for every recognised factory, independently of contract requiredness.
+Facts retain exact instances, bindings, invocations and source modules. `makeWizardPersistence` is
+now covered by the method-drift proof; auxiliary `makeEntityStore` can coexist with required booking
+and wizard capabilities without crashing or satisfying their requirements. The compatibility matrix
+and focused tests passed 42/42; the broader relevant zero-model suite passed 302/302.
+
+The single fresh AUTO booking proof spent 3.3876/12 credits over one contract and three core calls.
+It was correctly medium and carried the exact six-module plan. The aggregation exception was gone.
+No candidate reached compile: the final candidate used the valid but unmodelled grammar
+`export const { submitContact } = makeContactForm(...)`, which the linter falsely treated as a
+missing contact factory, and it bound wizard `getState`/`subscribe` without invoking them. There was
+no working checkpoint, so no repair or full regeneration ran. Cleanup parity passed across all 12
+canonical datasets. Worker/V1/flags/settlement/Caddy safety state is unchanged. Package 15 remains
+blocked. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-CAPABILITY-AGGREGATION-TOTALITY.md`.
+
+## Package 14S direct factory-result grammar gate passed (2026-08-09)
+
+Commit `9c794c7` gives the capability validator one source resolver for both named, proven
+capability objects and direct recognised factory `CallExpression` results. Direct/exported/aliased
+destructuring, direct member use and cross-module imports retain machine-verifiable factory
+provenance. The registry-driven matrix covers all six recognised factories across ten positive
+syntax forms each and retains fail-closed results for unrelated callables, objects, invalid factory
+configuration, missing methods and bound-but-unused methods.
+
+The retained live candidate shape now accepts its valid direct
+`makeContactForm({ entity: "contactMessage" })` destructuring but still rejects wizard `getState`
+and `subscribe` as bound but never invoked. It passes AST parse, patch/module-plan validation and a
+real Vite compile. A corrected version that invokes those methods passes every deterministic gate
+and also compiles. Focused grammar/replay tests passed 25/25; the relevant zero-model
+V2/provider/verification suite passed 307/307. No provider call, deployment or production mutation
+occurred. Another live booking proof is technically justified only under separate approval;
+Package 15 remains blocked until live strict quality passes. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-DIRECT-FACTORY-GRAMMAR.md`.
+
+## Package 14S post-grammar live booking proof failed (2026-08-09)
+
+The single authorized fresh AUTO booking lifecycle used
+`connected_allowance:codex:gpt-5.5:medium`, four calls and 4.392/15 internal credits. Medium
+complexity, the enforced six-module plan and the full capability grammar all held. The final
+candidate passed capability and module-plan validation, proving the direct factory-result false
+positive did not recur, but the deterministic persistence gate caught `sessionStorage` writes in
+`BookingFlow.jsx` before compilation. No browser journey ran and no immutable working checkpoint
+existed, so the approved targeted repair was ineligible and did not run.
+
+Cleanup restored canonical parity across all twelve guarded datasets. Production is back to 13
+projects, 39 build jobs, 198 AI requests, 284 usage records, one published site and five
+deployments, with zero active V2 builds/reservations/worker jobs. Worker authority is dark again,
+V2 flags are off and managed settlement remains paused. Builder V2 quality is not qualified;
+Package 15 remains blocked. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-DIRECT-GRAMMAR-LIVE-QUALIFICATION.md`.
+
+## Package 14S pre-compile persistence repair passed (2026-08-09)
+
+Durable booking generation now receives a machine-readable storage ownership plan:
+`makeBookingSystem` owns booking persistence, platform-backed `makeWizardMachine` owns recoverable
+wizard state, and UI modules own no durable business state. An AST verdict rejects
+`localStorage`, `sessionStorage`, IndexedDB and fake process-memory durability before compilation
+with exact file/API/journey/owner evidence.
+
+A structurally valid tree is now stored as immutable, content-addressed, non-promotable
+`candidate:*` state. One narrow repair can resume it using only the offending file, relevant
+interfaces, journey contract and validator findings; contract/core generation is not replayed.
+The candidate stays non-promotable through compile and browser verification, advancing to
+`working:*` only after those gates pass.
+The retained two-`sessionStorage` booking failure is rejected, repaired and passes a real Vite
+compile. Focused proof passed 7/7, stage/persistence compatibility passed 69/69, and the relevant
+V2 suite passed 357/357. No provider call or production action occurred. Another single live
+booking proof is technically justified only under separate approval; Builder V2 quality is not
+yet qualified and Package 15 remains blocked. Evidence:
+`docs/evidence/builder-v2-runtime/2026-08-09/PACKAGE-14S-PRECOMPILE-PERSISTENCE-REPAIR.md`.

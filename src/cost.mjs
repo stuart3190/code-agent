@@ -28,21 +28,23 @@ export const GPT55_ASSUMED_RATES = {
 // ---- real, published Anthropic Messages API rates ($/MTok) ----
 // Cache read ≈ 0.1× input; cache write = 1.25× input (5-minute TTL). Published rates, not assumed.
 export const ANTHROPIC_RATES = {
+  "claude-opus-5": { label: "claude-opus-5 (REAL Anthropic rates)", usdPerMInput: 5.0, usdPerMOutput: 25.0, cachedInputMultiplier: 0.1, cacheWriteMultiplier: 1.25 },
+  "claude-sonnet-5": { label: "claude-sonnet-5 (REAL Anthropic rates)", usdPerMInput: 3.0, usdPerMOutput: 15.0, cachedInputMultiplier: 0.1, cacheWriteMultiplier: 1.25 },
   "claude-sonnet-4-6": { label: "claude-sonnet-4-6 (REAL Anthropic rates)", usdPerMInput: 3.0, usdPerMOutput: 15.0, cachedInputMultiplier: 0.1, cacheWriteMultiplier: 1.25 },
   "claude-opus-4-8": { label: "claude-opus-4-8 (REAL Anthropic rates)", usdPerMInput: 5.0, usdPerMOutput: 25.0, cachedInputMultiplier: 0.1, cacheWriteMultiplier: 1.25 },
-  "claude-haiku-4-5": { label: "claude-haiku-4-5 (REAL Anthropic rates)", usdPerMInput: 1.0, usdPerMOutput: 5.0, cachedInputMultiplier: 0.1, cacheWriteMultiplier: 1.25 },
+  "claude-haiku-4-5-20251001": { label: "claude-haiku-4-5-20251001 (REAL Anthropic rates)", usdPerMInput: 1.0, usdPerMOutput: 5.0, cachedInputMultiplier: 0.1, cacheWriteMultiplier: 1.25 },
 };
 
 export function anthropicRatesFor(model) {
-  return ANTHROPIC_RATES[model] || ANTHROPIC_RATES["claude-sonnet-4-6"];
+  return ANTHROPIC_RATES[model] || ANTHROPIC_RATES["claude-sonnet-5"];
 }
 
 // xAI/Grok published rates (standard tier — long-context pricing is handled by the xAI
 // adapter's exact-cost calculator; these blended rates feed the credit WEIGHT system).
 export const XAI_RATES = {
-  "grok-4.5": { label: "grok-4.5 (xAI published rates)", usdPerMInput: 3.0, usdPerMOutput: 15.0, cachedInputMultiplier: 0.25, cacheWriteMultiplier: 1 },
-  "grok-4.3": { label: "grok-4.3 (xAI published rates)", usdPerMInput: 0.6, usdPerMOutput: 2.4, cachedInputMultiplier: 0.25, cacheWriteMultiplier: 1 },
-  "grok-build-0.1": { label: "grok-build-0.1 (xAI published rates)", usdPerMInput: 1.2, usdPerMOutput: 6.0, cachedInputMultiplier: 0.25, cacheWriteMultiplier: 1 },
+  "grok-4.5": { label: "grok-4.5 (xAI published rates)", usdPerMInput: 2.0, usdPerMOutput: 6.0, cachedInputMultiplier: 0.15, cacheWriteMultiplier: 1 },
+  "grok-4.3": { label: "grok-4.3 (xAI published rates)", usdPerMInput: 1.25, usdPerMOutput: 2.5, cachedInputMultiplier: 0.16, cacheWriteMultiplier: 1 },
+  "grok-build-0.1": { label: "grok-build-0.1 (xAI published rates)", usdPerMInput: 1.0, usdPerMOutput: 2.0, cachedInputMultiplier: 0.2, cacheWriteMultiplier: 1 },
 };
 
 // Active rate table used by telemetry's live per-turn log + summary (which create their cost inside

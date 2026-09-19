@@ -15,12 +15,12 @@
 //                                       Windows dev box. FAIL-SOFT: a publish never blocks on
 //                                       icons; install quality degrades, the site does not.
 
-import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, writeFile, copyFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { glyphPath } from "./iconGlyphs.mjs";
+import { runProcess } from "../../../build-worker/processTree.mjs";
 
 // shadcn-style token: "--primary: 222 47% 40%;" (space or comma separated) -> hex.
 function tokenToHex(css, name, fallback) {
@@ -155,37 +155,53 @@ function iconHtml({ glyph, letter, bg, fg }) {
 }
 
 function chromeRenderer() {
+  const chrome = process.env.PWA_CHROME_BIN;
+  if (chrome) {
+    return async (htmlPath, outPath, size) => {
+      const result = await runProcess(chrome, [
+        "--headless", "--no-sandbox", "--disable-gpu", `--window-size=${size},${size}`,
+        `--screenshot=${outPath}`, "--virtual-time-budget=2500", `file://${htmlPath}`,
+      ], { env: process.env, wallMs: 30_000, outputBytes: 1024 * 1024 });
+      if (!result.ok) throw new Error(result.stderr || "headless icon renderer failed");
+    };
+  }
   if (process.platform !== "win32") {
-    return (htmlPath, outPath, size) => execFileSync("docker", [
+    return async (htmlPath, outPath, size) => {
+      const result = await runProcess("docker", [
       "run", "--rm", "-v", `${path.dirname(htmlPath)}:/render`, "zenika/alpine-chrome:latest",
       "--headless", "--no-sandbox", "--disable-gpu", `--window-size=${size},${size}`,
       `--screenshot=/render/${path.basename(outPath)}`, "--virtual-time-budget=2500",
       `file:///render/${path.basename(htmlPath)}`,
-    ], { stdio: "pipe" });
+      ], { env: process.env, wallMs: 30_000, outputBytes: 1024 * 1024 });
+      if (!result.ok) throw new Error(result.stderr || "headless icon renderer failed");
+    };
   }
   const edge = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
   if (!existsSync(edge)) throw new Error("no headless renderer available");
-  return (htmlPath, outPath, size) => execFileSync(edge, [
+  return async (htmlPath, outPath, size) => {
+    const result = await runProcess(edge, [
     "--headless", "--disable-gpu", `--window-size=${size},${size}`,
     `--screenshot=${outPath}`, "--virtual-time-budget=2500",
     `file:///${htmlPath.replace(/\\/g, "/")}`,
-  ], { stdio: "pipe" });
+    ], { env: process.env, wallMs: 30_000, outputBytes: 1024 * 1024 });
+    if (!result.ok) throw new Error(result.stderr || "headless icon renderer failed");
+  };
 }
 
-export async function renderIcons({ appName, tree, distDir, iconGlyph = null, log = () => {} }) {
+export async function renderIcons({ appName, tree, distDir, iconGlyph = null, log = () => {}, renderer = null }) {
   const { name, themeColor, letterColor } = pwaColors(tree, appName);
   const letter = (name.match(/[a-zA-Z0-9]/) || ["A"])[0].toUpperCase();
   const glyph = iconGlyph ? glyphPath(iconGlyph) : null;
   const work = path.join(os.tmpdir(), `buildr-icons-${Date.now()}`);
   try {
-    const render = chromeRenderer();
+    const render = renderer || chromeRenderer();
     await mkdir(work, { recursive: true });
     await mkdir(path.join(distDir, "icons"), { recursive: true });
     const htmlPath = path.join(work, "icon.html");
     await writeFile(htmlPath, iconHtml({ glyph, letter, bg: themeColor, fg: letterColor }), "utf8");
     for (const [size, file] of [[512, "icon-512.png"], [192, "icon-192.png"], [180, "apple-touch-icon.png"]]) {
       const tmpOut = path.join(work, file);
-      render(htmlPath, tmpOut, size);
+      await render(htmlPath, tmpOut, size);
       await copyFile(tmpOut, path.join(distDir, "icons", file));
     }
     log(`pwa: icons rendered (${glyph ? iconGlyph : `"${letter}"`} on ${themeColor})`);

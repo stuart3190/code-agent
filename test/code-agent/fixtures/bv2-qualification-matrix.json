@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "modelSpend": false,
+  "classes": [
+    { "id": "landing", "proof": "builder-v2-orchestrator.test.mjs", "asserts": ["first-green", "preview-gate"] },
+    { "id": "contact", "proof": "builder-v2-capability-lint.test.mjs", "asserts": ["contact-capability", "no-fake-persistence"] },
+    { "id": "crud-data", "proof": "builder-v2-capabilities.test.mjs", "asserts": ["crud-capability", "protected-runtime"] },
+    { "id": "booking", "proof": "builder-v2-booking-capability.test.mjs", "asserts": ["capacity", "cancellation", "persistence"] },
+    { "id": "booking-wizard", "proof": "builder-v2-wizard-capability.test.mjs", "asserts": ["navigation", "selection", "validation", "confirmation", "progress", "cancellation", "restore"] },
+    { "id": "multi-route", "proof": "builder-v2-orchestrator.test.mjs", "asserts": ["secondary-increments", "route-graph"] },
+    { "id": "auth-session", "proof": "app-auth-security.test.mjs", "asserts": ["app-registry", "tenant-isolation", "reset-race"] },
+    { "id": "asset-heavy", "proof": "builder-v2-assets.test.mjs", "asserts": ["cache", "ssrf", "immutable-replacement"] },
+    { "id": "typescript-tsx", "proof": "builder-v2-indexer-v1.test.mjs", "asserts": ["tsx-symbols", "references", "edges"] },
+    { "id": "legacy-adoption", "proof": "builder-v2-project-source.test.mjs", "asserts": ["snapshot-authority", "explicit-compatibility"] },
+    { "id": "edit", "proof": "builder-v2-edit.test.mjs", "asserts": ["differential-verification", "failed-edit-no-promotion"] },
+    { "id": "repair", "proof": "builder-v2-orchestrator.test.mjs", "asserts": ["bounded-repair", "essential-failure-blocks"] },
+    { "id": "publish-rollback", "proof": "atomic-publishing.test.mjs", "asserts": ["immutable-release", "rollback-without-rebuild", "unpublish-republish"] },
+    { "id": "cancellation-worker", "proof": "build-worker.test.mjs", "asserts": ["cancellation", "lease-recovery", "isolation"] },
+    { "id": "provider-failure-billing", "proof": "builder-v2-model-lanes.test.mjs", "asserts": ["strict-lane", "retry-reservation", "usage-settlement"] },
+    { "id": "runtime-composition", "proof": "builder-v2-runtime-composition.test.mjs", "asserts": ["backend-row-proof", "owner-scoped-evidence", "worker-only"] },
+    { "id": "graph-owner-parity", "proof": "builder-v2-atomic-graph.test.mjs", "asserts": ["full-parity", "cross-owner-denial", "drift"] },
+    { "id": "backup-restore", "proof": "backup-coverage.test.mjs", "asserts": ["canonical-manifest", "symlink-rejection"] }
+  ]
+}

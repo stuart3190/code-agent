@@ -1,14 +1,41 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, writeFile, mkdir } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, writeFile, mkdir, symlink } from "node:fs/promises";
 import { gzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
-import { CA_TABLES } from "../../ops/backup-thrallo.mjs";
-import { RESTORE_ORDER } from "../../ops/restore-thrallo.mjs";
+import { CA_TABLES, canonicalSqlHash, loadMigrationLedgerEvidence } from "../../ops/backup-thrallo.mjs";
+import {
+  RESTORE_ORDER, prepareRowsForRestore, restoreWriteMethod,
+} from "../../ops/restore-thrallo.mjs";
 import { validateBackupDirectory } from "../../scripts/lib/backupValidation.mjs";
+import { inventoryFilesystemRoot, readInventoriedFile, restoreFilesystemLayout } from "../../ops/lib/filesystemBackup.mjs";
+import {
+  EPHEMERAL_RUNTIME_TABLES,
+  PRODUCTION_PUBLIC_FK_PAIRS_68,
+  PRODUCTION_PUBLIC_FK_PAIRS_70,
+  PRODUCTION_PUBLIC_FK_PAIRS_75,
+  PRODUCTION_PUBLIC_TABLES_68,
+  PRODUCTION_PUBLIC_TABLES_69,
+  PRODUCTION_PUBLIC_TABLES_70,
+  PRODUCTION_PUBLIC_TABLES_75,
+  PRODUCTION_PUBLIC_TABLES_98,
+  PRODUCTION_PUBLIC_FK_PAIRS_99,
+  backupTablesToVerify,
+  canonicalRowsForRestoreComparison,
+  collectDeferredRestorePatches,
+  PENDING_MIGRATION_TABLES,
+  findCatalogCoverageGaps,
+  prepareRowsForBackup,
+  runtimeCatalogEvidence,
+  validateGeneratedProjectIds,
+  validateRestoreOrder,
+  validateRuntimeBackupLinks,
+} from "../../ops/lib/runtimeBackupSchema.mjs";
 
 const migrationsDir = new URL("../../supabase/migrations/", import.meta.url);
 
@@ -35,13 +62,7 @@ const INTENTIONALLY_NOT_BACKED_UP = new Map([
   "provider_webhook_events", "knowledge_bases", "knowledge_documents", "knowledge_chunks",
   "app_user_integrations", "app_connector_oauth_states",
 ].map((table) => [table, UNAPPLIED_LEGACY]).concat([
-  // Builder v2 DERIVED data: the indexer rebuilds all four deterministically from any snapshot
-  // (content-hash keyed), so backing them up doubles snapshot size for zero recovery value.
-  ["bv2_file_revisions", "derived: rebuilt deterministically from snapshots by the bv2 indexer"],
-  ["bv2_symbols", "derived: rebuilt deterministically from snapshots by the bv2 indexer"],
-  ["bv2_symbol_refs", "derived: rebuilt deterministically from snapshots by the bv2 indexer"],
-  ["bv2_dependency_edges", "derived: rebuilt deterministically from snapshots by the bv2 indexer"],
-  ["bv2_verification_cache", "a cache keyed by owners_hash; re-verification regenerates it and restoring stale verdicts would be worse than empty"],
+  ["http_rate_limit_buckets", "short-lived admission-control counters are deliberately reset after restore; they contain no canonical customer state"],
 ]));
 
 // EVERY table any migration creates. This deliberately does NOT filter by name: the previous
@@ -80,11 +101,32 @@ test("every deliberate backup exclusion carries a written reason", () => {
 
 test("the restore order covers exactly the backed-up tables", () => {
   assert.deepEqual([...RESTORE_ORDER].sort(), [...CA_TABLES].sort());
+  assert.ok(RESTORE_ORDER.indexOf("ca_github_installations") < RESTORE_ORDER.indexOf("ca_repositories"));
   assert.ok(RESTORE_ORDER.indexOf("ca_repositories") < RESTORE_ORDER.indexOf("ca_agents"));
   assert.ok(RESTORE_ORDER.indexOf("ca_agents") < RESTORE_ORDER.indexOf("ca_runs"));
   assert.ok(RESTORE_ORDER.indexOf("ca_automations") < RESTORE_ORDER.indexOf("ca_runs"));
   assert.ok(RESTORE_ORDER.indexOf("ca_runs") < RESTORE_ORDER.indexOf("ca_run_events"));
   assert.ok(RESTORE_ORDER.indexOf("ca_runs") < RESTORE_ORDER.indexOf("ca_artifacts"));
+  assert.ok(RESTORE_ORDER.indexOf("bv2_file_revisions") < RESTORE_ORDER.indexOf("bv2_symbols"));
+  assert.ok(RESTORE_ORDER.indexOf("bv2_symbols") < RESTORE_ORDER.indexOf("bv2_symbol_refs"));
+  assert.ok(RESTORE_ORDER.indexOf("bv2_file_revisions") < RESTORE_ORDER.indexOf("bv2_shadow_run_files"));
+  assert.ok(RESTORE_ORDER.indexOf("bv2_shadow_runs") < RESTORE_ORDER.indexOf("bv2_shadow_run_files"));
+  assert.ok(RESTORE_ORDER.indexOf("bv2_shadow_runs") < RESTORE_ORDER.indexOf("bv2_shadow_checks"));
+  assert.ok(RESTORE_ORDER.indexOf("projects") < RESTORE_ORDER.indexOf("bv2_build_budget_approvals"));
+  assert.ok(RESTORE_ORDER.indexOf("bv2_build_budget_approvals") < RESTORE_ORDER.indexOf("build_jobs"));
+  assert.ok(RESTORE_ORDER.indexOf("bv2_model_reservations") < RESTORE_ORDER.indexOf("ca_model_call_identities"));
+  assert.ok(RESTORE_ORDER.indexOf("ca_lead_model_reservations") < RESTORE_ORDER.indexOf("ca_model_call_identities"));
+  assert.ok(RESTORE_ORDER.indexOf("ca_direct_model_reservations") < RESTORE_ORDER.indexOf("ca_model_call_identities"));
+});
+
+test("a forward-deployed verifier only requires tables present in a historical backup", () => {
+  assert.deepEqual(
+    backupTablesToVerify(
+      ["projects", "data_erasure_jobs", "data_erasure_events"],
+      { projects: 11 },
+    ),
+    ["projects"],
+  );
 });
 
 test("a backup directory round-trips through validation and rejects tampering", async () => {
@@ -105,10 +147,395 @@ test("a backup directory round-trips through validation and rejects tampering", 
   assert.equal(result.tables.ca_runs, 2);
 
   await writeFile(path.join(dir, "ca_runs.json.gz"), gzipSync(JSON.stringify([{ id: "1" }])));
-  await assert.rejects(validateBackupDirectory(dir), /manifest says 2/);
+  await assert.rejects(validateBackupDirectory(dir), /manifest says|checksum mismatch/);
+});
+
+test("backup validation proves the live catalog is wholly represented in the table manifest", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "thrallo-backup-catalog-"));
+  const rows = gzipSync("[]");
+  await writeFile(path.join(dir, "projects.json.gz"), rows);
+  const sha = createHash("sha256").update("projects").digest("hex");
+  await writeFile(path.join(dir, "manifest.json"), JSON.stringify({
+    product: "thrallo",
+    tables: { projects: 0 },
+    files: { "projects.json.gz": { bytes: rows.length, sha256: createHash("sha256").update(rows).digest("hex") } },
+    catalogCoverage: { tables: 1, names: ["projects"], sha256: sha },
+  }));
+  assert.equal((await validateBackupDirectory(dir)).catalogCoverage.tables, 1);
+  const manifest = JSON.parse(await readFile(path.join(dir, "manifest.json"), "utf8"));
+  manifest.catalogCoverage.names.push("bv2_model_reservations");
+  manifest.catalogCoverage.tables = 2;
+  manifest.catalogCoverage.sha256 = createHash("sha256").update("bv2_model_reservations\nprojects").digest("hex");
+  await writeFile(path.join(dir, "manifest.json"), JSON.stringify(manifest));
+  await assert.rejects(validateBackupDirectory(dir), /catalog tables missing/);
+});
+
+test("backup validation verifies storage, filesystem, and migration-ledger payload bytes", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "thrallo-backup-objects-"));
+  await mkdir(path.join(dir, "storage"), { recursive: true });
+  await mkdir(path.join(dir, "filesystem", "publish"), { recursive: true });
+  const raw = Buffer.from("immutable payload");
+  const objectGz = gzipSync(raw);
+  const storageFile = "storage/object.bin.gz";
+  const filesystemFile = "filesystem/publish/object.bin.gz";
+  await writeFile(path.join(dir, storageFile), objectGz);
+  await writeFile(path.join(dir, filesystemFile), objectGz);
+  const object = { file: storageFile, bytes: raw.length, sha256: createHash("sha256").update(raw).digest("hex") };
+  const storageIndex = gzipSync(JSON.stringify([object]));
+  const filesystemIndex = gzipSync(JSON.stringify([{ ...object, file: filesystemFile, root: "publish", relativePath: "index.html" }]));
+  const ledger = gzipSync(JSON.stringify({ migrations: [{ version: "1" }] }));
+  await writeFile(path.join(dir, "storage_objects.json.gz"), storageIndex);
+  await writeFile(path.join(dir, "filesystem_objects.json.gz"), filesystemIndex);
+  await writeFile(path.join(dir, "migration_ledger.json.gz"), ledger);
+  const files = Object.fromEntries([
+    [storageFile, objectGz],
+    [filesystemFile, objectGz],
+    ["storage_objects.json.gz", storageIndex],
+    ["filesystem_objects.json.gz", filesystemIndex],
+    ["migration_ledger.json.gz", ledger],
+  ].map(([file, bytes]) => [file, { bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") }]));
+  await writeFile(path.join(dir, "manifest.json"), JSON.stringify({
+    product: "thrallo",
+    tables: { storage_objects: 1, filesystem_objects: 1 },
+    files,
+    migrationLedger: { migrations: 1 },
+  }));
+
+  assert.equal((await validateBackupDirectory(dir)).ok, true);
+  await writeFile(path.join(dir, filesystemFile), gzipSync(Buffer.from("tampered")));
+  await assert.rejects(validateBackupDirectory(dir), /byte|checksum/i);
+});
+
+test("service-account home entries cannot contaminate the canonical worker artifact root", async () => {
+  const namespace = await mkdtemp(path.join(os.tmpdir(), "thrallo-worker-boundary-"));
+  const home = path.join(namespace, "worker-home");
+  const artifacts = path.join(namespace, "artifacts");
+  await mkdir(home);
+  await mkdir(artifacts);
+  await writeFile(path.join(home, ".face"), "os skeleton");
+  await symlink(".face", path.join(home, ".face.icon"), "file");
+
+  const inventory = await inventoryFilesystemRoot(artifacts);
+  assert.deepEqual(inventory.files, []);
+  assert.deepEqual(inventory.directories.map((entry) => entry.relative), ["."]);
+});
+
+test("an unexpected symlink inside a canonical job directory aborts backup inventory", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "thrallo-worker-symlink-"));
+  await mkdir(path.join(root, "job-1"));
+  await writeFile(path.join(root, "job-1", "artifact.zip"), "artifact");
+  await symlink("artifact.zip", path.join(root, "job-1", "latest.zip"), "file");
+  await assert.rejects(inventoryFilesystemRoot(root), /refuses symlink/);
+});
+
+test("a symlink pointing outside the canonical artifact root is rejected", async () => {
+  const namespace = await mkdtemp(path.join(os.tmpdir(), "thrallo-worker-outside-"));
+  const root = path.join(namespace, "artifacts");
+  const outside = path.join(namespace, "outside.txt");
+  await mkdir(root);
+  await writeFile(outside, "must not follow");
+  await symlink(outside, path.join(root, "escape"), "file");
+  await assert.rejects(inventoryFilesystemRoot(root), /refuses symlink/);
+});
+
+test("canonical worker files and directory modes are inventoried without silent skips", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "thrallo-worker-canonical-"));
+  const job = path.join(root, "job-1");
+  const artifact = path.join(job, "artifact");
+  await mkdir(artifact, { recursive: true });
+  await chmod(job, 0o750);
+  await chmod(artifact, 0o750);
+  await writeFile(path.join(job, "result.json"), "{\"ok\":true}");
+  await writeFile(path.join(artifact, "index.html"), "ready");
+
+  const inventory = await inventoryFilesystemRoot(root);
+  assert.deepEqual(inventory.files.map((entry) => entry.relative), [
+    "job-1/artifact/index.html",
+    "job-1/result.json",
+  ]);
+  assert.deepEqual(inventory.directories.map((entry) => entry.relative), [".", "job-1", "job-1/artifact"]);
+  const jobMode = (await import("node:fs/promises")).stat(job).then((entry) => entry.mode & 0o777);
+  assert.equal(inventory.directories.find((entry) => entry.relative === "job-1").mode, await jobMode);
+  assert.equal((await readInventoriedFile(inventory.files[0])).toString(), "ready");
+  assert.equal((await readInventoriedFile(inventory.files[1])).toString(), "{\"ok\":true}");
+
+  const target = await mkdtemp(path.join(os.tmpdir(), "thrallo-worker-restored-"));
+  const files = await Promise.all(inventory.files.map(async (entry) => {
+    const bytes = await readInventoriedFile(entry);
+    return {
+      root: "build-worker",
+      relativePath: entry.relative,
+      bytes: bytes.length,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      mode: entry.mode,
+      content: bytes,
+    };
+  }));
+  const directories = inventory.directories.map((entry) => ({
+    root: "build-worker",
+    relativePath: entry.relative,
+    mode: entry.mode,
+  }));
+  await restoreFilesystemLayout({
+    filesystemRoot: target,
+    directories,
+    files,
+    readObject: async (object) => object.content,
+  });
+  assert.equal(await readFile(path.join(target, "build-worker", "job-1", "artifact", "index.html"), "utf8"), "ready");
+  const restoredJobMode = (await (await import("node:fs/promises")).stat(path.join(target, "build-worker", "job-1"))).mode & 0o777;
+  assert.equal(restoredJobMode, await jobMode);
+});
+
+test("non-durable temp and workspace siblings are excluded from worker artifact inventory", async () => {
+  const namespace = await mkdtemp(path.join(os.tmpdir(), "thrallo-worker-nondurable-"));
+  const root = path.join(namespace, "artifacts");
+  await mkdir(root);
+  await mkdir(path.join(namespace, "workspace"));
+  await mkdir(path.join(namespace, "tmp"));
+  await writeFile(path.join(root, "result.json"), "canonical");
+  await writeFile(path.join(namespace, "workspace", "source.ts"), "temporary");
+  await writeFile(path.join(namespace, "tmp", "cache"), "temporary");
+
+  const inventory = await inventoryFilesystemRoot(root);
+  assert.deepEqual(inventory.files.map((entry) => entry.relative), ["result.json"]);
+});
+
+test("an empty canonical worker artifact root inventories cleanly", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "thrallo-worker-empty-"));
+  const inventory = await inventoryFilesystemRoot(root);
+  assert.equal(inventory.files.length, 0);
+  assert.deepEqual(inventory.directories.map((entry) => entry.relative), ["."]);
+});
+
+test("authoritative migration identity is line-ending independent without changing file hashes", async () => {
+  const lf = Buffer.from("select 1;\nselect 2;\n");
+  const crlf = Buffer.from("select 1;\r\nselect 2;\r\n");
+  assert.notEqual(createHash("sha256").update(lf).digest("hex"), createHash("sha256").update(crlf).digest("hex"));
+  assert.equal(canonicalSqlHash(lf), canonicalSqlHash(crlf));
+});
+
+test("backup migration evidence overlays the authoritative base through production ledger row 84", async () => {
+  const ledger = await loadMigrationLedgerEvidence();
+  // Row 84 is bv2_terminal_platform_failure_pool, applied under 20260916123552 (see versionDrift
+  // below) and confirmed applied in production on 2026-09-19.
+  assert.equal(ledger.migrations.length, 84);
+  assert.deepEqual(ledger.migrations.slice(-2).map((migration) => migration.version), [
+    "20260825105631",
+    "20260916120000",
+  ]);
+  assert.equal(ledger.migrations.at(-1).appliedOrder, 84);
+  assert.ok(ledger.migrations.slice(-2).every((migration) => migration.localCanonicalSqlSha256));
+  // appliedOrder must stay a gapless sequence, or the overlay has lost or double-counted a push.
+  assert.deepEqual(
+    ledger.migrations.map((migration) => migration.appliedOrder),
+    Array.from({ length: 84 }, (_, index) => index + 1),
+  );
+});
+
+test("migration history validation reports the effective applied ledger, not the 60-row base as remote", () => {
+  const result = JSON.parse(execFileSync(process.execPath, [
+    fileURLToPath(new URL("../../ops/validate-migration-history.mjs", import.meta.url)),
+  ], { encoding: "utf8" }));
+  assert.equal(result.authoritativeBase, 60);
+  assert.equal(result.appliedOverlay, 24);
+  assert.equal(result.effectiveApplied, 84);
+  assert.equal(result.active, 87);
+  // The overlay used to stop at 74 while production had gone on to 83, so this test asserted a
+  // pending list that its own comment admitted was already applied. Every entry was verified
+  // against supabase_migrations.schema_migrations on 2026-09-04 and recorded in the 2026-09-04
+  // overlay; row 84 was confirmed applied on 2026-09-19.
+  //
+  // The three pending rows are the WP4/WP8/WP12 migrations: additive, idempotent, and deliberately
+  // NOT applied. They are pending because nobody has applied them, which is the honest state — and
+  // the reason their tables sit in PENDING_MIGRATION_TABLES rather than the live catalog.
+  assert.deepEqual(result.pending, [
+    { version: "20260918120000", name: "app_accounts_memberships" },
+    { version: "20260918140000", name: "app_settings_audit" },
+    { version: "20260919120000", name: "app_subscriptions" },
+  ]);
+  // Five were pushed under an apply-time version that differs from the authored filename. Their SQL
+  // is identical to the ledger; only the version differs, and it is reported rather than hidden.
+  assert.deepEqual(result.versionDrift, [
+    { version: "20260822160000", appliedVersion: "20260822234502", name: "bv2_contract_envelopes_recovery_settlement" },
+    { version: "20260822223523", appliedVersion: "20260822234552", name: "fix_bv2_pipeline_retry_durable_payload" },
+    { version: "20260823101752", appliedVersion: "20260823110830", name: "bv2_owner_connected_recovery_transport" },
+    { version: "20260825105631", appliedVersion: "20260825120326", name: "add_bv2_minimal_verifier_policy" },
+    { version: "20260916120000", appliedVersion: "20260916123552", name: "bv2_terminal_platform_failure_pool" },
+  ]);
+});
+
+test("append-only accounting evidence restores without requiring UPDATE privilege", () => {
+  assert.equal(restoreWriteMethod("credit_ledger"), "insert");
+  assert.equal(restoreWriteMethod("ca_model_call_identities"), "insert");
+  assert.equal(restoreWriteMethod("projects"), "upsert");
+});
+
+test("generated-always run-event ids restore exactly only when the backup is contiguous", () => {
+  assert.deepEqual(prepareRowsForRestore("ca_run_events", [{ id: 2, value: "b" }, { id: 1, value: "a" }]), [
+    { value: "a" },
+    { value: "b" },
+  ]);
+  assert.throws(() => prepareRowsForRestore("ca_run_events", [{ id: 1 }, { id: 3 }]), /identity has gaps/);
+  assert.deepEqual(prepareRowsForRestore("build_work_events", [{ seq: 1, event_type: "queued" }]), [
+    { event_type: "queued" },
+  ]);
+  assert.throws(() => prepareRowsForRestore("build_work_events", [{ seq: 2 }]), /identity has gaps/);
+});
+
+test("append-only erasure event identities are regenerated only from a contiguous backup", () => {
+  assert.deepEqual(prepareRowsForRestore("data_erasure_events", [
+    { seq: 1, job_id: "a", event_type: "planned" },
+    { seq: 2, job_id: "a", event_type: "completed" },
+  ]), [
+    { job_id: "a", event_type: "planned" },
+    { job_id: "a", event_type: "completed" },
+  ]);
+  assert.throws(() => prepareRowsForRestore("data_erasure_events", [
+    { seq: 1, job_id: "a" }, { seq: 3, job_id: "a" },
+  ]), /identity has gaps/);
+});
+
+test("generated runtime project ids are omitted from backup and restore writes", () => {
+  const source = [{ id: "b1", project_id: "p1", project_id_text: "p1", state: "green" }];
+  assert.deepEqual(prepareRowsForBackup("bv2_builds", source), [{ id: "b1", project_id: "p1", state: "green" }]);
+  assert.deepEqual(prepareRowsForRestore("diag_runs", source), [{ id: "b1", project_id: "p1", state: "green" }]);
+  assert.deepEqual(canonicalRowsForRestoreComparison("bv2_builds", source), [{ id: "b1", project_id: "p1", state: "green" }]);
+  assert.deepEqual(validateGeneratedProjectIds("bv2_builds", source), []);
+  assert.match(validateGeneratedProjectIds("diag_runs", [{ ...source[0], project_id_text: "wrong" }])[0], /mismatch/);
+});
+
+test("the current runtime catalog and backup manifest are exactly aligned", () => {
+  assert.equal(PRODUCTION_PUBLIC_TABLES_98.length, 98);
+  assert.ok(PRODUCTION_PUBLIC_TABLES_98.includes("ca_direct_model_reservations"));
+  assert.ok(PRODUCTION_PUBLIC_TABLES_98.includes("bv2_build_settlements"));
+  // Tables whose migration has not been applied are reported as pending, not as a manifest that
+  // names something production lacks: they must be in the manifest BEFORE the migration lands, or
+  // the first snapshot after it silently omits them.
+  const coverage = findCatalogCoverageGaps(PRODUCTION_PUBLIC_TABLES_98, CA_TABLES, EPHEMERAL_RUNTIME_TABLES, PENDING_MIGRATION_TABLES);
+  assert.deepEqual({ missingFromBackup: coverage.missingFromBackup, missingFromCatalog: coverage.missingFromCatalog }, {
+    missingFromBackup: [], missingFromCatalog: [],
+  });
+  assert.deepEqual(coverage.pendingMigration, [...PENDING_MIGRATION_TABLES].sort(),
+    "every pending table is in the manifest and absent from production, which is exactly right until its migration is applied");
+  // A table nobody migrated and nobody backed up is still a gap, pending list or not.
+  assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_98, "ghost_table"], CA_TABLES, EPHEMERAL_RUNTIME_TABLES, PENDING_MIGRATION_TABLES).missingFromBackup,
+    ["ghost_table"]);
+  assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_98, "forgotten_runtime_table"], CA_TABLES, EPHEMERAL_RUNTIME_TABLES).missingFromBackup,
+    ["forgotten_runtime_table"]);
+});
+
+test("backup/restore recognizes historical ledgers and the current 81-migration catalog", () => {
+  assert.equal(PRODUCTION_PUBLIC_TABLES_68.length, 83);
+  assert.equal(PRODUCTION_PUBLIC_FK_PAIRS_68.length, 83);
+  assert.equal(runtimeCatalogEvidence(68).tables.length, 83);
+  assert.equal(PRODUCTION_PUBLIC_TABLES_69.length, 85);
+  assert.equal(runtimeCatalogEvidence(69).tables.length, 85);
+  assert.equal(runtimeCatalogEvidence(70).tables.length, 86);
+  assert.equal(runtimeCatalogEvidence(71).tables.length, 86);
+  assert.equal(runtimeCatalogEvidence(72).tables.length, 86);
+  assert.equal(runtimeCatalogEvidence(73).tables.length, 86);
+  assert.equal(runtimeCatalogEvidence(74).tables.length, 86);
+  assert.equal(runtimeCatalogEvidence(75).tables.length, 91);
+  assert.equal(runtimeCatalogEvidence(76).tables.length, 91);
+  assert.equal(runtimeCatalogEvidence(77).tables.length, 91);
+  assert.equal(runtimeCatalogEvidence(78).tables.length, 91);
+  assert.equal(runtimeCatalogEvidence(79).tables.length, 91);
+  assert.equal(runtimeCatalogEvidence(80).tables.length, 98);
+  assert.equal(runtimeCatalogEvidence(81).tables.length, 98);
+  assert.throws(() => runtimeCatalogEvidence(82), /unsupported production migration count/);
+});
+
+test("the restore order satisfies the complete production FK graph or explicitly defers a nullable cycle", () => {
+  assert.equal(PRODUCTION_PUBLIC_FK_PAIRS_70.length, 84);
+  assert.equal(PRODUCTION_PUBLIC_FK_PAIRS_75.length, 91);
+  assert.equal(PRODUCTION_PUBLIC_FK_PAIRS_99.length, 99);
+  assert.deepEqual(validateRestoreOrder(RESTORE_ORDER), { missingTables: [], violations: [] });
+  const broken = RESTORE_ORDER.filter((table) => table !== "bv2_model_reservations");
+  assert.deepEqual(validateRestoreOrder(broken).missingTables, ["bv2_model_reservations"]);
+});
+
+test("all forward and cyclic runtime links are restored through bounded post-parent patches", () => {
+  const rows = [{
+    id: "job", bv2_build_id: "build", diag_run_id: "diag", project_id: "project",
+    budget_approval_id: "approval",
+  }];
+  const deferred = collectDeferredRestorePatches("build_jobs", rows);
+  assert.deepEqual(deferred.rows, [{
+    id: "job", bv2_build_id: null, diag_run_id: null, project_id: "project",
+    budget_approval_id: "approval",
+  }]);
+  assert.deepEqual(deferred.patches.map(({ field, value }) => [field, value]), [
+    ["bv2_build_id", "build"], ["diag_run_id", "diag"],
+  ]);
+
+  const approvals = collectDeferredRestorePatches("bv2_build_budget_approvals", [{
+    id: "approval", conversation_id: "conversation", dispatch_project_id: "project",
+    dispatch_job_id: "job",
+  }]);
+  assert.deepEqual(approvals.rows, [{
+    id: "approval", conversation_id: "conversation", dispatch_project_id: "project",
+    dispatch_job_id: null,
+  }]);
+  assert.deepEqual(approvals.patches.map(({ field, value }) => [field, value]), [
+    ["dispatch_job_id", "job"],
+  ]);
+});
+
+test("empty and populated reservation tables validate with exact runtime ownership links", () => {
+  const owner = "00000000-0000-4000-8000-000000000001";
+  const project = { id: "00000000-0000-4000-8000-000000000002", owner, bv2_green_snapshot_id: "snapshot" };
+  const build = { id: "build", owner, project_id: project.id };
+  const diagnostic = { id: "diag", owner, project_id: project.id, project_id_text: project.id };
+  const snapshot = { id: "snapshot", owner, project_id: project.id };
+  const publicBuild = { id: "public", owner, project_id: project.id, bv2_build_id: build.id, diag_run_id: diagnostic.id };
+  const base = {
+    projects: [project], bv2_builds: [build], bv2_snapshots: [snapshot],
+    build_jobs: [publicBuild], diag_runs: [diagnostic], bv2_model_reservations: [],
+  };
+  assert.deepEqual(validateRuntimeBackupLinks(base), []);
+
+  const usage = { input: 100, cached: 25, output: 40, reasoning: 10 };
+  const reservations = [
+    { id: "held", owner, project_id: project.id, build_id: build.id, provider: "openai", model: "gpt-5", billing_lane: "managed", state: "held", actual_credits: null, settled_at: null, released_at: null, usage: null },
+    { id: "settled", owner, project_id: project.id, build_id: build.id, provider: "openai", model: "gpt-5", billing_lane: "managed", state: "settled", actual_credits: 12, settled_at: "2026-08-08T00:00:00Z", released_at: null, usage },
+    { id: "released", owner, project_id: project.id, build_id: build.id, provider: "anthropic", model: "claude", billing_lane: "byok_api", state: "released", actual_credits: null, settled_at: null, released_at: "2026-08-08T00:00:00Z", usage: null },
+  ];
+  assert.deepEqual(validateRuntimeBackupLinks({ ...base, bv2_model_reservations: reservations }), []);
+  assert.deepEqual(reservations[1].usage, usage, "input/cached/output/reasoning token evidence round-trips exactly");
+  assert.deepEqual(prepareRowsForBackup("bv2_model_reservations", reservations), reservations,
+    "provider/model/lane and terminal-state evidence are authoritative regular columns");
+});
+
+test("runtime link validation rejects cross-owner and missing diagnostic/build/snapshot references", () => {
+  const tables = {
+    projects: [{ id: "p", owner: "owner-a", bv2_green_snapshot_id: "missing-snapshot" }],
+    bv2_builds: [{ id: "b", owner: "owner-b", project_id: "p" }],
+    bv2_snapshots: [],
+    diag_runs: [],
+    build_jobs: [{ id: "job", owner: "owner-a", project_id: "p", bv2_build_id: "b", diag_run_id: "diag" }],
+    bv2_model_reservations: [{ id: "r", owner: "owner-a", project_id: "p", build_id: "b", provider: "p", model: "m", billing_lane: "managed", state: "held" }],
+  };
+  const errors = validateRuntimeBackupLinks(tables).join("\n");
+  assert.match(errors, /owner\/project differs|invalid V2 build link/);
+  assert.match(errors, /invalid diagnostic link/);
+  assert.match(errors, /invalid green snapshot link/);
+});
+
+test("runtime schema retains cascade and set-null behavior required after restore", async () => {
+  const reservations = await readFile(new URL("../../supabase/migrations/20260807213500_bv2_runtime_model_reservations.sql", import.meta.url), "utf8");
+  const runtime = await readFile(new URL("../../supabase/migrations/20260807221000_bv2_runtime_composition.sql", import.meta.url), "utf8");
+  assert.match(reservations, /references public\.bv2_builds\(id, owner, project_id\) on delete cascade/i);
+  assert.match(runtime, /references public\.projects\(id, owner\) on delete cascade/i);
+  assert.match(runtime, /references public\.bv2_builds\(id, owner, project_id\) on delete set null \(build_id\)/i);
+  assert.match(runtime, /on delete set null \(bv2_build_id\)/i);
+  assert.match(runtime, /on delete set null \(diag_run_id\)/i);
 });
 
 test("systemd units and the runbook ship with the repository", async () => {
+  const backup = await readFile(new URL("../../ops/backup-thrallo.mjs", import.meta.url), "utf8");
+  assert.match(backup, /\.incomplete-thrallo-/);
+  assert.match(backup, /await rename\(dir, finalDir\)/);
   const service = await readFile(new URL("../../ops/thrallo-backup.service", import.meta.url), "utf8");
   assert.match(service, /ExecStart=\/usr\/bin\/node ops\/backup-thrallo\.mjs/);
   // Drift runs AFTER the backup, so a drift failure can never stop a backup being taken.
@@ -117,9 +544,36 @@ test("systemd units and the runbook ship with the repository", async () => {
   const timer = await readFile(new URL("../../ops/thrallo-backup.timer", import.meta.url), "utf8");
   assert.match(timer, /OnCalendar=/);
   assert.match(timer, /Persistent=true/);
+  const restorePath = fileURLToPath(new URL("../../ops/run-latest-isolated-restore-drill.sh", import.meta.url));
+  const sourceRoot = fileURLToPath(new URL("../../", import.meta.url));
+  let repositoryRoot = "";
+  try {
+    repositoryRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd: sourceRoot, encoding: "utf8",
+    }).trim();
+  } catch {}
+  if (repositoryRoot && path.resolve(repositoryRoot) === path.resolve(sourceRoot)) {
+    const restoreMode = execFileSync("git", ["ls-files", "-s", "ops/run-latest-isolated-restore-drill.sh"], {
+      cwd: sourceRoot, encoding: "utf8",
+    });
+    assert.match(restoreMode, /^100755 /, "the systemd restore entrypoint must be executable in the release archive");
+  } else if (process.platform !== "win32") {
+    const mode = (await (await import("node:fs/promises")).stat(restorePath)).mode;
+    assert.notEqual(mode & 0o111, 0, "the extracted release entrypoint must remain executable");
+  } else {
+    // NTFS extraction cannot represent a POSIX executable bit. The archive verifier checks the tar
+    // header; here we can still prove this is a directly executable shell entrypoint, not a text
+    // substitute accidentally shipped at that path.
+    assert.match(await readFile(restorePath, "utf8"), /^#!\/usr\/bin\/env bash\r?\n/);
+  }
   const runbook = await readFile(new URL("../../docs/DISASTER-RECOVERY.md", import.meta.url), "utf8");
   assert.match(runbook, /PLATFORM_ENC_KEY/);
   assert.match(runbook, /restore-thrallo\.mjs/);
+  const workerUnit = await readFile(new URL("../../build-worker/thrallo-build-worker.service", import.meta.url), "utf8");
+  assert.match(workerUnit, /Environment=HOME=\/var\/lib\/thrallo-build-worker-home/);
+  assert.match(workerUnit, /ReadWritePaths=\/var\/lib\/thrallo-build-worker(?:\r?\n|$)/);
+  assert.doesNotMatch(workerUnit, /ReadWritePaths=\/var\/lib\/thrallo-build-worker-home/);
+  for (const table of ["build_work_results", "build_work_events"]) assert.ok(CA_TABLES.includes(table));
 });
 
 // ── Migration drift: the half CI structurally cannot do ─────────────────────────────────
@@ -155,6 +609,25 @@ test("a migrated-but-unbacked table is caught on its own", () => {
   });
 });
 
+test("migration drift accepts only the declared ephemeral backup exclusion", async () => {
+  const { findDrift } = await import("../../ops/migration-drift.mjs");
+  const excluded = new Set(EPHEMERAL_RUNTIME_TABLES);
+  assert.ok(excluded.has("http_rate_limit_buckets"));
+  assert.deepEqual(findDrift({
+    live: new Set(["http_rate_limit_buckets"]),
+    migrated: new Set(["http_rate_limit_buckets"]),
+    backedUp: new Set(),
+    backupExcluded: excluded,
+  }), [], "short-lived admission counters are intentionally reset after restore");
+  assert.deepEqual(findDrift({
+    live: new Set(["unmigrated_ephemeral"]),
+    migrated: new Set(),
+    backedUp: new Set(),
+    backupExcluded: new Set(["unmigrated_ephemeral"]),
+  }).map((problem) => /NO migration/.test(problem)), [true],
+  "a backup exclusion must never hide schema drift");
+});
+
 test("a fully reconciled database reports nothing, and Supabase's own tables are ignored", async () => {
   const { findDrift } = await import("../../ops/migration-drift.mjs");
   assert.deepEqual(findDrift({
@@ -162,6 +635,25 @@ test("a fully reconciled database reports nothing, and Supabase's own tables are
     migrated: new Set(["ca_runs"]),
     backedUp: new Set(["ca_runs"]),
   }), [], "schema_migrations is Supabase's, not ours to migrate or back up");
+});
+
+test("the production reservation FK cascade satisfies erasure even before composition code is deployed", async () => {
+  const { DATABASE_CASCADE_PURGED, findDrift } = await import("../../ops/migration-drift.mjs");
+  assert.ok(DATABASE_CASCADE_PURGED.has("bv2_model_reservations"));
+  const problems = findDrift({
+    live: new Set(["bv2_model_reservations"]),
+    migrated: new Set(["bv2_model_reservations"]),
+    backedUp: new Set(["bv2_model_reservations"]),
+    projectScoped: new Set(["bv2_model_reservations"]),
+    purged: new Set(["bv2_builds"]),
+    purgeExcluded: new Map(),
+    databaseCascadePurged: DATABASE_CASCADE_PURGED,
+  });
+  assert.deepEqual(problems, []);
+  const reservationSql = await readFile(new URL("../../supabase/migrations/20260807213500_bv2_runtime_model_reservations.sql", import.meta.url), "utf8");
+  const runtimeSql = await readFile(new URL("../../supabase/migrations/20260807221000_bv2_runtime_composition.sql", import.meta.url), "utf8");
+  assert.match(reservationSql, /references public\.bv2_builds\(id, owner, project_id\) on delete cascade/i);
+  assert.match(runtimeSql, /foreign key \(project_id, owner\) references public\.projects\(id, owner\) on delete cascade/i);
 });
 
 test("every table this session added to production is now migrated AND backed up", async () => {

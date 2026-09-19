@@ -86,6 +86,65 @@ test("a business question pauses the conversation on a card", () => {
   assert.equal(resumed.waiting, false);
 });
 
+test("large-build approval replays as one durable card and settles in place", () => {
+  const requested = applyEvent(emptyConversationView(), ev(1, "budget_approval_required", {
+    approvalId: "approval-1",
+    requestSummary: "Build a multi-tenant operations platform",
+    complexity: "advanced",
+    ceilingCredits: 60,
+    availableCredits: { included: 35, purchased: 40 },
+    expiresAt: "2026-08-14T00:00:00.000Z",
+    status: "pending",
+  }));
+  assert.equal(requested.waiting, true);
+  assert.equal(requested.thinking, false);
+  assert.equal(requested.items.at(-1).kind, "budget_approval");
+  assert.equal(requested.items.at(-1).approval.ceilingCredits, 60);
+
+  const resolved = applyEvent(requested, ev(2, "budget_approval_resolved", {
+    approvalId: "approval-1", status: "approved",
+  }));
+  assert.equal(resolved.waiting, false);
+  assert.equal(resolved.items.length, 1, "resolution updates the durable card rather than duplicating it");
+  assert.equal(resolved.items[0].approval.status, "approved");
+});
+
+test("a compacted approval resolution remains visible as a receipt", () => {
+  const view = applyEvent(emptyConversationView(), ev(9, "budget_approval_resolved", {
+    approvalId: "approval-old", status: "declined",
+  }));
+  assert.equal(view.items[0].kind, "receipt");
+  assert.match(view.items[0].text, /declined/i);
+});
+
+test("approval resume failure is durable, exact, and never reconstructs as waiting for approval", () => {
+  const view = replayEvents([
+    ev(1, "budget_approval_required", {
+      approvalId: "approval-1", status: "pending", ceilingCredits: 60,
+    }),
+    ev(2, "budget_approval_resume_failed", {
+      approvalId: "approval-1", status: "approved", code: "worker_required",
+      message: "The approved build could not start because the isolated Builder V2 worker is unavailable.",
+    }),
+  ]);
+  assert.equal(view.waiting, false);
+  assert.equal(view.thinking, false);
+  assert.equal(view.buildActivity, "FAILED");
+  assert.equal(view.items[0].approval.status, "approved");
+  assert.equal(view.items[0].approval.resumeErrorCode, "worker_required");
+  assert.match(view.items[0].approval.resumeError, /isolated Builder V2 worker/i);
+});
+
+test("build_started clears approval waiting before the durable job watcher reports running", () => {
+  const view = replayEvents([
+    ev(1, "budget_approval_required", { approvalId: "approval-1", status: "pending" }),
+    ev(2, "build_started", { jobId: "job-1", projectId: "project-1" }),
+  ]);
+  assert.equal(view.waiting, false);
+  assert.equal(view.thinking, false);
+  assert.deepEqual(view.buildReference, { jobId: "job-1", projectId: "project-1" });
+});
+
 test("errors surface softly and unknown event types never crash the shell", () => {
   // Failures now render as a sanitised failure card carrying a support reference — the
   // raw payload text is never shown (see error-shield.test.mjs for the full contract).

@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { CodeAgentInputError } from "../lib/codeAgentContracts.mjs";
 import {
   budgetOverview,
@@ -7,22 +8,32 @@ import {
 } from "../lib/usageBudgets.mjs";
 import {
   handleSubscriptionEvent,
+  startTopupCheckout,
   startBillingPortal,
   startPlanCheckout,
   thralloStripeConfigured,
   thralloWebhookConfigured,
 } from "../lib/subscriptionBilling.mjs";
+import { customerCredits } from "../lib/customerCredits.mjs";
 import { opsTelemetrySnapshot } from "../lib/opsTelemetry.mjs";
 import { isAdmin } from "../lib/admin.mjs";
 
 export async function handleBillingOverview(_req, res, owner) {
   return wrap(async () => {
+    const credits = await customerCredits(owner.id);
     sendJson(res, 200, {
       ...(await budgetOverview(owner.id)),
+      credits,
       plans: planCatalogPublic(),
       stripeConfigured: thralloStripeConfigured(),
     });
   });
+}
+
+export async function handleTopupCheckout(req, res, owner) {
+  return wrap(async () => sendJson(res, 200, await startTopupCheckout(owner.id, {
+    requestKey: req.headers["idempotency-key"] || crypto.randomUUID(),
+  })));
 }
 
 export async function handlePlanSelect(_req, res, owner, body = {}) {

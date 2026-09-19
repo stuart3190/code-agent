@@ -1,0 +1,42 @@
+{
+  "request": "Build Northwind Field Ops, a field-service operations workspace for a maintenance company.\nDispatchers, technicians and admins sign in with email and password.\nDispatchers create work orders (title, site, priority, scheduled date, assigned technician, status) and update them later;\neach work order references one customer site and one assigned technician.\nEvery work order opens on its own detail route where a technician logs visits (arrival time, notes, parts used) that belong to that work order,\nand updates the order's status from the same screen.\nA sites screen lists customer sites (name, region, contact email) with a filter by region and a search by name; dispatchers can add sites.\nAn analytics screen shows the number of open, in-progress and completed work orders and the average number of visits per work order,\ncomputed from the saved data.\nAn admin screen lets an admin manage team member accounts and their roles (dispatcher, technician, admin); technicians must be denied access to it.\nAll saved data must survive a page reload.",
+  "model": "gpt-5.5",
+  "calls": 1,
+  "durationMs": 169093,
+  "usage": {
+    "input": 3119,
+    "output": 9165,
+    "reasoning": 1589,
+    "cached": 0,
+    "total": 12284,
+    "providerRequestId": "codex:response:resp_0477c7771acc588d016aac2d9c733087d1854141944e7c7491"
+  },
+  "hash": "3093ada4eff6f97d91cb0a4f76eafed7ee97600572b119fd9c74f42a8ef57270",
+  "agent": {
+    "attempts": 1,
+    "degraded": false,
+    "problems": []
+  },
+  "validator": {
+    "ok": true,
+    "problems": [],
+    "warnings": []
+  },
+  "gate": [
+    "create-work-order:4:mutation reads state before it is produced: create-work-order.custom.id",
+    "technician-logs-visit:4:operation:createvisit reads state before it is produced: technician-logs-visit.custom.workOrderId",
+    "manage-sites:5:lookup reads state before it is produced: manage-sites.durable.reference"
+  ],
+  "incomplete": [],
+  "authIssues": [],
+  "unresolvedRoutes": [],
+  "unqualified": [],
+  "provenance": [],
+  "counts": {
+    "journeys": 7,
+    "steps": 38,
+    "entities": 5,
+    "operations": 15,
+    "routes": 6
+  }
+}

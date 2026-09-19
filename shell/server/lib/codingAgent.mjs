@@ -47,6 +47,8 @@ export async function runCodingAgent({
   commandPolicy = "standard",
   instructions = INSTRUCTIONS,
   tools = CODING_TOOLS,
+  dispatchAccounting = null,
+  maxOutputTokens = null,
 }) {
   const model = provider || createCodingModel(run.model);
   const input = [{ role: "user", content: augmentPromptWithContext(prompt ?? run.prompt, context, repositoryMap) }];
@@ -57,12 +59,18 @@ export async function runCodingAgent({
   for (let turn = 1; turn <= MAX_TURNS; turn += 1) {
     if (await isCancelled()) return { cancelled: true, usage };
     await emit("model.turn_started", { turn, model: model.model, message: `Thinking · turn ${turn}` });
-    const response = await model.turn({
+    const turnArgs = {
       instructions,
       input,
       tools,
       safetyIdentifier: run.owner,
-    });
+      maxOutputTokens,
+    };
+    const response = await turnWithDispatchAccounting(
+      model,
+      turnArgs,
+      dispatchAccounting?.forTurn(turn) || null,
+    );
     selectedProvider = response.provider || model.id;
     selectedModel = response.model || model.model;
     if (response.routing?.fallbackFrom) {
@@ -131,6 +139,34 @@ export async function runCodingAgent({
     }
   }
   throw agentError(`Agent exceeded the ${MAX_TURNS}-turn safety limit`, "turn_limit", usage);
+}
+
+async function turnWithDispatchAccounting(model, args, hooks) {
+  if (!hooks) return model.turn(args);
+  if (model.supportsDispatchAccounting) return model.turn({ ...args, ...hooks });
+
+  // Production models use the routed wrapper above, where each fallback attempt acquires its own
+  // hold. This direct path keeps injected/manual models honest too: exactly one reservation is
+  // acquired before their single network dispatch.
+  const candidate = { provider: model.id || "unknown", model: model.model || "unknown" };
+  const hold = await hooks.beforeDispatch(candidate, { attemptOrder: 1, args });
+  let providerCompleted = false;
+  try {
+    const response = await model.turn(args);
+    providerCompleted = true;
+    await hooks.afterDispatch(hold, candidate, response);
+    return response;
+  } catch (error) {
+    if (providerCompleted) {
+      throw Object.assign(error, { code: error.code || "billing_settlement_failed" });
+    }
+    try {
+      await hooks.dispatchFailed(hold, candidate, error);
+    } catch (accountingError) {
+      throw Object.assign(accountingError, { code: accountingError.code || "billing_settlement_failed" });
+    }
+    throw error;
+  }
 }
 
 // Errors carry accumulated usage so the worker can still meter tokens spent by a failed run.

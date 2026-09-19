@@ -1,0 +1,39 @@
+{
+  "id": "5ee9a5ef-fdf5-4e14-83ed-36c7fc0cad39",
+  "owner": "7fc93b1e-7dc6-48c0-ae05-38ce4ee3050f",
+  "project_id": "de17a679-ec4b-4f13-86c9-a55d8c169d40",
+  "profile": "advanced",
+  "request": "Build an interactive SVG floor-planning workspace for Lumen Layouts. Users sign in,\ncreate and name plans, pan and zoom the canvas, drag fixtures from a library, select fixtures, edit\nposition, rotation, and brightness in an inspector, undo and redo changes, switch plans, save and\nreload durable state, export a plan summary, and print it. Include accessible keyboard alternatives\nfor canvas actions and separate workspace, library, reports, and settings routes. Use platform\nauthentication and durable capabilities.\n\nQualification instance 1; create a fresh implementation.",
+  "state": "failed",
+  "budget_credits": 60,
+  "spent_credits": 13.08358,
+  "contract_id": "e27fd12f-7a1b-4f70-b84f-d527858f9788",
+  "final_snapshot": null,
+  "error": "Provider dispatch may have occurred. Automatic replay is blocked until durable provider evidence is reconciled.",
+  "started_at": "2026-09-16T10:38:05.919+00:00",
+  "finished_at": "2026-09-16T10:50:56.243+00:00",
+  "project_id_text": "de17a679-ec4b-4f13-86c9-a55d8c169d40",
+  "max_repair_dispatches": 1000,
+  "envelope_version": 2,
+  "customer_state": "failed",
+  "spent_breakdown": {
+    "thrallo_recovery:thrallo_repair:connected_allowance": 2.89098,
+    "customer_generation:customer_request:connected_allowance": 10.1926
+  },
+  "failure": {
+    "code": "failed",
+    "action": "stop",
+    "retryable": false,
+    "checkpointId": "8c517720-4b8f-4138-abd8-67a7a7c7cd04",
+    "classification": "generated_app",
+    "internalDetail": "Provider dispatch may have occurred. Automatic replay is blocked until durable provider evidence is reconciled. [failed]",
+    "providerCallMade": null,
+    "reservationState": "not_created",
+    "customerMessageKey": "build_checking_repairs",
+    "customerActionRequired": false
+  },
+  "last_durable_progress_at": "2026-09-16T10:42:55.97+00:00",
+  "expected_duration_ms": 1597000,
+  "hard_safety_duration_ms": 4791000,
+  "verifier_policy": "minimal_contract_v1"
+}

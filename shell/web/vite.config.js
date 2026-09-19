@@ -3,6 +3,8 @@ import react from "@vitejs/plugin-react";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resolvePublicAuthConfig } from "./publicAuthConfig.mjs";
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "..", "..");
 const SHELL_PORT = process.env.SHELL_PORT || "8787";
@@ -11,26 +13,22 @@ const SHELL_PORT = process.env.SHELL_PORT || "8787";
 // fs.allow: the balance meter imports the PROVEN ledger + costModel from the repo's src/ (reuse, not
 // re-derive), which live outside this web root — so Vite must be allowed to read them.
 export default defineConfig(({ mode }) => {
-  // Production keeps server credentials in shell/.env. Vite normally reads only
-  // shell/web/.env, so map the two public Supabase values explicitly. This keeps
-  // service-role credentials server-only while making fresh VPS builds reliable.
+  // Production keeps server credentials in shell/.env and public browser config in
+  // shell/web/.env. Read both, but expose only the validated public URL/key pair.
+  const webEnv = loadEnv(mode, HERE, "");
   const shellEnv = loadEnv(mode, path.resolve(HERE, ".."), "");
-  const supabaseUrl = process.env.VITE_SUPABASE_URL
-    || shellEnv.VITE_SUPABASE_URL
-    || process.env.SUPABASE_URL
-    || shellEnv.SUPABASE_URL
-    || "";
-  const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY
-    || shellEnv.VITE_SUPABASE_ANON_KEY
-    || process.env.SUPABASE_ANON_KEY
-    || shellEnv.SUPABASE_ANON_KEY
-    || "";
+  const environment = { ...shellEnv, ...webEnv, ...process.env };
+  const publicAuth = resolvePublicAuthConfig(environment, {
+    required: environment.THRALLO_REQUIRE_PUBLIC_AUTH === "1",
+  });
 
   return {
     plugins: [react()],
     define: {
-      "import.meta.env.VITE_SUPABASE_URL": JSON.stringify(supabaseUrl),
-      "import.meta.env.VITE_SUPABASE_ANON_KEY": JSON.stringify(supabaseAnonKey),
+      "import.meta.env.VITE_SUPABASE_URL": JSON.stringify(publicAuth.url),
+      "import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY": JSON.stringify(publicAuth.key),
+      // Keep the old name populated for older modules during the publishable-key transition.
+      "import.meta.env.VITE_SUPABASE_ANON_KEY": JSON.stringify(publicAuth.key),
     },
     server: {
       port: 5173,

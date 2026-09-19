@@ -1,0 +1,2818 @@
+{
+  "generatedAt": "2026-08-06T21:00:23.064Z",
+  "local": "fresh-local-catalog.json",
+  "production": "production-catalog.json",
+  "sections": {
+    "schemas": {
+      "localCount": 13,
+      "productionCount": 10,
+      "localSha256": "c92088789baef668a97453b7310d90360f3589a9e81f9d74a088f152d4d2fa31",
+      "productionSha256": "b0800d044823163c0d07b12d99c10256fb092eba4772b16a31b0a17eeddbfef8",
+      "expectedEnvironment": [
+        {
+          "key": "_realtime",
+          "reason": "local Supabase platform service",
+          "local": {
+            "owner": "postgres",
+            "schema": "_realtime"
+          },
+          "production": null
+        },
+        {
+          "key": "net",
+          "reason": "local Supabase platform service",
+          "local": {
+            "owner": "supabase_admin",
+            "schema": "net"
+          },
+          "production": null
+        },
+        {
+          "key": "supabase_functions",
+          "reason": "local Supabase platform service",
+          "local": {
+            "owner": "supabase_admin",
+            "schema": "supabase_functions"
+          },
+          "production": null
+        }
+      ],
+      "productionOnly": [],
+      "localOnly": [],
+      "changed": []
+    },
+    "tables": {
+      "localCount": 72,
+      "productionCount": 72,
+      "localSha256": "1ca554aa4c9af2d99573280e51040702c6cf66e99fac7c81fe22828a920f4598",
+      "productionSha256": "1ca554aa4c9af2d99573280e51040702c6cf66e99fac7c81fe22828a920f4598",
+      "expectedEnvironment": [],
+      "productionOnly": [],
+      "localOnly": [],
+      "changed": []
+    },
+    "columns": {
+      "localCount": 837,
+      "productionCount": 837,
+      "localSha256": "45cfc14374318f8520931874467542adce145615b15a9c6067c393861be1144c",
+      "productionSha256": "45cfc14374318f8520931874467542adce145615b15a9c6067c393861be1144c",
+      "expectedEnvironment": [],
+      "productionOnly": [],
+      "localOnly": [],
+      "changed": []
+    },
+    "constraints": {
+      "localCount": 285,
+      "productionCount": 285,
+      "localSha256": "9987517c603643c297b989892a8588faf2488a3bc91a80f7a572c2cdd62de966",
+      "productionSha256": "9987517c603643c297b989892a8588faf2488a3bc91a80f7a572c2cdd62de966",
+      "expectedEnvironment": [],
+      "productionOnly": [],
+      "localOnly": [],
+      "changed": []
+    },
+    "indexes": {
+      "localCount": 231,
+      "productionCount": 231,
+      "localSha256": "d14bc9003b994106f1d82d4f1a21aec6f926ccc297e86f2c3ed338ea2cdbec80",
+      "productionSha256": "d14bc9003b994106f1d82d4f1a21aec6f926ccc297e86f2c3ed338ea2cdbec80",
+      "expectedEnvironment": [],
+      "productionOnly": [],
+      "localOnly": [],
+      "changed": []
+    },
+    "functions": {
+      "localCount": 6,
+      "productionCount": 6,
+      "localSha256": "6e82fbbeb6d0cd9c5adb3744192f31a20db31c6b9fca7a684a3610dda7740cad",
+      "productionSha256": "ab71df91c6cdac4100545f08de2ba863b1c1996f1ba85ebaa36728af230dbb84",
+      "expectedEnvironment": [],
+      "productionOnly": [],
+      "localOnly": [],
+      "changed": []
+    },
+    "triggers": {
+      "localCount": 0,
+      "productionCount": 0,
+      "localSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "productionSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "expectedEnvironment": [],
+      "productionOnly": [],
+      "localOnly": [],
+      "changed": []
+    },
+    "policies": {
+      "localCount": 39,
+      "productionCount": 39,
+      "localSha256": "b33d29bbcdfe6a3d3d5f300c4e664ac2a8b73e6b06993c55a55660ee77050395",
+      "productionSha256": "b33d29bbcdfe6a3d3d5f300c4e664ac2a8b73e6b06993c55a55660ee77050395",
+      "expectedEnvironment": [],
+      "productionOnly": [],
+      "localOnly": [],
+      "changed": []
+    },
+    "grants": {
+      "localCount": 1098,
+      "productionCount": 1340,
+      "localSha256": "d393ade4f85306fea87930e04f7ee8f2cdf7fa8c37c5a95da7ac531bab5c25a6",
+      "productionSha256": "b23b978ce2fec879ddfa0012e6601fd5d356c7f8d2780e901f2e57158ccca885",
+      "expectedEnvironment": [],
+      "productionOnly": [
+        {
+          "key": "table.public.bv2_assets.anon.DELETE",
+          "production": {
+            "object": "bv2_assets",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_assets.anon.INSERT",
+          "production": {
+            "object": "bv2_assets",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_assets.anon.SELECT",
+          "production": {
+            "object": "bv2_assets",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_assets.anon.UPDATE",
+          "production": {
+            "object": "bv2_assets",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_assets.authenticated.DELETE",
+          "production": {
+            "object": "bv2_assets",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_assets.authenticated.INSERT",
+          "production": {
+            "object": "bv2_assets",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_assets.authenticated.SELECT",
+          "production": {
+            "object": "bv2_assets",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_assets.authenticated.UPDATE",
+          "production": {
+            "object": "bv2_assets",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_assets.service_role.DELETE",
+          "production": {
+            "object": "bv2_assets",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_assets.service_role.INSERT",
+          "production": {
+            "object": "bv2_assets",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_assets.service_role.SELECT",
+          "production": {
+            "object": "bv2_assets",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_assets.service_role.UPDATE",
+          "production": {
+            "object": "bv2_assets",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_blobs.anon.DELETE",
+          "production": {
+            "object": "bv2_blobs",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_blobs.anon.INSERT",
+          "production": {
+            "object": "bv2_blobs",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_blobs.anon.SELECT",
+          "production": {
+            "object": "bv2_blobs",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_blobs.anon.UPDATE",
+          "production": {
+            "object": "bv2_blobs",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_blobs.authenticated.DELETE",
+          "production": {
+            "object": "bv2_blobs",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_blobs.authenticated.INSERT",
+          "production": {
+            "object": "bv2_blobs",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_blobs.authenticated.SELECT",
+          "production": {
+            "object": "bv2_blobs",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_blobs.authenticated.UPDATE",
+          "production": {
+            "object": "bv2_blobs",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_blobs.service_role.DELETE",
+          "production": {
+            "object": "bv2_blobs",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_blobs.service_role.INSERT",
+          "production": {
+            "object": "bv2_blobs",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_blobs.service_role.SELECT",
+          "production": {
+            "object": "bv2_blobs",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_blobs.service_role.UPDATE",
+          "production": {
+            "object": "bv2_blobs",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_builds.anon.DELETE",
+          "production": {
+            "object": "bv2_builds",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_builds.anon.INSERT",
+          "production": {
+            "object": "bv2_builds",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_builds.anon.SELECT",
+          "production": {
+            "object": "bv2_builds",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_builds.anon.UPDATE",
+          "production": {
+            "object": "bv2_builds",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_builds.authenticated.DELETE",
+          "production": {
+            "object": "bv2_builds",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_builds.authenticated.INSERT",
+          "production": {
+            "object": "bv2_builds",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_builds.authenticated.SELECT",
+          "production": {
+            "object": "bv2_builds",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_builds.authenticated.UPDATE",
+          "production": {
+            "object": "bv2_builds",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_builds.service_role.DELETE",
+          "production": {
+            "object": "bv2_builds",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_builds.service_role.INSERT",
+          "production": {
+            "object": "bv2_builds",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_builds.service_role.SELECT",
+          "production": {
+            "object": "bv2_builds",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_builds.service_role.UPDATE",
+          "production": {
+            "object": "bv2_builds",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_contracts.anon.DELETE",
+          "production": {
+            "object": "bv2_contracts",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_contracts.anon.INSERT",
+          "production": {
+            "object": "bv2_contracts",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_contracts.anon.SELECT",
+          "production": {
+            "object": "bv2_contracts",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_contracts.anon.UPDATE",
+          "production": {
+            "object": "bv2_contracts",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_contracts.authenticated.DELETE",
+          "production": {
+            "object": "bv2_contracts",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_contracts.authenticated.INSERT",
+          "production": {
+            "object": "bv2_contracts",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_contracts.authenticated.SELECT",
+          "production": {
+            "object": "bv2_contracts",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_contracts.authenticated.UPDATE",
+          "production": {
+            "object": "bv2_contracts",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_contracts.service_role.DELETE",
+          "production": {
+            "object": "bv2_contracts",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_contracts.service_role.INSERT",
+          "production": {
+            "object": "bv2_contracts",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_contracts.service_role.SELECT",
+          "production": {
+            "object": "bv2_contracts",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_contracts.service_role.UPDATE",
+          "production": {
+            "object": "bv2_contracts",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_dependency_edges.anon.DELETE",
+          "production": {
+            "object": "bv2_dependency_edges",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_dependency_edges.anon.INSERT",
+          "production": {
+            "object": "bv2_dependency_edges",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_dependency_edges.anon.SELECT",
+          "production": {
+            "object": "bv2_dependency_edges",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_dependency_edges.anon.UPDATE",
+          "production": {
+            "object": "bv2_dependency_edges",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_dependency_edges.authenticated.DELETE",
+          "production": {
+            "object": "bv2_dependency_edges",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_dependency_edges.authenticated.INSERT",
+          "production": {
+            "object": "bv2_dependency_edges",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_dependency_edges.authenticated.SELECT",
+          "production": {
+            "object": "bv2_dependency_edges",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_dependency_edges.authenticated.UPDATE",
+          "production": {
+            "object": "bv2_dependency_edges",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_dependency_edges.service_role.DELETE",
+          "production": {
+            "object": "bv2_dependency_edges",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_dependency_edges.service_role.INSERT",
+          "production": {
+            "object": "bv2_dependency_edges",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_dependency_edges.service_role.SELECT",
+          "production": {
+            "object": "bv2_dependency_edges",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_dependency_edges.service_role.UPDATE",
+          "production": {
+            "object": "bv2_dependency_edges",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_feature_flags.anon.DELETE",
+          "production": {
+            "object": "bv2_feature_flags",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_feature_flags.anon.INSERT",
+          "production": {
+            "object": "bv2_feature_flags",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_feature_flags.anon.SELECT",
+          "production": {
+            "object": "bv2_feature_flags",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_feature_flags.anon.UPDATE",
+          "production": {
+            "object": "bv2_feature_flags",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_feature_flags.authenticated.DELETE",
+          "production": {
+            "object": "bv2_feature_flags",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_feature_flags.authenticated.INSERT",
+          "production": {
+            "object": "bv2_feature_flags",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_feature_flags.authenticated.SELECT",
+          "production": {
+            "object": "bv2_feature_flags",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_feature_flags.authenticated.UPDATE",
+          "production": {
+            "object": "bv2_feature_flags",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_feature_flags.service_role.DELETE",
+          "production": {
+            "object": "bv2_feature_flags",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_feature_flags.service_role.INSERT",
+          "production": {
+            "object": "bv2_feature_flags",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_feature_flags.service_role.SELECT",
+          "production": {
+            "object": "bv2_feature_flags",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_feature_flags.service_role.UPDATE",
+          "production": {
+            "object": "bv2_feature_flags",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_file_revisions.anon.DELETE",
+          "production": {
+            "object": "bv2_file_revisions",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_file_revisions.anon.INSERT",
+          "production": {
+            "object": "bv2_file_revisions",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_file_revisions.anon.SELECT",
+          "production": {
+            "object": "bv2_file_revisions",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_file_revisions.anon.UPDATE",
+          "production": {
+            "object": "bv2_file_revisions",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_file_revisions.authenticated.DELETE",
+          "production": {
+            "object": "bv2_file_revisions",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_file_revisions.authenticated.INSERT",
+          "production": {
+            "object": "bv2_file_revisions",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_file_revisions.authenticated.SELECT",
+          "production": {
+            "object": "bv2_file_revisions",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_file_revisions.authenticated.UPDATE",
+          "production": {
+            "object": "bv2_file_revisions",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_file_revisions.service_role.DELETE",
+          "production": {
+            "object": "bv2_file_revisions",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_file_revisions.service_role.INSERT",
+          "production": {
+            "object": "bv2_file_revisions",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_file_revisions.service_role.SELECT",
+          "production": {
+            "object": "bv2_file_revisions",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_file_revisions.service_role.UPDATE",
+          "production": {
+            "object": "bv2_file_revisions",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_migration_state.anon.DELETE",
+          "production": {
+            "object": "bv2_migration_state",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_migration_state.anon.INSERT",
+          "production": {
+            "object": "bv2_migration_state",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_migration_state.anon.SELECT",
+          "production": {
+            "object": "bv2_migration_state",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_migration_state.anon.UPDATE",
+          "production": {
+            "object": "bv2_migration_state",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_migration_state.authenticated.DELETE",
+          "production": {
+            "object": "bv2_migration_state",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_migration_state.authenticated.INSERT",
+          "production": {
+            "object": "bv2_migration_state",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_migration_state.authenticated.SELECT",
+          "production": {
+            "object": "bv2_migration_state",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_migration_state.authenticated.UPDATE",
+          "production": {
+            "object": "bv2_migration_state",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_migration_state.service_role.DELETE",
+          "production": {
+            "object": "bv2_migration_state",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_migration_state.service_role.INSERT",
+          "production": {
+            "object": "bv2_migration_state",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_migration_state.service_role.SELECT",
+          "production": {
+            "object": "bv2_migration_state",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_migration_state.service_role.UPDATE",
+          "production": {
+            "object": "bv2_migration_state",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_patches.anon.DELETE",
+          "production": {
+            "object": "bv2_patches",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_patches.anon.INSERT",
+          "production": {
+            "object": "bv2_patches",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_patches.anon.SELECT",
+          "production": {
+            "object": "bv2_patches",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_patches.anon.UPDATE",
+          "production": {
+            "object": "bv2_patches",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_patches.authenticated.DELETE",
+          "production": {
+            "object": "bv2_patches",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_patches.authenticated.INSERT",
+          "production": {
+            "object": "bv2_patches",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_patches.authenticated.SELECT",
+          "production": {
+            "object": "bv2_patches",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_patches.authenticated.UPDATE",
+          "production": {
+            "object": "bv2_patches",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_patches.service_role.DELETE",
+          "production": {
+            "object": "bv2_patches",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_patches.service_role.INSERT",
+          "production": {
+            "object": "bv2_patches",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_patches.service_role.SELECT",
+          "production": {
+            "object": "bv2_patches",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_patches.service_role.UPDATE",
+          "production": {
+            "object": "bv2_patches",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_knowledge.anon.DELETE",
+          "production": {
+            "object": "bv2_project_knowledge",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_knowledge.anon.INSERT",
+          "production": {
+            "object": "bv2_project_knowledge",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_knowledge.anon.SELECT",
+          "production": {
+            "object": "bv2_project_knowledge",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_knowledge.anon.UPDATE",
+          "production": {
+            "object": "bv2_project_knowledge",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_knowledge.authenticated.DELETE",
+          "production": {
+            "object": "bv2_project_knowledge",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_knowledge.authenticated.INSERT",
+          "production": {
+            "object": "bv2_project_knowledge",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_knowledge.authenticated.SELECT",
+          "production": {
+            "object": "bv2_project_knowledge",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_knowledge.authenticated.UPDATE",
+          "production": {
+            "object": "bv2_project_knowledge",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_knowledge.service_role.DELETE",
+          "production": {
+            "object": "bv2_project_knowledge",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_knowledge.service_role.INSERT",
+          "production": {
+            "object": "bv2_project_knowledge",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_knowledge.service_role.SELECT",
+          "production": {
+            "object": "bv2_project_knowledge",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_knowledge.service_role.UPDATE",
+          "production": {
+            "object": "bv2_project_knowledge",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_pointers.anon.DELETE",
+          "production": {
+            "object": "bv2_project_pointers",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_pointers.anon.INSERT",
+          "production": {
+            "object": "bv2_project_pointers",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_pointers.anon.SELECT",
+          "production": {
+            "object": "bv2_project_pointers",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_pointers.anon.UPDATE",
+          "production": {
+            "object": "bv2_project_pointers",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_pointers.authenticated.DELETE",
+          "production": {
+            "object": "bv2_project_pointers",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_pointers.authenticated.INSERT",
+          "production": {
+            "object": "bv2_project_pointers",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_pointers.authenticated.SELECT",
+          "production": {
+            "object": "bv2_project_pointers",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_pointers.authenticated.UPDATE",
+          "production": {
+            "object": "bv2_project_pointers",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_pointers.service_role.DELETE",
+          "production": {
+            "object": "bv2_project_pointers",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_pointers.service_role.INSERT",
+          "production": {
+            "object": "bv2_project_pointers",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_pointers.service_role.SELECT",
+          "production": {
+            "object": "bv2_project_pointers",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_project_pointers.service_role.UPDATE",
+          "production": {
+            "object": "bv2_project_pointers",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_retrieval_traces.anon.DELETE",
+          "production": {
+            "object": "bv2_retrieval_traces",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_retrieval_traces.anon.INSERT",
+          "production": {
+            "object": "bv2_retrieval_traces",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_retrieval_traces.anon.SELECT",
+          "production": {
+            "object": "bv2_retrieval_traces",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_retrieval_traces.anon.UPDATE",
+          "production": {
+            "object": "bv2_retrieval_traces",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_retrieval_traces.authenticated.DELETE",
+          "production": {
+            "object": "bv2_retrieval_traces",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_retrieval_traces.authenticated.INSERT",
+          "production": {
+            "object": "bv2_retrieval_traces",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_retrieval_traces.authenticated.SELECT",
+          "production": {
+            "object": "bv2_retrieval_traces",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_retrieval_traces.authenticated.UPDATE",
+          "production": {
+            "object": "bv2_retrieval_traces",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_retrieval_traces.service_role.DELETE",
+          "production": {
+            "object": "bv2_retrieval_traces",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_retrieval_traces.service_role.INSERT",
+          "production": {
+            "object": "bv2_retrieval_traces",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_retrieval_traces.service_role.SELECT",
+          "production": {
+            "object": "bv2_retrieval_traces",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_retrieval_traces.service_role.UPDATE",
+          "production": {
+            "object": "bv2_retrieval_traces",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshot_files.anon.DELETE",
+          "production": {
+            "object": "bv2_snapshot_files",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshot_files.anon.INSERT",
+          "production": {
+            "object": "bv2_snapshot_files",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshot_files.anon.SELECT",
+          "production": {
+            "object": "bv2_snapshot_files",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshot_files.anon.UPDATE",
+          "production": {
+            "object": "bv2_snapshot_files",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshot_files.authenticated.DELETE",
+          "production": {
+            "object": "bv2_snapshot_files",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshot_files.authenticated.INSERT",
+          "production": {
+            "object": "bv2_snapshot_files",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshot_files.authenticated.SELECT",
+          "production": {
+            "object": "bv2_snapshot_files",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshot_files.authenticated.UPDATE",
+          "production": {
+            "object": "bv2_snapshot_files",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshot_files.service_role.DELETE",
+          "production": {
+            "object": "bv2_snapshot_files",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshot_files.service_role.INSERT",
+          "production": {
+            "object": "bv2_snapshot_files",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshot_files.service_role.SELECT",
+          "production": {
+            "object": "bv2_snapshot_files",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshot_files.service_role.UPDATE",
+          "production": {
+            "object": "bv2_snapshot_files",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshots.anon.DELETE",
+          "production": {
+            "object": "bv2_snapshots",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshots.anon.INSERT",
+          "production": {
+            "object": "bv2_snapshots",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshots.anon.SELECT",
+          "production": {
+            "object": "bv2_snapshots",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshots.anon.UPDATE",
+          "production": {
+            "object": "bv2_snapshots",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshots.authenticated.DELETE",
+          "production": {
+            "object": "bv2_snapshots",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshots.authenticated.INSERT",
+          "production": {
+            "object": "bv2_snapshots",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshots.authenticated.SELECT",
+          "production": {
+            "object": "bv2_snapshots",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshots.authenticated.UPDATE",
+          "production": {
+            "object": "bv2_snapshots",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshots.service_role.DELETE",
+          "production": {
+            "object": "bv2_snapshots",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshots.service_role.INSERT",
+          "production": {
+            "object": "bv2_snapshots",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshots.service_role.SELECT",
+          "production": {
+            "object": "bv2_snapshots",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_snapshots.service_role.UPDATE",
+          "production": {
+            "object": "bv2_snapshots",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbol_refs.anon.DELETE",
+          "production": {
+            "object": "bv2_symbol_refs",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbol_refs.anon.INSERT",
+          "production": {
+            "object": "bv2_symbol_refs",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbol_refs.anon.SELECT",
+          "production": {
+            "object": "bv2_symbol_refs",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbol_refs.anon.UPDATE",
+          "production": {
+            "object": "bv2_symbol_refs",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbol_refs.authenticated.DELETE",
+          "production": {
+            "object": "bv2_symbol_refs",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbol_refs.authenticated.INSERT",
+          "production": {
+            "object": "bv2_symbol_refs",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbol_refs.authenticated.SELECT",
+          "production": {
+            "object": "bv2_symbol_refs",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbol_refs.authenticated.UPDATE",
+          "production": {
+            "object": "bv2_symbol_refs",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbol_refs.service_role.DELETE",
+          "production": {
+            "object": "bv2_symbol_refs",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbol_refs.service_role.INSERT",
+          "production": {
+            "object": "bv2_symbol_refs",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbol_refs.service_role.SELECT",
+          "production": {
+            "object": "bv2_symbol_refs",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbol_refs.service_role.UPDATE",
+          "production": {
+            "object": "bv2_symbol_refs",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbols.anon.DELETE",
+          "production": {
+            "object": "bv2_symbols",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbols.anon.INSERT",
+          "production": {
+            "object": "bv2_symbols",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbols.anon.SELECT",
+          "production": {
+            "object": "bv2_symbols",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbols.anon.UPDATE",
+          "production": {
+            "object": "bv2_symbols",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbols.authenticated.DELETE",
+          "production": {
+            "object": "bv2_symbols",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbols.authenticated.INSERT",
+          "production": {
+            "object": "bv2_symbols",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbols.authenticated.SELECT",
+          "production": {
+            "object": "bv2_symbols",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbols.authenticated.UPDATE",
+          "production": {
+            "object": "bv2_symbols",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbols.service_role.DELETE",
+          "production": {
+            "object": "bv2_symbols",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbols.service_role.INSERT",
+          "production": {
+            "object": "bv2_symbols",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbols.service_role.SELECT",
+          "production": {
+            "object": "bv2_symbols",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_symbols.service_role.UPDATE",
+          "production": {
+            "object": "bv2_symbols",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_verification_cache.anon.DELETE",
+          "production": {
+            "object": "bv2_verification_cache",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_verification_cache.anon.INSERT",
+          "production": {
+            "object": "bv2_verification_cache",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_verification_cache.anon.SELECT",
+          "production": {
+            "object": "bv2_verification_cache",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_verification_cache.anon.UPDATE",
+          "production": {
+            "object": "bv2_verification_cache",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_verification_cache.authenticated.DELETE",
+          "production": {
+            "object": "bv2_verification_cache",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_verification_cache.authenticated.INSERT",
+          "production": {
+            "object": "bv2_verification_cache",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_verification_cache.authenticated.SELECT",
+          "production": {
+            "object": "bv2_verification_cache",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_verification_cache.authenticated.UPDATE",
+          "production": {
+            "object": "bv2_verification_cache",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_verification_cache.service_role.DELETE",
+          "production": {
+            "object": "bv2_verification_cache",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_verification_cache.service_role.INSERT",
+          "production": {
+            "object": "bv2_verification_cache",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_verification_cache.service_role.SELECT",
+          "production": {
+            "object": "bv2_verification_cache",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.bv2_verification_cache.service_role.UPDATE",
+          "production": {
+            "object": "bv2_verification_cache",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_agents.authenticated.DELETE",
+          "production": {
+            "object": "ca_agents",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_agents.authenticated.INSERT",
+          "production": {
+            "object": "ca_agents",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_agents.authenticated.UPDATE",
+          "production": {
+            "object": "ca_agents",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_artifacts.authenticated.DELETE",
+          "production": {
+            "object": "ca_artifacts",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_artifacts.authenticated.INSERT",
+          "production": {
+            "object": "ca_artifacts",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_artifacts.authenticated.UPDATE",
+          "production": {
+            "object": "ca_artifacts",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_checkpoints.authenticated.DELETE",
+          "production": {
+            "object": "ca_checkpoints",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_checkpoints.authenticated.INSERT",
+          "production": {
+            "object": "ca_checkpoints",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_checkpoints.authenticated.UPDATE",
+          "production": {
+            "object": "ca_checkpoints",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_github_installations.authenticated.DELETE",
+          "production": {
+            "object": "ca_github_installations",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_github_installations.authenticated.INSERT",
+          "production": {
+            "object": "ca_github_installations",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_github_installations.authenticated.UPDATE",
+          "production": {
+            "object": "ca_github_installations",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_repositories.authenticated.DELETE",
+          "production": {
+            "object": "ca_repositories",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_repositories.authenticated.INSERT",
+          "production": {
+            "object": "ca_repositories",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_repositories.authenticated.UPDATE",
+          "production": {
+            "object": "ca_repositories",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_run_events.authenticated.DELETE",
+          "production": {
+            "object": "ca_run_events",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_run_events.authenticated.INSERT",
+          "production": {
+            "object": "ca_run_events",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_run_events.authenticated.UPDATE",
+          "production": {
+            "object": "ca_run_events",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_runs.authenticated.DELETE",
+          "production": {
+            "object": "ca_runs",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_runs.authenticated.INSERT",
+          "production": {
+            "object": "ca_runs",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_runs.authenticated.UPDATE",
+          "production": {
+            "object": "ca_runs",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_usage_records.authenticated.DELETE",
+          "production": {
+            "object": "ca_usage_records",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_usage_records.authenticated.INSERT",
+          "production": {
+            "object": "ca_usage_records",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.ca_usage_records.authenticated.UPDATE",
+          "production": {
+            "object": "ca_usage_records",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.deployments.anon.DELETE",
+          "production": {
+            "object": "deployments",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.deployments.anon.INSERT",
+          "production": {
+            "object": "deployments",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.deployments.anon.SELECT",
+          "production": {
+            "object": "deployments",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.deployments.anon.UPDATE",
+          "production": {
+            "object": "deployments",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.deployments.authenticated.DELETE",
+          "production": {
+            "object": "deployments",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.deployments.authenticated.INSERT",
+          "production": {
+            "object": "deployments",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.deployments.authenticated.UPDATE",
+          "production": {
+            "object": "deployments",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.deployments.service_role.DELETE",
+          "production": {
+            "object": "deployments",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "DELETE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.deployments.service_role.INSERT",
+          "production": {
+            "object": "deployments",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "INSERT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.deployments.service_role.SELECT",
+          "production": {
+            "object": "deployments",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "SELECT",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "table.public.deployments.service_role.UPDATE",
+          "production": {
+            "object": "deployments",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "UPDATE",
+            "object_type": "table"
+          }
+        },
+        {
+          "key": "routine.public.deployment_scope.anon.EXECUTE",
+          "production": {
+            "object": "deployment_scope",
+            "schema": "public",
+            "grantee": "anon",
+            "grantable": "NO",
+            "privilege": "EXECUTE",
+            "object_type": "routine",
+            "specific_name": "deployment_scope_34839"
+          }
+        },
+        {
+          "key": "routine.public.deployment_scope.authenticated.EXECUTE",
+          "production": {
+            "object": "deployment_scope",
+            "schema": "public",
+            "grantee": "authenticated",
+            "grantable": "NO",
+            "privilege": "EXECUTE",
+            "object_type": "routine",
+            "specific_name": "deployment_scope_34839"
+          }
+        },
+        {
+          "key": "routine.public.deployment_scope.service_role.EXECUTE",
+          "production": {
+            "object": "deployment_scope",
+            "schema": "public",
+            "grantee": "service_role",
+            "grantable": "NO",
+            "privilege": "EXECUTE",
+            "object_type": "routine",
+            "specific_name": "deployment_scope_34839"
+          }
+        }
+      ],
+      "localOnly": [],
+      "changed": []
+    },
+    "extensions": {
+      "localCount": 7,
+      "productionCount": 6,
+      "localSha256": "16466cad7f75fa53d4e5e3510a913f68b097b0f15c434d0f089c71e43f08e187",
+      "productionSha256": "e53fa18cda887c7ff299350d0491a73654e0e09316c509e46335fcb287f7ea47",
+      "expectedEnvironment": [
+        {
+          "key": "pg_net",
+          "reason": "local Supabase platform service",
+          "local": {
+            "schema": "extensions",
+            "version": "0.20.4",
+            "extension": "pg_net"
+          },
+          "production": null
+        }
+      ],
+      "productionOnly": [],
+      "localOnly": [],
+      "changed": []
+    }
+  },
+  "totals": {
+    "expectedEnvironment": 4,
+    "productionOnly": 242,
+    "localOnly": 0,
+    "changed": 0
+  }
+}

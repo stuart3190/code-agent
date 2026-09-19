@@ -47,10 +47,11 @@ const budgets = {
   computeSeconds: { used: 60, limit: 10_800 },
 };
 
-function billingPayload(subscription) {
+function billingPayload(subscription, extras = {}) {
   return {
     subscription, plans: PLANS, stripeConfigured: true, budgets,
     period: { start: "2026-08-01T00:00:00Z", end: "2026-09-01T00:00:00Z" },
+    ...extras,
   };
 }
 
@@ -58,7 +59,7 @@ const FREE = { plan: "free", planName: "Free", status: "active", stripeManaged: 
 const PRO = { plan: "pro", planName: "Pro", status: "active", stripeManaged: true, currentPeriodEnd: "2026-09-01T00:00:00Z", pendingPlan: null, pendingPlanName: null, pendingPlanAt: null, overrides: {} };
 const PRO_DOWNGRADING = { ...PRO, pendingPlan: "starter", pendingPlanName: "Starter", pendingPlanAt: "2026-09-01T00:00:00Z" };
 
-async function stub(page, subscription, { onPlanSelect = null, onPortal = null } = {}) {
+async function stub(page, subscription, { onPlanSelect = null, onPortal = null, extras = {} } = {}) {
   await page.addInitScript(([key, session]) => {
     window.localStorage.setItem(key, JSON.stringify(session));
   }, [`sb-${REF}-auth-token`, SESSION]);
@@ -73,7 +74,7 @@ async function stub(page, subscription, { onPlanSelect = null, onPortal = null }
     plan: { id: subscription.plan, name: subscription.planName },
     budgets: { managedTokens: { limit: 1_500_000, remaining: 1_400_000 } },
   } }));
-  await page.route("**/api/v1/billing", (r) => r.fulfill({ json: billingPayload(subscription) }));
+  await page.route("**/api/v1/billing", (r) => r.fulfill({ json: billingPayload(subscription, extras) }));
   await page.route(`https://${REF}.supabase.co/**`, (r) => r.fulfill({ json: {} }));
   await page.route(`https://${REF}.supabase.co/auth/v1/user**`, (r) => r.fulfill({ json: SESSION.user }));
 }
@@ -87,6 +88,16 @@ test("a Free account sees the upgrade banner", async ({ page }) => {
   await expect(banner).toBeVisible();
   await expect(banner).toContainText("You're currently on the Free plan");
   await expect(banner.getByRole("button", { name: "Upgrade Now" })).toBeVisible();
+});
+
+// Owner accounts (THRALLO_OWNER_EMAILS) live on the free subscription row, but nothing is ever
+// enforced against them — telling staff to "upgrade" from Free is simply untrue.
+test("an owner account on the free row is never told to upgrade", async ({ page }) => {
+  await stub(page, FREE, { extras: { ownerAccount: true, unlimited: true, previewPlan: null } });
+  await page.goto("/");
+  await expect(page.locator(".ct-begin")).toBeVisible();
+  await page.waitForResponse((r) => r.url().includes("/api/v1/billing"));
+  await expect(page.locator(".ct-planbar")).toHaveCount(0);
 });
 
 test("a paying account sees no banner at all", async ({ page }) => {

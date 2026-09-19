@@ -10,7 +10,7 @@ import { resolveBuildContext } from "../../shell/server/lib/appBuild/buildContex
 import {
   resolveProviderPolicy, permittedAlternatives, usesManagedCredits, preflightSummary, BILLING_LANES,
 } from "../../shell/server/lib/appBuild/providerPolicy.mjs";
-import { planEndAction } from "../../shell/server/lib/appBuild/appBuildService.mjs";
+import { memoryModelReservations } from "../../shell/server/lib/builderV2/modelReservations.mjs";
 
 const codexResolver = async () => ({ provider: "codex", secret: null });
 
@@ -64,19 +64,11 @@ test("FALLBACK — a Codex build cannot be steered onto managed via preferProvid
   assert.equal(context.byok, true);
 });
 
-test("FALLBACK — permittedAlternatives yields nothing for Codex, so a failure STOPS", () => {
+test("FALLBACK — permittedAlternatives yields nothing for Codex", () => {
   const policy = resolveProviderPolicy({ provider: "codex" });
   assert.deepEqual(permittedAlternatives(policy, ["managed", "anthropic", "xai"]), [],
     "no hidden fallback path exists");
 
-  // And the planner's provider-blocked branch with zero alternatives is a plain stop that keeps
-  // progress — not a switch, not a retry on another lane.
-  const action = planEndAction(
-    { status: "failed", error: "provider quota exceeded: rate limited" },
-    { attempt: 1, alternatives: [], autoFallback: true },
-  );
-  assert.equal(action.kind, "request_user_input", "the build stops and says why");
-  assert.match(action.message, /no other provider is connected/i);
 });
 
 test("RETRIES — a retry re-resolves under the same active connection, preserving the policy", async () => {
@@ -92,17 +84,36 @@ test("RETRIES — a retry re-resolves under the same active connection, preservi
   }
 });
 
-test("RESERVATIONS — a non-managed lane creates none and debits nothing", async () => {
-  // dispatchCheck's reservation branch is gated on lifecycle.managed; byok:true lanes never enter
-  // it. Pinned at the source level so a refactor cannot quietly widen it.
-  const { readFileSync } = await import("node:fs");
-  const service = readFileSync("shell/server/lib/appBuild/appBuildService.mjs", "utf8");
-  assert.match(service, /if \(ceiling && lifecycle\.managed && lifecycle\.reservations\)/,
-    "the managed reservation branch requires the managed lane");
-  // BYOK settle path never debits managed credits: settle() short-circuits on byok.
-  const jobs = readFileSync("shell/server/lib/buildJobs.mjs", "utf8");
-  assert.match(jobs, /if \(byok\) \{\s*\n?\s*serverLog\(job, `billing: BYOK/,
-    "the BYOK settle path bills the owner's provider, not managed credits");
+test("BYOK settlement never debits managed credits", async () => {
+  const reservations = memoryModelReservations();
+  const held = await reservations.reserve({
+    owner: "owner-1", projectId: "project-1", buildId: "build-1", callKey: "generate:1:test",
+    step: "generate", provider: "anthropic", model: "claude-sonnet-4-5", billingLane: "byok_api",
+    usageResponsibility: "customer_request", reservedCredits: 4, ceilingCredits: 8,
+    accountBalance: { included: 0, purchased: 0 }, maxRepairs: 2, maxCorrections: 2,
+  });
+  assert.equal(held.includedReservedCredits, 0);
+  assert.equal(held.purchasedReservedCredits, 0);
+  assert.equal(held.platformReservedCredits, 0);
+
+  const settled = await reservations.settle("owner-1", held.id, {
+    actualCredits: 3, usage: { total: 1200 }, providerRequestIds: ["req-byok-1"],
+  });
+  assert.equal(settled.includedActualCredits, 0);
+  assert.equal(settled.purchasedActualCredits, 0);
+  assert.equal(settled.platformActualCredits, 0);
+});
+
+test("FAIL CLOSED — credential lookup failure cannot silently select managed", async () => {
+  await assert.rejects(resolveBuildContext("owner-1", {
+    credentialResolver: async () => { throw Object.assign(new Error("credential store unavailable"), { code: "store_down" }); },
+  }), (error) => error.code === "store_down");
+});
+
+test("FAIL CLOSED — an unsupported connected provider cannot silently select managed", async () => {
+  await assert.rejects(resolveBuildContext("owner-1", {
+    credentialResolver: async () => ({ provider: "future-provider", secret: "owner-key" }),
+  }), (error) => error.code === "provider_unavailable");
 });
 
 test("PREFLIGHT — the summary states the lane before any live spend", () => {

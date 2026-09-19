@@ -10,8 +10,14 @@
 // cancellation is an account-wide Stripe setting, and this Stripe account is shared with another
 // product, so enabling it there would change that product too.
 
-import React, { useState } from "react";
-import { billingPortal, selectPlan, setCancellation } from "../lib/codeAgentApi.js";
+import React, { useRef, useState } from "react";
+import {
+  billingPortal,
+  selectPlan,
+  setCancellation,
+  startTopupCheckout,
+} from "../lib/codeAgentApi.js";
+import { createCheckoutIdempotencyKey } from "../billing/checkoutIdempotency.js";
 import { formatBillingDate } from "../billing/planState.js";
 
 const STATUS = {
@@ -23,10 +29,17 @@ const STATUS = {
 const price = (plan) => (plan.priceGbp === 0 ? "Free"
   : plan.priceGbp ? `£${plan.priceGbp}/month` : "Price to be announced");
 
+const creditAmount = (value) => Number(value || 0).toLocaleString("en-GB", {
+  maximumFractionDigits: 2,
+});
+
 export default function BillingTab({ data, onChanged, onConfirm, showToast }) {
-  const { subscription, plans, stripeConfigured, plan } = data;
+  const { subscription, plans, stripeConfigured, plan, credits = null } = data;
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  // Retain the key across an ambiguous network failure so a click on Try again cannot create a
+  // second Checkout Session for the same customer action.
+  const topupIdempotencyKey = useRef(null);
 
   const isFree = subscription.plan === "free";
   const paid = !isFree && subscription.stripeManaged;
@@ -59,6 +72,21 @@ export default function BillingTab({ data, onChanged, onConfirm, showToast }) {
   };
 
   const choose = (planId) => run(planId, () => selectPlan(planId));
+
+  const buyCredits = async () => {
+    if (!credits?.purchaseAvailable || busy) return;
+    setBusy("topup"); setError("");
+    if (!topupIdempotencyKey.current) topupIdempotencyKey.current = createCheckoutIdempotencyKey();
+    try {
+      const result = await startTopupCheckout(topupIdempotencyKey.current);
+      if (!result?.url) throw new Error("Checkout did not return a secure payment link.");
+      window.location.href = result.url;
+    } catch (requestError) {
+      setError(requestError?.message || "Additional credits could not be opened. Nothing was charged.");
+    } finally {
+      setBusy("");
+    }
+  };
 
   const cancel = () => onConfirm({
     title: `Cancel your ${plan.name} plan?`,
@@ -194,6 +222,31 @@ export default function BillingTab({ data, onChanged, onConfirm, showToast }) {
           )}
         </div>
       </div>
+
+      {credits && (
+        <div className="st-section">
+          <h3>Build credits</h3>
+          <div className="st-facts st-credit-facts">
+            <div className="st-fact"><b>{creditAmount(credits.totalAvailable)}</b><span>Available now</span></div>
+            <div className="st-fact"><b>{creditAmount(credits.includedRemaining)}</b><span>Included remaining</span></div>
+            <div className="st-fact"><b>{creditAmount(credits.purchasedRemaining)}</b><span>Additional credits</span></div>
+            <div className="st-fact"><b>{creditAmount(credits.reserved)}</b><span>Held for active work</span></div>
+          </div>
+          <div className="st-row st-credit-purchase">
+            <div>
+              Buy additional credits
+              <div className="ct-hint">
+                {credits.purchaseAvailable
+                  ? "Additional credits remain available after this billing period."
+                  : "Additional-credit purchasing is not available yet."}
+              </div>
+            </div>
+            <button className="ct-btn" disabled={!credits.purchaseAvailable || !!busy} onClick={buyCredits}>
+              {busy === "topup" ? "Opening…" : "Buy credits"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && <div className="mg-error">{error}</div>}
     </div>

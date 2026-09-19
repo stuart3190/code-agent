@@ -7,39 +7,24 @@
 // cannot serve single-shot completions; those owners fall back to managed keys when
 // configured.
 
-import { optionalEnv } from "./env.mjs";
+import crypto from "node:crypto";
+
 import { codeAgentStore } from "./codeAgentStore.mjs";
 import { activeAiCredential } from "./aiCredentialStore.mjs";
+import {
+  createManagedDirectDispatchAccounting, directModelReservations,
+} from "./directModelReservations.mjs";
 import { modelCatalog, createProviderForCandidate } from "./modelRouting.mjs";
 import { retrieveRepositoryContext } from "./repositoryIndexer.mjs";
-import { budgetOverview } from "./usageBudgets.mjs";
 
 const PREFIX_LIMIT = 6_000;
 const SUFFIX_LIMIT = 2_000;
 const CONTEXT_LIMIT = 3;
+const MAX_OUTPUT_TOKENS = 512;
 
 const INSTRUCTIONS = `You are a code completion engine. You receive the file path, code before the cursor (PREFIX), and code after the cursor (SUFFIX), plus optional repository excerpts.
 Output ONLY the code to insert at the cursor: no markdown fences, no explanation, no repetition of the prefix or suffix.
 Stop at a natural boundary within roughly ten lines. If no useful completion exists, output nothing.`;
-
-const buckets = new Map();
-
-export function completionRateAllowed(owner, now = Date.now()) {
-  const perMinute = boundedEnv("CODE_AGENT_COMPLETIONS_PER_MINUTE", 30);
-  const windowStart = now - 60_000;
-  const entries = (buckets.get(owner) || []).filter((stamp) => stamp > windowStart);
-  if (entries.length >= perMinute) {
-    buckets.set(owner, entries);
-    return false;
-  }
-  entries.push(now);
-  buckets.set(owner, entries);
-  return true;
-}
-
-export function resetCompletionRateForTests() {
-  buckets.clear();
-}
 
 export function parseCompletionInput(body = {}) {
   const path = String(body.path || "").slice(0, 500);
@@ -71,15 +56,8 @@ export async function completeCode(owner, input, {
   credentialResolver = activeAiCredential,
   providerFactory = createProviderForCandidate,
   contextRetriever = retrieveRepositoryContext,
-  overviewResolver = budgetOverview,
-  now = Date.now(),
+  reservationStoreFactory = directModelReservations,
 } = {}) {
-  const { isOwnerAccount } = await import("./ownerAccounts.mjs");
-  const ownerAccount = await isOwnerAccount(owner);
-  if (!ownerAccount && !completionRateAllowed(owner, now)) {
-    throw serviceError("Completion rate limit reached; slow down.", 429, "rate_limited");
-  }
-
   let credential = await credentialResolver(owner).catch(() => ({ provider: "managed", secret: null }));
   if (credential.provider === "codex") {
     // Same rule as the lead agent: a Codex-selected account is never silently rebilled to managed.
@@ -106,12 +84,6 @@ export async function completeCode(owner, input, {
     );
   }
   const billingSource = credential.provider === "managed" ? "managed" : "byok";
-  if (billingSource === "managed") {
-    const overview = await overviewResolver(owner, { store });
-    if (!overview.unlimited && overview.budgets.managedTokens.remaining <= 0) {
-      throw serviceError("Your monthly managed-model token allowance is used up.", 402, "budget_exceeded");
-    }
-  }
 
   // Editor-supplied local excerpts take priority (they reflect the working tree right now);
   // the server-side encrypted index fills any remaining slots.
@@ -127,27 +99,71 @@ export async function completeCode(owner, input, {
 
   const provider = providerFactory(candidate, credential);
   const started = Date.now();
-  const response = await provider.turn({
+  const turnArgs = {
     instructions: INSTRUCTIONS,
     input: [{ role: "user", content: buildCompletionPrompt(input, context) }],
     tools: [],
     safetyIdentifier: owner,
-  });
+    maxOutputTokens: MAX_OUTPUT_TOKENS,
+    maxProviderRetries: 0,
+    allowParameterRetry: false,
+  };
+  let response;
+  if (billingSource === "managed") {
+    const accounting = createManagedDirectDispatchAccounting({
+      owner,
+      kind: "completion",
+      subjectId: crypto.randomUUID(),
+      reservations: reservationStoreFactory({ runStore: store }),
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+      metadata: { repositoryId: repository?.id || null, path: input.path || null },
+    });
+    const hooks = accounting.forTurn(1);
+    let hold;
+    try {
+      hold = await hooks.beforeDispatch(candidate, { attemptOrder: 1, args: turnArgs });
+    } catch (error) {
+      if (error.code === "account_budget") {
+        throw serviceError("Your included and purchased AI credits are used up.", 402, "budget_exceeded");
+      }
+      throw error;
+    }
+    let providerCompleted = false;
+    try {
+      response = await provider.turn(turnArgs);
+      providerCompleted = true;
+      await hooks.afterDispatch(hold, candidate, response);
+    } catch (error) {
+      if (providerCompleted) {
+        throw Object.assign(error, { code: error.code || "billing_settlement_failed" });
+      }
+      try {
+        await hooks.dispatchFailed(hold, candidate, error);
+      } catch (accountingError) {
+        throw Object.assign(accountingError, { code: accountingError.code || "billing_settlement_failed" });
+      }
+      throw error;
+    }
+  } else {
+    response = await provider.turn(turnArgs);
+  }
   const completion = cleanCompletion(response.text || extractText(response));
 
-  const usage = response.usage || {};
-  await store.recordStandaloneUsage(owner, {
-    provider: candidate.provider,
-    model: candidate.model,
-    input_tokens: usage.inputTokens || 0,
-    cached_tokens: usage.cachedTokens || 0,
-    output_tokens: usage.outputTokens || 0,
-    reasoning_tokens: usage.reasoningTokens || 0,
-    compute_seconds: 0,
-    amount_gbp: 0,
-    billing_source: billingSource,
-    metadata: { kind: "completion", total_tokens: usage.totalTokens || 0 },
-  }).catch(() => {});
+  if (billingSource !== "managed") {
+    const usage = response.usage || {};
+    await store.recordStandaloneUsage(owner, {
+      provider: candidate.provider,
+      model: candidate.model,
+      input_tokens: usage.inputTokens || 0,
+      cached_tokens: usage.cachedTokens || 0,
+      output_tokens: usage.outputTokens || 0,
+      reasoning_tokens: usage.reasoningTokens || 0,
+      compute_seconds: 0,
+      amount_gbp: 0,
+      billing_source: billingSource,
+      metadata: { kind: "completion", total_tokens: usage.totalTokens || 0 },
+    }).catch(() => {});
+  }
 
   return {
     completion,
@@ -214,11 +230,6 @@ function extractText(response) {
     }
   }
   return "";
-}
-
-function boundedEnv(name, fallback) {
-  const value = Number(optionalEnv(name, ""));
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
 }
 
 function inputError(message) {

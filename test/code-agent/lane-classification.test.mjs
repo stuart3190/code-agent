@@ -13,28 +13,9 @@ import { resolveProviderPolicy, usesManagedCredits, managedSettlementPaused, MAN
 import { resolveBuildContext } from "../../shell/server/lib/appBuild/buildContext.mjs";
 import { createCodexProvider } from "../../src/providers/codexProvider.mjs";
 
-const SERVICE = readFileSync("shell/server/lib/appBuild/appBuildService.mjs", "utf8");
 const LEAD = readFileSync("shell/server/lib/leadAgentService.mjs", "utf8");
 
 // ── 1. one authoritative classification ───────────────────────────────────────────────────────
-
-test("SPLIT-BRAIN — the legacy classification is gone; managed derives from the policy, once", () => {
-  // The exact removed line, pinned as the wrong answer.
-  const live = SERVICE.split("\n").filter((l) => !l.trim().startsWith("//"));
-  assert.ok(!live.some((l) => /managed = activeProvider === "managed" \|\| activeProvider === "codex"/.test(l)),
-    "the legacy line that classified Codex as managed must not exist");
-  // EXACTLY ONE line touches `managed`, and it is the const policy derivation. The previous
-  // design allowed a `let managed = true` fail-safe default plus a mutable reassignment inside a
-  // try/catch — and when a missing import made the derivation throw, the catch swallowed it and
-  // the "fail-safe" silently classified every Codex build managed for six days. There is no
-  // mutable default any more: classification either derives from the policy or the error
-  // propagates. (Execution coverage: lifecycle-classification.test.mjs actually RUNS this.)
-  const assignments = live.filter((l) => /^\s*(let |const )?managed = /.test(l));
-  assert.equal(assignments.length, 1, `got: ${assignments.join(" | ")}`);
-  assert.match(assignments[0], /const managed = usesManagedCredits\(resolveProviderPolicy/,
-    "the single assignment is the const policy derivation");
-  assert.ok(!live.some((l) => /let managed/.test(l)), "no mutable default to fall back to");
-});
 
 test("SPLIT-BRAIN — Codex classifies as not-managed everywhere the policy is asked", () => {
   const policy = resolveProviderPolicy({ provider: "codex" });
@@ -45,33 +26,27 @@ test("SPLIT-BRAIN — Codex classifies as not-managed everywhere the policy is a
   // provider-policy suite), settle() short-circuits BYOK, and the managed ceiling does not apply.
 });
 
-test("SPLIT-BRAIN — an API key with no secret still classifies managed, mirroring buildContext", async () => {
-  // The subtlety the one-liner had right: anthropic-with-no-secret RESOLVES to managed in
-  // buildContext, so the lifecycle must classify it managed too — only Codex needs no secret.
-  const context = await resolveBuildContext("o", {
+test("SPLIT-BRAIN — an API key with no secret fails closed without changing billing lane", async () => {
+  await assert.rejects(resolveBuildContext("o", {
     credentialResolver: async () => ({ provider: "anthropic", secret: null }),
-  });
-  assert.equal(context.byok, false, "no usable secret resolves to the managed lane");
-  assert.equal(usesManagedCredits(context.policy), true);
+  }), (error) => error.code === "provider_unavailable");
 });
 
 // ── 2. the lead agent lane ────────────────────────────────────────────────────────────────────
 
-test("LEAD AGENT — the silent codex→managed rewrite is gone; the lane stops before spending", () => {
+test("LEAD AGENT — the silent codex→managed rewrite is gone and Codex executes in its own lane", () => {
   const live = LEAD.split("\n").filter((l) => !l.trim().startsWith("//"));
   assert.ok(!live.some((l) => /codex.*credential = \{ provider: "managed"/.test(l) && !/allowManagedFallback/.test(l)),
     "no unconditional rewrite may remain");
-  // The stop is policy-gated and worded for a human.
-  assert.match(LEAD, /allowManagedFallback/);
-  assert.match(LEAD, /won't quietly bill your managed credits/);
-  // And the pause covers the lane.
+  assert.match(LEAD, /credential\.provider \|\| "managed"/);
+  assert.doesNotMatch(LEAD, /orchestrator can't run on Codex yet/);
+  // The managed-only pause remains, but it is not applied to connected allowance.
   assert.match(LEAD, /managedSettlementPaused\(\)/);
 });
 
-test("LEAD AGENT — with Codex selected, zero managed dispatch and zero gpt-5.6 anywhere", async () => {
-  // Replay the lane decision with a fake resolver: policy says stop, so no model factory runs.
+test("LEAD AGENT — with Codex selected, zero managed dispatch and zero managed fallback", async () => {
   const policy = resolveProviderPolicy({ provider: "codex" });
-  assert.equal(policy.allowManagedFallback, false, "the stop branch is the one that executes");
+  assert.equal(policy.allowManagedFallback, false);
   // The build side, same account: six stages, all codex, no gpt-5.6.
   const context = await resolveBuildContext("o", { credentialResolver: async () => ({ provider: "codex" }) });
   for (const intent of ["generate", "edit"]) {
@@ -108,8 +83,9 @@ test("PAUSE — every managed lane consults the same kill switch", () => {
 
   // Source-pinned coverage: build jobs, the lead agent, background repo agents and inline
   // completions all gate managed dispatch. BYOK/Codex lanes pass — they cannot fall to managed.
-  const jobs = readFileSync("shell/server/lib/buildJobs.mjs", "utf8");
-  assert.match(jobs, /THRALLO_MANAGED_SETTLEMENT_PAUSED/);
+  const builderRuntime = readFileSync("shell/server/lib/builderV2/runtimeComposition.mjs", "utf8");
+  assert.match(builderRuntime, /managedSettlementPaused/);
+  assert.match(builderRuntime, /usesManagedCredits\(context\.policy\) && managedSettlementPaused\(\)/);
   assert.match(LEAD, /managedSettlementPaused/);
   assert.match(readFileSync("shell/server/lib/codeAgentService.mjs", "utf8"), /managedSettlementPaused/);
   assert.match(readFileSync("shell/server/lib/completions.mjs", "utf8"), /managedSettlementPaused/);

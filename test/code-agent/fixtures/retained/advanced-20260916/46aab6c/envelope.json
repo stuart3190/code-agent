@@ -1,0 +1,266 @@
+{
+  "id": "b548c7c6-cccd-475c-8310-37afdb3a85e0",
+  "owner": "7fc93b1e-7dc6-48c0-ae05-38ce4ee3050f",
+  "project_id": "23392280-b2b2-4f45-ad05-2894a446609f",
+  "build_id": "837b0c7b-b32d-4cdd-b219-08b8c956b291",
+  "version": 2,
+  "contract_hash": "a35359a8f85d459bba4c87a3bd4163f6170fd71562723d442a46434bc497f7b1",
+  "complexity_band": "complex_interactive",
+  "envelope": {
+    "stages": [
+      {
+        "id": "contract",
+        "required": true,
+        "dependencyIds": [],
+        "fundingSource": "customer_generation",
+        "estimatedCredits": 1.39,
+        "estimatedDurationMs": 115000,
+        "estimatedInputTokens": 7300,
+        "estimatedOutputTokens": 5400
+      },
+      {
+        "id": "capability_preflight",
+        "required": true,
+        "dependencyIds": [
+          "contract"
+        ],
+        "fundingSource": "platform",
+        "estimatedCredits": 0,
+        "estimatedDurationMs": 45000,
+        "estimatedInputTokens": 0,
+        "estimatedOutputTokens": 0
+      },
+      {
+        "id": "core_generation",
+        "required": true,
+        "dependencyIds": [
+          "capability_preflight"
+        ],
+        "fundingSource": "customer_generation",
+        "estimatedCredits": 3.325,
+        "estimatedDurationMs": 202000,
+        "estimatedInputTokens": 14060,
+        "estimatedOutputTokens": 9600
+      },
+      {
+        "id": "journey_generation:pan-zoom-canvas",
+        "required": true,
+        "dependencyIds": [
+          "core_generation"
+        ],
+        "fundingSource": "customer_generation",
+        "estimatedCredits": 0.59,
+        "estimatedDurationMs": 67000,
+        "estimatedInputTokens": 3380,
+        "estimatedOutputTokens": 2220
+      },
+      {
+        "id": "journey_generation:keyboard-canvas-actions",
+        "required": true,
+        "dependencyIds": [
+          "core_generation"
+        ],
+        "fundingSource": "customer_generation",
+        "estimatedCredits": 0.59,
+        "estimatedDurationMs": 67000,
+        "estimatedInputTokens": 3380,
+        "estimatedOutputTokens": 2220
+      },
+      {
+        "id": "journey_generation:undo-redo-edits",
+        "required": true,
+        "dependencyIds": [
+          "core_generation"
+        ],
+        "fundingSource": "customer_generation",
+        "estimatedCredits": 0.59,
+        "estimatedDurationMs": 67000,
+        "estimatedInputTokens": 3380,
+        "estimatedOutputTokens": 2220
+      },
+      {
+        "id": "journey_generation:switch-between-plans",
+        "required": true,
+        "dependencyIds": [
+          "core_generation"
+        ],
+        "fundingSource": "customer_generation",
+        "estimatedCredits": 0.59,
+        "estimatedDurationMs": 67000,
+        "estimatedInputTokens": 3380,
+        "estimatedOutputTokens": 2220
+      },
+      {
+        "id": "journey_generation:browse-library-route",
+        "required": true,
+        "dependencyIds": [
+          "core_generation"
+        ],
+        "fundingSource": "customer_generation",
+        "estimatedCredits": 0.47,
+        "estimatedDurationMs": 51000,
+        "estimatedInputTokens": 2940,
+        "estimatedOutputTokens": 1860
+      },
+      {
+        "id": "journey_generation:export-and-print-report",
+        "required": true,
+        "dependencyIds": [
+          "core_generation"
+        ],
+        "fundingSource": "customer_generation",
+        "estimatedCredits": 0.59,
+        "estimatedDurationMs": 67000,
+        "estimatedInputTokens": 3380,
+        "estimatedOutputTokens": 2220
+      },
+      {
+        "id": "journey_generation:settings-route-and-signout",
+        "required": true,
+        "dependencyIds": [
+          "core_generation"
+        ],
+        "fundingSource": "customer_generation",
+        "estimatedCredits": 0.59,
+        "estimatedDurationMs": 67000,
+        "estimatedInputTokens": 3380,
+        "estimatedOutputTokens": 2220
+      },
+      {
+        "id": "compile",
+        "required": true,
+        "dependencyIds": [
+          "journey_generation:pan-zoom-canvas",
+          "journey_generation:keyboard-canvas-actions",
+          "journey_generation:undo-redo-edits",
+          "journey_generation:switch-between-plans",
+          "journey_generation:browse-library-route",
+          "journey_generation:export-and-print-report",
+          "journey_generation:settings-route-and-signout"
+        ],
+        "fundingSource": "platform",
+        "estimatedCredits": 0,
+        "estimatedDurationMs": 105000,
+        "estimatedInputTokens": 0,
+        "estimatedOutputTokens": 0
+      },
+      {
+        "id": "fresh_browser_verification",
+        "required": true,
+        "dependencyIds": [
+          "compile"
+        ],
+        "fundingSource": "platform",
+        "estimatedCredits": 0,
+        "estimatedDurationMs": 760000,
+        "estimatedInputTokens": 0,
+        "estimatedOutputTokens": 0
+      },
+      {
+        "id": "promotion_projection",
+        "required": true,
+        "dependencyIds": [
+          "fresh_browser_verification"
+        ],
+        "fundingSource": "platform",
+        "estimatedCredits": 0,
+        "estimatedDurationMs": 30000,
+        "estimatedInputTokens": 0,
+        "estimatedOutputTokens": 0
+      }
+    ],
+    "version": 2,
+    "execution": {
+      "startedAt": "2026-09-16T13:31:54.005Z",
+      "expectedCalls": 14,
+      "expectedDurationMs": 1985000,
+      "hardSafetyDurationMs": 5955000,
+      "softTargetDurationMs": null,
+      "expectedBrowserPasses": 8,
+      "lastDurableProgressAt": "2026-09-16T13:31:54.005Z"
+    },
+    "contractHash": "a35359a8f85d459bba4c87a3bd4163f6170fd71562723d442a46434bc497f7b1",
+    "complexityBand": "complex_interactive",
+    "thralloRecovery": {
+      "heldCredits": 0,
+      "approvedCredits": 285.75,
+      "consumedCredits": 0,
+      "strategyCapacity": 26,
+      "strategyCostPlan": [
+        {
+          "id": "contract_protocol_correction",
+          "basis": {
+            "journeys": 8
+          },
+          "estimatedCredits": 1.39
+        },
+        {
+          "id": "deterministic_patch_correction",
+          "basis": {
+            "modules": 15
+          },
+          "estimatedCredits": 3.3
+        },
+        {
+          "id": "exact_owning_file_repair",
+          "basis": {
+            "steps": 33,
+            "journeys": 8
+          },
+          "estimatedCredits": 7.51
+        },
+        {
+          "id": "causal_dependency_repair",
+          "basis": {
+            "owningModules": 0
+          },
+          "estimatedCredits": 0.8
+        },
+        {
+          "id": "owner_module_regeneration",
+          "basis": {
+            "uniqueOwnerModules": 0
+          },
+          "estimatedCredits": 1
+        }
+      ],
+      "exceptionalApproval": null,
+      "fixedCorrectionCredits": 4.69,
+      "repairRoundCreditAllowance": 10.81
+    },
+    "approvalRequired": false,
+    "customerGeneration": {
+      "heldCredits": 0,
+      "plannedCredits": 8.725,
+      "approvedCredits": 60,
+      "consumedCredits": 0,
+      "remainingRequiredCredits": 8.725
+    },
+    "runtimeRequirements": {
+      "accounts": true,
+      "durableMutation": true
+    },
+    "recoveryProviderPolicy": {
+      "resolvedAt": "2026-09-16T13:25:54.456Z",
+      "selectedBy": "thrallo_recovery_authority",
+      "billingLane": "connected_allowance",
+      "fundingSource": "thrallo",
+      "managedFallback": false,
+      "primaryProvider": "codex",
+      "executionAuthority": "platform_connected_codex",
+      "usageResponsibility": "thrallo_repair",
+      "allowManagedFallback": false,
+      "recoveryPolicyVersion": "owner_connected_recovery_v1",
+      "allowedFallbackProviders": []
+    },
+    "generationProviderPolicy": {
+      "resolvedAt": "2026-09-16T13:25:54.275Z",
+      "selectedBy": "active_connection",
+      "billingLane": "connected_allowance",
+      "primaryProvider": "codex",
+      "allowManagedFallback": false,
+      "allowedFallbackProviders": []
+    }
+  },
+  "created_at": "2026-09-16T13:31:54.134261+00:00"
+}

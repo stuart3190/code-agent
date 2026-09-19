@@ -23,20 +23,20 @@ test("selector shots", async ({ page }, testInfo) => {
     { id: "deep", name: "Deep Thinking", icon: "🧠", badge: "Best Quality", detail: "Maximum reasoning quality." },
   ];
   await page.route("**/api/v1/models", (r) => r.fulfill({ json: {
-    options: [{ value: "auto", provider: "auto", available: true }, { value: "openai:gpt-5.6-terra", provider: "openai", model: "gpt-5.6-terra", available: true }],
+    options: [{ value: "auto", provider: "auto", available: true }, { value: "managed:openai:gpt-5.6-terra", provider: "openai", model: "gpt-5.6-terra", available: true }],
     providers: [
       { id: "auto", name: "Auto", available: true, models: [] },
       { id: "openai", name: "OpenAI", available: true, source: "Thrallo managed", modes: MODES,
         models: [
-          { id: "gpt-5.6-sol", name: "gpt-5.6-sol", tier: "Best quality", relCost: "≈1.6×", value: "openai:gpt-5.6-sol", stats: { successRate: 99.1, avgCostCredits: 1.4, avgDurationMs: 34_000, avgRepairRounds: 0.2, samples: 30 } },
-          { id: "gpt-5.6-terra", name: "gpt-5.6-terra", tier: "Balanced", relCost: "≈1.0×", value: "openai:gpt-5.6-terra", stats: { collecting: true, samples: 3 } },
+          { id: "gpt-5.6-sol", name: "gpt-5.6-sol", tier: "Best quality", relCost: "≈1.6×", value: "managed:openai:gpt-5.6-sol", stats: { successRate: 99.1, avgCostCredits: 1.4, avgDurationMs: 34_000, avgRepairRounds: 0.2, samples: 30 } },
+          { id: "gpt-5.6-terra", name: "gpt-5.6-terra", tier: "Balanced", relCost: "≈1.0×", value: "managed:openai:gpt-5.6-terra", stats: { collecting: true, samples: 3 } },
         ] },
       { id: "anthropic", name: "Anthropic", available: false, configure: true, models: [], modes: [] },
       { id: "gemini", name: "Gemini", available: false, configure: true, models: [], modes: [] },
       { id: "xai", name: "xAI / Grok", available: false, configure: true, models: [], modes: [] },
     ],
     modes: MODES,
-    autoStrategy: { provider: "openai", model: "gpt-5.6-terra", mode: "balanced", reason: "Highest measured success rate for coding.", stats: { successRate: 98.9, avgCostCredits: 1.0, avgDurationMs: 38_000, avgRepairRounds: 0.2, samples: 40 } },
+    autoStrategy: { provider: "openai", model: "gpt-5.6-terra", lane: "managed", value: "managed:openai:gpt-5.6-terra", mode: "balanced", reason: "Highest measured success rate for coding.", stats: { successRate: 98.9, avgCostCredits: 1.0, avgDurationMs: 38_000, avgRepairRounds: 0.2, samples: 40 } },
     unconfigured: ["anthropic", "gemini", "xai"], allowFallback: true,
   } }));
   await page.goto("/");

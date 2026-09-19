@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   validateContract, isVague, primaryJourney, journeysForStage,
-  contractBrief, contractSummary, STAGES, CONTRACT_VERSION,
+  contractBrief, contractSummary, verificationFixtureFields, STAGES, CONTRACT_VERSION,
 } from "../../shell/shared/implementationContract.mjs";
 
 // The booking contract the brief enumerates, in full — this is the shape PR5-PR7 consume.
@@ -22,8 +22,8 @@ const BOOKING = {
       priority: "primary", stage: "primary_journey",
       steps: [
         { action: "open the booking page", target: "/book", expect: "the list of services and their available slots is visible" },
-        { action: "select a service and an available slot", target: "slot picker", expect: "the chosen slot is highlighted and continue becomes enabled" },
-        { action: "enter name, email and phone and submit", target: "details form", expect: "a confirmation showing a booking reference is displayed" },
+        { action: "select a service and an available slot", target: "slot picker", operates: ["slotId"], expect: "the chosen slot is highlighted and continue becomes enabled" },
+        { action: "enter name, email and phone and submit", target: "details form", operates: ["email"], expect: "a confirmation showing a booking reference is displayed" },
         { action: "reload and look the booking up by reference", target: "manage booking", expect: "the booking is still shown after the reload" },
       ],
       acceptance: ["a booking survives a full page reload"],
@@ -32,8 +32,8 @@ const BOOKING = {
       id: "refuse-taken-slot", title: "A taken slot is refused",
       priority: "secondary", stage: "supporting",
       steps: [
-        { action: "select a slot already at capacity", target: "slot picker", expect: "the slot is shown as unavailable and cannot be selected" },
-        { action: "submit a duplicate booking for the same slot", target: "details form", expect: "an error appears and no second booking is stored" },
+        { action: "select a slot already at capacity", target: "slot picker", operates: ["slotId"], expect: "the slot is shown as unavailable and cannot be selected" },
+        { action: "submit a duplicate booking for the same slot", target: "details form", operates: ["email"], expect: "an error appears and no second booking is stored" },
       ],
     },
     {
@@ -41,7 +41,7 @@ const BOOKING = {
       priority: "secondary", stage: "supporting",
       steps: [
         { action: "sign in as the farm owner", target: "/admin", expect: "the list of bookings is displayed" },
-        { action: "cancel a booking", target: "bookings table", expect: "the booking disappears from the list and stays gone after a reload" },
+        { action: "cancel a booking", target: "bookings table", operates: ["reference"], expect: "the booking disappears from the list and stays gone after a reload" },
       ],
     },
   ],
@@ -212,6 +212,87 @@ test("no contract produces no brief rather than a misleading one", () => {
   assert.equal(contractBrief(null), "");
   assert.equal(contractSummary(null), "no contract");
   assert.match(contractSummary(BOOKING), /3 journeys · 1 entities · 2 operations · 4 acceptance tests · 1 deferred/);
+});
+
+test("domain-correct inputs require one explicit non-secret verification fixture", () => {
+  const contract = {
+    version: CONTRACT_VERSION,
+    summary: "A visitor answers a sample skill question and confirms an entry.",
+    projectType: "form",
+    journeys: [{ id: "enter-competition", title: "Complete a sample entry", priority: "primary",
+      steps: [
+        { action: "open the entry form", target: "/", expect: "the sample entry form is visible" },
+        { action: "enter name, email, and the correct skill question answer", target: "entry form",
+          operates: ["entrantName", "entrantEmail", "skillAnswer"],
+          expect: "the entered details are visible" },
+      ] }],
+    routes: [{ path: "/", name: "Entry" }],
+    entities: [{ name: "demoEntry", owned: false, fields: [
+      { name: "entrantName", type: "string" }, { name: "entrantEmail", type: "string" },
+      { name: "skillAnswer", type: "string" },
+    ] }],
+    auth: { required: false, rules: [] }, operations: [], integrations: [], states: [],
+    acceptance: [
+      { id: "a1", statement: "the sample entry form is visible", journey: "enter-competition" },
+      { id: "a2", statement: "the entered details are visible", journey: "enter-competition" },
+      { id: "a3", statement: "the correct answer remains in the form", journey: "enter-competition" },
+    ], deferred: [],
+  };
+  assert.deepEqual(verificationFixtureFields(contract.journeys[0].steps[1], contract), ["skillAnswer"]);
+  const missing = validateContract(contract);
+  assert.equal(missing.ok, false);
+  assert.ok(missing.problems.some((problem) => /verificationValues\.skillAnswer/.test(problem)),
+    JSON.stringify(missing.problems));
+
+  const legacy = structuredClone(contract);
+  legacy.version = 1;
+  assert.equal(validateContract(legacy).ok, true,
+    "persisted v1 contracts remain readable; only newly planned v2 contracts require the fixture authority");
+
+  contract.journeys[0].steps[1].verificationValues = { skillAnswer: "100" };
+  assert.equal(validateContract(contract).ok, true, JSON.stringify(validateContract(contract).problems));
+  assert.match(contractBrief(contract), /verification inputs: \{"skillAnswer":"100"\}/);
+});
+
+test("transient software search inputs require one matching generated-data fixture set", () => {
+  const contract = {
+    version: CONTRACT_VERSION,
+    summary: "A visitor filters a generic software catalogue.",
+    projectType: "catalogue",
+    journeys: [{ id: "filter-software", title: "Filter software", priority: "primary",
+      steps: [
+        { action: "open the software catalogue", target: "/", expect: "software entries are visible" },
+        { action: "search and filter the software catalogue", target: "catalogue filters",
+          operates: ["query", "categoryFilter", "filter-software-catalogue"],
+          expect: "matching software entries and a result count are visible" },
+      ] }],
+    routes: [{ path: "/", name: "Catalogue" }],
+    entities: [{ name: "catalogueSession", owned: false,
+      storage: "client-only transient session state", fields: [
+        { name: "query", type: "string", required: false },
+        { name: "categoryFilter", type: "string", required: false },
+        { name: "visibleSoftwareIds", type: "array", required: false },
+      ] }],
+    auth: { required: false, rules: [] },
+    operations: [{ id: "filter-software-catalogue", kind: "search", entity: "catalogueSession",
+      journey: "filter-software", description: "Filter the in-code software catalogue.",
+      responsibilities: [{ type: "functional", reads: ["query", "categoryFilter"],
+        writes: ["visibleSoftwareIds"], behavior: "match the in-code catalogue" }] }],
+    integrations: [], states: [], deferred: [], acceptance: [
+      { id: "a1", statement: "software entries are visible", journey: "filter-software" },
+      { id: "a2", statement: "filters update the result count", journey: "filter-software" },
+      { id: "a3", statement: "the filtered catalogue remains usable", journey: "filter-software" },
+    ],
+  };
+  assert.deepEqual(verificationFixtureFields(contract.journeys[0].steps[1], contract),
+    ["query", "categoryFilter"]);
+  const missing = validateContract(contract);
+  assert.equal(missing.ok, false);
+  assert.ok(missing.problems.some((problem) => /verificationValues\.query/.test(problem)));
+  assert.ok(missing.problems.some((problem) => /verificationValues\.categoryFilter/.test(problem)));
+
+  contract.journeys[0].steps[1].verificationValues = { query: "Atlas", categoryFilter: "Planning" };
+  assert.equal(validateContract(contract).ok, true, JSON.stringify(validateContract(contract).problems));
 });
 
 test("genuinely observable statements are not rejected for using unlisted verbs", () => {

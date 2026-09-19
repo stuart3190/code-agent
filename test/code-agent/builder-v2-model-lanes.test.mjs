@@ -5,9 +5,21 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createCodexProvider } from "../../src/providers/codexProvider.mjs";
-import { createModelLanes, jobUsageBucket, renderPatchPrompt } from "../../shell/server/lib/builderV2/modelLanes.mjs";
+import {
+  causalRepairProblems, COMPILE_CORRECTION_SYSTEM_PROMPT, createModelLanes, estimatePromptTokens,
+  HEADROOM_FRAGMENT_SYSTEM_PROMPT, headroomDispatchScope,
+  headroomSourceFragments, jobUsageBucket, planCallReservation, renderPatchPrompt,
+  repairFailureOwnedPaths, repairFailureReferences, runReservedDispatch, isTransportInterruption,
+} from "../../shell/server/lib/builderV2/modelLanes.mjs";
+import { providerFailure } from "../../shell/server/lib/providerOutcome.mjs";
 import { EMIT_PATCHES_SCHEMA } from "../../shell/server/lib/builderV2/patchEngine.mjs";
+import { memoryKnowledgeStore } from "../../shell/server/lib/builderV2/knowledge.mjs";
+import { memoryModelReservations } from "../../shell/server/lib/builderV2/modelReservations.mjs";
+import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
+import { moduleCorrectionScope } from "../../shell/server/lib/builderV2/moduleContracts.mjs";
+import { structuredBuildFailure } from "../../shell/server/lib/builderV2/buildFailure.mjs";
 
 // ── codex wire format ─────────────────────────────────────────────────────────────────────────
 
@@ -86,6 +98,988 @@ function fakePatchProvider({ usage = { input: 1000, output: 200, cached: 0, reas
   };
 }
 
+function oversizedModuleFixture({ source = null } = {}) {
+  const modulePlan = ["A", "B", "C", "D"].map((name) => ({
+    path: `src/components/${name}.jsx`, role: `${name} feature module`,
+  }));
+  const moduleContracts = {
+    version: 1,
+    specifications: modulePlan.map((module) => ({
+      path: module.path,
+      role: module.role, ownedJourneys: ["send-message"],
+      requiredImports: [], requiredCapabilities: [], forbiddenCapabilityBypasses: [],
+      state: { owns: "presentation" }, semanticInteractions: [],
+      // The canonical execution specification states only contract facts, so the oversize has
+      // to live in one that full generation states and a bounded continuation does not: the
+      // downstream consumer list of three unrelated modules, far larger than any real build's.
+      // This reproduces the live failure class (a correction re-sending every unrelated contract).
+      downstream: { consumes: [], produces: [], consumers: module.path.endsWith("/A.jsx")
+        ? [] : [`send-message:${"x".repeat(90_000)}`] },
+      persistence: { owner: null }, requiredExports: [], moduleSizeBoundary: 6_000,
+    })),
+  };
+  const tree = {
+    "src/App.jsx": "export default function App(){return <main/>}",
+    "src/routes/HomePage.jsx": "export default function HomePage(){return <main/>}",
+    ...(source == null ? {} : { "src/components/A.jsx": source }),
+  };
+  return { modulePlan, moduleContracts, tree };
+}
+
+test("oversized pre-dispatch core calls compact into one bounded continuation without another user turn", async () => {
+  const fixture = oversizedModuleFixture();
+  let providerCalls = 0;
+  const logs = [];
+  const provider = {
+    model: "gpt-5.5", provider: "openai",
+    runTurn: async () => {
+      providerCalls += 1;
+      return {
+        text: "", toolCalls: [{ id: "c", name: "emit_patches", arguments: { patches: [{
+          newFile: "src/components/A.jsx", content: "export function A(){return <section>A</section>}",
+        }] } }],
+        usage: { input: 1_000, output: 300, total: 1_300, providerRequestId: "req-headroom" },
+      };
+    },
+  };
+  const reservations = memoryModelReservations();
+  const lanes = createModelLanes({
+    providerForStep: async () => ({ provider, decision: {
+      provider: "openai", model: "gpt-5.5", billingLane: "connected_allowance",
+      estimatedCredits: 2, callCeilingCredits: 6, maxOutputTokens: 16_000,
+    } }),
+    ceilingCredits: 30, reservations, knowledgeStore: memoryKnowledgeStore(), log: (line) => logs.push(line),
+  });
+  const patches = await lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "build", step: "core", originalStep: "core",
+    contract: CONTRACT, tiers: TIERS, tree: fixture.tree, rejections: [], problems: [],
+    modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts,
+  });
+  assert.equal(providerCalls, 1, "the oversized envelope is rejected before dispatch; only the compact call reaches the provider");
+  assert.equal(reservations.rows().length, 1, "only the useful compact dispatch acquires a durable reservation");
+  assert.deepEqual(patches.dispatchScope.allowedFiles,
+    ["src/components/A.jsx", "src/components/B.jsx", "src/components/C.jsx"]);
+  assert.equal(patches.dispatchScope.expectedPatchTokens, 4_800,
+    "three missing modules reserve a realistic generation envelope");
+  assert.match(logs.join("\n"), /continuing internally with 3 module\(s\).*resize 1/);
+});
+
+test("scoped correction prompts use compact module contracts while full generation retains full architecture", () => {
+  const fixture = oversizedModuleFixture({ source: "export function A(){return <section/>}" });
+  const full = renderPatchPrompt({ step: "core", contract: CONTRACT, tiers: TIERS,
+    tree: fixture.tree, modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts });
+  const repairScope = headroomDispatchScope({
+    tree: fixture.tree, modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts,
+    repairScope: { files: ["src/components/A.jsx"], allowedFiles: ["src/components/A.jsx"] },
+  });
+  const compact = renderPatchPrompt({ step: "correction", originalStep: "core", contract: CONTRACT,
+    tiers: TIERS, tree: fixture.tree, modulePlan: fixture.modulePlan,
+    moduleContracts: fixture.moduleContracts, headroomScope: repairScope });
+  // 3 x 90k bytes of unrelated contract at 3.8 bytes/token: past a 6-credit (60k-token) call.
+  assert.ok(estimatePromptTokens({ messages: [{ role: "user", content: full }] }) > 60_000);
+  assert.ok(estimatePromptTokens({ messages: [{ role: "user", content: compact }] }) < 15_000,
+    "bounded corrections no longer resend every unrelated module contract");
+  assert.match(compact, /HEADROOM-SCOPED CONTINUATION/);
+  assert.doesNotMatch(compact, /diagnosticPadding/);
+});
+
+test("compile corrections fit the per-call guard with only compiler evidence and named source", async () => {
+  const importer = "src/components/catalogue/SoftwareFlow.jsx";
+  const exporter = "src/extensions/custom/catalogue.js";
+  const tree = {
+    "src/App.jsx": "export default function App(){return null}",
+    [importer]: 'import { SOFTWARE_CATALOGUE } from "../../extensions/custom/catalogue.js";\n'
+      + "export default function SoftwareFlow(){return <main>{SOFTWARE_CATALOGUE.length}</main>}",
+    [exporter]: "export function runCatalogueOperation(input){return input}",
+  };
+  const problem = `${importer} (1:9): SOFTWARE_CATALOGUE is not exported by ${exporter}`;
+  const compileScope = {
+    kind: "compile", files: [importer, exporter], allowedFiles: [importer, exporter],
+    findings: [], expectedPatchTokens: 2_000,
+    instruction: "Retain the candidate and correct the bounded compile failure in the named files.",
+  };
+  let retrieval;
+  const prompt = renderPatchPrompt({
+    step: "correction", originalStep: "core", contract: {
+      ...CONTRACT, diagnosticPadding: "x".repeat(180_000),
+    }, tiers: TIERS, tree, problems: [problem], moduleCorrectionScope: compileScope,
+    modulePlan: [], moduleContracts: { version: 1, specifications: [] },
+    onRetrieval: (trace) => { retrieval = trace; },
+  });
+  assert.match(prompt, /COMPILE CORRECTION/);
+  assert.match(prompt, /SOFTWARE_CATALOGUE is not exported/);
+  assert.match(prompt, /runCatalogueOperation/);
+  assert.doesNotMatch(prompt, /diagnosticPadding|IMPLEMENTATION CONTRACT/);
+  assert.deepEqual(retrieval.included.map((row) => row.path).sort(), [exporter, importer].sort());
+  const plan = planCallReservation({
+    systemPrompt: COMPILE_CORRECTION_SYSTEM_PROMPT,
+    messages: [{ role: "user", content: prompt }], tools: [EMIT_PATCHES_SCHEMA],
+  }, "gpt-5.5", {
+    requestedMaxOutputTokens: 8_000, callCeilingCredits: 4,
+    repairSizing: { retrievedFileCount: 2, retrievalTokens: retrieval.tokens,
+      problemCount: 1, expectedPatchTokens: compileScope.expectedPatchTokens },
+    budget: { approvedCeilingCredits: 44.88, consumedCredits: 0,
+      reservedCredits: 0, remainingCredits: 44.88 },
+  });
+  assert.ok(plan.maxOutputTokens >= 1_200);
+  assert.ok(plan.estimatedInputTokens < 8_000, plan.estimatedInputTokens);
+
+  let dispatched;
+  const provider = {
+    model: "gpt-5.5", provider: "codex",
+    runTurn: async (options) => {
+      dispatched = options;
+      return { text: "", toolCalls: [{ id: "compile", name: "emit_patches",
+        arguments: { patches: [] } }], usage: {
+        input: 1_200, output: 200, total: 1_400, providerRequestId: "compile-correction",
+      } };
+    },
+  };
+  const lanes = createModelLanes({
+    providerForStep: async () => ({ provider, decision: {
+      provider: "codex", model: "gpt-5.5", billingLane: "connected_allowance",
+      estimatedCredits: 0.5, callCeilingCredits: 4, maxOutputTokens: 8_000,
+    } }),
+    ceilingCredits: 44.88, reservations: memoryModelReservations(),
+    knowledgeStore: memoryKnowledgeStore(),
+  });
+  await lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "compile-build", step: "correction",
+    originalStep: "core", contract: { ...CONTRACT, diagnosticPadding: "x".repeat(180_000) },
+    tiers: TIERS, tree, rejections: [], problems: [problem], modulePlan: [],
+    moduleContracts: { version: 1, specifications: [] }, moduleCorrectionScope: compileScope,
+  });
+  assert.equal(dispatched.systemPrompt, COMPILE_CORRECTION_SYSTEM_PROMPT);
+  assert.match(dispatched.messages[0].content, /COMPILE CORRECTION/);
+});
+
+test("initial generation is told to mount one shared controller for a crowded screen", () => {
+  const modulePlan = [{
+    path: "src/screens/scaffold/SoftwareCatalogueScreen.jsx",
+    role: "mounted screen composition and application-specific visual design",
+    providedBy: "scaffold_screen_slot", routePath: "/",
+    journeyIds: ["browse-software", "clear-filters", "inspect-layout"],
+  }];
+  const prompt = renderPatchPrompt({ step: "core", contract: CONTRACT, tiers: TIERS,
+    tree: {}, modulePlan, moduleContracts: { version: 1, specifications: [] } });
+  assert.match(prompt, /Keep it as a small mounted coordinator/);
+  assert.match(prompt, /render its planned shared journey controller exactly once from the first batch/);
+  assert.match(prompt, /rejects a file above 5000 tokens that implements more than 2 journeys/);
+});
+
+test("scaffold headroom excludes legacy routes and sizes a missing shared controller from its interaction contract", () => {
+  const controller = "src/components/catalogue/SoftwareCatalogueController.jsx";
+  const screen = "src/screens/scaffold/SoftwareCatalogueScreen.jsx";
+  const modulePlan = [
+    { path: controller, role: "shared step navigation and flow composition",
+      journeyIds: ["browse-catalogue", "filter-catalogue", "inspect-catalogue"],
+      sharedControllerFor: "software-catalogue" },
+    { path: screen, role: "mounted screen composition", providedBy: "scaffold_screen_slot",
+      journeyIds: ["browse-catalogue", "filter-catalogue", "inspect-catalogue"] },
+  ];
+  const moduleContracts = { version: 1, specifications: [{
+    ...modulePlan[0], ownedJourneys: modulePlan[0].journeyIds,
+    semanticInteractions: Array.from({ length: 14 }, (_, index) => ({
+      interactionId: `catalogue-control-${index + 1}`,
+    })),
+    moduleSizeBoundary: 5_500,
+  }] };
+  const tree = {
+    "src/App.jsx": "export default function App(){return null}",
+    "src/routes/HomePage.jsx": "export default function HomePage(){return null}",
+    "src/lib/scaffolds/composed/manifest.js": "export const manifest = {};",
+    [screen]: "export default function SoftwareCatalogueScreen(){return <main/>}",
+  };
+  const scope = headroomDispatchScope({ tree, modulePlan, moduleContracts, logicalStep: "core" });
+  assert.deepEqual(scope.allowedFiles, [controller]);
+  assert.equal(scope.remainingFiles.includes("src/App.jsx"), false);
+  assert.equal(scope.remainingFiles.includes("src/routes/HomePage.jsx"), false);
+  assert.equal(scope.expectedPatchTokens, 4_700,
+    "the 14 declared interactions receive useful output headroom within the 5,500-token file guard");
+  assert.match(scope.instruction, /create each with newFile/);
+});
+
+test("whole-core retry keeps every missing planned module queued after prioritising the named failure", () => {
+  const extension = "src/extensions/custom/catalogue.js";
+  const controller = "src/components/catalogue/SoftwareCatalogueFlow.jsx";
+  const screen = "src/screens/scaffold/SoftwareCatalogueScreen.jsx";
+  const modulePlan = [
+    { path: extension, role: "bounded custom catalogue extension" },
+    { path: controller, role: "shared catalogue flow" },
+    { path: screen, role: "mounted catalogue screen" },
+  ];
+  const scope = headroomDispatchScope({
+    tree: { "src/lib/scaffolds/composed/manifest.js": "export const manifest = {};" },
+    modulePlan,
+    moduleContracts: { version: 1, specifications: [] },
+    problems: [`${controller} still has a named pre-compile finding`],
+    logicalStep: "core",
+  });
+  assert.equal(scope.allowedFiles[0], controller, "the causal module remains first");
+  assert.deepEqual(new Set([...scope.allowedFiles, ...scope.remainingFiles]),
+    new Set([extension, controller, screen]),
+    "resetting a whole-core attempt cannot silently drop clean modules that now need regeneration");
+});
+
+test("module correction focuses the exact conflicting control and requires direct mounted binding", () => {
+  const screen = "src/screens/scaffold/SoftwareCatalogueScreen.jsx";
+  const target = "inspect-catalogue:2:input:title";
+  const unrelated = "filter-catalogue:1:input:category";
+  const moduleContracts = { version: 1, specifications: [{
+    path: screen, role: "mounted catalogue screen", ownedJourneys: ["inspect-catalogue", "filter-catalogue"],
+    requiredCapabilities: [], requiredImports: [], requiredExports: ["default"], moduleSizeBoundary: 5_500,
+    semanticInteractions: [
+      { interactionId: target, journeyId: "inspect-catalogue", logicalField: "title", accessibleNames: ["Title"] },
+      { interactionId: unrelated, journeyId: "filter-catalogue", logicalField: "category", accessibleNames: ["Category"] },
+    ],
+  }] };
+  const finding = {
+    code: "contract_control_binding_conflict", module: screen, file: screen, line: 1,
+    elements: [{ file: screen, line: 1, element: "<input>" }], interactionId: target, control: "title",
+    requiredBinding: { helper: "useSemanticField", name: "title", spread: "inputProps", machineId: "ctl_title" },
+  };
+  const correctionScope = moduleCorrectionScope({
+    correction: { modules: [screen] }, blocking: [finding],
+  }, moduleContracts);
+  const prompt = renderPatchPrompt({
+    step: "correction", contract: { journeys: [], interactionContract: { flows: [] } }, tiers: {},
+    tree: { [screen]: "export default function SoftwareCatalogueScreen(){return <input aria-label=\"Title\"/>}" },
+    modulePlan: [{ path: screen, role: "mounted catalogue screen" }], moduleContracts,
+    moduleCorrectionScope: correctionScope,
+  });
+  assert.match(prompt, /inspect-catalogue:2:input:title/);
+  assert.doesNotMatch(prompt, /filter-catalogue:1:input:category/,
+    "an exact binding correction must not be diluted by unrelated controls in the shared screen");
+  assert.match(prompt, /modify the exact existing element named by finding\.file\/finding\.line/);
+  assert.match(prompt, /Do not add a parallel bound copy/);
+  assert.match(prompt, /unused props variable is incomplete|unused props variables is incomplete|unused props variable|unused props variables/);
+});
+
+test("whole-core retry keeps existing scaffold placeholders queued after prioritising the named failure", () => {
+  const extension = "src/extensions/custom/catalogue.js";
+  const screen = "src/screens/scaffold/SoftwareCatalogueScreen.jsx";
+  const screenStub = "export default function SoftwareCatalogueScreen(){return "
+    + "<section data-scaffold-slot=\"software-catalogue\"><p>"
+    + "Application screen ready for composition.</p></section>}";
+  const scope = headroomDispatchScope({
+    tree: {
+      "src/lib/scaffolds/composed/manifest.js": "export const manifest = {};",
+      [screen]: screenStub,
+    },
+    modulePlan: [
+      { path: extension, role: "bounded custom catalogue extension" },
+      { path: screen, role: "mounted catalogue screen", providedBy: "scaffold_screen_slot" },
+    ],
+    moduleContracts: { version: 1, specifications: [] },
+    problems: [`${extension} has a named compile finding`],
+    logicalStep: "core",
+  });
+  assert.equal(scope.allowedFiles[0], extension, "the causal module remains first");
+  assert.deepEqual(new Set([...scope.allowedFiles, ...scope.remainingFiles]),
+    new Set([extension, screen]),
+    "resetting to the foundation cannot silently drop mounted screen placeholders");
+});
+
+test("a retained complex application continuation carries only the selected module's semantic journey", () => {
+  const fixture = JSON.parse(readFileSync(new URL(
+    "../fixtures/downlight-capability-contract-6956e591.json", import.meta.url,
+  ), "utf8"));
+  const spec = deriveBuildSpec(fixture.contract);
+  const selectedModule = spec.modulePlan.find((module) => (
+    module.journeyIds?.includes("create-auto-layout-project") && /Screen\.jsx$/.test(module.path)
+  ));
+  assert.ok(selectedModule, "the retained application has a journey-owned mounted screen module");
+  const scope = headroomDispatchScope({
+    tree: {}, modulePlan: spec.modulePlan, moduleContracts: spec.moduleContracts,
+    repairScope: { files: [selectedModule.path], allowedFiles: [selectedModule.path] },
+    logicalStep: "core",
+  });
+  const prompt = renderPatchPrompt({
+    step: "core", originalStep: "core", contract: spec.contract, tiers: spec.tiers,
+    tree: {}, modulePlan: spec.modulePlan, moduleContracts: spec.moduleContracts,
+    capabilityGraph: spec.capabilityGraph, compositionPlan: spec.compositionPlan,
+    headroomScope: scope,
+  });
+  const semanticSection = prompt.slice(prompt.indexOf("CAPABILITY GRAPH"),
+    prompt.indexOf("INTERNAL HEADROOM-SCOPED WRITE BOUNDARY"));
+  assert.match(semanticSection, /create-auto-layout-project/);
+  assert.match(semanticSection, /customBehaviorModule/);
+  assert.match(semanticSection, /persistenceHandoff/);
+  assert.doesNotMatch(semanticSection, /"testContract"/,
+    "registry self-tests remain machine-enforced and are not duplicated into a bounded dispatch");
+  for (const journey of fixture.contract.journeys) {
+    if (journey.id === "create-auto-layout-project") continue;
+    assert.doesNotMatch(semanticSection, new RegExp(`"journeyId": "${journey.id}"`));
+  }
+  const plan = planCallReservation({ messages: [{ role: "user", content: prompt }] }, "gpt-5.5", {
+    requestedMaxOutputTokens: 16_000,
+    callCeilingCredits: 6,
+    repairSizing: {
+      retrievedFileCount: 1, retrievalTokens: 0, problemCount: 1,
+      expectedPatchTokens: scope.expectedPatchTokens,
+    },
+    budget: {
+      approvedCeilingCredits: 100, consumedCredits: 0, reservedCredits: 0, remainingCredits: 100,
+    },
+  });
+  assert.ok(plan.maxOutputTokens >= 1_500,
+    `the selected new modules received only ${plan.maxOutputTokens} output tokens`);
+  assert.ok(plan.estimatedInputTokens < 70_000,
+    `the bounded semantic envelope is still too large: ${plan.estimatedInputTokens}`);
+});
+
+test("a custom-extension headroom continuation scopes interactions by its owning module", () => {
+  const fixture = JSON.parse(readFileSync(new URL(
+    "../fixtures/downlight-capability-contract-6956e591.json", import.meta.url,
+  ), "utf8"));
+  const spec = deriveBuildSpec(fixture.contract);
+  const selectedModule = spec.modulePlan.find((module) => (
+    module.path === "src/extensions/custom/create-auto-layout-project.js"
+  ));
+  assert.ok(selectedModule);
+  const scope = headroomDispatchScope({
+    tree: {}, modulePlan: spec.modulePlan, moduleContracts: spec.moduleContracts,
+    repairScope: { files: [selectedModule.path], allowedFiles: [selectedModule.path] },
+    logicalStep: "core",
+  });
+  assert.equal(scope.moduleContracts.specifications[0].semanticInteractions.length, 0,
+    "the regression requires an extension contract without direct control interactions");
+  const prompt = renderPatchPrompt({
+    step: "core", originalStep: "core", contract: spec.contract, tiers: spec.tiers,
+    tree: {}, modulePlan: spec.modulePlan, moduleContracts: spec.moduleContracts,
+    capabilityGraph: spec.capabilityGraph, compositionPlan: spec.compositionPlan,
+    scaffoldGraph: spec.scaffoldGraph, scaffoldPlan: spec.scaffoldCompositionPlan,
+    headroomScope: scope,
+  });
+  const interactionSection = prompt.slice(prompt.indexOf("INTERACTION CONTRACT"),
+    prompt.indexOf("INTERNAL HEADROOM-SCOPED WRITE BOUNDARY"));
+  assert.match(interactionSection, /create-auto-layout-project:7:action/);
+  assert.doesNotMatch(interactionSection, /task-and-exclusion-zones:4:operation:autolayoutproject/,
+    "unrelated application interactions are not resent when direct control ids are absent");
+  const plan = planCallReservation({ messages: [{ role: "user", content: prompt }] }, "gpt-5.5", {
+    requestedMaxOutputTokens: 16_000,
+    callCeilingCredits: 6,
+    repairSizing: {
+      retrievedFileCount: 1, retrievalTokens: 0, problemCount: 1,
+      expectedPatchTokens: scope.expectedPatchTokens,
+    },
+    budget: {
+      approvedCeilingCredits: 100, consumedCredits: 0, reservedCredits: 0, remainingCredits: 100,
+    },
+  });
+  assert.equal(plan.maxOutputTokens, plan.outputEnvelope.plannedOutputTokens);
+  assert.ok(plan.maxOutputTokens >= 1_450);
+});
+
+test("a missing shared controller keeps its useful output allowance without duplicated graph semantics", () => {
+  const fixture = JSON.parse(readFileSync(new URL(
+    "../fixtures/downlight-capability-contract-6956e591.json", import.meta.url,
+  ), "utf8"));
+  const spec = deriveBuildSpec(fixture.contract);
+  const controller = spec.modulePlan.find((module) => module.sharedControllerFor);
+  assert.ok(controller);
+  assert.ok(controller.journeyIds.length > 2, "the fixture exercises a multi-journey controller");
+  const scope = headroomDispatchScope({
+    tree: {}, modulePlan: spec.modulePlan, moduleContracts: spec.moduleContracts,
+    repairScope: { files: [controller.path], allowedFiles: [controller.path] },
+    logicalStep: "core",
+  });
+  const prompt = renderPatchPrompt({
+    step: "core", originalStep: "core", contract: spec.contract, tiers: spec.tiers,
+    tree: {}, modulePlan: spec.modulePlan, moduleContracts: spec.moduleContracts,
+    capabilityGraph: spec.capabilityGraph, compositionPlan: spec.compositionPlan,
+    headroomScope: scope,
+  });
+  const graphSummary = prompt.slice(prompt.indexOf("CAPABILITY GRAPH"),
+    prompt.indexOf("DETERMINISTIC CAPABILITY COMPOSITION"));
+  assert.doesNotMatch(graphSummary, /"operationResponsibilities"|"stateOwnership"|"persistenceSemantics"/,
+    "verifier-only graph relationships are enforced after the patch instead of being serialized twice");
+  const plan = planCallReservation({ messages: [{ role: "user", content: prompt }] }, "gpt-5.5", {
+    requestedMaxOutputTokens: 16_000,
+    callCeilingCredits: 6,
+    repairSizing: {
+      retrievedFileCount: 1, retrievalTokens: 0, problemCount: 1,
+      expectedPatchTokens: scope.expectedPatchTokens,
+    },
+    budget: {
+      approvedCeilingCredits: 100, consumedCredits: 0, reservedCredits: 0, remainingCredits: 100,
+    },
+  });
+  assert.equal(plan.maxOutputTokens, plan.outputEnvelope.plannedOutputTokens,
+    "the unchanged per-call ceiling fits the complete scoped controller response");
+  assert.ok(plan.maxOutputTokens >= 5_500);
+  assert.ok(plan.estimatedInputTokens < 35_000, plan.estimatedInputTokens);
+});
+
+test("a retained scaffold placeholder mounts its existing shared controller without resending every journey", async () => {
+  const screen = "src/screens/scaffold/SignInScreen.jsx";
+  const controller = "src/components/catalogue/SoftwareCatalogueFlow.jsx";
+  const journeyIds = ["browse-catalogue", "filter-catalogue", "save-view", "review-summary"];
+  const journeys = journeyIds.map((id) => ({
+    id,
+    title: id,
+    priority: "primary",
+    steps: Array.from({ length: 4 }, (_, index) => ({
+      action: `use catalogue control ${index + 1}`,
+      expect: `catalogue state ${"remains observable ".repeat(240)}`,
+    })),
+  }));
+  const contract = {
+    summary: "software catalogue workspace",
+    journeys,
+    entities: [], routes: [{ path: "/signin", name: "Sign in" }], operations: [],
+    interactionContract: { version: 1, flows: [] },
+  };
+  const tiers = {
+    essential: { journeys: journeyIds, entities: [], operations: [] },
+    secondary: { journeys: [], entities: [], operations: [] },
+  };
+  const modulePlan = [{
+    path: screen,
+    role: "mounted screen composition",
+    providedBy: "scaffold_screen_slot",
+    routePath: "/signin",
+    journeyIds,
+    journeyController: controller,
+    requiredImports: [`../../components/catalogue/SoftwareCatalogueFlow.jsx`],
+    requiredExports: ["default"],
+  }];
+  const moduleContracts = { version: 1, specifications: [{
+    ...modulePlan[0],
+    ownedJourneys: journeyIds,
+    semanticInteractions: Array.from({ length: 20 }, (_, index) => ({
+      interactionId: `catalogue-control-${index + 1}`,
+      journeyId: journeyIds[index % journeyIds.length],
+      logicalField: `catalogueField${index + 1}`,
+      accessibleNames: [`Catalogue field ${index + 1}`],
+    })),
+    requiredCapabilities: [], forbiddenCapabilityBypasses: [],
+    state: { owns: "screen composition" }, downstream: { consumes: [], produces: [] },
+    persistence: { owner: null }, moduleSizeBoundary: 6_000,
+  }] };
+  const tree = {
+    [screen]: "// @thrallo-scaffold-screen-slot: signin.\n"
+      + "export default function SignInScreen(){return <section data-scaffold-slot=\"signin\">"
+      + "<p>Application screen ready for composition.</p></section>}",
+    [controller]: "export default function SoftwareCatalogueFlow(){return <main>Catalogue</main>}",
+  };
+  const scope = headroomDispatchScope({
+    tree, modulePlan, moduleContracts,
+    repairScope: { files: [screen], allowedFiles: [screen] },
+    logicalStep: "core",
+  });
+  let retrieval;
+  const prompt = renderPatchPrompt({
+    step: "core", originalStep: "core", contract, tiers, tree, modulePlan, moduleContracts,
+    headroomScope: scope, onRetrieval: (trace) => { retrieval = trace; },
+  });
+  assert.match(prompt, /HEADROOM-SCOPED SCAFFOLD MOUNT/);
+  assert.match(prompt, /SoftwareCatalogueFlow\.jsx/);
+  assert.match(prompt, /render that controller exactly once/);
+  assert.doesNotMatch(prompt, /IMPLEMENTATION CONTRACT|INTERACTION CONTRACT|catalogue state remains observable/);
+  assert.ok(estimatePromptTokens({ messages: [{ role: "user", content: prompt }] }) < 5_000);
+  assert.deepEqual(retrieval.included.map((row) => row.path).sort(), [controller, screen].sort());
+
+  let providerCalls = 0;
+  const reservations = memoryModelReservations();
+  const provider = {
+    model: "gpt-5.5", provider: "openai",
+    runTurn: async () => {
+      providerCalls += 1;
+      return {
+        text: "",
+        toolCalls: [{ id: "screen-mount", name: "emit_patches", arguments: { patches: [{
+          replaceFile: screen,
+          content: "import SoftwareCatalogueFlow from \"../../components/catalogue/SoftwareCatalogueFlow.jsx\";\n"
+            + "export default function SignInScreen(){return <SoftwareCatalogueFlow />}",
+        }] } }],
+        usage: { input: 4_000, output: 300, total: 4_300, providerRequestId: "screen-mount" },
+      };
+    },
+  };
+  const lanes = createModelLanes({
+    providerForStep: async () => ({ provider, decision: {
+      provider: "openai", model: "gpt-5.5", billingLane: "connected_allowance",
+      estimatedCredits: 2, callCeilingCredits: 6, maxOutputTokens: 16_000,
+    } }),
+    ceilingCredits: 30, reservations, knowledgeStore: memoryKnowledgeStore(),
+  });
+  const patches = await lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "screen-mount-build",
+    step: "core", originalStep: "core", contract, tiers, tree, rejections: [], problems: [],
+    modulePlan, moduleContracts, headroomScope: scope,
+  });
+  assert.equal(providerCalls, 1);
+  assert.equal(reservations.rows().length, 1);
+  assert.deepEqual(patches.dispatchScope.allowedFiles, [screen]);
+});
+
+test("browser-repair headroom batching targets only evidence owners and fits a useful one-file continuation", () => {
+  const liveSizedSource = `export default function Planner(){return <main>${"x".repeat(17_000)}</main>}`;
+  const fixture = oversizedModuleFixture({ source: liveSizedSource });
+  const problem = JSON.stringify({
+    code: "interaction_verification_failure",
+    responsibleModules: ["src/components/A.jsx"],
+    actualObservedState: "the contracted control was missing",
+  });
+  const cascade = "journey send-message: later step: not reached because step 1 was undriveable";
+  const scope = headroomDispatchScope({
+    tree: fixture.tree,
+    modulePlan: fixture.modulePlan,
+    moduleContracts: fixture.moduleContracts,
+    problems: [problem, cascade],
+    logicalStep: "repair",
+  });
+  assert.deepEqual(scope.allowedFiles, ["src/components/A.jsx"]);
+  assert.deepEqual(scope.remainingFiles, [], "unrelated missing planned modules are not queued behind a repair");
+
+  let retrieval = null;
+  const prompt = renderPatchPrompt({
+    step: "repair", originalStep: "core", contract: CONTRACT, tiers: TIERS,
+    tree: fixture.tree, modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts,
+    problems: [problem, cascade], headroomScope: scope,
+    onRetrieval: (trace) => { retrieval = trace; },
+  });
+  assert.doesNotMatch(prompt, /not reached because/, "cascade failures do not consume the smallest continuation");
+  assert.doesNotMatch(prompt, /diagnosticPadding/, "unrelated architecture padding stays out of the continuation");
+  const plan = planCallReservation({ messages: [{ role: "user", content: prompt }] }, "gpt-5.5", {
+    requestedMaxOutputTokens: 10_000,
+    callCeilingCredits: 6,
+    repairAllowanceCredits: 4,
+    repairSizing: {
+      retrievedFileCount: 1,
+      retrievalTokens: retrieval.tokens,
+      problemCount: 2,
+      expectedPatchTokens: scope.expectedPatchTokens,
+    },
+    budget: {
+      approvedCeilingCredits: 12,
+      consumedCredits: 10.0107,
+      reservedCredits: 0,
+      remainingCredits: 1.9893,
+    },
+  });
+  assert.ok(plan.maxOutputTokens >= 1_200, "the live remaining headroom fits a useful bounded response");
+  assert.ok(plan.estimatedInputTokens > 0, "the dispatch records its deterministic prompt estimate");
+});
+
+test("an irreducible large component resizes to exact causal fragments inside retained headroom", async () => {
+  const filePath = "src/components/A.jsx";
+  const filler = Array.from({ length: 350 }, (_, index) => `  // unrelated retained line ${index}`).join("\n");
+  const source = [
+    'import { useState } from "react";',
+    "export default function Planner() {",
+    '  const [user, setUser] = useState(null);',
+    '  const [project, setProject] = useState(null);',
+    filler,
+    '  function newProject() { setProject({ name: "Workspace Project" }); }',
+    filler,
+    '  if (!user) return <section><button onClick={newProject}>New Project control</button></section>;',
+    '  return <main><h1>{project?.name || "No project selected"}</h1><p>Workspace header room setup</p></main>;',
+    "}",
+  ].join("\n");
+  const fixture = oversizedModuleFixture({ source });
+  const problem = JSON.stringify({
+    code: "interaction_verification_failure", journeyId: "send-message",
+    userAction: "create a new project",
+    expectedOutcome: "project name appears in workspace header and room setup becomes editable",
+    detail: "expected project, name, workspace, header, room; found project, name",
+    responsibleModules: [filePath], stateOwners: [filePath],
+  });
+  const fullFileScope = headroomDispatchScope({
+    tree: fixture.tree, modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts,
+    problems: [problem], semanticFiles: [filePath], logicalStep: "repair",
+  });
+  const fragmentScope = headroomDispatchScope({
+    tree: fixture.tree, modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts,
+    problems: [problem], semanticFiles: [filePath], logicalStep: "repair", previousScope: fullFileScope,
+  });
+  assert.equal(fragmentScope.fragmented, true);
+  assert.deepEqual(fragmentScope.allowedFiles, [filePath]);
+  assert.equal(fragmentScope.remainingFiles.length, 0);
+  const excerpt = fragmentScope.fragments.map((fragment) => fragment.content).join("\n");
+  assert.match(excerpt, /newProject/);
+  assert.match(excerpt, /if \(!user\)/);
+  assert.ok(excerpt.length < source.length / 3, "unrelated retained source is not resent");
+  assert.deepEqual(headroomSourceFragments(source, [problem]),
+    fragmentScope.fragments.map(({ path: _path, ...fragment }) => fragment));
+
+  let retrieval;
+  const prompt = renderPatchPrompt({
+    step: "repair", originalStep: "core", contract: CONTRACT, tiers: TIERS,
+    tree: fixture.tree, modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts,
+    problems: [problem], headroomScope: fragmentScope,
+    rejections: [{
+      reason: "replace_exact: introduced unresolved call identifier(s): applySelection",
+    }],
+    regenerateFiles: [filePath],
+    onRetrieval: (trace) => { retrieval = trace; },
+  });
+  assert.match(prompt, /replace_exact/);
+  assert.match(HEADROOM_FRAGMENT_SYSTEM_PROMPT, /changing labels, messages, or static copy merely to echo/i);
+  assert.match(prompt, /Repair actual handler\/state\/conditional flow/);
+  assert.match(prompt, /PREVIOUS EXACT-SOURCE PATCH REJECTIONS/);
+  assert.match(prompt, /introduced unresolved call identifier\(s\): applySelection/);
+  assert.match(prompt, /REPEATED-REJECTION ESCALATION/);
+  assert.match(prompt, /whole-file replacement[\s\S]*exact causal fragment/);
+  assert.match(prompt, /Do not repeat the rejected operation/);
+  assert.doesNotMatch(prompt, /unrelated retained line 120/);
+  const plan = planCallReservation({
+    systemPrompt: HEADROOM_FRAGMENT_SYSTEM_PROMPT,
+    messages: [{ role: "user", content: prompt }], tools: [EMIT_PATCHES_SCHEMA],
+  }, "gpt-5.5", {
+    requestedMaxOutputTokens: 10_000, callCeilingCredits: 6, repairAllowanceCredits: 4,
+    repairSizing: { retrievedFileCount: 1, retrievalTokens: retrieval.tokens,
+      problemCount: 1, expectedPatchTokens: fragmentScope.expectedPatchTokens },
+    budget: { approvedCeilingCredits: 12, consumedCredits: 11.4303,
+      reservedCredits: 0, remainingCredits: 0.5697 },
+  });
+  assert.ok(plan.maxOutputTokens >= 1_200);
+  assert.ok(plan.estimatedInputTokens < 4_500, plan.estimatedInputTokens);
+
+  let providerCalls = 0;
+  const logs = [];
+  const reservations = memoryModelReservations();
+  const provider = {
+    model: "gpt-5.5", provider: "openai",
+    runTurn: async (options) => {
+      providerCalls += 1;
+      assert.match(options.messages[0].content, /RETAINED CANDIDATE MICRO-REPAIR/);
+      return {
+        text: "", toolCalls: [{ id: "micro", name: "emit_patches", arguments: { patches: [{
+          file: filePath, ops: [{ op: "replace_exact", symbol: "if (!user)", content: "if (!user && !project)" }],
+        }] } }],
+        usage: { input: 500, output: 100, total: 600, providerRequestId: "req-micro" },
+      };
+    },
+  };
+  const lanes = createModelLanes({
+    providerForStep: async () => ({ provider, decision: {
+      provider: "openai", model: "gpt-5.5", billingLane: "connected_allowance",
+      estimatedCredits: 2, callCeilingCredits: 6, maxOutputTokens: 10_000,
+    } }),
+    ceilingCredits: 0.5697, reservations, knowledgeStore: memoryKnowledgeStore(),
+    log: (line) => logs.push(line),
+  });
+  const patches = await lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "micro-build", step: "repair", originalStep: "core",
+    contract: CONTRACT, tiers: TIERS, tree: fixture.tree, rejections: [], problems: [problem],
+    modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts,
+  });
+  assert.equal(providerCalls, 1, "full-file refusals occur before dispatch; only the micro prompt reaches the provider");
+  assert.equal(reservations.rows().length, 1);
+  assert.equal(patches.dispatchScope.fragmented, true);
+  assert.match(logs.join("\n"), /resize 2/);
+});
+
+test("selection repair fragments retain the exact attempted catalogue option", () => {
+  const filePath = "src/components/Catalogue.jsx";
+  const source = [
+    'const SOFTWARE = [{ id: "atlas-notes" }, { id: "aurora-editor" }];',
+    "function selectSoftware(selectedItemId) {",
+    "  const selected = SOFTWARE.find((item) => item.id === selectedItemId) || null;",
+    "  return { selectedItemId: selected ? selected.id : \"\" };",
+    "}",
+    "export function Catalogue() { return null; }",
+  ].join("\n");
+  const problem = JSON.stringify({
+    code: "interaction_verification_failure",
+    userAction: "select a software card",
+    actualObservedState: "the clicked option never gained a selected state",
+    selectionAttempt: {
+      field: "selectedItemId",
+      value: "aurora-editor",
+      text: "Aurora Editor",
+      optionStates: [
+        { value: "atlas-notes", text: "Atlas Notes", selected: true },
+        { value: "aurora-editor", text: "Aurora Editor", selected: false },
+      ],
+    },
+  });
+  const fragments = headroomSourceFragments(source, [problem]);
+  assert.ok(fragments.length > 0);
+  assert.match(fragments.map((fragment) => fragment.content).join("\n"), /selectSoftware/);
+  const prompt = renderPatchPrompt({
+    step: "repair",
+    contract: CONTRACT,
+    tiers: TIERS,
+    tree: { [filePath]: source },
+    problems: [problem],
+    headroomScope: {
+      kind: "headroom_fragment_continuation",
+      fragmented: true,
+      allowedFiles: [filePath],
+      fragments: fragments.map((fragment) => ({ path: filePath, ...fragment })),
+    },
+  });
+  assert.match(prompt, /attemptedSelection=.*aurora-editor/);
+});
+
+test("structural modularity correction keeps the complete module and cannot degrade to a handler fragment", () => {
+  const filePath = "src/components/catalogue/SoftwareCatalogueFlow.jsx";
+  const source = [
+    'import { useState } from "react";',
+    "const SOFTWARE = [];",
+    "export default function SoftwareCatalogueFlow() {",
+    "  const [query, setQuery] = useState(\"\");",
+    `  ${"// retained catalogue presentation\n  ".repeat(900)}`,
+    "  return <main><input value={query} onChange={(event) => setQuery(event.target.value)} /></main>;",
+    "}",
+  ].join("\n");
+  const tree = { [filePath]: source, "src/App.jsx": "export default function App(){return null}" };
+  const repairScope = {
+    kind: "structural_modularity",
+    files: [filePath],
+    allowedFiles: [filePath],
+    allowedPrefixes: ["src/components/catalogue/"],
+    findings: [{ code: "tree_integrity_failed", message: `${filePath} is structurally too broad` }],
+    instruction: "Split the retained catalogue flow into focused sibling modules.",
+    expectedPatchTokens: 6_000,
+  };
+  let retrieval;
+  const prompt = renderPatchPrompt({
+    step: "correction", originalStep: "core", contract: CONTRACT, tiers: TIERS,
+    tree, repairScope, onRetrieval: (trace) => { retrieval = trace; },
+  });
+  assert.equal(retrieval.tokens, Math.ceil(source.length / 4));
+  assert.match(prompt, /STRUCTURALLY INVALID MODULES IN FULL/);
+  assert.match(prompt, /retained catalogue presentation/);
+  assert.match(prompt, /handler-only.*NOT structural/s);
+  assert.doesNotMatch(prompt, /IMPLEMENTATION CONTRACT:/,
+    "the bounded decomposition does not resend the unrelated application contract");
+  assert.ok(estimatePromptTokens({ messages: [{ role: "user", content: prompt }] }) < 20_000,
+    "the complete structural source fits without resending the application architecture");
+  const plan = planCallReservation({ messages: [{ role: "user", content: prompt }] }, "gpt-5.5", {
+    requestedMaxOutputTokens: 8_000,
+    callCeilingCredits: 4,
+    repairSizing: { retrievedFileCount: 1, retrievalTokens: retrieval.tokens,
+      problemCount: 1, expectedPatchTokens: repairScope.expectedPatchTokens },
+    fundingPolicy: "thrallo_recovery",
+    budget: { approvedCeilingCredits: 7.69, consumedCredits: 0,
+      reservedCredits: 0, remainingCredits: 7.69 },
+  });
+  assert.ok(plan.maxOutputTokens >= 6_000,
+    `the complete decomposition received only ${plan.maxOutputTokens} output tokens`);
+
+  const fullFileScope = headroomDispatchScope({ tree, repairScope, logicalStep: "correction" });
+  assert.equal(fullFileScope.wholeFileRequired, true);
+  assert.equal(headroomDispatchScope({
+    tree, repairScope, previousScope: fullFileScope, logicalStep: "correction",
+  }), null, "structural decomposition must fail closed instead of receiving an unusable handler excerpt");
+});
+
+test("custom-extension correction receives every call site in one whole-file dispatch", () => {
+  const filePath = "src/components/catalogue/SoftwareCatalogueFlow.jsx";
+  const source = [
+    'import { runBrowseCatalogue, runClearCatalogue } from "../../extensions/catalogue.js";',
+    `const retained = "${"catalogue-layout-".repeat(1_000)}";`,
+    "export default function SoftwareCatalogueFlow() {",
+    "  const apply = (runner, input, operation) => runner(input, { operation });",
+    "  return null;",
+    "}",
+  ].join("\n");
+  const tree = { [filePath]: source };
+  const repairScope = {
+    kind: "static_application",
+    files: [filePath],
+    allowedFiles: [filePath],
+    findings: [
+      { code: "custom_extension_invalid", exportName: "runBrowseCatalogue",
+        operation: "filter-catalogue", missingInputs: ["catalogue.draft.searchQuery", "catalogue.input.categoryFilter"] },
+      { code: "custom_extension_invalid", exportName: "runClearCatalogue",
+        operation: "clear-catalogue", missingInputs: ["catalogue.input.visibleItemIds"] },
+      { code: "custom_extension_invalid", exportName: "runBrowseCatalogue", operation: null,
+        allowedOperations: ["filter-catalogue", "inspect-catalogue"] },
+    ],
+    instruction: "Pass every named extension input explicitly at its direct call site.",
+    expectedPatchTokens: 6_000,
+  };
+  let retrieval;
+  const prompt = renderPatchPrompt({
+    step: "correction", originalStep: "core", contract: CONTRACT, tiers: TIERS,
+    tree, repairScope, onRetrieval: (trace) => { retrieval = trace; },
+  });
+  assert.equal(retrieval.tokens, Math.ceil(source.length / 4));
+  assert.match(prompt, /runBrowseCatalogue/);
+  assert.match(prompt, /runClearCatalogue/);
+  assert.match(prompt, /searchQuery/);
+  assert.match(prompt, /visibleItemIds/);
+  assert.match(prompt, /Repair ALL listed operations/);
+  assert.match(prompt, /literal context\.operation or context\.operationId/);
+  assert.match(prompt, /variable shorthand such as \{ operation \}/);
+  assert.match(prompt, /inspect-catalogue/);
+  assert.match(prompt, /VALIDATOR-NAMED MODULES IN FULL/);
+  assert.doesNotMatch(prompt, /IMPLEMENTATION CONTRACT:/);
+  assert.ok(estimatePromptTokens({ messages: [{ role: "user", content: prompt }] }) < 20_000);
+  const plan = planCallReservation({ messages: [{ role: "user", content: prompt }] }, "gpt-5.5", {
+    requestedMaxOutputTokens: 8_000,
+    callCeilingCredits: 4,
+    repairSizing: { retrievedFileCount: 1, retrievalTokens: retrieval.tokens,
+      problemCount: repairScope.findings.length, expectedPatchTokens: repairScope.expectedPatchTokens },
+    fundingPolicy: "thrallo_recovery",
+    budget: { approvedCeilingCredits: 7.69, consumedCredits: 0,
+      reservedCredits: 0, remainingCredits: 7.69 },
+  });
+  assert.ok(plan.maxOutputTokens >= 6_000,
+    `the complete call-site correction received only ${plan.maxOutputTokens} output tokens`);
+
+  const fullFileScope = headroomDispatchScope({ tree, repairScope, logicalStep: "correction" });
+  assert.equal(fullFileScope.wholeFileRequired, true);
+  assert.equal(headroomDispatchScope({
+    tree, repairScope, previousScope: fullFileScope, logicalStep: "correction",
+  }), null, "multi-call-site corrections cannot be reduced to the first matching handler");
+});
+
+test("repair scoping parses the emitted journey evidence and ignores downstream undriveable cascades", () => {
+  const problems = [
+    'journey send-message Â· step "fill the form" FAILED in a real browser: control missing',
+    'journey send-message Â· step "submit" FAILED in a real browser: not reached because step 1 was undriveable',
+  ];
+  assert.deepEqual(repairFailureReferences(problems), [{ journeyId: "send-message", action: "fill the form" }]);
+});
+
+test("primary browser evidence wins over simultaneous secondary first-step cascades", () => {
+  const primary = JSON.stringify({ code: "interaction_verification_failure", journeyId: "primary-flow",
+    userAction: "create a project", status: "fail", stateOwners: ["src/Primary.jsx"] });
+  const secondary = JSON.stringify({ code: "interaction_verification_failure", journeyId: "secondary-flow",
+    userAction: "open the project manager", status: "undriveable", stateOwners: ["src/Secondary.jsx"] });
+  const contract = { journeys: [
+    { id: "primary-flow", priority: "primary" }, { id: "secondary-flow", priority: "secondary" },
+  ] };
+  assert.deepEqual(causalRepairProblems(contract, [primary, secondary]), [primary]);
+  assert.deepEqual(repairFailureOwnedPaths(contract, [primary, secondary]), ["src/Primary.jsx"]);
+});
+
+test("headroom batching maps verifier actions to their semantic owner before planned-module fallback", () => {
+  const problems = ['journey planner-flow \u00b7 step "create a new project" FAILED in a real browser: name:missing'];
+  const contract = { interactionContract: { flows: [{
+    journeyId: "planner-flow",
+    action: "create a new project",
+    responsibleModules: ["src/components/CreatePlannerFlow.jsx"],
+    stateOwner: "src/components/CreatePlannerFlow.jsx",
+  }] } };
+  const semanticFiles = repairFailureOwnedPaths(contract, problems);
+  assert.deepEqual(semanticFiles, ["src/components/CreatePlannerFlow.jsx"]);
+  const scope = headroomDispatchScope({
+    tree: {
+      "src/components/CreatePlannerFlow.jsx": "export function CreatePlannerFlow(){}",
+      "src/components/Unrelated.jsx": "export function Unrelated(){}",
+    },
+    modulePlan: [
+      { path: "src/components/Unrelated.jsx" },
+      { path: "src/components/CreatePlannerFlow.jsx" },
+    ],
+    problems,
+    semanticFiles,
+    logicalStep: "repair",
+  });
+  assert.deepEqual(scope.allowedFiles, ["src/components/CreatePlannerFlow.jsx"]);
+  assert.deepEqual(scope.remainingFiles, []);
+});
+
+test("production browser cascades batch the causal structured owner, never unrelated planned journeys", () => {
+  const owner = "src/components/create-adjust-save-reopen-export-plan/CreateAdjustSaveReopenExportPlanFlow.jsx";
+  const unrelated = "src/components/project-manager-crud/ProjectManagerCrudFlow.jsx";
+  const problems = [
+    'journey create-adjust-save-reopen-export-plan · step "create a new project" FAILED in a real browser: contracted control(s) could not be driven: name:missing',
+    'journey project-manager-crud · step "open the project manager" FAILED in a real browser: not reached: the journey\'s required starting state could not be established (New Project control: no contracted control matched)',
+    JSON.stringify({
+      code: "interaction_verification_failure", journeyId: "create-adjust-save-reopen-export-plan",
+      userAction: "create a new project", status: "undriveable",
+      responsibleModules: [
+        "src/components/create-adjust-save-reopen-export-plan/CreateAdjustSaveReopenExportPlanConfirmation.jsx",
+        owner,
+        "src/components/create-adjust-save-reopen-export-plan/CreateAdjustSaveReopenExportPlanOutput.jsx",
+        "src/components/create-adjust-save-reopen-export-plan/CreateAdjustSaveReopenExportPlanStatus.jsx",
+      ], stateOwners: [owner],
+    }),
+  ];
+  const contract = { interactionContract: { flows: [
+    { journeyId: "project-manager-crud", action: "open the project manager", responsibleModules: [unrelated] },
+    { journeyId: "create-adjust-save-reopen-export-plan", action: "create a new project", responsibleModules: [owner] },
+  ] } };
+  assert.deepEqual(repairFailureReferences(problems), [
+    { journeyId: "create-adjust-save-reopen-export-plan", action: "create a new project" },
+    { journeyId: "create-adjust-save-reopen-export-plan", action: "create a new project" },
+  ]);
+  assert.deepEqual(repairFailureOwnedPaths(contract, problems), [owner]);
+  const scope = headroomDispatchScope({
+    tree: {
+      [owner]: "export function Planner(){}", [unrelated]: "export function Projects(){}",
+      "src/components/create-adjust-save-reopen-export-plan/CreateAdjustSaveReopenExportPlanConfirmation.jsx": "export function Confirmation(){}",
+      "src/components/create-adjust-save-reopen-export-plan/CreateAdjustSaveReopenExportPlanOutput.jsx": "export function Output(){}",
+      "src/components/create-adjust-save-reopen-export-plan/CreateAdjustSaveReopenExportPlanStatus.jsx": "export function Status(){}",
+    },
+    modulePlan: [{ path: unrelated }, { path: owner }], problems,
+    semanticFiles: repairFailureOwnedPaths(contract, problems), logicalStep: "repair",
+  });
+  assert.deepEqual(scope.allowedFiles, [owner]);
+  assert.deepEqual(scope.remainingFiles, []);
+});
+
+test("a single irreducible source fails closed after bounded zero-dispatch compaction", async () => {
+  const fixture = oversizedModuleFixture({ source: `export function A(){return <pre>${"x".repeat(240_000)}</pre>}` });
+  const scope = { kind: "compile", files: ["src/components/A.jsx"], allowedFiles: ["src/components/A.jsx"],
+    allowedPrefixes: [], findings: [], expectedPatchTokens: 1_200, instruction: "Fix A only." };
+  let providerCalls = 0;
+  const provider = { model: "gpt-5.5", provider: "openai", runTurn: async () => { providerCalls += 1; return {}; } };
+  const reservations = memoryModelReservations();
+  const lanes = createModelLanes({
+    providerForStep: async () => ({ provider, decision: {
+      provider: "openai", model: "gpt-5.5", billingLane: "connected_allowance",
+      estimatedCredits: 2, callCeilingCredits: 6, maxOutputTokens: 16_000,
+    } }),
+    ceilingCredits: 30, reservations, knowledgeStore: memoryKnowledgeStore(),
+  });
+  await assert.rejects(lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "build", step: "correction", originalStep: "core",
+    contract: CONTRACT, tiers: TIERS, tree: fixture.tree, rejections: [], problems: ["src/components/A.jsx"],
+    modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts, repairScope: scope,
+  }), (error) => error.code === "smallest_scoped_call_exceeds_headroom" && error.headroomResizes === 1);
+  assert.equal(providerCalls, 0, "neither oversized preflight is allowed onto the provider wire");
+  assert.equal(reservations.rows().length, 0, "no unusable call acquires or consumes a reservation");
+});
+
+test("later headroom batches keep repair funding without consuming another logical repair slot", async () => {
+  const fixture = oversizedModuleFixture({ source: "export function A(){return <section/>}" });
+  const reservations = memoryModelReservations();
+  const first = await reservations.reserve({
+    owner: "owner", projectId: "project", buildId: "build", callKey: "first-repair", step: "repair",
+    provider: "openai", model: "gpt-5.5", billingLane: "connected_allowance",
+    usageResponsibility: "thrallo_repair", reservedCredits: 0.1, ceilingCredits: 30,
+    maxRepairs: 1, maxCorrections: 2,
+  });
+  await reservations.settle("owner", first.id, {
+    actualCredits: 0.1, usage: { input: 100, output: 20 }, providerRequestIds: ["req-first"],
+  });
+  const provider = fakePatchProvider({ patches: [{
+    replaceFile: "src/components/A.jsx", content: "export function A(){return <section>A</section>}",
+  }] });
+  const lanes = createModelLanes({
+    providerForStep: async () => ({ provider, decision: {
+      provider: "openai", model: "gpt-5.5", billingLane: "connected_allowance",
+      estimatedCredits: 2, callCeilingCredits: 6, maxOutputTokens: 16_000,
+    } }),
+    ceilingCredits: 30, reservations, maxRepairs: 1, knowledgeStore: memoryKnowledgeStore(),
+  });
+  await lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "build", step: "repair", originalStep: "core",
+    contract: CONTRACT, tiers: TIERS, tree: fixture.tree, rejections: [], problems: [],
+    modulePlan: fixture.modulePlan, moduleContracts: fixture.moduleContracts,
+    headroomScope: {
+      kind: "headroom_continuation", logicalStep: "repair", batchIndex: 1,
+      files: ["src/components/A.jsx"], allowedFiles: ["src/components/A.jsx"], allowedPrefixes: [],
+      remainingFiles: [], expectedPatchTokens: 1_000, instruction: "Complete A only.",
+      moduleContracts: { version: 1, specifications: [fixture.moduleContracts.specifications[0]] },
+    },
+  });
+  const continuation = reservations.rows().find((row) => row.callKey.includes("repair:headroom"));
+  assert.ok(continuation, "the later call has a distinct durable continuation identity");
+  assert.equal(continuation.step, "repair:headroom");
+  assert.equal(continuation.usageResponsibility, "thrallo_repair");
+  assert.equal(provider.calls.length, 1);
+});
+
 function fakeDiag() {
   const steps = [];
   return { steps, step: (s) => steps.push(s) };
@@ -100,17 +1094,27 @@ test("WP9 — patchesFn: forced strict call, patches returned, rejection feedbac
   assert.equal(patches.length, 1);
   assert.deepEqual(provider.calls[0].toolChoice, { type: "function", name: "emit_patches" });
   assert.equal(provider.calls[0].tools[0], EMIT_PATCHES_SCHEMA);
+  assert.match(provider.calls[0].systemPrompt, /Declared runtime inputs are\s+authoritative/);
+  assert.match(provider.calls[0].systemPrompt,
+    /Never reject that identifier against private module-local records unless/);
   assert.equal(diag.steps.length, 1);
   assert.equal(diag.steps[0].usage.input, 1000, "spend recorded on the canonical step");
 
   await lanes.patchesFn({
-    step: "core", contract: CONTRACT, tiers: TIERS, tree: {},
+    step: "core", contract: CONTRACT, tiers: TIERS,
+    tree: { "src/App.jsx": "export default function App() { return null; }" },
     rejections: [{ reason: 'symbol "Nope" not found in src/App.jsx' }],
     problems: ["expectations: confirmation not rendered"],
+    regenerateFiles: ["src/App.jsx"],
   });
   const prompt = provider.calls[1].messages[0].content;
   assert.match(prompt, /symbol "Nope" not found/, "machine-readable rejection reaches the model");
   assert.match(prompt, /confirmation not rendered/, "gate problems reach the model");
+  assert.match(prompt, /Emit ONLY rejected or unfinished work/);
+  assert.doesNotMatch(prompt, /re-emit ALL patches/);
+  assert.match(prompt, /MANDATORY WHOLE-FILE ESCALATION/);
+  assert.match(prompt, /src\/App\.jsx/);
+  assert.match(prompt, /exactly one replaceFile operation/);
 });
 
 test("WP9 — ONE shared ceiling across all calls: the guard stops the job and spend is still recorded", async () => {
@@ -153,16 +1157,83 @@ test("WP9 — contractFn drives the v1 contract agent and records the bucket DEL
   });
   const provider = {
     model: "gpt-5.5",
-    runTurn: async () => ({ text: contractJson, toolCalls: [], usage: { input: 5000, output: 1500, cached: 0, reasoning: 0, total: 6500 } }),
+    runTurn: async () => ({ text: contractJson, toolCalls: [], usage: {
+      input: 5000, output: 1500, cached: 0, reasoning: 0, total: 6500,
+      providerRequestId: "codex:response:contract-1",
+    } }),
   };
   const diag = fakeDiag();
-  const lanes = createModelLanes({ provider, ceilingCredits: 5, diag });
-  const contract = await lanes.contractFn({ request: "landing page" });
+  const knowledgeStore = memoryKnowledgeStore();
+  await knowledgeStore.upsert({ owner: "o", project_id: "p", kind: "constraint", key: "brand", value: { text: "keep the existing farm name" } });
+  const lanes = createModelLanes({ provider, ceilingCredits: 5, diag, knowledgeStore });
+  const contract = await lanes.contractFn({ owner: "o", projectId: "p", request: "landing page" });
   assert.equal(contract.journeys[0].id, "send-message");
   assert.equal(contract.journeys[0].priority, "primary");
   const step = diag.steps.find((s) => /contract/.test(s.label));
   assert.ok(step, "contract call recorded");
+  assert.match(step.prompt, /keep the existing farm name/, "persistent project knowledge reaches contract generation");
   assert.ok(step.usage.input >= 5000, `usage delta captured (got ${JSON.stringify(step.usage)})`);
+  assert.deepEqual(step.usage.providerRequestIds, ["codex:response:contract-1"]);
+});
+
+test("a rejected planned contract response moves its correction to platform connected recovery", async () => {
+  const contractJson = JSON.stringify({
+    summary: "Contact site", projectType: "landing",
+    journeys: [{ id: "contact", title: "Send a message", priority: "primary", steps: [
+      { action: "fill in the form", target: "contact form", expect: "fields accept input" },
+      { action: "submit", target: "submit button", expect: "confirmation is visible" },
+    ], acceptance: ["confirmation visible"] }],
+    routes: [{ path: "/", name: "Home" }], entities: [], auth: { required: false }, operations: [],
+  });
+  let providerCalls = 0;
+  const routing = [];
+  const reservations = memoryModelReservations();
+  const lanes = createModelLanes({
+    providerForStep: async ({ recoveryDispatch }) => {
+      routing.push(recoveryDispatch === true);
+      return {
+        provider: { model: "gpt-5.5", providerId: "codex",
+          runTurn: async () => ({ text: providerCalls++ ? contractJson : "not json", toolCalls: [],
+            usage: { input: 100, output: 50, total: 150, providerRequestId: `contract-${providerCalls}` } }) },
+        decision: { provider: "codex", model: "gpt-5.5",
+          billingLane: "connected_allowance",
+          estimatedCredits: 0.5, callCeilingCredits: 3, maxOutputTokens: 6_000 },
+      };
+    },
+    ceilingCredits: 10, reservations, knowledgeStore: memoryKnowledgeStore(),
+    poolCeilingResolver: ({ fundingPool }) => fundingPool === "thrallo_recovery" ? 5 : 10,
+  });
+  const contract = await lanes.contractFn({ owner: "o", projectId: "p", buildId: "b", request: "contact site" });
+  assert.equal(contract.journeys[0].id, "contact");
+  assert.deepEqual(routing, [false, true]);
+  assert.deepEqual(reservations.rows().map((row) => [
+    row.billingLane, row.usageResponsibility, row.fundingPool,
+  ]), [
+    ["connected_allowance", "customer_request", "customer_generation"],
+    ["connected_allowance", "thrallo_repair", "thrallo_recovery"],
+  ]);
+  assert.equal((await reservations.budget("o", "b", 10, "customer_generation")).consumedCredits,
+    reservations.rows()[0].actualCredits);
+  assert.equal((await reservations.budget("o", "b", 5, "thrallo_recovery")).consumedCredits,
+    reservations.rows()[1].actualCredits);
+});
+
+test("a planned generation call cannot consume the completion reserve for mandatory increments", async () => {
+  let providerCalls = 0;
+  const provider = { model: "gpt-5.5", providerId: "codex", runTurn: async () => {
+    providerCalls += 1;
+    return { text: "ok", toolCalls: [], usage: { input: 10, output: 10, total: 20 } };
+  } };
+  await assert.rejects(runReservedDispatch({
+    reservations: memoryModelReservations(), owner: "o", projectId: "p", buildId: "b",
+    step: "core", sequence: 1, provider,
+    decision: { billingLane: "connected_allowance", estimatedCredits: 2,
+      callCeilingCredits: 5, maxOutputTokens: 4_000 },
+    options: { systemPrompt: "system", messages: [{ role: "user", content: "build" }] },
+    ceilingCredits: 5, completionReserveCredits: 4,
+  }), (error) => error.code === "customer_completion_reserve"
+    && error.fundingPool === "customer_generation");
+  assert.equal(providerCalls, 0, "the protected remainder stops the call before dispatch");
 });
 
 test("WP9 — renderPatchPrompt is byte-stable and scopes core vs increment correctly", () => {
@@ -173,7 +1244,8 @@ test("WP9 — renderPatchPrompt is byte-stable and scopes core vs increment corr
   assert.match(a, /do NOT build it now/i);
   // The v1 transition brief (the run-2 fix): exact verifier keywords + the snapshot rule.
   assert.match(a, /snapshots the page BEFORE each action/);
-  assert.match(a, /EXACT words as visible text: \[confirmation\]/, "keywords come from the verifier's own filter");
+  assert.match(a, /verified structurally: .*the words \[confirmation\] describe the intent and are never matched literally/,
+    "the brief says the verifier judges structurally; the words come from the verifier's own filter as intent only");
   assert.match(a, /DISTINCTIVE confirmation copy/);
 
   const inc = renderPatchPrompt({
@@ -194,6 +1266,7 @@ test("WP12 — edit/repair context is retrieval-sliced under a hard budget, not 
     "src/routes/BookPage.jsx": big("BookPage", "booking wizard slots"),
     "src/routes/FarmPage.jsx": big("FarmPage", "farm story panels"),
     "src/routes/VisitPage.jsx": big("VisitPage", "visit guidance"),
+    "src/lib/capabilities/crud.js": "export function makeEntityStore() { return {}; }",
   };
 
   // Repair: the compiler named BookPage — its body must be IN, the unrelated pages must NOT be full.
@@ -207,18 +1280,31 @@ test("WP12 — edit/repair context is retrieval-sliced under a hard budget, not 
   assert.match(repair, /FILE TREE \(paths only/, "the model still sees the full shape");
 
   // Edit: keyword targeting picks the file; identical inputs render byte-identically.
-  const edit = renderScopedContext(tree, { step: "edit", editRequest: "update the visit guidance opening hours" });
+  let trace = null;
+  const edit = renderScopedContext(tree, {
+    step: "edit", editRequest: "update the visit guidance opening hours",
+    capabilityPaths: ["src/lib/capabilities/crud.js"],
+    onRetrieval: (value) => { trace = value; },
+  });
   assert.match(edit, /VisitPage\.jsx — will be modified by this step/);
-  assert.equal(edit, renderScopedContext(tree, { step: "edit", editRequest: "update the visit guidance opening hours" }));
+  assert.match(edit, /makeEntityStore/, "bound capability interfaces are integrated into retrieval");
+  assert.equal(edit, renderScopedContext(tree, {
+    step: "edit", editRequest: "update the visit guidance opening hours",
+    capabilityPaths: ["src/lib/capabilities/crud.js"],
+  }));
+  assert.ok(Array.isArray(trace.included) && trace.included.length > 0,
+    "the NOT NULL persisted trace receives the retrieval engine's complete included manifest");
+  assert.ok(Number.isInteger(trace.omittedCount));
+  assert.ok(trace.included.some((row) => row.path === "src/routes/VisitPage.jsx"));
 });
 
-test("WP11 — a transport-shaped failure gets exactly ONE retry; model errors never do", async () => {
+test("WP11 — only an explicitly retry-safe pre-dispatch failure gets one retry", async () => {
   let calls = 0;
   const flaky = {
     model: "gpt-5.5",
     runTurn: async () => {
       calls += 1;
-      if (calls === 1) { const e = new Error("terminated"); throw e; }
+      if (calls === 1) throw Object.assign(new Error("rejected before dispatch"), { retrySafe: true, dispatchState: "before_dispatch" });
       return { text: "", toolCalls: [{ id: "c", name: "emit_patches", arguments: { patches: [] } }], usage: { input: 10, output: 5, cached: 0, reasoning: 0, total: 15 } };
     },
   };
@@ -235,4 +1321,301 @@ test("WP11 — a transport-shaped failure gets exactly ONE retry; model errors n
   const lanes2 = createModelLanes({ provider: badModel, ceilingCredits: 5, diag: null, log: () => {} });
   await assert.rejects(() => lanes2.patchesFn({ step: "core", contract: CONTRACT, tiers: TIERS, tree: {}, rejections: [], problems: [] }), /HTTP 400/);
   assert.equal(modelErrCalls, 1, "a real API error never retries");
+});
+
+test("ambiguous V2 transport failure settles known usage and blocks replay", async () => {
+  let calls = 0;
+  const seenOptions = [];
+  const provider = {
+    model: "gpt-5.5", provider: "openai",
+    async runTurn(options) {
+      seenOptions.push(options);
+      calls += 1;
+      if (calls === 1) throw Object.assign(new Error("terminated"), {
+        usage: { input: 8, output: 0, total: 8 }, providerRequestId: "req-failed",
+      });
+      return {
+        text: "", toolCalls: [{ id: "c", name: "emit_patches", arguments: { patches: [] } }],
+        usage: { input: 10, output: 5, total: 15, providerRequestId: "req-ok" },
+      };
+    },
+  };
+  const reservations = memoryModelReservations();
+  const controller = new AbortController();
+  const lanes = createModelLanes({
+    provider, providerForStep: async () => ({ provider, decision: { estimatedCredits: 1, provider: "openai" } }),
+    ceilingCredits: 5, reservations, knowledgeStore: memoryKnowledgeStore(), log: () => {},
+  });
+  await assert.rejects(lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "build", step: "core",
+    contract: CONTRACT, tiers: TIERS, tree: {}, rejections: [], problems: [], signal: controller.signal,
+  }), (error) => error.code === "provider_replay_unsafe");
+  assert.equal(calls, 1);
+  const rows = reservations.rows();
+  assert.equal(rows.length, 1, "ambiguous dispatch is never replayed");
+  assert.deepEqual(rows.map((row) => row.providerRequestIds), [["req-failed"]]);
+  assert.ok(rows.every((row) => row.reservedCredits >= 1));
+  assert.ok(seenOptions.every((options) => options.maxOutputTokens === 16_000));
+  assert.ok(seenOptions.every((options) => options.signal === controller.signal));
+});
+
+test("a stale managed allowance snapshot is refreshed before the only provider dispatch", async () => {
+  let balanceReads = 0;
+  let reserves = 0;
+  let providerCalls = 0;
+  const reservations = {
+    budget: async () => ({ approvedCeilingCredits: 5, consumedCredits: 0, reservedCredits: 0, remainingCredits: 5 }),
+    reserve: async (input) => {
+      reserves += 1;
+      if (reserves === 1) throw Object.assign(new Error("stale"), { code: "allowance_snapshot_stale" });
+      assert.equal(input.accountBalance.usageRowCount, 2);
+      return { id: "hold-refreshed", acquired: true };
+    },
+    settle: async () => ({}),
+  };
+  const provider = {
+    model: "gpt-5.5", provider: "openai",
+    runTurn: async () => {
+      providerCalls += 1;
+      return { text: "", toolCalls: [{ id: "c", name: "emit_patches", arguments: { patches: [] } }],
+        usage: { input: 10, output: 5, total: 15 } };
+    },
+  };
+  const lanes = createModelLanes({
+    provider,
+    providerForStep: async () => ({ provider, decision: { billingLane: "managed", estimatedCredits: 1 } }),
+    ceilingCredits: 5,
+    reservations,
+    knowledgeStore: memoryKnowledgeStore(),
+    accountCreditResolver: async () => ({ included: 5, purchased: 0, usageRowCount: ++balanceReads }),
+  });
+  await lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "build", step: "core",
+    contract: CONTRACT, tiers: TIERS, tree: {}, rejections: [], problems: [],
+  });
+  assert.equal(balanceReads, 2);
+  assert.equal(reserves, 2);
+  assert.equal(providerCalls, 1);
+});
+
+test("a successful provider response with failed settlement stops without rewriting telemetry", async () => {
+  let settles = 0;
+  const ambiguous = [];
+  const reservations = {
+    reserve: async () => ({ id: "hold-1" }),
+    settle: async () => { settles += 1; throw new Error("settlement unavailable"); },
+    markAmbiguous: async (owner, id, input) => { ambiguous.push({ owner, id, input }); },
+  };
+  const provider = {
+    model: "gpt-5.5",
+    runTurn: async () => ({
+      text: "", toolCalls: [{ id: "c", name: "emit_patches", arguments: { patches: [] } }],
+      usage: { input: 10, output: 5, total: 15, providerRequestId: "req-success" },
+    }),
+  };
+  const lanes = createModelLanes({
+    provider, ceilingCredits: 5, reservations, knowledgeStore: memoryKnowledgeStore(),
+  });
+  await assert.rejects(lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "build", step: "core",
+    contract: CONTRACT, tiers: TIERS, tree: {}, rejections: [], problems: [],
+  }), (error) => error.code === "provider_replay_unsafe"
+    && error.providerRequestId === "req-success");
+  assert.equal(settles, 1, "a settlement acknowledgement failure is not settled again as empty provider telemetry");
+  assert.deepEqual(ambiguous, [{
+    owner: "owner", id: "hold-1", input: {
+      reason: "provider completed but settlement failed: settlement unavailable",
+      providerRequestIds: ["req-success"],
+    },
+  }]);
+});
+
+test("qualification correction calls still use Thrallo recovery responsibility", async () => {
+  const reserved = [];
+  const reservations = {
+    reserve: async (input) => { reserved.push(input); return { id: "qualification-hold" }; },
+    settle: async () => ({}),
+  };
+  const provider = {
+    model: "gpt-5.5",
+    runTurn: async () => ({
+      text: "", toolCalls: [{ id: "c", name: "emit_patches", arguments: { patches: [] } }],
+      usage: { input: 10, output: 5, total: 15, providerRequestId: "req-qualification" },
+    }),
+  };
+  const lanes = createModelLanes({
+    provider, ceilingCredits: 5, reservations, knowledgeStore: memoryKnowledgeStore(),
+    defaultUsageResponsibility: "qualification",
+  });
+  await lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "build", step: "correction",
+    contract: CONTRACT, tiers: TIERS, tree: {}, rejections: [], problems: [],
+  });
+  assert.equal(reserved[0].usageResponsibility, "thrallo_repair");
+  assert.equal(reserved[0].fundingPool, "thrallo_recovery");
+});
+
+test("a recovery provider rejection before source exists is platform-classified, never generated-app", async () => {
+  const reservations = memoryModelReservations();
+  const provider = {
+    providerId: "codex", model: "gpt-5.5",
+    runTurn: async () => {
+      throw Object.assign(new Error("Codex HTTP 429: platform allowance unavailable"), {
+        status: 429, dispatchState: "provider_rejected", retrySafe: true,
+      });
+    },
+  };
+  let observed;
+  await assert.rejects(runReservedDispatch({
+    reservations, owner: "customer", projectId: "project", buildId: "build",
+    step: "contract", logicalStep: "contract_protocol_correction", sequence: 2,
+    provider, decision: { provider: "codex", model: "gpt-5.5",
+      billingLane: "connected_allowance", estimatedCredits: 0.5, callCeilingCredits: 3 },
+    options: { systemPrompt: "correct", messages: [{ role: "user", content: "fix contract" }] },
+    ceilingCredits: 5, fundingPool: "thrallo_recovery", usageResponsibility: "thrallo_repair",
+  }), (error) => {
+    observed = structuredBuildFailure(error);
+    return observed.classification === "platform" && observed.customerActionRequired === false;
+  });
+  assert.notEqual(observed.classification, "generated_app");
+  assert.equal(reservations.rows()[0].billingLane, "connected_allowance");
+  assert.equal(reservations.rows()[0].fundingPool, "thrallo_recovery");
+  assert.equal(reservations.rows()[0].state, "released");
+});
+
+// A binding finding's fix lives in two places — a hook declared beside the other useSemantic*
+// calls and a spread on the element. Medium on cf5c4f7 (2026-09-07) burned its correction allowance
+// because the fragment excerpt showed only the JSX: the model spread `{...emailField.inputProps}`
+// against a hook it could not declare, then deleted the spread when the next round reported the
+// undefined identifier. The excerpt must carry the import and hook region, and the prompt must say so.
+test("binding findings pull the import and hook-declaration region into the micro-repair excerpt", () => {
+  const filePath = "src/screens/scaffold/SignInScreen.jsx";
+  const filler = Array.from({ length: 220 }, (_, index) => `  // unrelated retained line ${index}`).join("\n");
+  const source = [
+    'import { useState } from "react";',
+    'import { useSemanticAction } from "../../lib/capabilities/composed/interaction-primitives.js";',
+    "export default function SignInScreen() {",
+    '  const [taskDraft, setTaskDraft] = useState({ taskStatus: "" });',
+    '  const createTaskAction = useSemanticAction({ name: "create-task", label: "Create task", onActivate: () => {} });',
+    filler,
+    '  return <form><label>Task Status<select aria-label="task Status" value={taskDraft.taskStatus}',
+    "    onChange={(event) => setTaskDraft({ ...taskDraft, taskStatus: event.target.value })} /></label>",
+    '    <button {...createTaskAction.buttonProps} data-thrallo-action="act_0bd63ca5" type="button">Create task</button></form>;',
+    "}",
+  ].join("\n");
+  const problem = JSON.stringify({
+    code: "contract_control_binding_conflict", fails: true, control: "taskStatus", inferredKey: "taskstatus",
+    requiredBinding: { helper: "useSemanticField", name: "taskStatus", attribute: "data-thrallo-control", machineId: "ctl_eb8d94b6", spread: "inputProps" },
+    elements: [{ file: filePath, line: 227, element: "<select>", via: "native", identities: ["task Status", "Task Status"] }],
+    message: `the contracted control "taskStatus" has a machine-bound implementation, but ${filePath}:227 also implements that exact control without machine identity; bind the journey-facing implementation`,
+    file: filePath, line: 227, severity: "blocking",
+  });
+  const fragments = headroomSourceFragments(source, [problem]);
+  const excerpt = fragments.map((fragment) => fragment.content).join("\n");
+  assert.match(excerpt, /import \{ useSemanticAction \}/, "the import line is in the excerpt");
+  assert.match(excerpt, /useSemanticAction\(\{ name: "create-task"/, "the hook-declaration region is in the excerpt");
+  assert.match(excerpt, /aria-label="task Status"/, "the flagged element is in the excerpt");
+  assert.ok(excerpt.length < source.length / 2, "unrelated retained source is not resent");
+  const prompt = renderPatchPrompt({
+    step: "repair", contract: CONTRACT, tiers: TIERS, tree: { [filePath]: source }, problems: [problem],
+    headroomScope: { kind: "headroom_fragment_continuation", fragmented: true, allowedFiles: [filePath],
+      fragments: fragments.map((fragment) => ({ path: filePath, ...fragment })) },
+  });
+  assert.match(prompt, /BINDING RULE/);
+  assert.match(prompt, /useSemanticField\(\{ name: "<control>"/);
+  assert.match(prompt, /must be DECLARED, never deleted/);
+});
+
+test("an undefined-identifier finding left by a binding correction is treated as a binding problem", () => {
+  const source = [
+    'import { useSemanticAction } from "../../lib/capabilities/composed/interaction-primitives.js";',
+    "export default function Screen() {",
+    '  const action = useSemanticAction({ name: "save", label: "Save", onActivate: () => {} });',
+    ...Array.from({ length: 120 }, (_, index) => `  // retained ${index}`),
+    '  return <input {...emailField.inputProps} aria-label="email" />;',
+    "}",
+  ].join("\n");
+  const fragments = headroomSourceFragments(source, ["src/screens/Screen.jsx:124 references undefined identifier emailField"]);
+  const excerpt = fragments.map((fragment) => fragment.content).join("\n");
+  assert.match(excerpt, /useSemanticAction\(\{ name: "save"/);
+  assert.match(excerpt, /emailField\.inputProps/);
+});
+
+// ── transport interruption: one honest retry ──────────────────────────────────────────────────
+//
+// 2026-09-16: the Codex backend closed the socket mid-stream on two consecutive advanced builds
+// ("terminated <- other side closed [UND_ERR_SOCKET]"), before any usage event, and each ended
+// the whole build under the fail-closed replay rule. That rule still holds for any failure that
+// carried usage, and for a second interruption; a first interruption with no usage is retried
+// once as a new durable reservation while the original hold is absorbed by the platform.
+
+const socketClosed = (requestId) => {
+  const inner = Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" });
+  const outer = new TypeError("terminated", { cause: inner });
+  return providerFailure(outer, { state: "provider_dispatch_ambiguous", providerRequestId: requestId });
+};
+
+test("isTransportInterruption recognises undici socket closures through the cause chain and nothing else", () => {
+  assert.equal(isTransportInterruption(socketClosed("codex:request:1")), true);
+  assert.equal(isTransportInterruption(Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" })), true);
+  assert.equal(isTransportInterruption(new Error("Codex responses HTTP 502: bad gateway")), false);
+  assert.equal(isTransportInterruption(new Error("the model did not call emit_patches")), false);
+  assert.equal(isTransportInterruption(null), false);
+});
+
+test("a stream dropped before any usage is retried once as a new reservation; the first hold is absorbed", async () => {
+  const reservations = memoryModelReservations();
+  let calls = 0;
+  const provider = { model: "gpt-5.5", providerId: "codex", provider: "codex", runTurn: async () => {
+    calls += 1;
+    if (calls === 1) throw socketClosed("codex:request:dropped");
+    return { text: "ok", toolCalls: [], usage: { input: 100, output: 20, total: 120, providerRequestId: "codex:request:good" } };
+  } };
+  const turn = await runReservedDispatch({
+    reservations, owner: "o", projectId: "p", buildId: "b", step: "contract", sequence: 1, provider,
+    decision: { provider: "codex", billingLane: "connected_allowance", estimatedCredits: 0.5, callCeilingCredits: 3, maxOutputTokens: 6_000 },
+    options: { systemPrompt: "system", messages: [{ role: "user", content: "contract" }] },
+    ceilingCredits: 10,
+  });
+  assert.equal(turn.text, "ok");
+  assert.equal(calls, 2);
+  const rows = reservations.rows();
+  assert.equal(rows.length, 2, "the retry is its own durable call");
+  assert.notEqual(rows[0].callKey, rows[1].callKey);
+  assert.equal(rows[0].reconciliationState, "platform_assumed", "the dropped call is absorbed by the platform, not silently released");
+  assert.match(rows[0].reconciliationReason, /transport interrupted before any usage \(terminated\); retried once as /);
+  assert.deepEqual(rows[0].providerRequestIds, ["codex:request:dropped"], "the dropped call keeps its provider identity");
+  assert.equal(rows[1].state, "settled");
+  assert.equal(rows[1].actualCredits > 0, true);
+});
+
+test("a second interruption, or an interruption that carried usage, still fails closed", async () => {
+  const twice = memoryModelReservations();
+  let calls = 0;
+  await assert.rejects(runReservedDispatch({
+    reservations: twice, owner: "o", projectId: "p", buildId: "b2", step: "contract", sequence: 1,
+    provider: { model: "gpt-5.5", providerId: "codex", provider: "codex", runTurn: async () => { calls += 1; throw socketClosed(`codex:request:${calls}`); } },
+    decision: { provider: "codex", billingLane: "connected_allowance", estimatedCredits: 0.5, callCeilingCredits: 3, maxOutputTokens: 6_000 },
+    options: { systemPrompt: "system", messages: [{ role: "user", content: "contract" }] },
+    ceilingCredits: 10,
+  }), (error) => error.code === "provider_replay_unsafe");
+  assert.equal(calls, 2, "exactly one retry");
+  assert.equal(twice.rows().length, 2);
+
+  const withUsage = memoryModelReservations();
+  let usageCalls = 0;
+  await assert.rejects(runReservedDispatch({
+    reservations: withUsage, owner: "o", projectId: "p", buildId: "b3", step: "contract", sequence: 1,
+    provider: { model: "gpt-5.5", providerId: "codex", provider: "codex", runTurn: async () => {
+      usageCalls += 1;
+      const failure = socketClosed("codex:request:partial");
+      failure.usage = { input: 50, output: 10, total: 60, providerRequestId: "codex:request:partial" };
+      throw failure;
+    } },
+    decision: { provider: "codex", billingLane: "connected_allowance", estimatedCredits: 0.5, callCeilingCredits: 3, maxOutputTokens: 6_000 },
+    options: { systemPrompt: "system", messages: [{ role: "user", content: "contract" }] },
+    ceilingCredits: 10,
+  }), (error) => error.code === "provider_replay_unsafe");
+  assert.equal(usageCalls, 1, "usage means the turn happened: no replay");
+  assert.equal(withUsage.rows()[0].state, "settled", "the usage that was reported is settled, not discarded");
 });

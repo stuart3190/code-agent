@@ -1,0 +1,21 @@
+﻿○ thrallo-backup.service - Thrallo nightly control-plane backup
+     Loaded: loaded (/etc/systemd/system/thrallo-backup.service; static)
+     Active: inactive (dead) since Thu 2026-08-06 21:42:55 UTC; 11min ago
+ Invocation: f0a7a246785e4329a74dcbc0b39dd500
+TriggeredBy: ● thrallo-backup.timer
+    Process: 2013521 ExecStart=/usr/bin/node ops/backup-thrallo.mjs (code=exited, status=0/SUCCESS)
+    Process: 2013852 ExecStartPost=/usr/bin/node ops/migration-drift.mjs (code=exited, status=0/SUCCESS)
+   Main PID: 2013521 (code=exited, status=0/SUCCESS)
+   Mem peak: 366.2M
+        CPU: 7.806s
+
+Aug 06 21:42:47 vps-1a959f37 node[2013521]:   storage: 2 objects from thrallo-artifacts
+Aug 06 21:42:47 vps-1a959f37 node[2013521]:   filesystem publish: 153 files (5734627 bytes)
+Aug 06 21:42:47 vps-1a959f37 node[2013521]:   filesystem qa: 10 files (1267538 bytes)
+Aug 06 21:42:47 vps-1a959f37 node[2013521]:   migration ledger: 60 authoritative rows captured 2026-08-06T21:36:14.026Z
+Aug 06 21:42:48 vps-1a959f37 node[2013521]:   validation: 242 files decoded, counted and checksummed
+Aug 06 21:42:48 vps-1a959f37 node[2013521]: backup OK -> /home/ubuntu/thrallo-backups/thrallo-2026-08-06T214220 (32949517 bytes gz total, pruned 0 old runs)
+Aug 06 21:42:55 vps-1a959f37 node[2013852]: No migration drift.
+Aug 06 21:42:55 vps-1a959f37 systemd[1]: thrallo-backup.service: Deactivated successfully.
+Aug 06 21:42:55 vps-1a959f37 systemd[1]: Finished thrallo-backup.service - Thrallo nightly control-plane backup.
+Aug 06 21:42:55 vps-1a959f37 systemd[1]: thrallo-backup.service: Consumed 7.806s CPU time over 34.931s wall clock time, 366.2M memory peak.

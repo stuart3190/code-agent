@@ -1,0 +1,24 @@
+# WP6 — Typed routing and generated layouts (2026-09-18)
+
+## Architectural change
+
+- **Route compiler** `src/lib/modules/routing.js` (pure, protected): `compileRoutes` orders routes by specificity (static segments outrank parameters, catch-all last) and **rejects** duplicate ids, duplicate patterns and ambiguous patterns, so a contract can never ship an undecidable router. `matchRoute` returns typed parameters (`entityId`, `integer`, `string`) and treats a malformed parameter as an error rather than a miss. `routeHref(id, params)` refuses to build a destination with an unbound parameter — the audit's "a parameterised route should never appear as a literal `/projects/:projectId`". `evaluateGuard` answers `loading | ready | forbidden` against the session state, and a **visitor never satisfies a member route**. `loaderArgs` resolves `$params.*`.
+- **Router store** `src/lib/modules/router.js`: current path, matched route, guard evaluation against the identity controller, loader execution with cancellation of superseded navigations, history push/replace, and not-found for both an unknown path and a loader that finds no record. A missing loader is a platform error, never a silent ready.
+- **Route plan** `platformModules/routePlan.mjs`: stable route ids, typed parameters (an `<entity>Id` segment names the entity whose canonical id it carries), a guard from the route's `auth` flag and the identity mode, a loader bound to the entity module's read for a single-entity detail route, the states each screen must render, redirects, and the deterministic probes (direct load, params, not-found, unknown path, history, guard). Derived after the scaffold graph so each route names the screen actually mounted for it, then **stamped onto the scaffold graph** exactly as the route resolution already is — so the static gate, the module-conformance validator and the execution specification all recompute an identical composition plan from the graph alone.
+- **Composition**: `composed/routes.js` (compiled table, loaders bound to entity repositories, the router) and facade `app/routing.js` (`useRoute`, `routeHref`, `navigate`, `Link` bound to a route id). `thrallo.routing@1.0.0` is registered, locked and hashed.
+- **Generated layouts**: with the routing module installed, the protected root stops rendering a navigation design. It mounts two **model-owned** slots — `src/layout/AppLayout.jsx` (an outlet; the active screen arrives as `children`) and `src/layout/RouteStates.jsx` (how loading/not-found/forbidden/error look) — created once and never overwritten by recomposition, mirroring mounted screens.
+- **Selection** `platformModules/selection.mjs`: modules no capability names (routing, and WP7's query/forms/async) are requested from the contract's own structure, each with the reason recorded so the resolution stays explainable. A request is only emitted for a module the registry actually has.
+- **Lint**: `route_parameter_literal` (advisory) reports a generated destination that still carries a `:param`.
+
+## Compatibility
+
+- A tree that does not ship `src/lib/modules/routing.js` — a legacy base, a retained fixture — keeps the pre-WP6 shell **and is judged against it**: `scaffoldCompositionPlanFor(tree, graph)` is now the default plan for `validateScaffoldComposition`, the static gate and module conformance, so a legacy shell is never reported as a modified protected module.
+- The composed routing primitives (`useRoute`, `useParams`, `Link`, `NavLink`, `useNavigate`, `matchRouteParams`, …) remain exported from `primitives.jsx` for screens already written against them, and the react-router-dom import rewrite is unchanged.
+
+## Tests
+
+`builder-v2-routing-module.test.mjs` (6): compiler precedence/ambiguity/duplicates/typed params/href refusal/guards; router direct loads, params, loaders, record-missing, unknown path, history no-op, superseded navigation, visitor refused before the loader runs, missing loader; route-plan derivation and probes; composition of the table, the generated layout with an outlet and the route-state slots, recomposition preserving a customised layout, and the legacy-tree shell with plan agreement; registry + the literal-parameter lint; UI binding rendering each state through the facade hooks.
+
+## Defect found and fixed while wiring
+
+The routed shell was first gated on the routing **runtime** shipping in the tree. The scaffold ships that runtime to every application, so a contract that never selected routing (no session capability, therefore no composed facade) still received a shell importing `src/lib/app/routing.js` — a dangling import that failed five orchestrator and resume-budget suites. The gate is now the composed **facade** (`routingInstalled(tree)`), which exists only where routing is genuinely composed for that application; capability composition runs before scaffold composition, so the signal is always available. Regression restored to green.

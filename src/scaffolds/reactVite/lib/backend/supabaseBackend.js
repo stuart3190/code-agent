@@ -18,13 +18,92 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null, paymentsUrl = null, actionsUrl = null, runtimeUrl = null, connectorsUrl = null, analyticsUrl = null } = {}) {
+// One auth client represents one browser/app session. Keep initialization flights scoped to that
+// exact client so generated modules share work without ever sharing a visitor across clients.
+const visitorSessionFlights = new WeakMap();
+
+function sessionFlightsFor(auth) {
+  let flights = visitorSessionFlights.get(auth);
+  if (!flights) {
+    flights = new Map();
+    visitorSessionFlights.set(auth, flights);
+  }
+  return flights;
+}
+
+/** Invalidate one app-scoped initialization flight (sign-out/reset boundary). */
+export function invalidateAppVisitorSession({ auth, appId } = {}) {
+  const flights = auth && visitorSessionFlights.get(auth);
+  if (!flights) return false;
+  const key = String(appId || "app");
+  const flight = flights.get(key);
+  if (flight) flight.invalidated = true;
+  flights.delete(key);
+  if (!flights.size) visitorSessionFlights.delete(auth);
+  return !!flight;
+}
+
+/**
+ * Exact anonymous app-session state machine shared by generated browsers and the worker preflight.
+ * Fresh and persisted credentials go through idempotent signup. app-auth treats a repeated signup
+ * with the same password as session recovery, which avoids a guaranteed signin 401 when a reload
+ * interrupts the first signup after credentials have already reached localStorage.
+ */
+export async function ensureAppVisitorSession({
+  auth,
+  appId,
+  storage = globalThis.localStorage,
+  randomUUID = () => globalThis.crypto?.randomUUID?.()
+    || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+} = {}) {
+  if (!auth?.currentUser || !auth?.signIn || !auth?.signUp) {
+    throw new Error("ensureAppVisitorSession: app-scoped auth is required.");
+  }
+  const current = await auth.currentUser().catch(() => null);
+  if (current) return current;
+
+  const identity = String(appId || "app");
+  const flights = sessionFlightsFor(auth);
+  const existing = flights.get(identity);
+  if (existing) return existing.promise;
+
+  const flight = { invalidated: false, promise: null };
+  flight.promise = (async () => {
+    const key = `visitor-session:${identity}`;
+    let saved = null;
+    try { saved = JSON.parse(storage?.getItem?.(key) || "null"); } catch { saved = null; }
+    if (!saved?.email || !saved?.password) {
+      const id = randomUUID();
+      saved = { email: `visitor-${id}@visitor.local`, password: `Visitor-${id}-key` };
+      try { storage?.setItem?.(key, JSON.stringify(saved)); } catch { /* a per-load session still works */ }
+    }
+
+    const user = await auth.signUp(saved);
+    if (flight.invalidated) {
+      await auth.signOut?.().catch(() => {});
+      throw Object.assign(new Error("Visitor session initialization was reset before completion."), {
+        code: "visitor_session_reset",
+      });
+    }
+    return user;
+  })();
+  flights.set(identity, flight);
+  try {
+    return await flight.promise;
+  } finally {
+    if (flights.get(identity) === flight) flights.delete(identity);
+    if (!flights.size) visitorSessionFlights.delete(auth);
+  }
+}
+
+export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId = null, authUrl = null, paymentsUrl = null, actionsUrl = null, runtimeUrl = null, connectorsUrl = null, analyticsUrl = null, accountsUrl = null, fetchImpl = globalThis.fetch, visitorStorage = globalThis.localStorage } = {}) {
   if (!url || !anonKey) {
     throw new Error(
       "createSupabaseBackend: `url` and `anonKey` are required (set VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY)."
     );
   }
-  const client = createClient(url, anonKey);
+  if (typeof fetchImpl !== "function") throw new Error("createSupabaseBackend: a fetch implementation is required.");
+  const client = createClient(url, anonKey, { global: { fetch: fetchImpl } });
 
   // Normalise a Supabase {data,error} reply into a value-or-throw, so app code can
   // `await` and use try/catch instead of threading error objects through the UI.
@@ -38,13 +117,18 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
   // app-scoped auth user and returns a REAL session — same email can register in many apps without
   // collision. The session is installed on this client, so db/storage/RLS behave identically.
   const appAuthPost = async (action, payload = {}) => {
-    const res = await fetch(authUrl, {
+    const res = await fetchImpl(authUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}`, apikey: anonKey },
+      // A publishable API key belongs in `apikey`, not Authorization: Bearer. Authorization is for
+      // an end-user JWT; treating an opaque sb_publishable_ key as a JWT can be rejected before an
+      // Edge Function runs. app-auth is the seam that creates that user session, so none exists yet.
+      headers: { "Content-Type": "application/json", apikey: anonKey },
       body: JSON.stringify({ action, appId, ...payload }),
     });
     const out = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(out.error || `auth ${action} failed (${res.status})`);
+    if (!res.ok) throw Object.assign(new Error(out.error || `auth ${action} failed (${res.status})`), {
+      code: "app_auth_request_failed", status: res.status, action,
+    });
     return out;
   };
   // Session-returning actions install the session on this client so db/storage/RLS just work.
@@ -68,6 +152,8 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
           return appAuthCall("reset-confirm", { email, code, newPassword });
         },
         async signOut() {
+          releaseEntitySession();
+          invalidateAppVisitorSession({ auth, appId });
           const { error } = await client.auth.signOut();
           if (error) throw error;
         },
@@ -105,6 +191,56 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
         },
       };
 
+  // Sign-out is also a generated-runtime cache boundary. Invalidating first ensures a concurrent
+  // signup cannot remain the session authority after the user explicitly signed out.
+  const signOut = auth.signOut.bind(auth);
+  auth.signOut = async () => {
+    invalidateAppVisitorSession({ auth, appId });
+    return signOut();
+  };
+
+  // Entities are owner-scoped by RLS, so every protected operation needs a session. Generated
+  // code used to have to remember `await ensureVisitorSession()` before its first read; a live
+  // qualification lost its booking journey to exactly that omission
+  // (401 GET /rest/v1/entities?type=eq.booking).
+  //
+  // The prerequisite is now satisfied HERE, once, for every entity operation. This grants no
+  // privilege: it establishes the same app-scoped anonymous visitor identity the app would have
+  // created itself, through the same approved app-auth path, and RLS still scopes every row to
+  // that identity. A signed-in user short-circuits it. No service-role credential is involved.
+  const appScopedSession = Boolean(appId && authUrl);
+  let entitySessionFlight = null;
+  /** Reset after sign-out/reset so the next operation establishes a fresh identity. */
+  const releaseEntitySession = () => { entitySessionFlight = null; };
+  async function ensureEntitySession() {
+    if (!appScopedSession) return null;         // platform-auth apps sign in explicitly
+    // One establishment per backend instance, shared by concurrent callers and retryable on
+    // failure — an entity operation must not pay an auth round-trip every call.
+    if (!entitySessionFlight) {
+      entitySessionFlight = ensureAppVisitorSession({ auth, appId, storage: visitorStorage })
+        .catch((error) => { entitySessionFlight = null; throw error; });
+    }
+    return entitySessionFlight;
+  }
+
+  // One predicate builder for list and count. A field is matched on its JSONB path unless it is
+  // row metadata; an object value carries operators (eq/neq/gte/lte/ilike/in), a bare value is eq.
+  const applyEntityFilters = (query, filters = {}) => {
+    let next = query;
+    for (const [field, value] of Object.entries(filters || {})) {
+      const column = field === "id" || field === "created_at" ? field : `data->>${field}`;
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        if (value.eq !== undefined) next = next.eq(column, value.eq);
+        if (value.neq !== undefined) next = next.neq(column, value.neq);
+        if (value.gte !== undefined) next = next.gte(column, value.gte);
+        if (value.lte !== undefined) next = next.lte(column, value.lte);
+        if (value.ilike !== undefined) next = next.ilike(column, value.ilike);
+        if (Array.isArray(value.in)) next = next.in(column, value.in);
+      } else next = next.eq(column, value);
+    }
+    return next;
+  };
+
   // db.entity(type) — CRUD over the generic `entities` table, scoped to one `type`.
   // Records are returned flat: { id, type, data, owner, created_at }.
   const db = {
@@ -115,47 +251,67 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
       const scoped = (q) => (appId ? q.eq("app_id", appId) : q);
       return {
         async create(data = {}) {
+          await ensureEntitySession();
           const row = appId ? { type, data, app_id: appId } : { type, data };
           const rows = unwrap(await table().insert(row).select());
           return rows[0];
         },
         async list({ filters = {}, order = "created_at", ascending = false, limit = 100, cursor = null } = {}) {
-          let query = scoped(table().select("*").eq("type", type));
-          for (const [field, value] of Object.entries(filters || {})) {
-            const column = field === "id" || field === "created_at" ? field : `data->>${field}`;
-            if (value && typeof value === "object" && !Array.isArray(value)) {
-              if (value.eq !== undefined) query = query.eq(column, value.eq);
-              if (value.neq !== undefined) query = query.neq(column, value.neq);
-              if (value.gte !== undefined) query = query.gte(column, value.gte);
-              if (value.lte !== undefined) query = query.lte(column, value.lte);
-              if (value.ilike !== undefined) query = query.ilike(column, value.ilike);
-              if (Array.isArray(value.in)) query = query.in(column, value.in);
-            } else query = query.eq(column, value);
-          }
-          if (cursor) query = ascending ? query.gt("created_at", cursor) : query.lt("created_at", cursor);
+          await ensureEntitySession();
           const safeOrder = ["created_at", "id", "type"].includes(order) ? order : "created_at";
-          return unwrap(await query.order(safeOrder, { ascending }).limit(Math.max(1, Math.min(500, limit))));
+          let query = applyEntityFilters(scoped(table().select("*").eq("type", type)), filters);
+          // A composite cursor is a KEYSET condition: strictly past the last row's sort value, or
+          // equal to it and past its id. The id tie-breaker is what stops rows sharing a
+          // created_at from being skipped or repeated across pages. A bare value stays supported
+          // for callers written against the original single-column cursor.
+          if (cursor && typeof cursor === "object") {
+            const at = cursor[safeOrder] ?? cursor.createdAt ?? cursor.value;
+            const beyond = ascending ? "gt" : "lt";
+            if (at !== undefined && at !== null) {
+              query = cursor.id
+                ? query.or(`${safeOrder}.${beyond}.${at},and(${safeOrder}.eq.${at},id.${beyond}.${cursor.id})`)
+                : query[beyond](safeOrder, at);
+            }
+          } else if (cursor) query = ascending ? query.gt(safeOrder, cursor) : query.lt(safeOrder, cursor);
+          return unwrap(await query.order(safeOrder, { ascending }).order("id", { ascending })
+            .limit(Math.max(1, Math.min(500, limit))));
         },
+        // Count applies the SAME predicate as list — including operators — so a total can never
+        // disagree with the page it describes.
         async count(filters = {}) {
-          let query = scoped(table().select("id", { count: "exact", head: true }).eq("type", type));
-          for (const [field, value] of Object.entries(filters || {})) query = query.eq(field === "id" ? field : `data->>${field}`, value);
+          await ensureEntitySession();
+          const query = applyEntityFilters(scoped(table().select("id", { count: "exact", head: true }).eq("type", type)), filters);
           const { count, error } = await query; if (error) throw error; return count || 0;
         },
         async get(id) {
+          await ensureEntitySession();
           return unwrap(await scoped(table().select("*").eq("type", type).eq("id", id)).single());
         },
         async update(id, patch = {}) {
+          await ensureEntitySession();
           const rows = unwrap(
             await scoped(table().update({ data: patch }).eq("type", type).eq("id", id)).select()
           );
           return rows[0];
         },
+        // WP5: compare-and-set. The row is replaced only while its stored version still equals
+        // `expectedVersion` (data->__meta->>version); zero rows means another writer moved it.
+        async updateVersioned(id, data, expectedVersion) {
+          await ensureEntitySession();
+          const rows = unwrap(await scoped(table().update({ data }).eq("type", type).eq("id", id)
+            .eq("data->__meta->>version", String(expectedVersion))).select());
+          return rows[0] || null;
+        },
         async delete(id) {
+          await ensureEntitySession();
           const { error } = await scoped(table().delete().eq("type", type).eq("id", id));
           if (error) throw error;
         },
         subscribe(callback) {
           if (typeof callback !== "function") throw new Error("db.entity(type).subscribe(callback): callback is required.");
+          // Realtime is RLS-scoped too. subscribe() stays synchronous (callers rely on getting an
+          // unsubscribe immediately), so the session is established alongside it rather than awaited.
+          ensureEntitySession().catch(() => { /* the channel simply yields nothing without a session */ });
           const channel = client.channel(`entities:${appId || "global"}:${type}:${Math.random().toString(36).slice(2)}`)
             .on("postgres_changes", { event: "*", schema: "public", table: "entities", filter: appId ? `app_id=eq.${appId}` : undefined },
               (event) => { const record = event.new?.type === type ? event.new : event.old?.type === type ? event.old : null; if (record) callback({ ...event, record }); })
@@ -320,6 +476,39 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     },
   };
   const usage = { async getBalance() { return (await runtimePost("usage")).balance; } };
+
+  // WP4: accounts — memberships, profiles and administration through the app-accounts service.
+  // Every command carries the signed-in user's JWT; the service derives the actor and enforces
+  // the app's policy. Nothing the client sends about itself (role, appId) grants anything.
+  const accountsPost = async (command, payload = {}) => {
+    if (!accountsUrl || !appId) throw Object.assign(new Error("Accounts are not configured for this app."), { code: "accounts_unavailable" });
+    const session = (await client.auth.getSession()).data.session;
+    if (!session?.access_token) throw Object.assign(new Error("Sign in before using account features."), { code: "unauthenticated" });
+    const response = await fetchImpl(accountsUrl, { method: "POST", headers: { "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`, apikey: anonKey }, body: JSON.stringify({ command, appId, ...payload }) });
+    const out = await response.json().catch(() => ({}));
+    if (!response.ok) { const error = new Error(out.error || `Account request failed (${response.status}).`); error.code = out.code || "forbidden"; error.status = response.status; error.details = out.details; throw error; }
+    return out;
+  };
+  const accounts = {
+    async me() { return accountsPost("me"); },
+    async updateMe(values = {}) { return accountsPost("updateMe", { values }); },
+    async permissions() { return accountsPost("permissions"); },
+    async member({ userId = null, email = null } = {}) { return accountsPost("member", { userId, email }); },
+    async members() { return (await accountsPost("members")).members; },
+    async invite({ email, role = null } = {}) { return accountsPost("invite", { email, role }); },
+    async provision({ email, role = null } = {}) { return accountsPost("provision", { email, role }); },
+    async setRole({ userId = null, email = null, role } = {}) { return accountsPost("setRole", { userId, email, role }); },
+    async setStatus({ userId = null, email = null, status } = {}) { return accountsPost("setStatus", { userId, email, status }); },
+    // WP8 — settings and append-only history. There is no append: history is written by the
+    // platform, never by the application.
+    async settings({ scope = "app", target = null } = {}) { return (await accountsPost("settings", { scope, target })).values; },
+    async setSetting({ key, value, target = null } = {}) { return accountsPost("setSetting", { key, value, target }); },
+    async history(query = {}) { return accountsPost("history", query); },
+    // WP12 — the subscription state the server derived from the provider events it applied. An
+    // application reads it; it can never write it, which is what makes an entitlement worth anything.
+    async subscription({ subject = null } = {}) { return accountsPost("subscription", { subject }); },
+  };
   const knowledge = { async search(actionKey, query, options = {}) {
     const job = await actions.invoke(actionKey, { query, ...options }); return actions.wait(job.id);
   } };
@@ -396,5 +585,5 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     }).catch(() => {}));
   }
 
-  return { auth, db, storage, payments, notifications, actions, usage, knowledge, integrations, analytics, _client: client };
+  return { auth, db, storage, payments, notifications, actions, usage, knowledge, integrations, analytics, accounts, _client: client };
 }

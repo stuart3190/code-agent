@@ -9,8 +9,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { flagValue, flagOn, flagOnFor, setFlag, killSwitchActive, __resetFlagCacheForTests } from "../../shell/server/lib/builderV2/featureFlags.mjs";
-import { validateFact, recordFact, getKnowledge, knowledgeBrief, memoryKnowledgeStore, FACT_KINDS } from "../../shell/server/lib/builderV2/knowledge.mjs";
+import { killSwitchActive } from "../../shell/server/lib/builderV2/cutoverPolicy.mjs";
+import { validateFact, recordFact, recordFacts, getKnowledge, knowledgeBrief, memoryKnowledgeStore, FACT_KINDS } from "../../shell/server/lib/builderV2/knowledge.mjs";
 import { indexFile, indexTree, diffIndex, treeHashOf } from "../../shell/server/lib/builderV2/indexerV0.mjs";
 import { memoryGraph } from "../../shell/server/lib/builderV2/graphStore.mjs";
 import { createSnapshotStore, memorySnapshotStorage, PROMOTABLE_LABELS } from "../../shell/server/lib/builderV2/snapshotStore.mjs";
@@ -19,43 +19,12 @@ const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtur
 const MONOLITH_TREE = JSON.parse(readFileSync(path.join(FIXTURES, "run178f7fc8-tree.json"), "utf8"));
 const MODULAR_TREE = JSON.parse(readFileSync(path.join(FIXTURES, "run17b6513f-tree.json"), "utf8"));
 
-// ── C: feature flags ──────────────────────────────────────────────────────────────────────────
+// ── C: V2-only cutover policy ────────────────────────────────────────────────────────────────
 
-function fakeFlagClient(rows) {
-  return { from: () => ({ select: async () => ({ data: rows, error: null }), upsert: async (row) => { rows.push(row); return { error: null }; } }) };
-}
-
-test("C — flags: kill switch beats DB, unknown is false, cache respects TTL", async () => {
-  __resetFlagCacheForTests();
-  const rows = [{ key: "bv2.enabled", value: true }, { key: "bv2.owners", value: ["o-1"] }];
-  const client = fakeFlagClient(rows);
-  let clock = 0;
-  const now = () => clock;
-
-  assert.equal(await flagOn("bv2.enabled", { client, now }), true);
-  assert.equal(await flagOn("bv2.never_set", { client, now }), false, "unknown flag is FALSE — v2 is opt-in");
-  assert.equal(await flagOnFor("bv2.owners", "o-1", { client, now }), true);
-  assert.equal(await flagOnFor("bv2.owners", "o-2", { client, now }), false);
-
-  // Cache: mutating rows is invisible until the TTL passes.
-  rows.length = 0;
-  assert.equal(await flagOn("bv2.enabled", { client, now }), true, "cached within TTL");
-  clock += 61_000;
-  assert.equal(await flagOn("bv2.enabled", { client, now }), false, "TTL expiry refetches");
-
-  // The kill switch needs no TTL and no DB.
-  process.env.THRALLO_BV2_KILL = "1";
-  try {
-    assert.equal(killSwitchActive(), true);
-    assert.equal(await flagOn("bv2.enabled", { client, now }), false, "kill beats everything, instantly");
-  } finally {
-    delete process.env.THRALLO_BV2_KILL;
-  }
-
-  // A broken flags table means everything off — v2 fails closed, v1 unaffected.
-  __resetFlagCacheForTests();
-  const broken = { from: () => ({ select: async () => ({ data: null, error: { message: "boom" } }) }) };
-  assert.equal(await flagOn("bv2.enabled", { client: broken, now: () => 10_000_000 }), false);
+test("C — the V2-only emergency kill switch is immediate and database-independent", () => {
+  assert.equal(killSwitchActive({}), false);
+  assert.equal(killSwitchActive({ THRALLO_BV2_KILL: "0" }), false);
+  assert.equal(killSwitchActive({ THRALLO_BV2_KILL: "1" }), true);
 });
 
 // ── D: project knowledge ──────────────────────────────────────────────────────────────────────
@@ -65,6 +34,10 @@ test("D — knowledge: validated facts, deterministic byte-stable brief, bounded
   await recordFact("o-1", "p-1", { kind: "entity", key: "booking", value: { owned: true, fields: ["date", "slot"] } }, { store });
   await recordFact("o-1", "p-1", { kind: "route", key: "/book", value: { name: "Book a slot" } }, { store });
   await recordFact("o-1", "p-1", { kind: "capability", key: "booking", value: { version: "1.0.0", pinnedMajor: 1 } }, { store });
+  await recordFacts("o-1", "p-1", [
+    { kind: "contract_ref", key: "current", value: { contractId: "c-1", version: 1 } },
+    { kind: "decision", key: "edit:b-1", value: { text: "keep the farm name" } },
+  ], { store });
 
   assert.equal(validateFact({ kind: "nonsense", key: "x", value: 1 }).ok, false);
   await assert.rejects(recordFact("o-1", "p-1", { kind: "entity", key: "", value: 1 }, { store }), /invalid knowledge fact/);
@@ -80,6 +53,8 @@ test("D — knowledge: validated facts, deterministic byte-stable brief, bounded
   const failing = { list: async () => { throw new Error("db down"); } };
   const empty = await getKnowledge("o-1", "p-1", { store: failing });
   assert.equal(knowledgeBrief(empty), "PROJECT KNOWLEDGE: none recorded yet.");
+  await assert.rejects(getKnowledge("o-1", "p-1", { store: failing, failClosed: true }), /db down/,
+    "production V2 cannot silently omit durable project knowledge");
 });
 
 // ── E: indexer v0 ─────────────────────────────────────────────────────────────────────────────
@@ -208,12 +183,49 @@ test("G/C2 — creation is atomic in effect: interrupted work exposes nothing us
   await assert.rejects(store.promote("o", "p", "green", strays[0].id), /only ready snapshots/);
 
   // A missing blob blocks creation outright.
-  const noBlob = { ...storage, hasBlob: async () => false };
-  await assert.rejects(createSnapshotStore(noBlob).createSnapshot("o", "p", { "a.js": "x" }), /did not persist/);
+  const corruptBlob = { ...storage, getBlob: async () => "different bytes" };
+  await assert.rejects(createSnapshotStore(corruptBlob).createSnapshot("o", "p", { "a.js": "x" }), /do not match content hash/);
 
   // GC sweeps building strays.
   const swept = await store.gc("o", "p", { keepLatest: 20 });
   assert.ok(swept.removedSnapshots.includes(strays[0].id));
+});
+
+test("C5 — materialisation byte-verifies every blob and corrupt snapshots cannot promote", async () => {
+  const storage = memorySnapshotStorage();
+  let corruptReads = false;
+  const wrapped = {
+    ...storage,
+    async getBlob(owner, hash) {
+      const content = await storage.getBlob(owner, hash);
+      return corruptReads && content !== null ? `${content}!tampered` : content;
+    },
+  };
+  const store = createSnapshotStore(wrapped);
+  const snapshot = await store.createSnapshot("o", "p", { "src/a.js": "trusted bytes" });
+  corruptReads = true;
+  await assert.rejects(store.materialize("o", snapshot.id), /bytes do not match content hash/);
+  assert.equal((await store.getSnapshot(snapshot.id)).state, "corrupt");
+  await assert.rejects(store.promote("o", "p", "green", snapshot.id), /only ready snapshots/);
+  assert.equal(await store.pointer("o", "p", "green"), null);
+});
+
+test("C5 — concurrent promotions compare-and-set: exactly one wins from the same pointer", async () => {
+  const store = createSnapshotStore();
+  const first = await store.createSnapshot("o", "p", { "a.js": "one" });
+  const second = await store.createSnapshot("o", "p", { "a.js": "two" });
+  const third = await store.createSnapshot("o", "p", { "a.js": "three" });
+  await store.promote("o", "p", "green", first.id);
+
+  const results = await Promise.allSettled([
+    store.promote("o", "p", "green", second.id),
+    store.promote("o", "p", "green", third.id),
+  ]);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  assert.match(results.find((result) => result.status === "rejected").reason.message, /pointer changed concurrently/);
+  const winner = results.find((result) => result.status === "fulfilled").value.snapshotId;
+  assert.equal(await store.pointer("o", "p", "green"), winner);
 });
 
 test("G/C2 — promotion is one pointer write; failure keeps the old pointer; rollback is one write back", async () => {

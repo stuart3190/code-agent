@@ -249,7 +249,8 @@ test("rollback does not route through the dead Buildr101 release mechanism", asy
     "those tables do not exist in Thrallo's database; rollback would throw on the first real call");
   assert.match(fn, /openDeployment/, "a rollback is itself a deployment");
   assert.match(fn, /rolled_back_from|rolledBackFrom|rollbackFrom/i, "and records what it restored");
-  assert.match(fn, /site\.slug/, "the same slug, so the URL and custom domains do not move");
+  assert.match(fn, /activateRetainedRelease/, "the retained release activation preserves the site's slug and domains");
+  assert.match(fn, /restored\.slug/, "the receipt uses the canonical activated site's slug");
 });
 
 test("download runs the secret scrubber and uses the deployment's own source", async () => {

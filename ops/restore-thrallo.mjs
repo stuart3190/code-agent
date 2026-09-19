@@ -12,18 +12,26 @@
 // admin API; passwords cannot be restored — users reset them. Restored encrypted columns are
 // only readable when the server runs with the ORIGINAL PLATFORM_ENC_KEY.
 
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { gunzipSync } from "node:zlib";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { ARTIFACT_BUCKET } from "./backup-thrallo.mjs";
 import { validateBackupDirectory } from "../scripts/lib/backupValidation.mjs";
+import { restoreFilesystemLayout } from "./lib/filesystemBackup.mjs";
+import {
+  canonicalRowsForRestoreComparison,
+  collectDeferredRestorePatches,
+  sha256Lines,
+  runtimeCatalogEvidence,
+  validateRestoreOrder,
+} from "./lib/runtimeBackupSchema.mjs";
 
 // Foreign-key-safe insert order. ca_automations and ca_runs reference each other, so
 // automations insert first with last_run_id withheld and patched after runs exist.
 export const RESTORE_ORDER = [
-  "ca_repositories",
   "ca_github_installations",
+  "ca_repositories",
   "ca_github_webhook_deliveries",
   "ca_agents",
   "ca_automations",
@@ -52,13 +60,26 @@ export const RESTORE_ORDER = [
   "ca_conversations",
   "ca_conversation_turns",
   "ca_conversation_events",
+  "ca_lead_model_reservations",
+  "ca_direct_model_reservations", // optional run_id references ca_runs, restored above
   "ca_owner_profile",
   "ca_memories",
   "projects",     // references ca_products -> restore after it
+  "credit_ledger",
+  // Approval rows reference projects and conversations. Restore them before build_jobs, withholding
+  // the nullable dispatch_job_id until jobs exist; build_jobs.budget_approval_id can then remain intact.
+  "bv2_build_budget_approvals",
   "build_jobs",
+  "build_work_payloads",
+  "build_work_jobs",
+  "build_work_results",
+  "build_work_events",
+  "build_worker_nodes",
   "published_sites",
   // After published_sites: a deployment references the project and product those rows describe.
   "deployments",
+  "publish_releases",
+  "publish_activation_intents",
   "custom_domains",
   "ca_push_subscriptions",
   "entities",       // owner references auth.users -> after users are ensured
@@ -89,18 +110,61 @@ export const RESTORE_ORDER = [
   "bv2_feature_flags",
   "bv2_migration_state",
   "bv2_project_knowledge",
+  "bv2_file_revisions",
+  "bv2_symbols",
+  "bv2_symbol_refs",
+  "bv2_dependency_edges",
+  "bv2_shadow_runs",
+  "bv2_shadow_run_files",
+  "bv2_shadow_checks",
   "bv2_blobs",
   "bv2_snapshots",
   "bv2_snapshot_files",
   "bv2_project_pointers",
   "bv2_contracts",
   "bv2_builds",
+  "bv2_build_envelopes",
+  "bv2_build_progress",
+  "bv2_recovery_approvals",
+  "bv2_duration_extensions",
+  "bv2_verification_defects",
+  "bv2_repair_strategies",
+  "bv2_build_settlements",
+  "bv2_model_reservations", // references projects + bv2_builds
+  // Global provider-response identities are canonical deduplication evidence. They carry logical
+  // reservation ids rather than physical FKs, but restoring them after both reservation tables
+  // keeps the evidence boundary explicit.
+  "ca_model_call_identities",
   "bv2_assets",
   "bv2_retrieval_traces",
   "bv2_patches",
+  "bv2_verification_cache",
+  // Generated-application platform state (WP4, WP8, WP12). Profiles and memberships reference
+  // auth.users, so they follow app_users; the policy and audit configuration are per application
+  // and reference nothing; the two event tables are append-only and restored after the state they
+  // describe, so a restored trail never precedes the rows it explains.
+  "app_profiles",
+  "app_memberships",
+  "app_membership_events",
+  "app_account_policies",
+  "app_settings",
+  "app_audit_config",
+  "app_audit_events",
+  "app_subscriptions",
+  "app_billing_events",
+  "data_erasure_jobs",
+  "data_erasure_events",
 ];
 
 const BATCH = 500;
+export const IMMUTABLE_INSERT_TABLES = Object.freeze(new Set([
+  "ca_model_call_identities",
+  "credit_ledger",
+]));
+
+export function restoreWriteMethod(table) {
+  return IMMUTABLE_INSERT_TABLES.has(table) ? "insert" : "upsert";
+}
 
 async function loadRows(dir, name) {
   const bytes = await readFile(path.join(dir, `${name}.json.gz`));
@@ -109,9 +173,50 @@ async function loadRows(dir, name) {
 
 async function insertRows(svc, table, rows) {
   for (let from = 0; from < rows.length; from += BATCH) {
-    const { error } = await svc.from(table).upsert(rows.slice(from, from + BATCH));
+    const writer = svc.from(table);
+    const { error } = await writer[restoreWriteMethod(table)](rows.slice(from, from + BATCH));
     if (error) throw new Error(`${table}: ${error.message}`);
   }
+}
+
+async function loadOptionalRows(dir, name) {
+  if (!(await stat(path.join(dir, `${name}.json.gz`)).catch(() => null))?.isFile()) return [];
+  return loadRows(dir, name);
+}
+
+export function prepareRowsForRestore(table, rows, deferredPatches = []) {
+  let prepared = canonicalRowsForRestoreComparison(table, rows);
+  const identity = table === "ca_run_events" ? "id"
+    : ["build_work_events", "data_erasure_events"].includes(table) ? "seq" : null;
+  if (identity && prepared.length > 0) {
+    const sorted = [...prepared].sort((a, b) => Number(a[identity]) - Number(b[identity]));
+    for (let index = 0; index < sorted.length; index += 1) {
+      if (Number(sorted[index][identity]) !== index + 1) {
+        throw new Error(`${table} identity has gaps; exact restore requires a database-native OVERRIDING SYSTEM VALUE path`);
+      }
+    }
+    prepared = sorted.map((source) => {
+      const row = { ...source };
+      delete row[identity];
+      return row;
+    });
+  }
+  const deferred = collectDeferredRestorePatches(table, prepared);
+  deferredPatches.push(...deferred.patches);
+  return deferred.rows;
+}
+
+export function assertCurrentRestoreDependencyGraph(migrationCount = 70, order = RESTORE_ORDER) {
+  const evidence = runtimeCatalogEvidence(migrationCount);
+  const graphHash = sha256Lines(evidence.fkPairs);
+  if (graphHash !== evidence.fkPairsSha256) {
+    throw new Error(`${migrationCount}-migration FK evidence is corrupt: count=${evidence.fkPairs.length} sha256=${graphHash}`);
+  }
+  const validation = validateRestoreOrder(order, evidence.fkPairs);
+  if (validation.missingTables.length || validation.violations.length) {
+    throw new Error(`restore dependency order is invalid: ${JSON.stringify(validation)}`);
+  }
+  return { pairs: evidence.fkPairs.length, sha256: graphHash };
 }
 
 async function main() {
@@ -123,11 +228,24 @@ async function main() {
   const confirm = process.argv.includes("--confirm");
 
   const validation = await validateBackupDirectory(dir);
+  const migrationCount = Number(validation.migrationLedger?.migrations);
+  const evidence = runtimeCatalogEvidence(migrationCount);
+  const activeOrder = RESTORE_ORDER.filter((table) => table in validation.tables);
+  const dependencyGraph = assertCurrentRestoreDependencyGraph(migrationCount, activeOrder);
+  console.log(`restore dependency graph: ${dependencyGraph.pairs} FK pairs (${dependencyGraph.sha256})`);
   console.log(`backup validated: ${validation.files} files`);
+  if (validation.catalogCoverage) {
+    if (validation.catalogCoverage.tables !== evidence.tables.length
+      || validation.catalogCoverage.sha256 !== evidence.tablesSha256) {
+      throw new Error(`backup catalog evidence is not the approved ${migrationCount}-migration production catalog`);
+    }
+    console.log(`backup catalog coverage: ${validation.catalogCoverage.tables} tables (${validation.catalogCoverage.sha256})`);
+  }
   for (const [table, count] of Object.entries(validation.tables)) {
     console.log(`  ${table}: ${count} rows`);
   }
-  const missing = RESTORE_ORDER.filter((table) => !(table in validation.tables));
+  const excluded = new Set(validation.catalogCoverage?.excluded || []);
+  const missing = evidence.tables.filter((table) => !excluded.has(table) && !(table in validation.tables));
   if (missing.length) throw new Error(`backup is missing tables: ${missing.join(", ")}`);
 
   if (!confirm) {
@@ -154,34 +272,42 @@ async function main() {
   }
   console.log(`auth users: ${users.length} ensured (passwords must be reset)`);
 
-  const automationPatches = [];
-  for (const table of RESTORE_ORDER) {
+  const deferredPatches = [];
+  for (const table of activeOrder) {
     let rows = await loadRows(dir, table);
-    if (table === "ca_automations") {
-      for (const row of rows) {
-        if (row.last_run_id) automationPatches.push({ id: row.id, last_run_id: row.last_run_id });
-      }
-      rows = rows.map((row) => ({ ...row, last_run_id: null }));
-    }
+    rows = prepareRowsForRestore(table, rows, deferredPatches);
     await insertRows(svc, table, rows);
     console.log(`  ${table}: ${rows.length} restored`);
   }
-  for (const patch of automationPatches) {
-    const { error } = await svc.from("ca_automations")
-      .update({ last_run_id: patch.last_run_id }).eq("id", patch.id);
-    if (error) throw new Error(`ca_automations patch ${patch.id}: ${error.message}`);
+  for (const patch of deferredPatches) {
+    const { error } = await svc.from(patch.table)
+      .update({ [patch.field]: patch.value }).eq("id", patch.id);
+    if (error) throw new Error(`${patch.table} patch ${patch.id}.${patch.field}: ${error.message}`);
   }
-  if (automationPatches.length) console.log(`  ca_automations: ${automationPatches.length} last_run_id links patched`);
+  if (deferredPatches.length) console.log(`  deferred FK links: ${deferredPatches.length} patched after parent restore`);
 
   const objects = await loadRows(dir, "storage_objects");
   for (const object of objects) {
     const gz = await readFile(path.join(dir, object.file));
     const bytes = gunzipSync(gz);
     const { error } = await svc.storage.from(ARTIFACT_BUCKET)
-      .upload(object.key, bytes, { upsert: true, contentType: "application/octet-stream" });
+      .upload(object.key, bytes, { upsert: true, contentType: object.contentType || "application/octet-stream" });
     if (error) throw new Error(`storage ${object.key}: ${error.message}`);
   }
   console.log(`storage: ${objects.length} objects restored to ${ARTIFACT_BUCKET}`);
+  const filesystemObjects = await loadRows(dir, "filesystem_objects");
+  const filesystemDirectories = await loadOptionalRows(dir, "filesystem_directories");
+  const filesystemRoot = process.env.RESTORE_TARGET_FILESYSTEM_ROOT;
+  if ((filesystemObjects.length || filesystemDirectories.length) && !filesystemRoot) {
+    throw new Error("filesystem restore requires RESTORE_TARGET_FILESYSTEM_ROOT (an isolated empty namespace)");
+  }
+  await restoreFilesystemLayout({
+    filesystemRoot,
+    directories: filesystemDirectories,
+    files: filesystemObjects,
+    readObject: async (object) => gunzipSync(await readFile(path.join(dir, object.file))),
+  });
+  console.log(`filesystem: ${filesystemObjects.length} files and ${filesystemDirectories.length} directories restored under ${filesystemRoot}`);
   console.log("restore complete — run the verification steps in docs/DISASTER-RECOVERY.md");
 }
 

@@ -7,7 +7,14 @@ test("real shell serves Thrallo capabilities and production SPA", { timeout: 15_
   const port = await freePort();
   const child = spawn(process.execPath, ["shell/server/index.mjs"], {
     cwd: process.cwd(),
-    env: { ...process.env, SHELL_PORT: String(port), CODE_AGENT_WORKER: "off" },
+    env: {
+      ...process.env,
+      SHELL_PORT: String(port),
+      CODE_AGENT_WORKER: "off",
+      CODE_AGENT_STANDALONE: "on",
+      CODE_AGENT_STORE: "memory",
+      PREVIEW_MODE: "local",
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";

@@ -19,12 +19,41 @@ import test from "node:test";
 const routesDir = fileURLToPath(new URL("../../shell/server/routes", import.meta.url));
 const indexPath = fileURLToPath(new URL("../../shell/server/index.mjs", import.meta.url));
 
+// Builder V1's mutable-tree route surface is retired, not merely unmounted. Keep an explicit
+// absence guard so one of these endpoints cannot be restored accidentally by copying old code.
+const REMOVED_ROUTE_MODULES = new Set([
+  "android.mjs",
+  "environments.mjs",
+  "foundation.mjs",
+  "generate.mjs",
+  "preview.mjs",
+  "projects.mjs",
+  "publish.mjs",
+  "templates.mjs",
+  "visualBrand.mjs",
+  "analytics.mjs",
+  "capabilities.mjs",
+  "connectWebhook.mjs",
+  "connectors.mjs",
+  "domains.mjs",
+  "features.mjs",
+  "github.mjs",
+  "integrations.mjs",
+  "ownerConsole.mjs",
+  "runtimeCheckout.mjs",
+  "runtimeConnectors.mjs",
+  "runtimeWebhook.mjs",
+  "saasPayments.mjs",
+  "stripeWebhook.mjs",
+]);
+
 // Modules whose handlers MUST be mounted. These are Thrallo's live product surface.
 const MUST_BE_MOUNTED = new Set([
   "aiConnections.mjs",
   "apiTokens.mjs",
   "automations.mjs",
   "builds.mjs",          // restored 2026-08-01 — the incident this guard exists for
+  "buildBudgetApprovals.mjs",
   "codeAgent.mjs",
   "conversations.mjs",
   "diagnostics.mjs",
@@ -44,33 +73,7 @@ const MUST_BE_MOUNTED = new Set([
   "onboarding.mjs",      // Phase 8 — first-run state
 ]);
 
-// Modules deliberately NOT mounted, each with the reason. A bare list would rot; a reason makes
-// the next legacy sweep reviewable instead of guesswork.
-const DELIBERATELY_UNMOUNTED = new Map(Object.entries({
-  "analytics.mjs": "Buildr101 per-app analytics connector; not part of the Thrallo product surface",
-  "android.mjs": "Buildr101 Android/TWA packaging; gated until demanded",
-  "capabilities.mjs": "Buildr101 connector capability runtime; superseded by the Capability Registry",
-  "connectWebhook.mjs": "Stripe Connect webhook for generated-app payments; unmounted until payments return",
-  "connectors.mjs": "Buildr101 connector hub; superseded by the Capability Registry",
-  "domains.mjs": "legacy custom-domain management; Thrallo serves its own ask-gate via previewDomainCheck.mjs",
-  "environments.mjs": "Buildr101 environments/releases; not part of the Thrallo product surface",
-  "features.mjs": "Buildr101 feature-flag matrix; Thrallo gates on plan + capability requirements",
-  "foundation.mjs": "Buildr101 project secrets/releases/environments",
-  "generate.mjs": "legacy synchronous generate endpoint; superseded by the app_build capability",
-  "github.mjs": "legacy PAT-based GitHub export; deliberately replaced by the GitHub App (githubApp.mjs)",
-  "integrations.mjs": "Buildr101 integrations; superseded by the Capability Registry",
-  "ownerConsole.mjs": "Buildr101 owner console; superseded by Thrallo admin analytics",
-  "preview.mjs": "legacy synchronous preview endpoint; superseded by the show_preview capability, which calls previewProvider() directly",
-  "projects.mjs": "handler is legacy; deleteProjectCascade is imported directly by the soft-delete service",
-  "publish.mjs": "handler is legacy; materializeAndPublish is invoked by the publish capability",
-  "runtimeCheckout.mjs": "Buildr101 generated-app checkout runtime",
-  "runtimeConnectors.mjs": "Buildr101 generated-app connector runtime",
-  "runtimeWebhook.mjs": "Buildr101 generated-app webhook runtime",
-  "saasPayments.mjs": "Buildr101 generated-app payments",
-  "stripeWebhook.mjs": "legacy platform billing webhook; superseded by the Thrallo billing webhook",
-  "templates.mjs": "Buildr101 templates; Principle 7 replaces templates with the outcome router",
-  "visualBrand.mjs": "Buildr101 visual brand kits; superseded by the design director",
-}));
+const DELIBERATELY_UNMOUNTED = new Map();
 
 async function routeModules() {
   const modules = new Map();
@@ -82,12 +85,22 @@ async function routeModules() {
   return modules;
 }
 
-test("every route module is classified as mounted or deliberately unmounted", async () => {
+test("every remaining route module is mounted", async () => {
   const modules = await routeModules();
   const unclassified = [...modules.keys()]
     .filter((file) => !MUST_BE_MOUNTED.has(file) && !DELIBERATELY_UNMOUNTED.has(file));
   assert.deepEqual(unclassified, [],
     `classify these in test/code-agent/route-manifest.test.mjs — mounted, or unmounted with a reason: ${unclassified.join(", ")}`);
+});
+
+test("retired Builder V1 route modules remain physically absent", async () => {
+  const files = new Set(await readdir(routesDir));
+  const present = [...REMOVED_ROUTE_MODULES].filter((file) => files.has(file));
+  assert.deepEqual(present, [], `retired route modules restored: ${present.join(", ")}`);
+
+  const index = await readFile(indexPath, "utf8");
+  const referenced = [...REMOVED_ROUTE_MODULES].filter((file) => index.includes(`routes/${file}`));
+  assert.deepEqual(referenced, [], `retired route modules referenced by index.mjs: ${referenced.join(", ")}`);
 });
 
 // A handler that is imported but never CALLED is exactly the state PR #53 left behind, so
@@ -114,7 +127,7 @@ test("every handler of a live route module is actually mounted, not merely impor
     `these handlers are imported but never dispatched — the route body was deleted: ${importedButUnused.join(", ")}`);
 });
 
-test("a deliberately retired route cannot be revived without updating the manifest", async () => {
+test("no deliberately unmounted route modules remain", async () => {
   const modules = await routeModules();
   const index = await readFile(indexPath, "utf8");
   const revived = [];
@@ -130,6 +143,7 @@ test("a deliberately retired route cannot be revived without updating the manife
 });
 
 test("every retirement carries a written reason", () => {
+  assert.equal(DELIBERATELY_UNMOUNTED.size, 0);
   for (const [file, reason] of DELIBERATELY_UNMOUNTED) {
     assert.ok(reason && reason.length > 25, `${file}: retirement needs a real justification`);
   }

@@ -18,10 +18,11 @@ import { SkeletonRows } from "../manage/shared.jsx";
 const UsageDetail = lazy(() => import("./UsageDetail.jsx"));
 
 const RETENTION_TEXT = (days) => (days === null ? "kept indefinitely" : `${days} days`);
+const creditAmount = (value) => Number(value || 0).toLocaleString("en-GB", { maximumFractionDigits: 2 });
 
 export default function UsageTab({ data, onUpgrade, onOpenTab, onChanged, showToast }) {
   const [detail, setDetail] = useState(false);
-  const { plan, budgets, period, capabilities, counts, unlimited, ownerAccount, pastDue } = data;
+  const { plan, budgets, period, capabilities, counts, unlimited, ownerAccount, previewPlan, pastDue, credits = null } = data;
   const resets = formatBillingDate(period?.end);
   const anyAtLimit = !unlimited && Object.values(budgets || {}).some((b) => b.remaining <= 0);
 
@@ -29,12 +30,14 @@ export default function UsageTab({ data, onUpgrade, onOpenTab, onChanged, showTo
     <div className="st-tab">
       <div className="st-headline">
         <div>
-          <div className="st-headline-plan">{plan.name} plan</div>
+          <div className="st-headline-plan">
+            {ownerAccount && !previewPlan ? "Owner account" : `${plan.name} plan`}
+          </div>
           <div className="ct-hint">
             {resets ? <>This period ends {resets}, when every allowance below resets.</> : "Allowances reset monthly."}
           </div>
         </div>
-        {plan.id === "free" && <button className="ct-btn" onClick={onUpgrade}>See plans</button>}
+        {plan.id === "free" && !ownerAccount && <button className="ct-btn" onClick={onUpgrade}>See plans</button>}
       </div>
 
       {pastDue && (
@@ -55,6 +58,24 @@ export default function UsageTab({ data, onUpgrade, onOpenTab, onChanged, showTo
           <strong>An allowance is used up.</strong> New work pauses until {resets || "the period resets"}
           {plan.id === "pro" ? "." : " or the plan changes."}
           {plan.id !== "pro" && <button className="ct-linkish" onClick={onUpgrade}>See plans</button>}
+        </div>
+      )}
+
+      {credits && (
+        <div className="st-section">
+          <h3>Build credits</h3>
+          <div className="st-facts st-credit-facts">
+            <div className="st-fact"><b>{creditAmount(credits.totalAvailable)}</b><span>Available now</span></div>
+            <div className="st-fact"><b>{creditAmount(credits.includedRemaining)}</b><span>Included remaining</span></div>
+            <div className="st-fact"><b>{creditAmount(credits.purchasedRemaining)}</b><span>Additional credits</span></div>
+            <div className="st-fact"><b>{creditAmount(credits.reserved)}</b><span>Held for active work</span></div>
+          </div>
+          <p className="ct-hint st-note">
+            Credits held for active work return automatically when they are not used.
+            {credits.purchaseAvailable
+              ? <><br /><button className="ct-linkish" onClick={() => onOpenTab("billing")}>Buy additional credits</button></>
+              : " Additional-credit purchasing is not available yet."}
+          </p>
         </div>
       )}
 

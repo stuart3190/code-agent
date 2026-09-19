@@ -73,6 +73,10 @@ async function stub(page, conversations) {
 }
 
 const card = (page, title) => page.locator(".ct-project").filter({ hasText: title });
+const actions = async (project) => {
+  await project.getByRole("button", { name: /Project actions for/ }).click();
+  return project.getByRole("menu");
+};
 // Settings, analytics, health, logs, deployments and domains now live in one tabbed dashboard.
 const sheetOf = (page) => page.locator(".ct-projdash");
 
@@ -81,7 +85,7 @@ async function openSettings(page, { domains = [], allowance = UNLIMITED, onDomai
   await page.route("**/domains", (route) => (onDomains ? onDomains(route, state) : route.fulfill({ json: state })));
   await page.route("**/domains/*", (route) => (onDomains ? onDomains(route, state) : route.fulfill({ json: state })));
   await page.goto("/");
-  await card(page, "FocusFlow").getByRole("button", { name: "Project Settings" }).click();
+  await (await actions(card(page, "FocusFlow"))).getByRole("menuitem", { name: "Project settings" }).click();
   await expect(sheetOf(page)).toBeVisible();
   await sheetOf(page).getByRole("tab", { name: "Domains" }).click();
   return state;
@@ -228,9 +232,8 @@ test("a live project is marked LIVE and stands out from a draft", async ({ page 
   await expect(live.locator(".ct-badge.tone-live")).toHaveText("LIVE");
   await expect(live).toHaveClass(/is-live/);
   await expect(card(page, "Draft idea")).not.toHaveClass(/is-live/);
-  // The public URL, its link target and the publish time are all on the card itself.
-  await expect(live.locator(".ct-pubrow-url")).toHaveAttribute("href", SITE.url);
-  await expect(live).toContainText("published 6 minutes ago");
+  await expect(live.locator(".ct-pubrow")).toHaveCount(0);
+  await expect((await actions(live)).getByRole("menuitem", { name: "View live site" })).toHaveAttribute("href", SITE.url);
 });
 
 test("a project with an update pending still says LIVE, because it is", async ({ page }) => {
@@ -252,13 +255,12 @@ test("an active custom domain becomes the address on the card", async ({ page, c
   await stub(page, [withDomain]);
   await page.goto("/");
   const c = card(page, "FocusFlow");
-  await expect(c.locator(".ct-pubrow-url")).toHaveText("shop.example.com");
-  await expect(c.locator(".ct-pubrow-url")).toHaveAttribute("href", "https://shop.example.com");
-  await expect(c.getByRole("link", { name: "Open Live Site" })).toHaveAttribute("href", "https://shop.example.com");
-  await c.getByRole("button", { name: "Copy URL" }).click();
+  const menu = await actions(c);
+  await expect(menu.getByRole("menuitem", { name: "View live site" })).toHaveAttribute("href", "https://shop.example.com");
+  await menu.getByRole("menuitem", { name: "Copy live URL" }).click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("https://shop.example.com");
   // The Thrallo address is still reachable where it belongs.
-  await c.getByRole("button", { name: "Project Settings" }).click();
+  await menu.getByRole("menuitem", { name: "Project settings" }).click();
   await expect(sheetOf(page)).toBeVisible();
   await sheetOf(page).getByRole("tab", { name: "Settings" }).click();
   await expect(sheetOf(page)).toContainText("focusflow.app.thrallo.com");

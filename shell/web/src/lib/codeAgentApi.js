@@ -110,8 +110,16 @@ export const updateBudgets = (body) => request("/api/v1/billing/budgets", {
   method: "POST", body: JSON.stringify(body),
 });
 export const billingPortal = () => request("/api/v1/billing/portal", { method: "POST" });
+export const startTopupCheckout = (idempotencyKey = null) => request("/api/v1/billing/topup", {
+  method: "POST",
+  body: JSON.stringify(idempotencyKey ? { idempotencyKey } : {}),
+});
 // Everything Settings needs, in one read — see shell/server/routes/settings.mjs.
 export const accountSettings = () => request("/api/v1/settings");
+export const accountErasureManifest = () => request("/api/v1/account/erasure-manifest");
+export const permanentlyDeleteAccount = (manifestSha256) => request("/api/v1/account", {
+  method: "DELETE", body: JSON.stringify({ confirm: true, manifestSha256 }),
+});
 // First-run state lives on the server so it does not reappear on a second device.
 export const onboardingState = () => request("/api/v1/onboarding");
 export const updateOnboarding = (action, step = null) => request("/api/v1/onboarding", {
@@ -180,8 +188,8 @@ export const listConversations = ({ tab = null, q = "", offset = 0, limit = 0, s
   const suffix = query.toString();
   return request(`/api/v1/conversations${suffix ? `?${suffix}` : ""}`);
 };
-export const startConversation = (text, workspaceContext = null, modelPref = null) => request("/api/v1/conversations", {
-  method: "POST", body: JSON.stringify({ text, workspaceContext, modelPref }),
+export const startConversation = (text, workspaceContext = null, modelPref = null, buildProfile = null) => request("/api/v1/conversations", {
+  method: "POST", body: JSON.stringify({ text, workspaceContext, modelPref, buildProfile }),
 });
 export const getConversation = (conversationId) => request(`/api/v1/conversations/${conversationId}`);
 export const deleteConversation = (conversationId, { permanent = false } = {}) =>
@@ -196,6 +204,12 @@ export const sendConversationMessage = (conversationId, text, workspaceContext =
 export const listModels = () => request("/api/v1/models");
 export const setConversationModel = (conversationId, value) =>
   request(`/api/v1/conversations/${conversationId}/model`, { method: "POST", body: JSON.stringify({ value }) });
+export const getBuildBudgetApproval = (approvalId) =>
+  request(`/api/v1/build-budget-approvals/${encodeURIComponent(approvalId)}`);
+export const approveBuildBudget = (approvalId) =>
+  request(`/api/v1/build-budget-approvals/${encodeURIComponent(approvalId)}/approve`, { method: "POST" });
+export const declineBuildBudget = (approvalId) =>
+  request(`/api/v1/build-budget-approvals/${encodeURIComponent(approvalId)}/decline`, { method: "POST" });
 export const setPreviewPlan = (plan) => request("/api/v1/owner/preview-plan", {
   method: "POST", body: JSON.stringify({ plan }),
 });
@@ -230,6 +244,36 @@ export async function streamConversationEvents(conversationId, onEvent, { signal
   }
   return after;
 }
+
+// Durable build truth used to reconstruct activity after refresh/reconnect. Unlike conversation
+// progress events, this stream starts with the job's current snapshot and ends at a terminal state.
+export async function streamBuildEvents(jobId, onEvent, { signal } = {}) {
+  const token = await accessToken();
+  const response = await fetch(`${apiBase()}/api/builds/${encodeURIComponent(jobId)}/events`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "text/event-stream" },
+    signal,
+  });
+  if (!response.ok) throw new Error(`Build stream failed (${response.status})`);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let boundary;
+    while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+      const block = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const name = block.split("\n").find((line) => line.startsWith("event: "))?.slice(7) || "message";
+      const data = block.split("\n").find((line) => line.startsWith("data: "));
+      if (data) onEvent(name, JSON.parse(data.slice(6)));
+    }
+  }
+}
+
+export const projectBuildStatus = (projectId) =>
+  request(`/api/projects/${encodeURIComponent(projectId)}/active-build`);
 export const listAutomations = () => request("/api/v1/automations");
 export const createAutomation = (body) => request("/api/v1/automations", {
   method: "POST", body: JSON.stringify(body),
@@ -375,17 +419,60 @@ export const exportAnalytics = (projectId, { days = 30, format = "json" } = {}) 
     `thrallo-analytics.${format}`);
 export const projectHealth = (projectId) => request(`/api/v1/projects/${projectId}/health`);
 
-// Project logs. The stream and export are plain URLs because EventSource and <a download> take
-// URLs, not fetch options — both still go through the same owner-scoped routes.
+// Project logs. Streaming uses authenticated fetch because native EventSource cannot attach the
+// bearer token required by the owner-scoped server route.
 export const projectLogs = (projectId, params = {}) => {
   const query = new URLSearchParams(Object.entries(params).filter(([, v]) => v));
   return request(`/api/v1/projects/${projectId}/logs?${query}`);
 };
 export const projectBuildRuns = (projectId) => request(`/api/v1/projects/${projectId}/logs/runs`);
-export const logStreamUrl = (projectId, params = {}) => {
-  const query = new URLSearchParams(Object.entries(params).filter(([, v]) => v));
-  return `${apiBase()}/api/v1/projects/${projectId}/logs/stream?${query}`;
-};
+export async function streamProjectLogs(projectId, params, onLog, {
+  signal, reconnectDelayMs = 1_000, maxReconnectDelayMs = 15_000,
+} = {}) {
+  let since = params?.since || null;
+  let delay = reconnectDelayMs;
+  while (!signal?.aborted) {
+    const token = await accessToken();
+    const query = new URLSearchParams(Object.entries({ ...params, since }).filter(([, value]) => value));
+    try {
+      const response = await fetch(`${apiBase()}/api/v1/projects/${projectId}/logs/stream?${query}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "text/event-stream" }, signal,
+      });
+      if (response.status === 401) {
+        const error = new Error("Your log session expired. Sign in again to continue.");
+        error.code = "stream_auth_expired"; throw error;
+      }
+      if (!response.ok || !response.body) throw new Error(`Log stream failed (${response.status})`);
+      const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
+      while (!signal?.aborted) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+        let boundary;
+        while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+          const block = buffer.slice(0, boundary); buffer = buffer.slice(boundary + 2);
+          const type = block.split("\n").find((line) => line.startsWith("event:"))?.slice(6).trim();
+          const raw = block.split("\n").filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice(5).trimStart()).join("\n");
+          if (type !== "log" || !raw) continue;
+          const entry = JSON.parse(raw);
+          since = entry.at || since; onLog(entry);
+        }
+      }
+      delay = reconnectDelayMs;
+    } catch (error) {
+      if (signal?.aborted || error?.name === "AbortError") return { stopped: true, since };
+      if (error?.code === "stream_auth_expired") throw error;
+    }
+    if (signal?.aborted) break;
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, delay);
+      signal?.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+    });
+    delay = Math.min(maxReconnectDelayMs, Math.max(reconnectDelayMs, delay * 2));
+  }
+  return { stopped: true, since };
+}
 // Exports go through the authenticated download, not a bare link. A link sends no Authorization
 // header, so these buttons were saving a 401 JSON body under a .csv name.
 export const exportLogs = (projectId, params = {}) => {

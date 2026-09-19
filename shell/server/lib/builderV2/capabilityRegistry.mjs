@@ -7,11 +7,15 @@
 // functions and state enums only, no JSX, no styles — visual identity belongs to the design
 // system, which is how two sites sharing every capability still look nothing alike.
 
-export const CAPABILITIES = Object.freeze({
+const LEGACY_CAPABILITIES = Object.freeze({
   crud: {
     name: "crud",
     version: "1.0.0",
     package: "src/lib/capabilities/crud.js",
+    // WP5 named this capability `entities` (audit §7.1). It is the same capability and the same
+    // module, so the new name is an ALIAS — exactly as `auth` aliases `session` — rather than a
+    // second registry entry that could drift from this one.
+    aliases: ["entities"],
     interface: ["makeEntityStore"],
     storeInterface: ["list", "get", "create", "update", "remove", "count", "subscribe"],
     entities: [],            // generic — binds to whatever the contract declares
@@ -20,9 +24,13 @@ export const CAPABILITIES = Object.freeze({
   },
   session: {
     name: "session",
-    version: "1.0.0",
+    version: "1.1.0",
     package: "src/lib/capabilities/session.js",
-    interface: ["ensureSession", "ensureVisitorSession", "currentUser", "signOut"],
+    aliases: ["auth"],
+    interface: [
+      "ensureSession", "ensureVisitorSession", "currentUser", "signUp", "signIn",
+      "signOut", "resetPassword", "confirmReset",
+    ],
     entities: [],
     uiContract: [],
     upgradePolicy: "replace-on-iterate",
@@ -45,6 +53,14 @@ export const CAPABILITIES = Object.freeze({
     uiContract: ["idle", "invalid", "over_capacity", "confirmed_with_reference", "cancel_confirm_prompt", "cancelled"],
     upgradePolicy: "replace-on-iterate",
   },
+  wizard: {
+    name: "wizard", version: "1.0.0", package: "src/lib/capabilities/wizard.js",
+    interface: ["makeWizardMachine", "makeWizardPersistence"],
+    systemInterface: ["getState", "subscribe", "hydrate", "restore", "setValue", "select", "validateCurrent", "next", "back", "goTo", "confirm", "cancel", "reset"],
+    entities: [],
+    uiContract: ["step_progress", "selection", "validation", "confirmation", "cancelled", "restored"],
+    upgradePolicy: "replace-on-iterate",
+  },
   contact: {
     name: "contact", version: "1.0.0", package: "src/lib/capabilities/forms.js",
     interface: ["makeContactForm"], entities: ["contactMessage"],
@@ -55,7 +71,276 @@ export const CAPABILITIES = Object.freeze({
     interface: ["makeNewsletter"], entities: ["newsletterSignup"],
     uiContract: ["idle", "invalid", "success", "duplicate"], upgradePolicy: "replace-on-iterate",
   },
+  // WP4 — real accounts. Profiles, memberships, roles and administration are platform-owned
+  // through the app-accounts service; a role field on a business record is never authority.
+  accounts: {
+    name: "accounts", version: "1.0.0", package: "src/lib/modules/accounts.js",
+    interface: ["createAccountsController"], entities: [],
+    uiContract: ["idle", "loading", "ready", "error"], upgradePolicy: "replace-on-iterate",
+  },
+  authorization: {
+    name: "authorization", version: "1.1.0", package: "src/lib/modules/accounts.js",
+    interface: ["createAuthorization"], entities: [],
+    uiContract: [], upgradePolicy: "replace-on-iterate",
+  },
+  admin: {
+    name: "admin", version: "1.0.0", package: "src/lib/modules/accounts.js",
+    interface: ["createAdmin"], entities: [],
+    uiContract: ["idle", "loading", "ready", "error", "denied"], upgradePolicy: "replace-on-iterate",
+  },
+  // WP8. Settings are typed keys with declared scopes and defaults, never a fabricated singleton
+  // record; history is read-only to the application because the platform is the only honest
+  // author of "who changed what".
+  settings: {
+    name: "settings", version: "1.0.0", package: "src/lib/modules/settings.js",
+    interface: ["compileSettings", "createSettingsController"], entities: [],
+    uiContract: ["idle", "loading", "ready", "error", "denied"], upgradePolicy: "replace-on-iterate",
+  },
+  // WP15. A filtered read over durable records is a compiled query the backend executes, not a
+  // predicate over a page the browser happened to load. Registering it is what lets the contract
+  // say so, and what stops the last generic fallthrough in the retained corpus.
+  query: {
+    name: "query", version: "1.0.0", package: "src/lib/modules/query.js",
+    interface: ["compileQuery", "runQuery", "matchesQuery"], entities: [],
+    uiContract: ["idle", "loading", "ready", "empty", "error"], upgradePolicy: "replace-on-iterate",
+  },
+  audit: {
+    name: "audit", version: "1.0.0", package: "src/lib/modules/audit.js",
+    interface: ["createHistoryController"], entities: [],
+    uiContract: ["idle", "loading", "ready", "empty", "error", "denied"], upgradePolicy: "replace-on-iterate",
+  },
 });
+
+const metadata = Object.freeze({
+  crud: {
+    supportedOperations: ["list", "get", "create", "update", "remove", "count", "subscribe"],
+    requiredInputs: { factory: ["entityType"], operations: { get: ["id"], create: ["values"], update: ["id", "partialValues"], remove: ["id"] } },
+    outputs: { records: "flat entity records", mutations: "persisted entity record or void" },
+    stateOwnership: { owns: "entity records", scope: "application and authenticated or visitor owner" },
+    persistenceSemantics: { durable: true, owner: "generated backend entity API", mergeUpdates: true, browserStorage: false },
+    dependencies: ["session"], compatibleUiInteractionPrimitives: ["field", "selection", "action", "status"],
+    verificationSemantics: { actions: ["create", "read", "update", "delete"], stateChange: "entity record mutation", durableMutation: true, observe: ["returned record", "reload or reopen read"] },
+    testContract: ["create", "read", "update", "delete"],
+  },
+  session: {
+    supportedOperations: ["ensure", "recover", "current", "signUp", "signIn", "signOut", "resetPassword", "confirmReset"],
+    requiredInputs: { factory: [], operations: {
+      signUp: ["email", "password"], signIn: ["email", "password"],
+      resetPassword: ["email"], confirmReset: ["email", "code", "newPassword"],
+    } },
+    operationOutputs: {
+      ensure: ["session"], recover: ["session"], current: ["current"],
+      signUp: ["session"], signIn: ["session"], signOut: ["signedOut"],
+      resetPassword: ["resetRequested"], confirmReset: ["session"],
+    },
+    outputs: { session: "authenticated user or app-scoped visitor", current: "user or null", signedOut: "signed-out session state", resetRequested: "password reset request accepted" },
+    stateOwnership: { owns: "authentication and session identity", scope: "browser and generated backend" },
+    persistenceSemantics: { durable: true, owner: "generated auth runtime", browserStorage: "runtime-owned only" },
+    dependencies: [], compatibleUiInteractionPrimitives: ["field", "action", "status"],
+    verificationSemantics: { actions: ["establish", "recover", "signUp", "signIn", "signOut", "resetPassword", "confirmReset"], stateChange: "session identity", durableMutation: false, observe: ["authorized operation succeeds", "current user", "signed-out state"] },
+    testContract: ["current", "ensure", "recover", "signUp", "signIn", "signOut", "resetPassword", "confirmReset"],
+  },
+  roles: {
+    supportedOperations: ["isOwner", "requireOwner"],
+    requiredInputs: { factory: [], operations: { isOwner: ["record", "user"], requireOwner: ["record", "user"] } },
+    outputs: { authorization: "boolean or authorized record" }, stateOwnership: { owns: "no state", scope: "record ownership decision" },
+    persistenceSemantics: { durable: false, owner: "RLS enforcement with a matching UI helper", browserStorage: false },
+    dependencies: ["session"], compatibleUiInteractionPrimitives: ["action"],
+    verificationSemantics: { actions: ["authorize", "reject"], stateChange: "none", durableMutation: false, observe: ["allowed action", "permission error"] },
+    testContract: ["owner allowed", "non-owner rejected"],
+  },
+  booking: {
+    supportedOperations: ["createBooking", "getBooking", "listBookings", "cancelBooking", "remaining"],
+    requiredInputs: { factory: ["entity", "slots"], operations: { createBooking: ["date", "slotId", "name", "email"], getBooking: ["reference"], cancelBooking: ["reference"] } },
+    outputs: { booking: "booking with stable reference and status", capacity: "remaining quantity or unknown", result: "ok, invalid, or over_capacity" },
+    stateOwnership: { owns: "booking records, capacity admission, reference and cancellation status", scope: "configured booking entity" },
+    persistenceSemantics: { durable: true, owner: "booking capability through generated backend", conflictPolicy: "deterministic admission rank", browserStorage: false },
+    dependencies: ["session"], compatibleUiInteractionPrimitives: ["field", "selection", "action", "status"],
+    verificationSemantics: { actions: ["create", "lookup", "list", "cancel", "check_capacity"], stateChange: "booking status, reference, and capacity", durableMutation: true, observe: ["reference", "capacity refusal", "cancelled status", "reload lookup"] },
+    testContract: ["invalid refused", "create and lookup", "capacity race", "cancel and recover"],
+  },
+  wizard: {
+    supportedOperations: ["getState", "subscribe", "hydrate", "restore", "setValue", "select", "validateCurrent", "next", "back", "goTo", "confirm", "cancel", "reset", "save", "load", "clear"],
+    requiredInputs: { factory: ["id", "steps"], operations: { setValue: ["field", "value"], goTo: ["stepId"], restore: ["optionalState"] } },
+    outputs: { state: "immutable workflow snapshot", confirmation: "terminal confirmation payload", persistence: "saved or restored workflow state" },
+    stateOwnership: { owns: "workflow draft, step, validation, and terminal state", scope: "stable flow id" },
+    persistenceSemantics: { durable: true, owner: "wizard persistence through generated backend", orderedWrites: true, browserStorage: false },
+    dependencies: ["session"], compatibleUiInteractionPrimitives: ["field", "selection", "flow_advance", "action", "status"],
+    verificationSemantics: { actions: ["transition", "review", "confirm", "cancel", "restore", "reset"], stateChange: "workflow snapshot and terminal status", durableMutation: true, observe: ["step and progress", "review values", "terminal state", "reload restore"] },
+    testContract: ["transition", "review", "terminal state", "restore", "reset"],
+  },
+  contact: {
+    supportedOperations: ["submitContact"], requiredInputs: { factory: ["entity"], operations: { submitContact: ["name", "email", "message"] } },
+    outputs: { result: "sent or invalid", message: "persisted contact record" }, stateOwnership: { owns: "contact validation and record", scope: "configured contact entity" },
+    persistenceSemantics: { durable: true, owner: "contact capability through generated backend", browserStorage: false },
+    dependencies: ["session"], compatibleUiInteractionPrimitives: ["field", "action", "status"],
+    verificationSemantics: { actions: ["validate", "submit"], stateChange: "contact result and record", durableMutation: true, observe: ["field problems", "sent state", "persisted record"] },
+    testContract: ["invalid refused", "valid persisted", "sent observed"],
+  },
+  newsletter: {
+    supportedOperations: ["subscribe"], requiredInputs: { factory: ["entity"], operations: { subscribe: ["email"] } },
+    outputs: { result: "success, invalid, or duplicate", signup: "persisted signup record" }, stateOwnership: { owns: "newsletter validation, duplicate policy, and record", scope: "configured signup entity" },
+    persistenceSemantics: { durable: true, owner: "newsletter capability through generated backend", duplicatePolicy: "normalized email", browserStorage: false },
+    dependencies: ["session"], compatibleUiInteractionPrimitives: ["field", "action", "status"],
+    verificationSemantics: { actions: ["validate", "subscribe", "reject_duplicate"], stateChange: "signup result and record", durableMutation: true, observe: ["invalid", "success", "duplicate"] },
+    testContract: ["invalid refused", "valid persisted", "duplicate refused"],
+  },
+  accounts: {
+    supportedOperations: ["ensure", "reload", "getMe", "updateMe", "getMember"],
+    requiredInputs: { factory: [], operations: { updateMe: ["values"], getMember: ["email"] } },
+    operationOutputs: { ensure: ["account"], reload: ["account"], getMe: ["account"], updateMe: ["profile"], getMember: ["member"] },
+    outputs: { account: "principal, membership (role/status), profile and allowed actions of the signed-in member", profile: "the member's self-editable profile", member: "one membership (email, role, status)" },
+    stateOwnership: { owns: "account profile and membership state", scope: "signed-in member of this application" },
+    persistenceSemantics: { durable: true, owner: "app-accounts service (app_profiles, app_memberships)", browserStorage: false },
+    dependencies: ["session"], compatibleUiInteractionPrimitives: ["field", "action", "status"],
+    verificationSemantics: { actions: ["load", "updateProfile", "lookup"], stateChange: "profile and membership", durableMutation: true, observe: ["profile after reload", "membership role and status", "allowed actions"] },
+    testContract: ["me", "updateMe allow-listed", "reload keeps profile", "suspended denied"],
+  },
+  authorization: {
+    supportedOperations: ["can", "authorize", "explainAllowedActions", "role", "isOwner", "requireOwner"],
+    requiredInputs: { factory: [], operations: { can: ["action"], authorize: ["action"], isOwner: ["record", "user"], requireOwner: ["record", "user"] } },
+    operationOutputs: { can: ["decision"], authorize: ["decision"], explainAllowedActions: ["allowedActions"], role: ["role"] },
+    outputs: { decision: "allowed with a reason when denied", allowedActions: "actions the policy grants the actor", role: "the actor's membership role", authorization: "boolean or authorized record" },
+    stateOwnership: { owns: "no state", scope: "policy decision over the server-derived actor" },
+    persistenceSemantics: { durable: false, owner: "server policy (app-accounts) plus RLS; the client evaluation only shapes UI", browserStorage: false },
+    dependencies: ["session"], compatibleUiInteractionPrimitives: ["action", "status"],
+    verificationSemantics: { actions: ["authorize", "reject"], stateChange: "none", durableMutation: false, observe: ["allowed action visible", "denied action absent or refused", "server denial"] },
+    testContract: ["member allowed", "member denied", "admin allowed", "visitor denied", "own membership immutable"],
+  },
+  admin: {
+    supportedOperations: ["listMembers", "inviteMember", "provisionMember", "setMemberRole", "setMemberStatus"],
+    requiredInputs: { factory: [], operations: { inviteMember: ["email", "role"], provisionMember: ["email", "role"], setMemberRole: ["email", "role"], setMemberStatus: ["email", "status"] } },
+    operationOutputs: { listMembers: ["members"], inviteMember: ["member"], provisionMember: ["member"], setMemberRole: ["member"], setMemberStatus: ["member"] },
+    outputs: { members: "every membership of the application", member: "the membership after the command" },
+    stateOwnership: { owns: "memberships: invitations, roles and status", scope: "application, administered by a member the policy grants members.* actions" },
+    persistenceSemantics: { durable: true, owner: "app-accounts service (app_memberships, app_membership_events)", browserStorage: false },
+    dependencies: ["session", "accounts", "authorization"], compatibleUiInteractionPrimitives: ["field", "selection", "action", "status"],
+    verificationSemantics: { actions: ["list", "invite", "provision", "changeRole", "suspend", "reinstate"], stateChange: "membership rows", durableMutation: true, observe: ["member listed", "role after reload", "suspended member denied", "non-admin denied"] },
+    testContract: ["non-admin denied", "admin invites", "role change persists", "suspension denies sign-in", "cross-app isolation", "last admin protected"],
+  },
+  settings: {
+    supportedOperations: ["get", "all", "set", "reset"],
+    requiredInputs: { factory: ["schema"], operations: { get: ["key"], set: ["key", "value"], reset: ["key"] } },
+    operationOutputs: { get: ["value"], all: ["values"], set: ["value"], reset: ["value"] },
+    outputs: { value: "the current value of one declared key, or its declared default", values: "every declared key in one scope" },
+    stateOwnership: { owns: "application, workspace and member settings", scope: "the requested scope, isolated server-side" },
+    persistenceSemantics: { durable: true, owner: "app-accounts service (app_settings)", browserStorage: false },
+    dependencies: ["session", "authorization"], compatibleUiInteractionPrimitives: ["field", "selection", "action", "status"],
+    verificationSemantics: { actions: ["read", "change", "reset"], stateChange: "setting values", durableMutation: true, observe: ["declared default before any write", "changed value after reload", "member denied an application value"] },
+    testContract: ["declared default", "typed coercion", "scope isolation", "administration required", "reload"],
+  },
+  query: {
+    supportedOperations: ["query", "count", "page"],
+    requiredInputs: { factory: ["entity"], operations: { query: ["filters"], page: ["cursor"] } },
+    operationOutputs: { query: ["records"], count: ["total"], page: ["records"] },
+    outputs: { records: "the records matching a compiled query, across pages", total: "how many records match" },
+    stateOwnership: { owns: "the active query and its results", scope: "one entity collection for the signed-in actor" },
+    persistenceSemantics: { durable: true, owner: "entities backend through a compiled query", browserStorage: false },
+    dependencies: ["crud"], compatibleUiInteractionPrimitives: ["field", "selection", "action", "status"],
+    verificationSemantics: { actions: ["filter", "search", "sort", "clear", "page"], stateChange: "visible records", durableMutation: false, observe: ["filtered results across pages", "a cleared filter restores the full set"] },
+    testContract: ["allow-listed fields", "stable pagination", "filtering across pages", "cleared filters"],
+  },
+  audit: {
+    supportedOperations: ["list", "redact"],
+    requiredInputs: { factory: [], operations: { list: [] } },
+    operationOutputs: { list: ["events"] },
+    outputs: { events: "authorised history newest first, already redacted" },
+    stateOwnership: { owns: "no state: history is written by the platform", scope: "events this application's policy lets the actor read" },
+    persistenceSemantics: { durable: true, owner: "app-accounts service (app_audit_events)", browserStorage: false },
+    dependencies: ["session", "authorization"], compatibleUiInteractionPrimitives: ["selection", "status"],
+    verificationSemantics: { actions: ["list"], stateChange: "none", durableMutation: false, observe: ["a change is attributed", "no sensitive value appears", "a member without the grant sees none"] },
+    testContract: ["append-only", "attribution", "redaction", "authorised read", "paging"],
+  },
+  "interaction-primitives": {
+    supportedOperations: ["subscribe_state", "run_action", "field", "selection", "action", "flow_advance", "status"],
+    requiredInputs: { factory: [], operations: { field: ["name", "value", "onChange"], selection: ["name", "value", "onSelect"], action: ["name", "onActivate"] } },
+    outputs: { bindings: "accessible props with stable machine identity", state: "reactive capability snapshot or action state" },
+    stateOwnership: { owns: "ephemeral React action status only", scope: "rendered component" },
+    persistenceSemantics: { durable: false, owner: "none", browserStorage: false },
+    dependencies: [], compatibleUiInteractionPrimitives: ["field", "selection", "action", "flow_advance", "status"],
+    verificationSemantics: { actions: ["fill", "select", "activate", "advance", "observe"], stateChange: "control value, selection, or action result", durableMutation: false, observe: ["opaque control identity", "accessible name", "selected, value, or status transition"] },
+    testContract: ["field accepts value", "selection becomes observable", "action changes state", "status announced"],
+  },
+});
+
+const interactionPrimitives = Object.freeze({
+  name: "interaction-primitives", version: "1.0.0", package: "src/lib/capabilities/react.js",
+  interface: ["useCapabilityState", "useCapabilityAction", "useSemanticField", "useSemanticSelection", "useSemanticAction", "useFlowAdvance", "useStatusRegion"],
+  entities: [], uiContract: [], upgradePolicy: "replace-on-iterate",
+});
+
+// A method name is not enough to establish semantic ownership. In particular, CRUD's `update`
+// persists values supplied by its caller; it does not calculate, generate or otherwise produce
+// those values. Capability-graph derivation consults this declaration before it lets a registered
+// capability satisfy a functional responsibility.
+const RESPONSIBILITY_SEMANTICS = Object.freeze({
+  crud: Object.freeze({
+    persistence: Object.freeze(["list", "get", "create", "update", "remove", "count", "subscribe"]),
+    functional: Object.freeze([]),
+  }),
+  session: Object.freeze({
+    persistence: Object.freeze(["signUp", "signIn", "signOut", "resetPassword", "confirmReset"]),
+    functional: Object.freeze(["ensure", "recover", "current", "signUp", "signIn", "signOut", "resetPassword", "confirmReset"]),
+  }),
+  roles: Object.freeze({ persistence: Object.freeze([]), functional: Object.freeze(["isOwner", "requireOwner"]) }),
+  booking: Object.freeze({
+    persistence: Object.freeze(["createBooking", "getBooking", "listBookings", "cancelBooking"]),
+    functional: Object.freeze(["createBooking", "getBooking", "listBookings", "cancelBooking", "remaining"]),
+  }),
+  wizard: Object.freeze({
+    persistence: Object.freeze(["hydrate", "restore", "save", "load", "clear"]),
+    functional: Object.freeze(["getState", "subscribe", "hydrate", "restore", "setValue", "select", "validateCurrent", "next", "back", "goTo", "confirm", "cancel", "reset", "save", "load", "clear"]),
+  }),
+  contact: Object.freeze({ persistence: Object.freeze(["submitContact"]), functional: Object.freeze(["submitContact"]) }),
+  newsletter: Object.freeze({ persistence: Object.freeze(["subscribe"]), functional: Object.freeze(["subscribe"]) }),
+  accounts: Object.freeze({
+    persistence: Object.freeze(["updateMe"]),
+    functional: Object.freeze(["ensure", "reload", "getMe", "updateMe", "getMember"]),
+  }),
+  authorization: Object.freeze({
+    persistence: Object.freeze([]),
+    functional: Object.freeze(["can", "authorize", "explainAllowedActions", "role", "isOwner", "requireOwner"]),
+  }),
+  admin: Object.freeze({
+    persistence: Object.freeze(["inviteMember", "provisionMember", "setMemberRole", "setMemberStatus"]),
+    functional: Object.freeze(["listMembers", "inviteMember", "provisionMember", "setMemberRole", "setMemberStatus"]),
+  }),
+  "interaction-primitives": Object.freeze({
+    persistence: Object.freeze([]),
+    functional: Object.freeze(["subscribe_state", "run_action", "field", "selection", "action", "flow_advance", "status"]),
+  }),
+  settings: Object.freeze({
+    persistence: Object.freeze(["set", "reset"]),
+    functional: Object.freeze(["get", "all", "set", "reset"]),
+  }),
+  // There is deliberately no append: an application that could write its own history could write
+  // a false one, so the platform appends and the application only reads.
+  audit: Object.freeze({ persistence: Object.freeze([]), functional: Object.freeze(["list", "redact"]) }),
+  query: Object.freeze({
+    persistence: Object.freeze(["query", "count", "page"]),
+    functional: Object.freeze(["query", "count", "page"]),
+  }),
+});
+
+/** The one machine-readable inventory of reusable behavior that actually ships. */
+export const CAPABILITIES = Object.freeze(Object.fromEntries(
+  Object.entries({ ...LEGACY_CAPABILITIES, "interaction-primitives": interactionPrimitives })
+    .map(([id, entry]) => [id, Object.freeze({
+      id, ...entry, ...metadata[id],
+      responsibilitySemantics: RESPONSIBILITY_SEMANTICS[id],
+      implementation: Object.freeze({ mode: "deterministic", proven: true, protected: true }),
+    })]),
+));
+
+const CAPABILITY_ALIASES = new Map(Object.entries(CAPABILITIES).flatMap(([id, entry]) => [
+  [id.toLowerCase(), id],
+  ...(entry.aliases || []).map((alias) => [String(alias).toLowerCase(), id]),
+]));
+
+/** Resolve a structured contract capability name to the one registry-owned capability id. */
+export function canonicalCapabilityId(value) {
+  return CAPABILITY_ALIASES.get(String(value || "").trim().toLowerCase()) || null;
+}
 
 /** Validate a contract's capability bindings against the registry. */
 export function validateBindings(bindings = []) {
@@ -76,11 +361,128 @@ export function validateBindings(bindings = []) {
 // usage lint (capabilityLint.mjs pins the same table; a drift test compares both against
 // the real factories). Live run 3 failed on contactForm.submit vs submitContact because
 // the brief named the factories but never their methods.
+// React bindings for the stores above. Advertised so generated code assembles the wiring
+// instead of reinventing it — and so a capability method may simply be HANDED to a hook.
+export const REACT_BINDINGS = [
+  "useCapabilityState(store, selector?) → live state via useSyncExternalStore(store.subscribe, store.getState)",
+  "useCapabilityAction(fn) → { run, pending, error, result } with stale-result protection",
+  "useSemanticField({ name, label, value, onChange, type }) → { labelProps, inputProps }; onChange receives the semantic value directly, NEVER a DOM event",
+  "useSemanticSelection({ name, value, onSelect, actionName? }) → { groupProps, optionProps(option) }; keeps the native button role, reports selection via aria-pressed, and actionName binds the same option as a contracted flow-entry action",
+  "useSemanticAction({ name, label, onActivate }) → { buttonProps } for a contracted action; label freely",
+  "useFlowAdvance({ label, onActivate, disabled }) → { buttonProps } for the control that moves a multi-step flow FORWARD; label freely",
+  "useStatusRegion({ label }) → { statusProps } announcing a state transition",
+];
+
+/**
+ * PREFERRED ASSEMBLY PATTERNS — the shortest correct way to build each shape this contract
+ * actually needs. Selected from the contract, never dumped wholesale.
+ *
+ * A live qualification hand-wired a selection control whose clicked option never gained an
+ * observable selected state; the value never propagated and review, confirmation and recovery
+ * all failed behind it. The binding that prevents that already existed and was listed as an
+ * API. Listing an API is not the same as showing the assembly, so each pattern below is a
+ * complete, copyable few lines. None of them constrains layout, styling or markup.
+ */
+const ASSEMBLY_PATTERNS = Object.freeze({
+  selection: {
+    when: "the contract has selectable choices (a size, tier, variant, stage, status, method, slot…)",
+    lines: [
+      "SELECTABLE STATE — selected state must be observable, or the choice cannot be verified:",
+      '  const choice = useSemanticSelection({ name: "<field>", value: state.<field>, onSelect: (v) => store.select("<field>", v) });',
+      "  <div {...choice.groupProps}>",
+      "    {options.map((o) => <button key={o} {...choice.optionProps(o)}>{label(o)}</button>)}",
+      "  </div>",
+      '  // optionProps supplies name/aria-pressed and keeps a button; when the choice is also a contracted flow entry, pass actionName: "<contract control accessibleName>" to carry both identities.',
+    ],
+  },
+  flowAdvance: {
+    when: "a flow spans more than one step or screen, so later controls are reached by advancing",
+    lines: [
+      "FORWARD CONTROL — if the flow spans screens, every later control is behind this one:",
+      '  const advance = useFlowAdvance({ label: "<any wording>", disabled: !canContinue, onActivate: () => <next>() });',
+      '  <button {...advance.buttonProps}>{/* any label, icon or language */}</button>   // FORWARD only: back and commit stay useSemanticAction({ name })',
+    ],
+  },
+  capabilityState: {
+    when: "a capability store holds state a screen renders",
+    lines: [
+      "CAPABILITY STORE STATE — one source of truth, no local mirror of store state:",
+      "  const state = useCapabilityState(<store>);           // or (<store>, (s) => s.values)",
+      "  // Re-renders on every store change. Never copy store state into useState.",
+    ],
+  },
+  field: {
+    when: "the contract collects typed input",
+    lines: [
+      "FORM FIELD — an accessible name is what makes a field findable:",
+      '  const field = useSemanticField({ name: "<field>", value: draft.<field>, type: "<text|email|tel|number>", onChange: (v) => setDraft({ ...draft, <field>: v }) });',
+      "  <label {...field.labelProps} /> <input {...field.inputProps} />",
+      "  // onChange receives v directly. Never read v.target.value or v.currentTarget.value.",
+    ],
+  },
+  entities: {
+    when: "the app reads or writes contracted records",
+    lines: [
+      "ENTITY ACCESS — call the capability directly:",
+      "  await store.create(values) / store.get(id) / store.list({ filters }) / store.update(id, values)",
+      "  // The runtime establishes the app's visitor session before any protected operation.",
+      "  // Do NOT call ensureVisitorSession() first, and do NOT use db.entity() for a capability-owned type.",
+    ],
+  },
+  status: {
+    when: "a state transition must become visible",
+    lines: [
+      "ANNOUNCED OUTCOME — a transition the browser can observe:",
+      '  const status = useStatusRegion({ label: "<what this reports>" });',
+      "  <p {...status.statusProps}>{message}</p>",
+    ],
+  },
+  terminalReset: {
+    when: "a durable flow can finish (confirmed) or be abandoned (cancelled)",
+    lines: [
+      "FINISHED FLOW — a confirmed or cancelled flow is TERMINAL: it refuses further edits, and it",
+      "is restored in that state on the next visit. Render the outcome, and give an explicit way to",
+      "begin a new one — otherwise a returning visitor is stuck on the finished record:",
+      "  const state = useCapabilityState(<flowStore>);",
+      "  const finished = state.status === \"confirmed\" || state.status === \"cancelled\";",
+      "  {finished && <>",
+      "    <p>…show the reference and its final status…</p>",
+      "    <button onClick={() => <flowStore>.reset()}>Start a new <thing></button>",
+      "  </>}",
+      "  // reset() clears the durable record and returns the flow to its first step.",
+      "  // Never reset implicitly on load: that would silently discard a real outcome.",
+    ],
+  },
+});
+
+/**
+ * The short, contract-derived assembly brief. Only the shapes this build needs appear, so the
+ * prompt grows by a few lines rather than another instruction block.
+ *
+ * `needs` is a plain fact set derived upstream from the interaction contract — no domain words.
+ */
+export function preferredAssemblyBrief(needs = {}) {
+  const selected = Object.entries(ASSEMBLY_PATTERNS)
+    .filter(([key]) => needs[key])
+    .map(([, pattern]) => pattern.lines.join("\n"));
+  if (!selected.length) return "";
+  return [
+    "PREFERRED ASSEMBLY (supported bindings from ./lib/capabilities — shortest correct path;",
+    "visual design remains entirely yours):",
+    ...selected,
+  ].join("\n");
+}
+
 const INSTANCE_METHODS = Object.freeze({
   crud: "makeEntityStore(type) → { list, get, create, update, remove, count, subscribe }",
+  session: "signUp({ email, password }); signIn({ email, password }); resetPassword({ email }); confirmReset({ email, code, newPassword }); currentUser(); signOut() — credential methods take ONE object, never positional arguments",
   booking: "makeBookingSystem(...) → { createBooking, getBooking, listBookings, cancelBooking, remaining }",
+  wizard: "makeWizardMachine({ id, steps, onConfirm }) → durable app-scoped state that HYDRATES ITSELF on first subscribe; getState()/subscribe snapshots expose canonical { stepId, stepIndex, values } plus compatible step/currentStep/current aliases; restore() reloads durable state and restore({ stepId, values, ... }) atomically adopts and saves a compatible state; methods { getState, subscribe, hydrate, restore, setValue, select, validateCurrent, next, back, goTo, confirm, cancel, reset }",
   contact: "makeContactForm(...) → { submitContact(fields) }   // NOT .submit",
   newsletter: "makeNewsletter(...) → { subscribe(email) }",
+  accounts: "composed `accountsController` → { ensure, reload, updateMe(values), getMember({ email }), getState, subscribe } — the signed-in member's profile/membership; never a generic entity store",
+  authorization: "composed `authorization` → { can(action, target?) → { allowed, reason }, authorize(action), explainAllowedActions(), role() } plus isOwner/requireOwner — the server enforces independently",
+  admin: "composed `admin` → { listMembers(), inviteMember({ email, role }), provisionMember({ email, role }), setMemberRole({ email, role }), setMemberStatus({ email, status }), getState, subscribe }",
 });
 
 /** The interface brief a build prompt carries — small, byte-stable, sorted. */
@@ -89,9 +491,13 @@ export function capabilityBrief(names = Object.keys(CAPABILITIES)) {
   for (const name of [...names].sort()) {
     const entry = CAPABILITIES[name];
     if (!entry) continue;
-    lines.push(`  ${entry.name}@${entry.version}: ${entry.interface.join(", ")}`);
-    if (INSTANCE_METHODS[name]) lines.push(`    ${INSTANCE_METHODS[name]}`);
+    const inlineMethods = name === "session" ? `; ${INSTANCE_METHODS.session}` : "";
+    lines.push(`  ${entry.name}@${entry.version}: ${entry.interface.join(", ")}${inlineMethods}`);
+    if (INSTANCE_METHODS[name] && name !== "session") lines.push(`    ${INSTANCE_METHODS[name]}`);
     if (entry.uiContract.length) lines.push(`    UI must render states: ${entry.uiContract.join(", ")}`);
   }
+  lines.push("REACT BINDINGS (import from ./lib/capabilities — assemble, do not reinvent):");
+  for (const binding of REACT_BINDINGS) lines.push(`  ${binding}`);
+  lines.push("  A capability method may be CALLED or PASSED as a reference; both are correct usage.");
   return lines.join("\n");
 }

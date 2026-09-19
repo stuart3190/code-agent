@@ -21,9 +21,14 @@ import { mkdtemp, mkdir, writeFile, rm, readFile, rename } from "node:fs/promise
 import { existsSync } from "node:fs";
 import {
   ensureCaddy, createContainer, cpInto, connectCaddy, startContainer, stopContainer,
-  destroy, containerState, listPreviewContainers, removeDanglingNets, caddyLogs, PUBLISH_ROOT,
+  destroy, containerState, listPreviewContainers, pruneStoppedPreviews, removeDanglingNets,
+  caddyLogs, PUBLISH_ROOT,
   containerExists,
 } from "./docker.mjs";
+import {
+  activateRelease, cleanupReleases, finalizeRelease, inspectPointer, listReleaseFiles,
+  purgeProjectReleases, unpublishPointer, verifyRelease,
+} from "./releases.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -64,6 +69,11 @@ const PER_CONTAINER_MB = 118; // RUNTIME.md measured idle RSS
 const CAP = Number(process.env.PREVIEW_CAP || Math.floor(AVAILABLE_MB / PER_CONTAINER_MB)); // RAM-bound (~55)
 const REAP_IDLE_MS = Number(process.env.REAP_IDLE_MS || 10 * 60 * 1000);   // billing model: ~10 min idle
 const REAP_INTERVAL_MS = Number(process.env.REAP_INTERVAL_MS || 60 * 1000);
+const STOPPED_RETENTION_MS = Number(process.env.PREVIEW_STOPPED_RETENTION_MS || 6 * 60 * 60_000);
+const STOPPED_RETAIN = Number(process.env.PREVIEW_STOPPED_RETAIN || 8);
+// Leave isolated subnet headroom for worker admission/preflight networks as well as previews.
+const PREVIEW_NETWORK_CAP = Number(process.env.PREVIEW_NETWORK_CAP || 27);
+const ATOMIC_PUBLISH = process.env.THRALLO_ATOMIC_PUBLISH_ENABLED === "1";
 
 if (!TOKEN) { console.error("[provisiond] refusing to start: PROVISIOND_TOKEN is empty"); process.exit(1); }
 
@@ -102,10 +112,27 @@ async function reapOnce(idleMs = REAP_IDLE_MS) {
   return reaped;
 }
 
+async function maintainPreviewCapacity({ retain = STOPPED_RETAIN } = {}) {
+  const pruned = await pruneStoppedPreviews({
+    olderThanMs: STOPPED_RETENTION_MS,
+    retain: Math.max(0, retain),
+  });
+  const danglingNets = await removeDanglingNets();
+  return { pruned, danglingNets };
+}
+
 // Refuse past the RAM-bound cap. A label already running (re-provision/wake) doesn't add a slot.
 async function enforceCapacity(label) {
   const running = await listPreviewContainers();
   if (running.includes(label)) return;
+  await maintainPreviewCapacity({ retain: Math.min(STOPPED_RETAIN,
+    Math.max(0, PREVIEW_NETWORK_CAP - running.length - 1)) });
+  const allocated = await listPreviewContainers({ all: true });
+  if (allocated.length >= PREVIEW_NETWORK_CAP) {
+    const e = new Error(`preview network capacity reached (${allocated.length}/${PREVIEW_NETWORK_CAP})`);
+    e.code = "capacity";
+    throw e;
+  }
   if (running.length >= CAP) { const e = new Error(`capacity reached (${running.length}/${CAP} previews running)`); e.code = "capacity"; throw e; }
 }
 
@@ -281,9 +308,14 @@ async function attachDomain(domain, label) {
   if (!SLUG_RE.test(String(label)) && !/^p[a-z0-9]+$/.test(String(label))) throw new Error(`invalid label: ${label}`);
   const { d, link } = domainPath(domain);
   await mkdir(path.join(PUBLISH_ROOT, "_domains"), { recursive: true });
-  await rm(link, { force: true });
   const { symlink } = await import("node:fs/promises");
-  await symlink(`../${label}`, link, "dir");
+  // During the paused adoption window provisiond supports both layouts. Binding a domain to an
+  // unadopted site must continue to resolve to its legacy bytes until that site's pointer exists.
+  const pointer = ATOMIC_PUBLISH ? await inspectPointer(label) : { kind: "absent" };
+  const target = pointer.kind === "release_pointer" ? `../.thrallo/sites/${label}/current` : `../${label}`;
+  const next = `${link}.next-${crypto.randomUUID()}`;
+  try { await symlink(target, next, "dir"); await rename(next, link); }
+  finally { await rm(next, { force: true }); }
   return { domain: d, label };
 }
 
@@ -318,7 +350,9 @@ const server = http.createServer(async (req, res) => {
 
     if (p === "/health") {
       const running = await listPreviewContainers();
-      return send(res, 200, { ok: true, capacity: CAP, running: running.length, reapIdleMs: REAP_IDLE_MS });
+      const allocated = await listPreviewContainers({ all: true });
+      return send(res, 200, { ok: true, capacity: CAP, running: running.length,
+        networkCapacity: PREVIEW_NETWORK_CAP, allocated: allocated.length, reapIdleMs: REAP_IDLE_MS });
     }
     if (!authed(req)) return send(res, 401, { error: "unauthorized" });
 
@@ -348,6 +382,47 @@ const server = http.createServer(async (req, res) => {
       if (!projectId || !files || typeof files !== "object") return send(res, 400, { error: "projectId and files required" });
       return send(res, 200, await publishSite(projectId, files, slug));
     }
+    if (p.startsWith("/releases/") && !ATOMIC_PUBLISH) {
+      return send(res, 404, { error: "atomic publishing is disabled", code: "atomic_publish_disabled" });
+    }
+    if (p === "/releases/finalize" && req.method === "POST") {
+      const body = await readJson(req);
+      if (!body.releaseId || !body.owner || !body.projectId || !body.files || !body.proof) {
+        return send(res, 400, { error: "releaseId, owner, projectId, files and proof required" });
+      }
+      return send(res, 200, await finalizeRelease(body));
+    }
+    if (p === "/releases/activate" && req.method === "POST") {
+      const body = await readJson(req);
+      if (!body.slug || !body.owner || !body.projectId || !body.releaseId) {
+        return send(res, 400, { error: "slug, owner, projectId and releaseId required" });
+      }
+      return send(res, 200, await activateRelease(body));
+    }
+    if (p === "/releases/unpublish" && req.method === "POST") {
+      const body = await readJson(req);
+      if (!body.slug) return send(res, 400, { error: "slug required" });
+      return send(res, 200, await unpublishPointer(body));
+    }
+    if (p === "/releases/inspect" && req.method === "GET") {
+      const slug = url.searchParams.get("slug");
+      if (!slug) return send(res, 400, { error: "slug required" });
+      return send(res, 200, await inspectPointer(slug));
+    }
+    if (p === "/releases/verify" && req.method === "POST") {
+      const body = await readJson(req);
+      return send(res, 200, await verifyRelease(body));
+    }
+    if (p === "/releases/files" && req.method === "POST") {
+      const body = await readJson(req);
+      return send(res, 200, { files: await listReleaseFiles(body) });
+    }
+    if (p === "/releases/cleanup" && req.method === "POST") {
+      return send(res, 200, await cleanupReleases(await readJson(req)));
+    }
+    if (p === "/releases/purge-project" && req.method === "POST") {
+      return send(res, 200, await purgeProjectReleases(await readJson(req)));
+    }
     if (p === "/unpublish" && req.method === "POST") {
       const { projectId, slug } = await readJson(req);
       if (!projectId) return send(res, 400, { error: "projectId required" });
@@ -370,7 +445,8 @@ const server = http.createServer(async (req, res) => {
     if (p === "/exists" && req.method === "GET") {
       const label = String(url.searchParams.get("label") || "").toLowerCase();
       if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(label)) return send(res, 200, { exists: false });
-      const exists = (await containerExists(label)) || existsSync(path.join(PUBLISH_ROOT, label));
+      const atomicSite = await inspectPointer(label).catch(() => ({ kind: "absent" }));
+      const exists = (await containerExists(label)) || existsSync(path.join(PUBLISH_ROOT, label)) || atomicSite.kind !== "absent";
       return send(res, 200, { exists });
     }
     if (p === "/get" && req.method === "GET") {
@@ -387,7 +463,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, "127.0.0.1", async () => {
   console.log(`[provisiond] listening on 127.0.0.1:${PORT} · suffix ${SUFFIX} · scheme ${SCHEME}`);
   try {
-    const removed = await removeDanglingNets();                 // orphan cleanup
+    const maintenance = await maintainPreviewCapacity();
     // Re-raise the Caddy front after a VPS reboot: the container doesn't auto-restart and its old
     // preview-net attachments may have just been removed above, so docker start would fail anyway —
     // ensureCaddy rm -f's the dead one and runs a fresh front (certs persist in buildr-caddy-data).
@@ -396,9 +472,13 @@ server.listen(PORT, "127.0.0.1", async () => {
     await ensureCaddy(CADDY_CFG);
     const running = await listPreviewContainers();
     for (const l of running) touch(l);                          // adopt survivors so they aren't reaped at once
-    console.log(`[provisiond] boot: cap ${CAP} · adopted ${running.length} running preview(s) · removed ${removed.length} dangling net(s) · caddy up · reap idle ${REAP_IDLE_MS}ms`);
+    console.log(`[provisiond] boot: cap ${CAP} · network cap ${PREVIEW_NETWORK_CAP} · adopted ${running.length} running preview(s) · pruned ${maintenance.pruned.length} stopped preview(s) · removed ${maintenance.danglingNets.length} dangling net(s) · caddy up · reap idle ${REAP_IDLE_MS}ms`);
   } catch (e) {
     console.error("[provisiond] boot cleanup error:", e.message);
   }
-  setInterval(() => { reapOnce().catch((e) => console.error("[reaper]", e.message)); }, REAP_INTERVAL_MS);
+  setInterval(() => {
+    reapOnce()
+      .then(() => maintainPreviewCapacity())
+      .catch((e) => console.error("[reaper]", e.message));
+  }, REAP_INTERVAL_MS);
 });

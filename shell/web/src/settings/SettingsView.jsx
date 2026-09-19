@@ -122,7 +122,7 @@ export default function SettingsView({
       case "preferences":
         return (
           <PreferencesTab user={user} theme={theme} setTheme={setTheme} data={data}
-            onSection={onSection}
+            onSection={onSection} onConfirm={setConfirm} showToast={showToast}
             onPreviewPlan={(plan) => setPreviewPlan(plan).then(load).catch(() => {})} />
         );
       default:
@@ -141,7 +141,11 @@ export default function SettingsView({
           <h2 ref={heading} tabIndex={-1}>Settings</h2>
           {data && (
             <div className="ct-projdash-facts">
-              <span className="ct-badge tone-muted">{data.plan.name.toUpperCase()}</span>
+              <span className="ct-badge tone-muted">
+                {data.ownerAccount
+                  ? (data.previewPlan ? `${data.plan.name.toUpperCase()} PREVIEW` : "OWNER")
+                  : data.plan.name.toUpperCase()}
+              </span>
               <span className="ct-hint">{user.email}</span>
             </div>
           )}

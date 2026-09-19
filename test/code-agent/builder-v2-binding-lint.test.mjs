@@ -1,0 +1,697 @@
+// A CONTRACTED CONTROL THAT NOTHING CAN ADDRESS.
+//
+// The browser's mechanics probe addresses controls by `data-thrallo-control`. A hand-wired control
+// carries none, so the probe cannot see it, and the defect surfaces as a step failure part-way
+// through a paid run — run #8 died on step 2 of 8 that way. This lint asks the question after emit
+// and before the app is served, offline, for nothing.
+//
+// The DANGEROUS half of this lint is not the detection, it is the restraint. The preferred binding
+// is a spread — `<input {...field.inputProps} />` — and no Thrallo browser fixture contains a
+// literal `data-thrallo-control` in its JSX. A lint that looked for the attribute as text would
+// fail every correctly-built application. Most of these tests exist to hold that line.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+import { BINDING, lintControlBindings } from "../../shell/server/lib/builderV2/bindingLint.mjs";
+import { actionIdFor, controlIdFor } from "../../shell/server/lib/builderV2/verificationManifest.mjs";
+import { deriveBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
+import { validateModuleConformance } from "../../shell/server/lib/builderV2/moduleContracts.mjs";
+import { composeCapabilityFoundation } from "../../shell/server/lib/builderV2/capabilityComposer.mjs";
+import { composeScaffoldFoundation } from "../../shell/server/lib/builderV2/scaffoldComposer.mjs";
+import { reachableSourcePaths } from "../../shell/server/lib/builderV2/surfaceIntegration.mjs";
+import { fromScaffold } from "../../src/engine/fileTree.mjs";
+import { REACT_VITE } from "../../src/scaffolds/reactVite.mjs";
+
+const CONTRACT = {
+  summary: "A booking application for a supper club", projectType: "booking", version: 1,
+  auth: { required: false }, routes: [{ path: "/", name: "Booking" }],
+  entities: [{ name: "booking", fields: [
+    { name: "eventDate", type: "string" }, { name: "guestName", type: "string" }] }],
+  operations: [],
+  journeys: [{ id: "book", title: "A guest books a seat", priority: "primary", steps: [
+    { action: "open the booking page", target: "/", expect: "the booking page is visible" },
+    { action: "select an available date", target: "date picker", operates: ["eventDate"],
+      primitive: "selection", expect: "the selected date is highlighted" },
+    { action: "enter the guest name", target: "form", operates: ["guestName"],
+      expect: "the guest name is shown" },
+  ] }],
+  acceptance: [
+    { id: "a1", statement: "a submitted booking is readable after a page reload", kind: "persistence" },
+    { id: "a2", statement: "the booking page renders its available dates", kind: "render" },
+    { id: "a3", statement: "an invalid contact detail is rejected before submission", kind: "validation" }],
+  states: [], deferred: [], imageIntents: [], integrations: [],
+};
+
+const SPEC = deriveBuildSpec(CONTRACT);
+const lint = (tree) => lintControlBindings(tree, { interactionContract: SPEC.interactionContract });
+const failing = (result) => result.findings.filter((row) => row.fails);
+
+// ── the preferred path: everything bound through spreads ───────────────────────────────────────
+
+test("an app that binds everything through the capability spreads PASSES", () => {
+  const tree = { "src/components/Flow.jsx": `
+    import { useSemanticField, useSemanticSelection } from "../lib/capabilities/react.js";
+    export function Flow() {
+      const dates = useSemanticSelection({ name: "eventDate", label: "Date" });
+      const name = useSemanticField({ name: "guestName", label: "Guest name" });
+      return <main>
+        <div {...dates.groupProps}>
+          {["a", "b"].map((value) => <button key={value} {...dates.optionProps(value)}>{value}</button>)}
+        </div>
+        <label {...name.labelProps} />
+        <input {...name.inputProps} />
+      </main>;
+    }` };
+  const result = lint(tree);
+  assert.equal(result.ok, true, `spread-bound controls were failed: ${JSON.stringify(failing(result), null, 1)}`);
+  // …and they were recognised as BOUND, not merely tolerated as unknown.
+  const bound = result.elements.filter((row) => row.binding === BINDING.BINDING);
+  // The group container is not itself interactive (a role="group" div is not operated), so the
+  // resolved bindings are the option button and the input.
+  assert.ok(bound.length >= 2, `only ${bound.length} element(s) resolved to a binding`);
+});
+
+test("a literal data-thrallo-control PASSES", () => {
+  // The ids come from the platform identity function, never copied by hand: a test that hardcodes
+  // a hash proves only that the hash was typed correctly.
+  const tree = { "src/components/Flow.jsx": `
+    export function Flow() {
+      return <main>
+        <div role="group" data-thrallo-control="${controlIdFor("eventDate")}" aria-label="Date">
+          <button role="option" data-thrallo-control="${controlIdFor("eventDate")}" data-thrallo-option="a">A</button>
+        </div>
+        <input aria-label="Guest name" data-thrallo-control="${controlIdFor("guestName")}" />
+      </main>;
+    }` };
+  const result = lint(tree);
+  assert.equal(result.ok, true, JSON.stringify(failing(result)));
+});
+
+test("native select options are owned by the bound select, not duplicate controls", () => {
+  const field = "categoryFilter";
+  const machineId = controlIdFor(field);
+  const interactionContract = { flows: [
+    { id: "browse:input", journeyId: "browse", stepIndex: 0, kind: "input",
+      control: { logicalField: field, accessibleName: "category Filter",
+        accessibleNames: ["category Filter"], machineId, roles: ["combobox"] } },
+    { id: "browse:selection", journeyId: "browse", stepIndex: 1, kind: "selection",
+      control: { logicalField: field, accessibleName: "category Filter",
+        accessibleNames: ["category Filter"], machineId, roles: ["combobox", "option"] } },
+  ] };
+  const tree = { "src/components/Catalogue.jsx": `
+    import { useSemanticField } from "../lib/capabilities/react.js";
+    export function Catalogue() {
+      const category = useSemanticField({ name: "categoryFilter", label: "category Filter" });
+      return <label {...category.labelProps}>Category Filter
+        <select {...category.inputProps} data-thrallo-control="${machineId}">
+          {["All categories", "Data"].map((option) =>
+            <option key={option} value={option} aria-label={\`\${option} category option\`}>{option}</option>)}
+        </select>
+      </label>;
+    }` };
+  const result = lintControlBindings(tree, { interactionContract });
+  assert.equal(result.ok, true, JSON.stringify(failing(result), null, 2));
+  assert.equal(result.elements.some((row) => row.element === "<option>"), false,
+    "native options were linted as controls separate from their select");
+});
+
+test("one operation-backed semantic action satisfies differently worded journeys", () => {
+  const operationId = "filter-catalogue";
+  const interactionContract = { flows: [
+    { id: "browse:action", journeyId: "browse", stepIndex: 0, kind: "action", operationId,
+      control: { accessibleName: "catalogue search and filter controls",
+        machineId: actionIdFor(operationId), roles: ["button"] } },
+    { id: "empty:action", journeyId: "empty", stepIndex: 0, kind: "action", operationId,
+      control: { accessibleName: "catalogue search control",
+        machineId: actionIdFor(operationId), roles: ["button"] } },
+  ] };
+  const tree = { "src/components/Catalogue.jsx": `
+    import { useSemanticAction } from "../lib/capabilities/react.js";
+    export function Catalogue() {
+      const filter = useSemanticAction({ name: "filter-catalogue", label: "Search catalogue" });
+      return <button {...filter.buttonProps}>Search catalogue</button>;
+    }` };
+  const result = lintControlBindings(tree, { interactionContract });
+
+  assert.equal(result.ok, true, JSON.stringify(failing(result)));
+  assert.equal(result.coverage.filter((row) => row.bound > 0).length, 2);
+});
+
+test("operation-backed actions reject helper names derived from journey wording", () => {
+  const operationId = "filter-catalogue";
+  const interactionContract = { flows: [{ id: "browse:action", journeyId: "browse", stepIndex: 0,
+    kind: "action", operationId, control: { accessibleName: "catalogue search control",
+      machineId: actionIdFor(operationId), roles: ["button"] } }] };
+  const tree = { "src/components/Catalogue.jsx": `
+    import { useSemanticAction } from "../lib/capabilities/react.js";
+    export function Catalogue() {
+      const filter = useSemanticAction({ name: "catalogue search control" });
+      return <button {...filter.buttonProps}>Search catalogue</button>;
+    }` };
+  const result = lintControlBindings(tree, { interactionContract });
+
+  assert.ok(failing(result).some((row) => row.code === "contract_control_wrong_binding"),
+    JSON.stringify(result.findings));
+  assert.equal(failing(result)[0].requiredBinding.name, operationId);
+});
+
+test("LIVE-SHAPED REGRESSION — a later bound copy cannot mask the hand-wired entry control", () => {
+  const tree = {
+    "src/routes/HomePage.jsx": `
+      export default function HomePage({ events, choose }) {
+        return <main>{events.map((event) => <button type="button"
+          aria-label={\`Event date \${event.title}\`} onClick={() => choose(event.id)}>
+          Featured event enter control</button>)}</main>;
+      }`,
+    "src/components/book/BookFlow.jsx": `
+      import { useSemanticField, useSemanticSelection } from "../../lib/capabilities/react.js";
+      export function BookFlow() {
+        const date = useSemanticSelection({ name: "eventDate", label: "Event date" });
+        const guest = useSemanticField({ name: "guestName", label: "Guest name" });
+        return <main><div {...date.groupProps}><button {...date.optionProps("a")}>A</button></div>
+          <input {...guest.inputProps} /></main>;
+      }`,
+  };
+
+  const result = lint(tree);
+  const conflict = failing(result).find((row) => row.code === "contract_control_binding_conflict");
+  assert.ok(conflict, `the later-route binding masked the entry control: ${JSON.stringify(result.coverage)}`);
+  assert.equal(conflict.control, "eventDate");
+  assert.equal(conflict.shadowedByBoundDuplicate, true);
+  assert.deepEqual(conflict.elements.map((row) => row.file), ["src/routes/HomePage.jsx"]);
+
+  const conformance = validateModuleConformance(tree, {
+    contract: CONTRACT, modulePlan: SPEC.modulePlan, moduleContracts: SPEC.moduleContracts,
+    interactionContract: SPEC.interactionContract, bindings: SPEC.bindings,
+  });
+  const blocking = conformance.blocking.find((row) => row.code === "contract_control_binding_conflict");
+  assert.equal(blocking?.module, "src/routes/HomePage.jsx",
+    `the exact conflict did not reach the pre-compile correction gate: ${JSON.stringify(conformance.blocking)}`);
+});
+
+test("a named action section does not rename independent row-selection buttons", () => {
+  const operationId = "create-project";
+  const machineId = actionIdFor(operationId);
+  const interactionContract = { flows: [{
+    id: "project-workspace:mutation", journeyId: "project-workspace", stepIndex: 0,
+    kind: "mutation", operationId,
+    control: { accessibleName: "create project form", machineId, roles: ["button"] },
+  }] };
+  const tree = { "src/components/ProjectWorkspace.jsx": `
+    import { useSemanticAction } from "../lib/capabilities/react.js";
+    export default function ProjectWorkspace({ projects, selectProject, createProject }) {
+      const create = useSemanticAction({ name: "create-project", onActivate: createProject });
+      return <section aria-label="create project form" data-thrallo-action="create-project">
+        <button type="button" {...create.buttonProps} data-thrallo-action="${machineId}">
+          Create project
+        </button>
+        {projects.map((project) => <button type="button" key={project.id}
+          onClick={() => selectProject(project.id)}>
+          {project.name} — owner {project.owner} — status {project.status}
+        </button>)}
+      </section>;
+    }`,
+  };
+
+  const result = lintControlBindings(tree, { interactionContract });
+  assert.equal(result.ok, true, JSON.stringify(failing(result), null, 2));
+  assert.equal(failing(result).some((row) => row.code === "contract_control_binding_conflict"), false);
+
+  const duplicateTree = { ...tree,
+    "src/components/ProjectWorkspace.jsx": tree["src/components/ProjectWorkspace.jsx"].replace(
+      "{projects.map((project)",
+      `<button type="button" onClick={createProject}>Create project form</button>
+        {projects.map((project)`,
+    ) };
+  const duplicateResult = lintControlBindings(duplicateTree, { interactionContract });
+  assert.equal(failing(duplicateResult).some((row) => row.code === "contract_control_binding_conflict"), true,
+    "an independently named duplicate action was no longer rejected");
+});
+
+test("RETAINED SCAFFOLD REGRESSION — dead bound routes cannot conflict with the mounted live screen", () => {
+  const capability = composeCapabilityFoundation(fromScaffold(REACT_VITE), SPEC.capabilityGraph);
+  const composed = composeScaffoldFoundation(capability.tree, SPEC.scaffoldGraph);
+  const screen = SPEC.scaffoldGraph.screens[0].module;
+  const tree = {
+    ...composed.tree,
+    [screen]: `export default function HomeScreen({ choose, name, setName }) {
+      return <main>
+        <div role="group" id="eventDate" aria-label="Event date">
+          <button role="option" aria-pressed="false" onClick={() => choose("a")}>A</button>
+        </div>
+        <label htmlFor="guestName">Guest name</label>
+        <input id="guestName" name="guestName" value={name} onChange={(event) => setName(event.target.value)} />
+      </main>;
+    }`,
+    // Exact production shape: a valid-looking bound module remains as retained evidence, but the
+    // protected scaffold router never imports or renders it.
+    "src/routes/HomePage.jsx": `import { useSemanticField, useSemanticSelection }
+      from "../lib/capabilities/react.js";
+      export default function HomePage() {
+        const date = useSemanticSelection({ name: "eventDate", label: "Event date" });
+        const guest = useSemanticField({ name: "guestName", label: "Guest name" });
+        return <main><div {...date.groupProps}><button {...date.optionProps("a")}>A</button></div>
+          <input {...guest.inputProps} /></main>;
+      }`,
+  };
+  const authoritativeFiles = reachableSourcePaths(tree);
+  assert.equal(authoritativeFiles.has(screen), true, "the composed screen is not reachable");
+  assert.equal(authoritativeFiles.has("src/routes/HomePage.jsx"), false,
+    "the retained dead route became reachable");
+
+  const result = lintControlBindings(tree, {
+    interactionContract: SPEC.interactionContract,
+    authoritativeFiles,
+  });
+  assert.equal(result.authoritativeSurface, true);
+  assert.ok(result.ignoredSourceFiles.includes("src/routes/HomePage.jsx"));
+  assert.equal(failing(result).some((row) => row.code === "contract_control_binding_conflict"), false,
+    JSON.stringify(failing(result), null, 2));
+  const unbound = failing(result).find((row) => row.code === "contract_control_unbound"
+    && row.control === "eventDate");
+  assert.equal(unbound?.elements?.[0]?.file, screen);
+  assert.deepEqual(unbound?.requiredBinding, {
+    helper: "useSemanticSelection", name: "eventDate", attribute: "data-thrallo-control",
+    machineId: controlIdFor("eventDate"), spread: "groupProps + optionProps(option)",
+  });
+
+  const conformance = validateModuleConformance(tree, {
+    contract: SPEC.contract, modulePlan: SPEC.modulePlan, moduleContracts: SPEC.moduleContracts,
+    interactionContract: SPEC.interactionContract, bindings: SPEC.bindings,
+    capabilityGraph: SPEC.capabilityGraph, scaffoldGraph: SPEC.scaffoldGraph,
+  });
+  assert.equal(conformance.blocking.some((row) => row.code === "contract_control_binding_conflict"), false,
+    JSON.stringify(conformance.blocking, null, 2));
+  assert.equal(conformance.controlBindings.ignoredSourceFiles.includes("src/routes/HomePage.jsx"), true);
+});
+
+test("qualified date controls do not conflict with a different bound date field", () => {
+  const interactionContract = { flows: [{
+    id: "task-workspace:selection:taskduedate", journeyId: "task-workspace", stepIndex: 0,
+    kind: "selection", valueWritten: "taskDueDate", control: {
+      logicalField: "taskDueDate", accessibleName: "task Due Date",
+      machineId: controlIdFor("taskDueDate"), roles: ["button", "option", "combobox"],
+    },
+  }] };
+  const tree = { "src/screens/TaskWorkspace.jsx": `
+    import { useSemanticSelection } from "../lib/capabilities/react.js";
+    export default function TaskWorkspace() {
+      const taskDate = useSemanticSelection({ name: "taskDueDate", label: "Task due date" });
+      return <main>
+        <div {...taskDate.groupProps}><button {...taskDate.optionProps("next-week")}>Next week</button></div>
+        <label>Start date<input aria-label="start date" type="date" /></label>
+        <label>Due date<input aria-label="due date" type="date" /></label>
+      </main>;
+    }`,
+  };
+  const result = lintControlBindings(tree, { interactionContract });
+
+  assert.equal(failing(result).some((row) => row.code === "contract_control_binding_conflict"), false,
+    JSON.stringify(failing(result), null, 2));
+  assert.equal(result.ok, true, JSON.stringify(failing(result), null, 2));
+});
+
+test("useFlowAdvance cannot impersonate an arbitrary contracted action through its visible copy", () => {
+  const actionContract = { flows: [{
+    id: "start:1:flow_start", kind: "flow_start", journeyId: "start",
+    control: { accessibleName: "View live competitions call to action",
+      machineId: "act_d83f91b9" },
+  }] };
+  const tree = { "src/screens/Home.jsx": `import { useFlowAdvance } from "../lib/capabilities/react.js";
+    export default function Home(){
+      const start = useFlowAdvance({ label: "View live competitions call to action", onActivate() {} });
+      return <button {...start.buttonProps}>View live competitions call to action</button>;
+    }` };
+  const result = lintControlBindings(tree, { interactionContract: actionContract });
+  assert.equal(result.findings.some((row) => row.code === "contract_control_binding_conflict"), false);
+  assert.equal(failing(result).some((row) => row.code === "contract_control_missing"), true,
+    "the canonical advance identity was accepted as an unrelated action identity");
+});
+
+test("retained smoke shape — a selection identity cannot impersonate its flow-entry action", () => {
+  const actionName = "competition card enter button";
+  const flowEntryContract = { flows: [{
+    id: "submit-demo-entry:1:flow_start", kind: "flow_start", journeyId: "submit-demo-entry",
+    control: {
+      logicalField: "competitionId", accessibleName: actionName,
+      machineId: actionIdFor(actionName), roles: ["button", "link"], flowEntry: true,
+    },
+  }] };
+  const tree = { "src/screens/scaffold/HomeScreen.jsx": `import { useSemanticSelection } from "../../lib/capabilities/react.js";
+    export default function HomeScreen() {
+      const listing = useSemanticSelection({ name: "competition Id", value: "", onSelect() {} });
+      return <div {...listing.groupProps}>{["one", "two"].map((id) =>
+        <button key={id} aria-label="${actionName}" {...listing.optionProps(id)}>Enter</button>)}</div>;
+    }` };
+  const result = lintControlBindings(tree, { interactionContract: flowEntryContract });
+  const wrong = failing(result).find((row) => row.code === "contract_control_wrong_binding");
+  assert.equal(wrong?.control, "competitionId", JSON.stringify(result.findings, null, 2));
+  assert.deepEqual(wrong.requiredBinding, {
+    helper: "useSemanticSelection", name: "competitionId", actionName,
+    attribute: "data-thrallo-control + data-thrallo-action",
+    machineId: actionIdFor(actionName), spread: "groupProps + optionProps(option)",
+  });
+});
+
+test("a selection-backed flow entry passes when it declares the independent action identity", () => {
+  const actionName = "competition card enter button";
+  const flowEntryContract = { flows: [{
+    id: "submit-demo-entry:1:flow_start", kind: "flow_start", journeyId: "submit-demo-entry",
+    control: {
+      logicalField: "competitionId", accessibleName: actionName,
+      machineId: actionIdFor(actionName), roles: ["button", "link"], flowEntry: true,
+    },
+  }] };
+  const tree = { "src/screens/scaffold/HomeScreen.jsx": `import { useSemanticSelection } from "../../lib/capabilities/react.js";
+    export default function HomeScreen() {
+      const listing = useSemanticSelection({ name: "competition Id", actionName: "${actionName}", value: "", onSelect() {} });
+      return <div {...listing.groupProps}>{["one", "two"].map((id) =>
+        <button key={id} {...listing.optionProps(id)}>Enter</button>)}</div>;
+    }` };
+  const result = lintControlBindings(tree, { interactionContract: flowEntryContract });
+  assert.equal(failing(result).some((row) => row.code === "contract_control_wrong_binding"), false,
+    JSON.stringify(result.findings, null, 2));
+  assert.equal(result.coverage[0]?.compatibleBound > 0, true, JSON.stringify(result.coverage));
+});
+
+// ── the run #8 shape ───────────────────────────────────────────────────────────────────────────
+
+test("LIVE-SHAPED REGRESSION — a hand-wired chooser matching a contracted key FAILS and is named", () => {
+  const tree = {
+    "src/components/DatePicker.jsx": `
+      export function DatePicker({ onPick }) {
+        return <div role="group" id="eventDate" aria-label="Event date">
+          {["2026-02-14", "2026-02-21"].map((value) => (
+            <button key={value} role="option" onClick={() => onPick(value)}>{value}</button>
+          ))}
+        </div>;
+      }`,
+    "src/components/Contact.jsx": `
+      import { useSemanticField } from "../lib/capabilities/react.js";
+      export function Contact() {
+        const name = useSemanticField({ name: "guestName", label: "Guest name" });
+        return <><label {...name.labelProps} /><input {...name.inputProps} /></>;
+      }`,
+  };
+  const result = lint(tree);
+  assert.equal(result.ok, false, "a hand-wired contracted chooser passed the lint");
+  const flagged = failing(result);
+  assert.equal(flagged.length, 1, JSON.stringify(flagged.map((row) => row.code)));
+  const finding = flagged[0];
+  assert.equal(finding.code, "contract_control_unbound");
+  assert.equal(finding.control, "eventDate");
+  assert.ok(finding.inferredKey, "no inferred semantic key reported");
+  // file, line and element — the structured list the report promises.
+  assert.equal(finding.elements[0].file, "src/components/DatePicker.jsx");
+  assert.ok(Number.isInteger(finding.elements[0].line), "no line reported");
+  assert.match(finding.elements[0].element, /<div role="group">|<button role="option">/);
+  // The bound field beside it is NOT dragged into the failure.
+  assert.equal(flagged.some((row) => row.control === "guestName"), false);
+});
+
+// ── restraint ──────────────────────────────────────────────────────────────────────────────────
+
+test("a non-interactive element with no handler is not flagged at all", () => {
+  const tree = { "src/components/Copy.jsx": `
+    export function Copy() {
+      return <main><section><h1>Supper club</h1><p>Tonight we serve fire-roasted things.</p>
+        <div className="card"><span>Not a control</span></div></section></main>;
+    }` };
+  const result = lint(tree);
+  assert.deepEqual(result.elements, [], `non-interactive elements were collected: ${JSON.stringify(result.elements)}`);
+});
+
+test("uncontracted chrome is REPORTED and does not fail the build", () => {
+  const tree = {
+    "src/components/Nav.jsx": `
+      export function Nav({ onToggle }) {
+        return <nav><button onClick={onToggle} aria-label="Open the menu">Menu</button></nav>;
+      }`,
+    "src/components/Flow.jsx": `
+      import { useSemanticField, useSemanticSelection } from "../lib/capabilities/react.js";
+      export function Flow() {
+        const dates = useSemanticSelection({ name: "eventDate", label: "Date" });
+        const name = useSemanticField({ name: "guestName", label: "Guest name" });
+        return <main><div {...dates.groupProps}>
+          <button {...dates.optionProps("a")}>A</button></div>
+          <input {...name.inputProps} /></main>;
+      }`,
+  };
+  const result = lint(tree);
+  assert.equal(result.ok, true, `chrome failed the build: ${JSON.stringify(failing(result))}`);
+  const reported = result.findings.filter((row) => row.code === "uncontracted_control_unbound");
+  assert.equal(reported.length, 1, JSON.stringify(result.findings));
+  assert.equal(reported[0].fails, false);
+  assert.match(reported[0].file, /Nav\.jsx/);
+});
+
+test("a wrapper forwarding props is UNRESOLVED, and never fails", () => {
+  // The element is bound inside the wrapper, or by whoever passes the props. This file cannot
+  // know, and guessing is the false positive that made the old static finding unusable.
+  const tree = { "src/components/Field.jsx": `
+    export function Field(props) { return <input {...props} />; }
+    export function Chooser({ groupProps, options }) {
+      return <div {...groupProps} id="eventDate">{options.map((o) => <button key={o} role="option">{o}</button>)}</div>;
+    }
+    export function GuestName(bound) { return <input {...bound} id="guestName" aria-label="Guest name" />; }` };
+  const result = lint(tree);
+  const unresolved = result.elements.filter((row) => row.binding === BINDING.UNRESOLVED);
+  assert.ok(unresolved.length >= 2, `spreads were not treated as unresolved: ${JSON.stringify(
+    result.elements.map((row) => [row.element, row.binding]))}`);
+  assert.equal(result.ok, true, `an unresolvable spread failed the build: ${JSON.stringify(failing(result))}`);
+  assert.equal(result.coverageUndetermined, true);
+  assert.ok(result.findings.some((row) => row.code === "contract_control_coverage_undetermined"));
+});
+
+test("runtime wrapper identities cannot turn a nearby catalogue action into field binding failures", () => {
+  const fields = ["softwareTitle", "softwareSummary", "softwareStatus"];
+  const interactionContract = { flows: [
+    { id: "catalogue:input:title", kind: "input", journeyId: "manage-catalogue",
+      control: { logicalField: fields[0], accessibleName: "software Title",
+        machineId: controlIdFor(fields[0]), roles: ["textbox"] } },
+    { id: "catalogue:input:summary", kind: "input", journeyId: "manage-catalogue",
+      control: { logicalField: fields[1], accessibleName: "software Summary",
+        machineId: controlIdFor(fields[1]), roles: ["textbox"] } },
+    { id: "catalogue:selection:status", kind: "selection", journeyId: "manage-catalogue",
+      control: { logicalField: fields[2], accessibleName: "software Status",
+        machineId: controlIdFor(fields[2]), roles: ["combobox", "option"] } },
+  ] };
+  const tree = { "src/screens/Catalogue.jsx": `
+    function TextField({ id, label, machineId }) {
+      return <label>{label}<input id={id} data-thrallo-control={machineId} /></label>;
+    }
+    function StatusField({ id, label, machineId }) {
+      return <label>{label}<select id={id} data-thrallo-control={machineId}>
+        <option>Draft</option><option>Published</option>
+      </select></label>;
+    }
+    export default function Catalogue() {
+      return <main>
+        <TextField id="softwareTitle" label="software Title" machineId="${controlIdFor(fields[0])}" />
+        <TextField id="softwareSummary" label="software Summary" machineId="${controlIdFor(fields[1])}" />
+        <StatusField id="softwareStatus" label="software Status" machineId="${controlIdFor(fields[2])}" />
+        <div aria-label="software Status" data-thrallo-control="${controlIdFor(fields[2])}">
+          {["Draft", "Published"].map((option) => <button key={option}
+            data-thrallo-action={option === "Published" ? "act_catalogue_publish" : undefined}>
+            {option}</button>)}
+        </div>
+      </main>;
+    }`, };
+
+  const result = lintControlBindings(tree, { interactionContract });
+  assert.equal(result.ok, true, JSON.stringify(failing(result), null, 2));
+  assert.equal(failing(result).some((row) => row.code === "contract_control_wrong_binding"), false,
+    JSON.stringify(result.findings, null, 2));
+  assert.equal(result.elements.some((row) => row.attribute === "data-thrallo-control"
+    && row.binding === BINDING.UNRESOLVED), true, JSON.stringify(result.elements, null, 2));
+  assert.equal(result.elements.some((row) => row.coversOnly && row.attribute === "data-thrallo-control"
+    && row.machineId === controlIdFor(fields[2])), true, JSON.stringify(result.elements, null, 2));
+  assert.ok(result.findings.some((row) => row.code === "contract_control_coverage_undetermined"),
+    JSON.stringify(result.findings, null, 2));
+});
+
+// ── coverage ───────────────────────────────────────────────────────────────────────────────────
+
+test("a contracted control absent from the tree entirely FAILS as contract_control_missing", () => {
+  const tree = { "src/components/Flow.jsx": `
+    import { useSemanticField } from "../lib/capabilities/react.js";
+    export function Flow() {
+      const name = useSemanticField({ name: "guestName", label: "Guest name" });
+      return <main><label {...name.labelProps} /><input {...name.inputProps} /></main>;
+    }` };
+  const result = lint(tree);
+  assert.equal(result.ok, false);
+  const missing = failing(result).filter((row) => row.code === "contract_control_missing");
+  assert.equal(missing.length, 1, JSON.stringify(failing(result)));
+  assert.equal(missing[0].control, "eventDate");
+  assert.notEqual(missing[0].code, "contract_control_unbound", "missing and unbound must stay distinct");
+});
+
+test("the platform's own capability sources are never linted", () => {
+  const tree = { "src/lib/capabilities/react.js": `
+    export function useSemanticField() { return { inputProps: {} }; }
+    export const Raw = () => <input id="eventDate" />;` };
+  assert.deepEqual(lint(tree).elements, []);
+});
+
+// ── the honesty requirement ────────────────────────────────────────────────────────────────────
+
+test("the result states its residual gap, and the gap is real", () => {
+  const result = lint({ "src/components/Flow.jsx": "export const Flow = () => null;" });
+  assert.match(result.residualGap, /textual/i);
+  assert.match(result.residualGap, /not a proof/i);
+
+  // The gap, demonstrated rather than asserted: a chooser labelled divergently from its contracted
+  // key is hand-wired, and this lint does not catch it. It is reported as uncontracted chrome —
+  // and `eventDate` is then reported MISSING, which is the honest description of what was found.
+  const divergent = { "src/components/Flow.jsx": `
+    import { useSemanticField } from "../lib/capabilities/react.js";
+    export function Flow({ onPick }) {
+      const name = useSemanticField({ name: "guestName", label: "Guest name" });
+      return <main>
+        <div role="group" aria-label="Choose your evening">
+          <button role="option" onClick={() => onPick(1)}>An evening</button>
+        </div>
+        <input {...name.inputProps} />
+      </main>;
+    }` };
+  const outcome = lint(divergent);
+  assert.equal(failing(outcome).some((row) => row.code === "contract_control_unbound"), false,
+    "the divergently-labelled chooser was matched after all — the documented gap is wrong");
+});
+
+test("a control bound DYNAMICALLY is never reported missing", () => {
+  // Measured, not imagined: `opaqueIdentityApp` — a fixture that passes in a real browser — binds
+  // six fields in a loop, so the factory is called with a variable and the elements carry no static
+  // identity whatsoever. Before this case was handled, the lint failed that app with SEVEN
+  // contract_control_missing findings. A build must never fail because a correct app used a map.
+  const tree = { "src/components/Flow.jsx": `
+    import { useSemanticField } from "../lib/capabilities/react.js";
+    const NAMES = ["eventDate", "guestName"];
+    export function Flow() {
+      const fields = Object.fromEntries(NAMES.map((name) => [name, useSemanticField({ name })]));
+      return <main>{NAMES.map((name) => <input key={name} {...fields[name].inputProps} />)}</main>;
+    }` };
+  const result = lint(tree);
+  assert.equal(result.ok, true, `dynamic binding failed the build: ${JSON.stringify(failing(result))}`);
+  const undetermined = result.findings.filter((row) => row.code === "contract_control_coverage_undetermined");
+  assert.ok(undetermined.length >= 1, "the undetermined coverage was not reported at all");
+  assert.equal(undetermined.every((row) => row.fails === false), true);
+  assert.match(undetermined[0].message, /dynamically/);
+});
+
+// ── a quiet result is not a proof ──────────────────────────────────────────────────────────────
+
+test("a tree the walker cannot fully read is marked coverage-UNDETERMINED", () => {
+  // Three of the four ways a correct app binds a control — a wrapper, a store, a factory called
+  // with a variable — are outside a static reader's reach. Where any is present, "nothing was
+  // found unbound" describes what could be SEEN, not what the app does, and the report must say so
+  // at tree level. Otherwise a green lint reads as coverage, and the only way to reach zero false
+  // rejections would be to stop firing wherever indirection appears.
+  const dynamic = { "src/components/Flow.jsx": `
+    import { useSemanticField } from "../lib/capabilities/react.js";
+    const NAMES = ["eventDate", "guestName"];
+    export function Flow() {
+      const fields = Object.fromEntries(NAMES.map((name) => [name, useSemanticField({ name })]));
+      return <main>{NAMES.map((name) => <input key={name} {...fields[name].inputProps} />)}</main>;
+    }` };
+  const result = lint(dynamic);
+  assert.equal(result.ok, true);
+  assert.equal(result.coverageUndetermined, true, "a dynamically-bound tree was reported as determined");
+  assert.match(result.undeterminedReasons.join(" "), /dynamically/);
+  // …and the residual gap still ships alongside it.
+  assert.match(result.residualGap, /not a proof/i);
+});
+
+test("an unfollowable wrapper also makes coverage undetermined", () => {
+  const wrapped = { "src/components/Field.jsx": `
+    export function Field(props) { return <input {...props} aria-label="Guest name" />; }
+    export function Chooser({ groupProps }) {
+      return <div {...groupProps} id="eventDate"><button role="option">A</button></div>;
+    }` };
+  const result = lint(wrapped);
+  assert.equal(result.coverageUndetermined, true);
+  assert.match(result.undeterminedReasons.join(" "), /cannot follow/i);
+});
+
+test("a fully readable tree is NOT marked undetermined", () => {
+  const readable = { "src/components/Flow.jsx": `
+    import { useSemanticField, useSemanticSelection } from "../lib/capabilities/react.js";
+    export function Flow() {
+      const dates = useSemanticSelection({ name: "eventDate", label: "Date" });
+      const name = useSemanticField({ name: "guestName", label: "Guest name" });
+      return <main><div {...dates.groupProps}><button {...dates.optionProps("a")}>A</button></div>
+        <input {...name.inputProps} /></main>;
+    }` };
+  const result = lint(readable);
+  assert.equal(result.ok, true);
+  assert.equal(result.coverageUndetermined, false,
+    `a readable tree was marked undetermined: ${JSON.stringify(result.undeterminedReasons)}`);
+});
+
+// ── a field is never a hand-wired duplicate of the action that submits it ───────────────────────
+//
+// Medium on cf5c4f7 (2026-09-07): the sign-in step operated the email textbox inside a "sign-in
+// form" action, so the derived action control carried logicalField "email" on a button. The button
+// was bound correctly; the plain <input aria-label="email"> it submits was reported as a
+// contract_control_binding_conflict, and three corrections could not satisfy a demand that made no
+// sense (spreading an undeclared field hook, then removing it again).
+
+const AUTH_CONTRACT = {
+  summary: "Team operations dashboard", projectType: "web app", version: 1,
+  auth: { required: true }, routes: [{ path: "/", name: "Home" }, { path: "/projects", name: "Projects" }],
+  entities: [{ name: "memberProfile", fields: [{ name: "email", type: "string" }, { name: "displayName", type: "string" }] }],
+  operations: [{ id: "create-member-profile", entity: "memberProfile", kind: "create", journey: "work" }],
+  journeys: [{ id: "work", title: "A member signs in", priority: "primary", steps: [
+    { action: "open the app while signed out", target: "/", expect: "the sign-in screen is visible" },
+    { action: "sign in with platform authentication as a team member", target: "sign-in form",
+      operates: ["email"], primitive: "textbox", verificationValues: { email: "member@alderstudio.test" },
+      expect: "the Projects dashboard route opens and shows the signed-in team member name" },
+  ] }],
+  acceptance: [], states: [], deferred: [], imageIntents: [], integrations: [],
+};
+const AUTH_SPEC = deriveBuildSpec(AUTH_CONTRACT);
+const authAction = AUTH_SPEC.interactionContract.flows.find((flow) => flow.kind === "action" && flow.control?.machineId);
+
+test("LIVE-SHAPED — the email field an action submits is not a duplicate of the action button", () => {
+  assert.equal(authAction?.control?.logicalField, "email", "the live derivation shape: an action control keyed by the operated field");
+  const tree = {
+    "src/screens/scaffold/SignInScreen.jsx": `
+      import { useState } from "react";
+      import { useSemanticAction } from "../../lib/capabilities/composed/interaction-primitives.js";
+      export default function SignInScreen() {
+        const [auth, setAuth] = useState({ email: "", password: "" });
+        const signInAction = useSemanticAction({ name: "sign-in form", label: "Sign in", onActivate: () => {} });
+        return <form aria-label="sign-in form" onSubmit={(event) => event.preventDefault()}>
+          <label>Email<input aria-label="email" name="email" type="email" value={auth.email}
+            onChange={(event) => setAuth((current) => ({ ...current, email: event.target.value }))} /></label>
+          <label>Password<input aria-label="password" name="password" type="password" value={auth.password}
+            onChange={(event) => setAuth((current) => ({ ...current, password: event.target.value }))} /></label>
+          <button {...signInAction.buttonProps} data-thrallo-action=${JSON.stringify(authAction.control.machineId)} type="button">Sign in</button>
+        </form>;
+      }`,
+  };
+  const result = lintControlBindings(tree, { interactionContract: AUTH_SPEC.interactionContract });
+  assert.equal(failing(result).some((row) => row.code === "contract_control_binding_conflict"), false,
+    JSON.stringify(failing(result)));
+});
+
+test("a second hand-wired BUTTON for the same action is still a conflict", () => {
+  const tree = {
+    "src/screens/scaffold/SignInScreen.jsx": `
+      import { useSemanticAction } from "../../lib/capabilities/composed/interaction-primitives.js";
+      export default function SignInScreen() {
+        const signInAction = useSemanticAction({ name: "sign-in form", label: "Sign in", onActivate: () => {} });
+        return <form aria-label="sign-in form">
+          <input aria-label="email" name="email" type="email" />
+          <button {...signInAction.buttonProps} data-thrallo-action=${JSON.stringify(authAction.control.machineId)} type="button">Sign in</button>
+          <button type="button" aria-label="email" onClick={() => {}}>Sign in form</button>
+        </form>;
+      }`,
+  };
+  const result = lintControlBindings(tree, { interactionContract: AUTH_SPEC.interactionContract });
+  const conflict = failing(result).find((row) => row.code === "contract_control_binding_conflict");
+  assert.ok(conflict, JSON.stringify(result.findings));
+  assert.deepEqual(conflict.elements.map((row) => row.element), ["<button>"]);
+});

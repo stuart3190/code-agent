@@ -7,12 +7,18 @@
 // never a guessed anchor.
 
 import { indexFile } from "./indexer.mjs";
-import { modularityCheck } from "../appBuild/modularity.mjs";
+import { FILE_MAX_TOKENS, modularityCheck } from "../appBuild/modularity.mjs";
+import { createHash } from "node:crypto";
+import { parse } from "@babel/parser";
 
 export const PROTECTED_PATHS = Object.freeze([
   /^src\/lib\/backend\//,
   /^src\/lib\/visitorSession\.js$/,
   /^src\/lib\/capabilities\//,
+  /^src\/lib\/scaffolds\/composed\//,
+  // WP3+: platform module runtime and the composed public application facade.
+  /^src\/lib\/modules\//,
+  /^src\/lib\/app\//,
 ]);
 
 // The strict tool schema the orchestrator will register (strict tools proven since P18:
@@ -23,7 +29,8 @@ export const EMIT_PATCHES_SCHEMA = Object.freeze({
     + "the code index; a rejected op comes back with the exact reason. Use newFile for files "
     + "that do not exist yet; never rewrite a whole existing file through newFile. Files the "
     + "index cannot parse into symbols (CSS, config) can only change via replaceFile with the "
-    + "COMPLETE new content.",
+    + "COMPLETE new content. For a very large symbol, replace_exact uses `symbol` as the exact "
+    + "old source excerpt and `content` as its replacement; the excerpt must occur exactly once.",
   strict: true,
   parameters: {
     type: "object",
@@ -45,9 +52,9 @@ export const EMIT_PATCHES_SCHEMA = Object.freeze({
                 additionalProperties: false,
                 required: ["op", "symbol", "content"],
                 properties: {
-                  op: { type: "string", enum: ["replace_symbol", "insert_after_symbol", "insert_before_symbol", "delete_symbol", "append", "add_import"] },
-                  symbol: { type: ["string", "null"] },
-                  content: { type: ["string", "null"] },
+                  op: { type: "string", enum: ["replace_symbol", "replace_exact", "insert_after_symbol", "insert_before_symbol", "delete_symbol", "append", "add_import"] },
+                  symbol: { type: ["string", "null"], description: "For replace_exact, the complete exact old source excerpt (never only a function/component name); for symbol operations, the indexed symbol name" },
+                  content: { type: ["string", "null"], description: "Complete replacement source for the selected symbol or exact old excerpt" },
                 },
               },
             },
@@ -62,7 +69,15 @@ export const EMIT_PATCHES_SCHEMA = Object.freeze({
   },
 });
 
-const isProtected = (path) => PROTECTED_PATHS.some((re) => re.test(path));
+export const isProtectedPath = (path, { tree = null, contract = null } = {}) => {
+  if (PROTECTED_PATHS.some((re) => re.test(path))) return true;
+  // App.jsx becomes a protected one-line mount authority only on a composed tree. Legacy trees
+  // and retained fixtures that predate the scaffold manifest preserve their existing behavior.
+  if (path === "src/App.jsx" && tree?.["src/lib/scaffolds/composed/manifest.js"]
+    && contract?.scaffoldGraph) return true;
+  return (contract?.scaffoldGraph?.protectedFiles || []).includes(path)
+    && Boolean(tree?.["src/lib/scaffolds/composed/manifest.js"]);
+};
 
 // Two default exports compile-fail EVERY time — a live run burned a full gate round on
 // "Multiple exports with the same name 'default'" from an append that should have been a
@@ -75,32 +90,185 @@ function duplicateDefault(candidateText) {
     + `use replace_symbol on the existing default component instead of adding another`;
 }
 
+const SAFE_BARE_CALL_GLOBALS = new Set([
+  "Array", "BigInt", "Boolean", "Date", "Event", "Function", "Map", "Number", "Object", "Promise",
+  "Proxy", "RegExp", "Set", "String", "Symbol", "URL", "URLSearchParams", "WeakMap", "WeakSet",
+  "alert", "atob", "btoa", "cancelAnimationFrame", "clearInterval", "clearTimeout",
+  "confirm", "decodeURI", "decodeURIComponent", "encodeURI", "encodeURIComponent",
+  "escape", "eval", "fetch", "isFinite", "isNaN", "parseFloat", "parseInt", "prompt",
+  "queueMicrotask", "requestAnimationFrame", "setInterval", "setTimeout", "structuredClone",
+  "unescape",
+]);
+
+function addBindingNames(node, names) {
+  if (!node || typeof node !== "object") return;
+  if (node.type === "Identifier") { names.add(node.name); return; }
+  if (node.type === "RestElement" || node.type === "AssignmentPattern") {
+    addBindingNames(node.argument || node.left, names);
+    return;
+  }
+  if (node.type === "ObjectPattern") {
+    for (const property of node.properties || []) addBindingNames(property.value || property.argument, names);
+    return;
+  }
+  if (node.type === "ArrayPattern") for (const element of node.elements || []) addBindingNames(element, names);
+}
+
+// Micro-repairs are intentionally too small for a compile/retry round. Fail closed when one adds
+// a bare call or constructor for which the complete candidate has no declaration or import. This
+// catches runtime-only defects (for example an invented React setter) that Vite transpilation does
+// not report, while leaving member calls and pre-existing generated behavior unchanged.
+function unresolvedIntroducedCalls(before, after, file) {
+  const facts = (source) => {
+    const calls = new Set();
+    const bindings = new Set();
+    const ast = parse(source, {
+      sourceType: "unambiguous",
+      plugins: ["jsx", ...(file.endsWith(".ts") || file.endsWith(".tsx") ? ["typescript"] : [])],
+    });
+    const visit = (node) => {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) { for (const child of node) visit(child); return; }
+      if (node.type === "ImportSpecifier" || node.type === "ImportDefaultSpecifier"
+          || node.type === "ImportNamespaceSpecifier") addBindingNames(node.local, bindings);
+      if (node.type === "VariableDeclarator") addBindingNames(node.id, bindings);
+      if (node.type === "FunctionDeclaration" || node.type === "FunctionExpression"
+          || node.type === "ArrowFunctionExpression" || node.type === "ObjectMethod"
+          || node.type === "ClassMethod" || node.type === "ClassPrivateMethod") {
+        addBindingNames(node.id, bindings);
+        for (const param of node.params || []) addBindingNames(param, bindings);
+      }
+      if (node.type === "ClassDeclaration" || node.type === "ClassExpression") addBindingNames(node.id, bindings);
+      if (node.type === "CatchClause") addBindingNames(node.param, bindings);
+      if ((node.type === "CallExpression" || node.type === "OptionalCallExpression"
+          || node.type === "NewExpression") && node.callee?.type === "Identifier") calls.add(node.callee.name);
+      for (const [key, child] of Object.entries(node)) {
+        if (["loc", "start", "end", "extra", "comments", "errors"].includes(key)) continue;
+        visit(child);
+      }
+    };
+    visit(ast.program);
+    return { calls, bindings };
+  };
+  const prior = facts(before);
+  const next = facts(after);
+  return [...next.calls].filter((name) => !prior.calls.has(name)
+    && !next.bindings.has(name) && !SAFE_BARE_CALL_GLOBALS.has(name));
+}
+
 function opSignature(patch, op) {
   if (patch.newFile) return `new:${patch.newFile}`;
   if (patch.deleteFile) return `del:${patch.deleteFile}`;
   if (patch.replaceFile) return `repl:${patch.replaceFile}`;
+  if (op.op === "replace_exact") {
+    const digest = createHash("sha256").update(String(op.symbol || "")).digest("hex").slice(0, 16);
+    return `${patch.file}:${op.op}:${digest}`;
+  }
   return `${patch.file}:${op.op}:${op.symbol || ""}`;
 }
+
+function importBindingKey(specifier) {
+  if (specifier.type === "ImportDefaultSpecifier") return `default:${specifier.local.name}`;
+  if (specifier.type === "ImportNamespaceSpecifier") return `namespace:${specifier.local.name}`;
+  const imported = specifier.imported?.name || specifier.imported?.value;
+  return `named:${imported}:${specifier.local.name}`;
+}
+
+function parseImportDeclarations(source) {
+  return parse(source, { sourceType: "module", plugins: ["jsx", "typescript"] }).program.body
+    .filter((node) => node.type === "ImportDeclaration");
+}
+
+/**
+ * Return only the import bindings not already present in the retained file. Increment retries
+ * operate on a candidate containing every clean sibling from the previous batch. Re-inserting
+ * `import { useState } from "react"` into a file which already imports useState is therefore an
+ * idempotent success, not malformed source. If one binding is new, emit a separate valid import
+ * for just that binding rather than duplicating the already-retained names.
+ */
+function missingImportStatements(current, statement) {
+  try {
+    const requested = parseImportDeclarations(statement);
+    if (requested.length !== 1) return [statement];
+    const declaration = requested[0];
+    const source = declaration.source.value;
+    const existing = new Set(parseImportDeclarations(current)
+      .filter((row) => row.source.value === source)
+      .flatMap((row) => row.specifiers.map(importBindingKey)));
+    if (!declaration.specifiers.length) {
+      return parseImportDeclarations(current).some((row) => row.source.value === source)
+        ? [] : [statement];
+    }
+    const missing = declaration.specifiers.filter((specifier) => !existing.has(importBindingKey(specifier)));
+    if (!missing.length) return [];
+    const quotedSource = JSON.stringify(source);
+    const additions = [];
+    for (const specifier of missing.filter((row) => row.type === "ImportDefaultSpecifier")) {
+      additions.push(`import ${specifier.local.name} from ${quotedSource};`);
+    }
+    for (const specifier of missing.filter((row) => row.type === "ImportNamespaceSpecifier")) {
+      additions.push(`import * as ${specifier.local.name} from ${quotedSource};`);
+    }
+    const named = missing.filter((row) => row.type === "ImportSpecifier");
+    if (named.length) {
+      additions.push(`import { ${named.map((specifier) => {
+        const imported = specifier.imported?.name || specifier.imported?.value;
+        return imported === specifier.local.name ? imported : `${imported} as ${specifier.local.name}`;
+      }).join(", ")} } from ${quotedSource};`);
+    }
+    return additions;
+  } catch {
+    return [statement];
+  }
+}
+
+/**
+ * Why a patch was refused. Stable codes — the readable reason may be reworded at any time, these
+ * may not, because attempt accounting and repair targeting both branch on them.
+ */
+export const REJECTION = Object.freeze({
+  SOURCE_PARSE_FAILED: "source_parse_failed",       // the content the model wrote is not parseable
+  PATCH_NOT_APPLICABLE: "patch_not_applicable",     // the target does not exist, or already does
+  INVALID_PATCH_OPERATION: "invalid_patch_operation", // the op itself is malformed or unknown
+  WRITE_SCOPE_VIOLATION: "write_scope_violation",   // protected platform path
+  TREE_INTEGRITY_FAILED: "tree_integrity_failed",   // the batch would break a structural invariant
+  BATCH_ATOMIC_ROLLBACK: "batch_atomic_rollback",   // valid on its own; discarded with its batch
+});
 
 /**
  * Apply a batch of patches to a tree, validating every operation against the CURRENT index
  * of the file it touches. Returns the new tree plus applied/rejected lists; the input tree
  * is never mutated. `contract` enables the modularity re-check on every changed file.
+ *
+ * PER-PATCH, NOT ATOMIC: a patch that cannot apply is skipped, and its siblings still apply. Only
+ * a modularity violation rejects the whole batch, because a tree that half-applied its way into a
+ * monolith is worse than a clean refusal.
  */
 export function applyPatches(tree, patches, { contract = null } = {}) {
   const working = { ...tree };
   const applied = [];
   const rejected = [];
-  const reject = (patch, op, reason) => rejected.push({ signature: opSignature(patch, op || {}), reason });
+  // Every rejection carries a STABLE CODE as well as its readable reason. A live build recorded
+  // twelve rejected patches with a null reason and one reason attached to the wrong patch, because
+  // the audit trail correlated rejections to patches by array position. A code, a file and an
+  // operation make each row answerable on its own.
+  const reject = (patch, op, reason, code = REJECTION.INVALID_PATCH_OPERATION) => rejected.push({
+    code,
+    signature: opSignature(patch, op || {}),
+    file: patch.newFile || patch.replaceFile || patch.deleteFile || patch.file || null,
+    operation: op?.op || (patch.newFile ? "newFile" : patch.replaceFile ? "replaceFile"
+      : patch.deleteFile ? "deleteFile" : null),
+    reason,
+  });
 
   for (const patch of patches || []) {
     // ── create ───────────────────────────────────────────────────────────────────────────
     if (patch.newFile) {
-      if (patch.newFile in working) { reject(patch, null, `newFile: ${patch.newFile} already exists — use ops to modify it`); continue; }
-      if (isProtected(patch.newFile)) { reject(patch, null, `newFile: ${patch.newFile} is protected platform infrastructure`); continue; }
+      if (patch.newFile in working) { reject(patch, null, `newFile: ${patch.newFile} already exists — use ops to modify it`, REJECTION.PATCH_NOT_APPLICABLE); continue; }
+      if (isProtectedPath(patch.newFile, { tree: working, contract })) { reject(patch, null, `newFile: ${patch.newFile} is protected platform infrastructure`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
       const probe = indexFile(patch.newFile, patch.content || "");
       if (probe.opaque && /\.(jsx?|tsx?|mjs|cjs)$/.test(patch.newFile)) {
-        reject(patch, null, `newFile: content for ${patch.newFile} does not parse (unbalanced braces or no structure)`);
+        reject(patch, null, `newFile: content for ${patch.newFile} does not parse (unbalanced braces or no structure)`, REJECTION.SOURCE_PARSE_FAILED);
         continue;
       }
       working[patch.newFile] = String(patch.content || "");
@@ -110,12 +278,12 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
 
     // ── whole-file replace (the ONLY mutation path for index-opaque files like CSS) ──────
     if (patch.replaceFile) {
-      if (!(patch.replaceFile in working)) { reject(patch, null, `replaceFile: ${patch.replaceFile} does not exist — use newFile to create files`); continue; }
-      if (isProtected(patch.replaceFile)) { reject(patch, null, `replaceFile: ${patch.replaceFile} is protected platform infrastructure`); continue; }
+      if (!(patch.replaceFile in working)) { reject(patch, null, `replaceFile: ${patch.replaceFile} does not exist — use newFile to create files`, REJECTION.PATCH_NOT_APPLICABLE); continue; }
+      if (isProtectedPath(patch.replaceFile, { tree: working, contract })) { reject(patch, null, `replaceFile: ${patch.replaceFile} is protected platform infrastructure`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
       const content = String(patch.content || "");
       if (/\.(jsx?|tsx?|mjs|cjs)$/.test(patch.replaceFile)) {
         const probe = indexFile(patch.replaceFile, content);
-        if (probe.opaque) { reject(patch, null, `replaceFile: content for ${patch.replaceFile} does not parse (unbalanced braces or no structure)`); continue; }
+        if (probe.opaque) { reject(patch, null, `replaceFile: content for ${patch.replaceFile} does not parse (unbalanced braces or no structure)`, REJECTION.SOURCE_PARSE_FAILED); continue; }
       }
       working[patch.replaceFile] = content;
       applied.push({ signature: opSignature(patch, {}), file: patch.replaceFile, kind: "replaceFile" });
@@ -124,10 +292,10 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
 
     // ── delete ───────────────────────────────────────────────────────────────────────────
     if (patch.deleteFile) {
-      if (!(patch.deleteFile in working)) { reject(patch, null, `deleteFile: ${patch.deleteFile} does not exist`); continue; }
-      if (isProtected(patch.deleteFile)) { reject(patch, null, `deleteFile: ${patch.deleteFile} is protected platform infrastructure`); continue; }
+      if (!(patch.deleteFile in working)) { reject(patch, null, `deleteFile: ${patch.deleteFile} does not exist`, REJECTION.PATCH_NOT_APPLICABLE); continue; }
+      if (isProtectedPath(patch.deleteFile, { tree: working, contract })) { reject(patch, null, `deleteFile: ${patch.deleteFile} is protected platform infrastructure`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
       if (/^src\/(routes|data)\//.test(patch.deleteFile)) {
-        reject(patch, null, `deleteFile: ${patch.deleteFile} — route/data modules from earlier stages are never deleted by a patch (anti-collapse)`);
+        reject(patch, null, `deleteFile: ${patch.deleteFile} — route/data modules from earlier stages are never deleted by a patch (anti-collapse)`, REJECTION.WRITE_SCOPE_VIOLATION);
         continue;
       }
       delete working[patch.deleteFile];
@@ -137,26 +305,31 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
 
     // ── symbol ops on an existing file ───────────────────────────────────────────────────
     const file = patch.file;
-    if (!file || !(file in working)) { reject(patch, null, `file ${file} does not exist — use newFile to create files`); continue; }
-    if (isProtected(file)) { reject(patch, null, `${file} is protected platform infrastructure and cannot be patched`); continue; }
+    if (!file || !(file in working)) { reject(patch, null, `file ${file} does not exist — use newFile to create files`, REJECTION.PATCH_NOT_APPLICABLE); continue; }
+    if (isProtectedPath(file, { tree: working, contract })) { reject(patch, null, `${file} is protected platform infrastructure and cannot be patched`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
 
     for (const op of patch.ops || []) {
       const current = String(working[file]);
       const index = indexFile(file, current);
-      if (index.opaque) { reject(patch, op, `${file} is opaque to the index — use replaceFile with the COMPLETE new content instead of symbol ops`); continue; }
+      if (index.opaque) { reject(patch, op, `${file} is opaque to the index — use replaceFile with the COMPLETE new content instead of symbol ops`, REJECTION.SOURCE_PARSE_FAILED); continue; }
 
       // Imports are lines, not symbols — two live runs burned whole rounds trying to name
       // an import statement as a symbol. add_import inserts after the file's last import.
       if (op.op === "add_import") {
         const statement = String(op.content || "").trim();
-        if (!/^import\b/.test(statement)) { reject(patch, op, "add_import: content must be a complete import statement"); continue; }
+        if (!/^import\b/.test(statement)) { reject(patch, op, "add_import: content must be a complete import statement", REJECTION.INVALID_PATCH_OPERATION); continue; }
+        const additions = missingImportStatements(current, statement);
+        if (!additions.length) {
+          applied.push({ signature: opSignature(patch, op), file, kind: "add_import_existing" });
+          continue;
+        }
         const lines = current.split("\n");
         let lastImport = -1;
         for (let i = 0; i < lines.length; i += 1) if (/^\s*import\b/.test(lines[i])) lastImport = i;
-        lines.splice(lastImport + 1, 0, statement);
+        lines.splice(lastImport + 1, 0, ...additions);
         const candidate = lines.join("\n");
         const probe = indexFile(file, candidate);
-        if (probe.opaque) { reject(patch, op, "add_import: resulting file does not parse"); continue; }
+        if (probe.opaque) { reject(patch, op, "add_import: resulting file does not parse", REJECTION.SOURCE_PARSE_FAILED); continue; }
         working[file] = candidate;
         applied.push({ signature: opSignature(patch, op), file, kind: op.op });
         continue;
@@ -165,9 +338,60 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
       if (op.op === "append") {
         const candidate = `${current}\n${op.content || ""}`;
         const dupDefault = duplicateDefault(candidate);
-        if (dupDefault) { reject(patch, op, dupDefault); continue; }
+        if (dupDefault) { reject(patch, op, dupDefault, REJECTION.TREE_INTEGRITY_FAILED); continue; }
         const probe = indexFile(file, candidate);
-        if (probe.opaque) { reject(patch, op, "append: resulting file does not parse"); continue; }
+        if (probe.opaque) { reject(patch, op, "append: resulting file does not parse", REJECTION.SOURCE_PARSE_FAILED); continue; }
+        working[file] = candidate;
+        applied.push({ signature: opSignature(patch, op), file, kind: op.op });
+        continue;
+      }
+
+      // Large generated components often contain small nested handlers or conditional branches
+      // that are not top-level index symbols. Requiring replace_symbol there forces the model to
+      // resend an entire 15-30k component for a two-line correction. `replace_exact` is the safe
+      // bounded alternative: the old excerpt is an optimistic-concurrency precondition, must be
+      // non-empty and unique, and the complete file must still parse after replacement.
+      if (op.op === "replace_exact") {
+        const expected = String(op.symbol || "");
+        if (!expected) {
+          reject(patch, op, "replace_exact: symbol must contain the non-empty exact old source excerpt",
+            REJECTION.INVALID_PATCH_OPERATION);
+          continue;
+        }
+        if (index.symbols.some((symbol) => symbol.name === expected)) {
+          reject(patch, op, `replace_exact: "${expected}" is only an indexed symbol name, not an exact old `
+            + "source excerpt. Put the complete unique old code block in symbol, or use replace_symbol with "
+            + "the complete replacement declaration", REJECTION.INVALID_PATCH_OPERATION);
+          continue;
+        }
+        const first = current.indexOf(expected);
+        const last = current.lastIndexOf(expected);
+        if (first < 0) {
+          reject(patch, op, "replace_exact: the expected old source excerpt was not found",
+            REJECTION.PATCH_NOT_APPLICABLE);
+          continue;
+        }
+        if (first !== last) {
+          reject(patch, op, "replace_exact: the expected old source excerpt is not unique",
+            REJECTION.PATCH_NOT_APPLICABLE);
+          continue;
+        }
+        const candidate = current.slice(0, first) + String(op.content || "")
+          + current.slice(first + expected.length);
+        const dupDefault = duplicateDefault(candidate);
+        if (dupDefault) { reject(patch, op, dupDefault, REJECTION.TREE_INTEGRITY_FAILED); continue; }
+        const probe = indexFile(file, candidate);
+        if (probe.opaque) {
+          reject(patch, op, "replace_exact: resulting file does not parse — include complete balanced syntax",
+            REJECTION.SOURCE_PARSE_FAILED);
+          continue;
+        }
+        const unresolved = unresolvedIntroducedCalls(current, candidate, file);
+        if (unresolved.length) {
+          reject(patch, op, `replace_exact: introduced unresolved call identifier(s): ${unresolved.join(", ")}`,
+            REJECTION.TREE_INTEGRITY_FAILED);
+          continue;
+        }
         working[file] = candidate;
         applied.push({ signature: opSignature(patch, op), file, kind: op.op });
         continue;
@@ -179,7 +403,7 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
         const importHint = /^\s*import\b/.test(String(op.symbol || ""))
           ? ' — to ADD an import, use {op: "add_import", content: "import …"} instead of naming the statement as a symbol'
           : "";
-        reject(patch, op, `symbol "${op.symbol}" not found in ${file} — present symbols: ${known}${importHint}`);
+        reject(patch, op, `symbol "${op.symbol}" not found in ${file} — present symbols: ${known}${importHint}`, REJECTION.PATCH_NOT_APPLICABLE);
         continue;
       }
 
@@ -193,14 +417,14 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
       } else if (op.op === "insert_before_symbol") {
         candidate = `${current.slice(0, symbol.start)}${op.content || ""}\n${current.slice(symbol.start)}`;
       } else {
-        reject(patch, op, `unknown op ${op.op}`);
+        reject(patch, op, `unknown op ${op.op}`, REJECTION.INVALID_PATCH_OPERATION);
         continue;
       }
 
       const dupDefault = duplicateDefault(candidate);
-      if (dupDefault) { reject(patch, op, dupDefault); continue; }
+      if (dupDefault) { reject(patch, op, dupDefault, REJECTION.TREE_INTEGRITY_FAILED); continue; }
       const probe = indexFile(file, candidate);
-      if (probe.opaque) { reject(patch, op, `${op.op} on ${op.symbol}: resulting file does not parse — check braces in your content`); continue; }
+      if (probe.opaque) { reject(patch, op, `${op.op} on ${op.symbol}: resulting file does not parse — check braces in your content`, REJECTION.SOURCE_PARSE_FAILED); continue; }
       working[file] = candidate;
       applied.push({ signature: opSignature(patch, op), file, kind: op.op });
     }
@@ -211,20 +435,108 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
   if (changedFiles.length) {
     const scope = Object.fromEntries(changedFiles.map((f) => [f, working[f]]));
     const modular = modularityCheck(scope, { contract });
-    if (!modular.ok) {
+    // JUDGE THE DELTA, NOT THE INHERITED STATE.
+    //
+    // This rule exists to stop a batch re-monolithing a modular tree, and it did that job by
+    // rejecting the WHOLE batch whenever a changed file broke a structural invariant. Applied to a
+    // file that was ALREADY over the limit it became a trap with no exit: every repair to the
+    // oversized flow component was discarded — however correct — because the file it was fixing was
+    // too big, and nothing ever asked the model to shrink it. One production build spent 23 repair
+    // dispatches and produced 2 browser verdicts that way; the file could not be fixed, could not
+    // be shrunk, and could never go green.
+    //
+    // A patch does not inherit the blame for a violation it did not create. A pre-existing problem
+    // on a file this batch did not make larger is carried forward as a structural finding for the
+    // repair brief instead of a rejection. Creating a new violation, or worsening an existing one,
+    // is rejected exactly as before.
+    const previousScope = Object.fromEntries(changedFiles.filter((f) => f in tree).map((f) => [f, tree[f]]));
+    const baseline = modularityCheck(previousScope, { contract });
+    const sizeBefore = new Map(baseline.metrics.map((row) => [row.path, row.tokens]));
+    const sizeAfter = new Map(modular.metrics.map((row) => [row.path, row.tokens]));
+    const pathOf = (problem) => (String(problem).match(/^(src\/[^\s]+)/) || [])[1] || null;
+    const inheritedPaths = new Set(baseline.problems.map(pathOf).filter(Boolean));
+    const inherited = [];
+    // A real fix to an oversized module usually has to ADD a few lines — wiring an onChange, adding
+    // a handler. Demanding that it never grow by a single token would leave the deadlock exactly
+    // where it was, so an already-violating file may grow by a small margin while the split it has
+    // been asked for is still outstanding. Material growth is still making the monolith worse.
+    const INHERITED_GROWTH_TOLERANCE = Math.round(FILE_MAX_TOKENS * 0.1);
+    const introduced = modular.problems.filter((problem) => {
+      const path = pathOf(problem);
+      if (!path || !inheritedPaths.has(path)) return true;               // brand-new violation
+      const growth = (sizeAfter.get(path) || 0) - (sizeBefore.get(path) || 0);
+      if (growth > INHERITED_GROWTH_TOLERANCE) return true;              // materially worse
+      inherited.push(problem);
+      return false;
+    });
+    if (introduced.length === 0 && inherited.length) {
+      // Nothing new was broken. Let the work land and hand the pre-existing shape problem to the
+      // caller, which briefs it as something to fix rather than silently discarding the fix.
+      return { tree: working, provisionalTree: null, structuralProblems: [], inheritedStructuralProblems: inherited,
+        applied, rejected, modularityFailed: false };
+    }
+    if (introduced.length) {
+      modular.problems = introduced;
       // The batch violated a structural invariant: the WHOLE batch is rejected — a tree that
       // half-applied its way into a monolith would be worse than a clean refusal.
+      const structuralDetail = modular.problems.join("; ");
       return {
-        tree, applied: [], rejected: [
+        tree,
+        // Non-promotable recovery evidence only. Callers must explicitly classify the structural
+        // findings before using this tree; the ordinary result remains the untouched input tree.
+        provisionalTree: working,
+        structuralProblems: modular.problems,
+        applied: [],
+        rejected: [
           ...rejected,
-          ...modular.problems.map((p) => ({ signature: "modularity", reason: p })),
+          ...modular.problems.map((problem) => ({ code: REJECTION.TREE_INTEGRITY_FAILED,
+            signature: "modularity", file: null, operation: null, reason: problem })),
+          // Named individually, so the audit trail says which work was lost and that it was lost
+          // to a SIBLING rather than to anything wrong with itself.
+          ...applied.map((row) => ({ code: REJECTION.BATCH_ATOMIC_ROLLBACK, signature: row.signature,
+            file: row.file, operation: row.kind, independentlyValid: true,
+            reason: `${row.file} applied cleanly and was rolled back with its batch: `
+              + `the batch as a whole broke a structural invariant (${structuralDetail})` })),
         ],
         modularityFailed: true,
       };
     }
   }
 
-  return { tree: working, applied, rejected, modularityFailed: false };
+  return { tree: working, provisionalTree: null, structuralProblems: [], applied, rejected, modularityFailed: false };
+}
+
+/**
+ * The outcome of EACH patch in a batch, correlated by signature rather than by array position.
+ *
+ * The audit trail used to write `rejected[index].reason` against `patches[index]`. Those two lists
+ * are different lengths in different orders, so a live build recorded twelve rejected rows with a
+ * null reason and attached the one real reason — a parse failure in src/data/wizard.js — to an
+ * unrelated patch. A rejected row with no reason is not an audit trail.
+ */
+export function patchOutcomes(patches = [], { applied = [], rejected = [] } = {}) {
+  const bySignature = new Map();
+  for (const row of rejected) {
+    if (!bySignature.has(row.signature)) bySignature.set(row.signature, row);
+  }
+  const appliedSignatures = new Set(applied.map((row) => row.signature));
+  return (patches || []).map((patch) => {
+    const signatures = patch.newFile || patch.deleteFile || patch.replaceFile
+      ? [opSignature(patch, {})]
+      : (patch.ops || []).map((op) => opSignature(patch, op));
+    const refusal = signatures.map((signature) => bySignature.get(signature)).find(Boolean);
+    const landed = signatures.some((signature) => appliedSignatures.has(signature));
+    if (refusal) {
+      return { outcome: "rejected", code: refusal.code, reason: refusal.reason,
+        file: refusal.file ?? null, operation: refusal.operation ?? null,
+        independentlyValid: refusal.independentlyValid === true };
+    }
+    if (landed) return { outcome: "applied", code: null, reason: null, independentlyValid: true };
+    // No signature of this patch appears in either list: it contributed no operation at all.
+    return { outcome: "rejected", code: REJECTION.INVALID_PATCH_OPERATION, independentlyValid: false,
+      file: patch.file || patch.newFile || patch.replaceFile || patch.deleteFile || null, operation: null,
+      reason: "the patch carried no applicable operation (no ops, and no newFile/replaceFile/deleteFile)" };
+  });
 }
 
 /**

@@ -36,6 +36,8 @@ export const PROJECT_SCOPED_TABLES = Object.freeze([
   { table: "health_checks", column: "project_id", ownerScoped: true, label: "health history" },
   { table: "health_status", column: "project_id", ownerScoped: true, label: "health" },
   { table: "custom_domains", column: "project_id", ownerScoped: true, label: "custom domains" },
+  { table: "publish_activation_intents", column: "project_id", ownerScoped: true, label: "publish activations" },
+  { table: "publish_releases", column: "project_id", ownerScoped: true, label: "published releases" },
   { table: "published_sites", column: "project_id", ownerScoped: true, label: "published site" },
   // Deployment history is permanent while the project LIVES — it is the answer to "what was live
   // last Tuesday" — but a deleted project must not leave its published source behind, and
@@ -43,6 +45,10 @@ export const PROJECT_SCOPED_TABLES = Object.freeze([
   { table: "deployments", column: "project_id", ownerScoped: true, label: "deployment history" },
   { table: "build_checkpoints", column: "project_id", ownerScoped: true, label: "build checkpoints" },
   { table: "ai_requests", column: "project_id", ownerScoped: true, label: "usage records" },
+  { table: "build_work_events", column: "project_id", ownerScoped: true, label: "build worker events" },
+  { table: "build_work_results", column: "project_id", ownerScoped: true, label: "build worker results" },
+  { table: "build_work_jobs", column: "project_id", ownerScoped: true, label: "build worker jobs" },
+  { table: "build_work_payloads", column: "project_id", ownerScoped: true, label: "build worker payloads" },
   { table: "build_jobs", column: "project_id", ownerScoped: true, label: "build history" },
 
   // diag_runs holds the prompts the user actually typed. The build audit trail is deliberately
@@ -58,11 +64,13 @@ export const PROJECT_SCOPED_TABLES = Object.freeze([
   // makes those blobs unreferenced.
   { table: "bv2_migration_state", column: "project_id", ownerScoped: true, label: "builder migration state" },
   { table: "bv2_project_knowledge", column: "project_id", ownerScoped: true, label: "project knowledge" },
+  { table: "bv2_shadow_runs", column: "project_id", ownerScoped: true, label: "shadow evidence" },
   { table: "bv2_file_revisions", column: "project_id", ownerScoped: true, label: "code index" },
   { table: "bv2_project_pointers", column: "project_id", ownerScoped: true, label: "snapshot pointers" },
   { table: "bv2_snapshots", column: "project_id", ownerScoped: true, label: "snapshots" },
   { table: "bv2_contracts", column: "project_id", ownerScoped: true, label: "build contracts" },
   { table: "bv2_verification_cache", column: "project_id", ownerScoped: true, label: "verification cache" },
+  { table: "bv2_model_reservations", column: "project_id", ownerScoped: true, label: "model reservations" },
   { table: "bv2_builds", column: "project_id", ownerScoped: true, label: "builds" },
   { table: "bv2_assets", column: "project_id", ownerScoped: true, label: "project imagery" },
 
@@ -84,10 +92,20 @@ export const NOT_PURGED = Object.freeze(new Map([
   ["bv2_symbols", "cascades from bv2_file_revisions (FK ON DELETE CASCADE)"],
   ["bv2_symbol_refs", "cascades from bv2_file_revisions (FK ON DELETE CASCADE)"],
   ["bv2_dependency_edges", "cascades from bv2_file_revisions (FK ON DELETE CASCADE)"],
+  ["bv2_shadow_run_files", "cascades from bv2_shadow_runs (FK ON DELETE CASCADE)"],
+  ["bv2_shadow_checks", "cascades from bv2_shadow_runs (FK ON DELETE CASCADE)"],
   ["bv2_snapshot_files", "cascades from bv2_snapshots (FK ON DELETE CASCADE)"],
-  ["bv2_retrieval_traces", "build-scoped audit rows keyed by build_id, not project_id; swept by 90-day retention like diag telemetry"],
-  ["bv2_patches", "build-scoped audit rows keyed by build_id, not project_id; swept by 90-day retention like diag telemetry"],
+  ["bv2_retrieval_traces", "cascades from bv2_builds through the build/owner FK"],
+  ["bv2_patches", "cascades from bv2_builds through the build/owner FK"],
+  ["bv2_build_envelopes", "cascades from bv2_builds through the build/owner/project FK"],
+  ["bv2_build_progress", "cascades from bv2_builds through the build/owner FK"],
+  ["bv2_recovery_approvals", "cascades from bv2_builds through the build/owner FK"],
+  ["bv2_duration_extensions", "cascades from bv2_builds through the build/owner FK"],
+  ["bv2_verification_defects", "cascades from bv2_builds through the build/owner/project FK"],
+  ["bv2_repair_strategies", "cascades from bv2_builds through the build/owner/project FK"],
+  ["bv2_build_settlements", "cascades from bv2_builds through the build/owner FK"],
   ["bv2_blobs", "per-owner content-addressed store; GC removes hashes no retained snapshot references once manifests are purged above"],
+  ["data_erasure_jobs", "pseudonymous content-free erasure evidence is intentionally retained after owner_id is cleared on successful deletion"],
   ["bv2_feature_flags", "platform-global flags — carries no project or app column, listed for the guard only"],
   ...[
     "project_secrets", "project_integrations", "project_environments", "project_releases",
@@ -167,14 +185,18 @@ export async function takeSiteOffline({ client, provisiond, ownerId, projectId }
 
 // Detach every custom domain from Caddy before the rows are deleted. Deleting the rows first
 // loses the hostnames, and Caddy would keep serving them with nothing in Thrallo aware of it.
-export async function detachDomains({ client, provisiond, ownerId, projectId }) {
+export async function detachDomains({ client, provisiond, ownerId, projectId, strictExternal = false }) {
   const { data: domains } = await client.from("custom_domains")
     .select("domain").eq("project_id", String(projectId)).eq("owner", ownerId);
   const names = (domains || []).map((d) => d.domain);
   if (!provisiond) return { detached: [], skipped: names };
   for (const domain of names) {
-    await provisiond("/domain-detach", { domain })
-      .catch((error) => console.error(`[teardown] detach ${domain}: ${error?.message || error}`));
+    try {
+      await provisiond("/domain-detach", { domain });
+    } catch (error) {
+      if (strictExternal) throw failure("custom domain teardown", error);
+      console.error(`[teardown] detach ${domain}: ${error?.message || error}`);
+    }
   }
   return { detached: names, skipped: [] };
 }
@@ -185,12 +207,25 @@ export async function detachDomains({ client, provisiond, ownerId, projectId }) 
  * Infrastructure first — while the records that describe it still exist — then the rows. Reversing
  * that order is what left orphans.
  */
-export async function purgeProjectResources(ownerId, projectId, { client = serviceClient(), provisiond = null } = {}) {
+export async function purgeProjectResources(ownerId, projectId, {
+  client = serviceClient(), provisiond = null, strictExternal = false, atomicDatabase = false,
+} = {}) {
   const report = { projectId: String(projectId) };
 
   report.site = await takeSiteOffline({ client, provisiond, ownerId, projectId });
-  report.domains = await detachDomains({ client, provisiond, ownerId, projectId });
-  if (provisiond) await provisiond("/stop", { projectId }).catch(() => {});  // preview container
+  report.domains = await detachDomains({ client, provisiond, ownerId, projectId, strictExternal });
+  if (provisiond && process.env.THRALLO_ATOMIC_PUBLISH_ENABLED === "1") {
+    report.releases = await provisiond("/releases/purge-project", { owner: ownerId, projectId: String(projectId) });
+    if (!report.releases?.purged) {
+      // No directory is valid for a never-atomically-published project. The DB deletion below is
+      // still authoritative; restore/erasure verification proves no release rows or files remain.
+      report.releases = { ...(report.releases || {}), verifiedAbsent: true };
+    }
+  }
+  if (provisiond) {
+    try { await provisiond("/stop", { projectId }); }
+    catch (error) { if (strictExternal) throw failure("preview teardown", error); }
+  }
 
   // The end users of a generated app have their own auth identities; deleting the app must not
   // leave them able to sign in to nothing.
@@ -202,9 +237,24 @@ export async function purgeProjectResources(ownerId, projectId, { client = servi
   report.appUsers = 0;
   for await (const rows of pagedRows(client, "app_users", "auth_user_id", { app_id: String(projectId) })) {
     for (const user of rows) {
-      await client.auth.admin.deleteUser(user.auth_user_id).catch(() => {});
+      try {
+        const { error } = await client.auth.admin.deleteUser(user.auth_user_id);
+        if (error) throw error;
+      } catch (error) {
+        if (strictExternal) throw failure("generated-app user deletion", error);
+        console.error(`[teardown] app user ${user.auth_user_id} deletion failed: ${error?.message || error}`);
+      }
       report.appUsers += 1;
     }
+  }
+
+  if (atomicDatabase) {
+    const { data, error } = await client.rpc("erase_project_runtime_rows", {
+      p_owner: ownerId, p_project: String(projectId),
+    });
+    if (error) throw failure("transactional project data deletion", error);
+    report.database = data;
+    return report;
   }
 
   // build_signals is keyed by build, so collect the run ids before diag_runs is removed. Paged for

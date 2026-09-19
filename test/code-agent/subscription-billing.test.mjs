@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 
 import { MemoryCodeAgentStore } from "../../shell/server/lib/codeAgentStore.mjs";
 import {
-  handleSubscriptionEvent, startPlanCheckout, thralloStripeConfigured, stripeConfigMistake,
+  handleSubscriptionEvent, startPlanCheckout, startTopupCheckout, thralloStripeConfigured,
+  thralloTopupConfigured, stripeConfigMistake,
 } from "../../shell/server/lib/subscriptionBilling.mjs";
 
 const OWNER = "22222222-2222-4222-8222-222222222222";
@@ -22,6 +23,8 @@ function clearStripeEnv() {
   delete process.env.THRALLO_STRIPE_WEBHOOK_SECRET;
   delete process.env.THRALLO_STRIPE_PRICE_STARTER;
   delete process.env.THRALLO_STRIPE_PRICE_PRO;
+  delete process.env.THRALLO_STRIPE_TOPUP_PRICE_ID;
+  delete process.env.THRALLO_STRIPE_TOPUP_CREDITS;
 }
 
 function fakeStripe(event, subscription) {
@@ -47,7 +50,10 @@ function fakeStripe(event, subscription) {
         return next;
       },
     },
-    checkout: { sessions: { create: async (params) => ({ url: `https://checkout/${params.customer}` }) } },
+    checkout: { sessions: {
+      create: async (params) => ({ url: `https://checkout/${params.customer}` }),
+      listLineItems: async () => ({ data: [{ price: { id: "price_topup" }, quantity: 1 }] }),
+    } },
   };
   return stripe;
 }
@@ -74,9 +80,158 @@ test("checkout creates a customer once and returns the session URL", async () =>
   clearStripeEnv();
 });
 
+test("top-up checkout is config-gated and never accepts a browser-supplied quantity", async () => {
+  clearStripeEnv();
+  const store = new MemoryCodeAgentStore();
+  await assert.rejects(startTopupCheckout(OWNER, { store }), (error) => error.code === "topup_not_configured");
+  configureStripeEnv();
+  process.env.THRALLO_STRIPE_TOPUP_PRICE_ID = "price_topup";
+  process.env.THRALLO_STRIPE_TOPUP_CREDITS = "25";
+  assert.equal(thralloTopupConfigured(), true);
+  const stripe = fakeStripe();
+  let checkout = null;
+  const options = [];
+  stripe.checkout.sessions.create = async (params, requestOptions) => {
+    checkout = params; options.push(requestOptions); return { url: "https://checkout/topup" };
+  };
+  assert.deepEqual(await startTopupCheckout(OWNER, {
+    store, stripe, requestKey: "11111111-1111-4111-8111-111111111111",
+  }), { url: "https://checkout/topup" });
+  await startTopupCheckout(OWNER, {
+    store, stripe, requestKey: "22222222-2222-4222-8222-222222222222",
+  });
+  assert.deepEqual(checkout.line_items, [{ price: "price_topup", quantity: 1 }]);
+  assert.equal(checkout.metadata.thrallo_purchase, "build_credits");
+  assert.notEqual(options[0].idempotencyKey, options[1].idempotencyKey);
+  delete process.env.THRALLO_STRIPE_WEBHOOK_SECRET;
+  assert.equal(thralloTopupConfigured(), false, "payment cannot open without its fulfilment webhook");
+  clearStripeEnv();
+});
+
+test("a paid top-up webhook grants configured credits exactly once through the append-only ledger", async () => {
+  configureStripeEnv();
+  process.env.THRALLO_STRIPE_TOPUP_PRICE_ID = "price_topup";
+  process.env.THRALLO_STRIPE_TOPUP_CREDITS = "25";
+  const grants = [];
+  const store = new MemoryCodeAgentStore();
+  const setupStripe = fakeStripe();
+  let checkout = null;
+  setupStripe.checkout.sessions.create = async (params) => {
+    checkout = params;
+    return { url: "https://checkout/topup" };
+  };
+  await startTopupCheckout(OWNER, {
+    store, stripe: setupStripe, requestKey: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  });
+  const event = { id: "evt_topup", type: "checkout.session.completed", data: { object: {
+    id: "cs_topup", mode: "payment", payment_status: "paid", client_reference_id: OWNER,
+    customer: checkout.customer, metadata: checkout.metadata,
+  } } };
+  const result = await handleSubscriptionEvent("raw", "sig", {
+    store, stripe: fakeStripe(event),
+    ledger: { grant: async (input) => { grants.push(input); return { ok: true }; } },
+  });
+  assert.equal(result.creditsGranted, 25);
+  assert.deepEqual(grants, [{ owner: OWNER, credits: 25, bucket: "topup", ref: "stripe-checkout:cs_topup" }]);
+  clearStripeEnv();
+});
+
+test("delayed top-up fulfilment uses its signed checkout-time credit contract after config rotation", async () => {
+  configureStripeEnv();
+  process.env.THRALLO_STRIPE_TOPUP_PRICE_ID = "price_topup";
+  process.env.THRALLO_STRIPE_TOPUP_CREDITS = "25";
+  const store = new MemoryCodeAgentStore();
+  const setupStripe = fakeStripe();
+  let checkout = null;
+  setupStripe.checkout.sessions.create = async (params) => {
+    checkout = params;
+    return { url: "https://checkout/topup" };
+  };
+  await startTopupCheckout(OWNER, {
+    store, stripe: setupStripe, requestKey: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  });
+  process.env.THRALLO_STRIPE_TOPUP_PRICE_ID = "price_rotated";
+  process.env.THRALLO_STRIPE_TOPUP_CREDITS = "40";
+  const event = { type: "checkout.session.async_payment_succeeded", data: { object: {
+    id: "cs_delayed", mode: "payment", payment_status: "paid", client_reference_id: OWNER,
+    customer: checkout.customer, metadata: checkout.metadata,
+  } } };
+  const stripe = fakeStripe(event);
+  stripe.checkout.sessions.listLineItems = async () => ({ data: [{ price: { id: "price_topup" }, quantity: 1 }] });
+  const grants = [];
+  const result = await handleSubscriptionEvent("raw", "sig", {
+    store, stripe, ledger: { grant: async (input) => grants.push(input) },
+  });
+  assert.equal(result.creditsGranted, 25);
+  assert.equal(grants[0].credits, 25);
+  clearStripeEnv();
+});
+
+test("top-up refunds and disputes adjust credits only from settled outcomes", async () => {
+  configureStripeEnv();
+  process.env.THRALLO_STRIPE_TOPUP_PRICE_ID = "price_topup";
+  process.env.THRALLO_STRIPE_TOPUP_CREDITS = "25";
+  const store = new MemoryCodeAgentStore();
+  const setupStripe = fakeStripe();
+  let checkout = null;
+  setupStripe.checkout.sessions.create = async (params) => {
+    checkout = params;
+    return { url: "https://checkout/topup" };
+  };
+  await startTopupCheckout(OWNER, {
+    store, stripe: setupStripe, requestKey: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  });
+  const adjustments = [];
+  const deliver = async (event) => {
+    const stripe = fakeStripe(event);
+    stripe.paymentIntents = { retrieve: async () => ({
+      id: "pi_topup", customer: checkout.customer, metadata: checkout.metadata,
+      amount_received: 1_000,
+    }) };
+    return handleSubscriptionEvent("raw", "sig", {
+      store, stripe, ledger: { adjust: async (input) => { adjustments.push(input); return { ok: true }; } },
+    });
+  };
+
+  await deliver({ type: "refund.created", data: { object: {
+    id: "re_1", status: "pending", payment_intent: "pi_topup", amount: 500,
+  } } });
+  await deliver({ type: "refund.updated", data: { object: {
+    id: "re_1", status: "failed", payment_intent: "pi_topup", amount: 500,
+  } } });
+  assert.equal(adjustments.length, 0);
+  await deliver({ type: "refund.updated", data: { object: {
+    id: "re_1", status: "succeeded", payment_intent: "pi_topup", amount: 500,
+  } } });
+  await deliver({ type: "refund.created", data: { object: {
+    id: "re_1", status: "succeeded", payment_intent: "pi_topup", amount: 500,
+  } } });
+  assert.deepEqual(adjustments.slice(0, 2), [
+    { owner: OWNER, credits: -12.5, bucket: "topup", ref: "stripe-refund:re_1" },
+    { owner: OWNER, credits: -12.5, bucket: "topup", ref: "stripe-refund:re_1" },
+  ], "duplicate deliveries use one stable append-only ledger identity");
+
+  await deliver({ type: "charge.dispute.created", data: { object: {
+    id: "dp_1", status: "needs_response", payment_intent: "pi_topup", amount: 1_000,
+  } } });
+  await deliver({ type: "charge.dispute.closed", data: { object: {
+    id: "dp_1", status: "lost", payment_intent: "pi_topup", amount: 1_000,
+  } } });
+  await deliver({ type: "charge.dispute.closed", data: { object: {
+    id: "dp_2", status: "won", payment_intent: "pi_topup", amount: 1_000,
+  } } });
+  assert.deepEqual(adjustments.slice(2), [
+    { owner: OWNER, credits: -25, bucket: "topup", ref: "stripe-dispute:dp_1" },
+    { owner: OWNER, credits: -25, bucket: "topup", ref: "stripe-dispute:dp_2" },
+    { owner: OWNER, credits: 25, bucket: "topup", ref: "stripe-dispute-won:dp_2" },
+  ]);
+  clearStripeEnv();
+});
+
 test("completed checkout applies the plan, period, and Stripe identifiers", async () => {
   configureStripeEnv();
   const store = new MemoryCodeAgentStore();
+  await store.upsertSubscription(OWNER, { stripe_customer_id: "cus_9" });
   const subscription = {
     id: "sub_9", customer: "cus_9", status: "active",
     current_period_start: 1_753_000_000, current_period_end: 1_755_600_000,
@@ -84,7 +239,7 @@ test("completed checkout applies the plan, period, and Stripe identifiers", asyn
   };
   const event = {
     type: "checkout.session.completed",
-    data: { object: { client_reference_id: OWNER, subscription: "sub_9" } },
+    data: { object: { client_reference_id: OWNER, customer: "cus_9", subscription: "sub_9" } },
   };
   const result = await handleSubscriptionEvent("raw", "sig", {
     store, stripe: fakeStripe(event, subscription),
@@ -163,6 +318,7 @@ async function withEnv(vars, run) {
     "THRALLO_STRIPE_SECRET_KEY", "THRALLO_STRIPE_WEBHOOK_SECRET",
     "THRALLO_STRIPE_PRICE_STARTER", "THRALLO_STRIPE_PRICE_PRO",
     "THRALLO_STARTER_PRICE_ID", "THRALLO_PRO_PRICE_ID",
+    "THRALLO_STRIPE_TOPUP_PRICE_ID", "THRALLO_STRIPE_TOPUP_CREDITS",
     "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET",
   ];
   const saved = Object.fromEntries(names.map((n) => [n, process.env[n]]));
@@ -188,7 +344,8 @@ test("either spelling of the price variables configures a plan", async () => {
     ["THRALLO_STARTER_PRICE_ID", "THRALLO_PRO_PRICE_ID"],
   ]) {
     await withEnv({
-      THRALLO_STRIPE_SECRET_KEY: "sk_test_x", [starter]: "price_s", [pro]: "price_p",
+      THRALLO_STRIPE_SECRET_KEY: "sk_test_x", THRALLO_STRIPE_WEBHOOK_SECRET: "whsec_x",
+      [starter]: "price_s", [pro]: "price_p",
     }, async () => {
       assert.equal(thralloStripeConfigured(), true, `${starter}/${pro} must configure billing`);
       const store = new MemoryCodeAgentStore();

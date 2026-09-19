@@ -1,0 +1,556 @@
+{
+  "summary": "Alder Studio projects and board: create a project, create a task, update its status, then filter the board",
+  "projectType": "dashboard",
+  "version": 1,
+  "auth": {
+    "required": false
+  },
+  "routes": [
+    {
+      "path": "/projects",
+      "name": "Projects",
+      "auth": false,
+      "purpose": "create and view projects"
+    },
+    {
+      "path": "/board",
+      "name": "Board",
+      "auth": false,
+      "purpose": "task board with filters"
+    }
+  ],
+  "entities": [
+    {
+      "name": "memberProfile",
+      "owned": true,
+      "fields": [
+        {
+          "name": "memberId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "memberEmail",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "displayName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "role",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "relationships": [
+        "a member profile belongs to one authenticated platform user",
+        "a member profile can be referenced as a project owner",
+        "a member profile can be referenced as a task owner"
+      ]
+    },
+    {
+      "name": "project",
+      "owned": false,
+      "fields": [
+        {
+          "name": "projectId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "projectTitle",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "projectDescription",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "clientName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "projectStatus",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "projectOwnerId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "projectOwnerName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "projectDueDate",
+          "type": "date",
+          "required": true
+        },
+        {
+          "name": "createdBy",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "relationships": [
+        "a project has one owner member profile",
+        "a project has many tasks"
+      ]
+    },
+    {
+      "name": "task",
+      "owned": false,
+      "fields": [
+        {
+          "name": "taskId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "projectId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "projectTitle",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "taskTitle",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "taskDescription",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "taskOwnerId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "taskOwnerName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "taskStatus",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "taskPriority",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "taskDueDate",
+          "type": "date",
+          "required": true
+        },
+        {
+          "name": "createdBy",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "relationships": [
+        "a task belongs to one project",
+        "a task has one owner member profile"
+      ]
+    },
+    {
+      "name": "filterCriteria",
+      "owned": false,
+      "fields": [
+        {
+          "name": "projectFilterId",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "ownerFilterId",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "statusFilter",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "priorityFilter",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "searchQuery",
+          "type": "string",
+          "required": false
+        }
+      ],
+      "storage": "transient",
+      "relationships": [
+        "filter criteria reads project and task fields but is not persisted"
+      ]
+    }
+  ],
+  "operations": [
+    {
+      "id": "create-project",
+      "kind": "create",
+      "entity": "project",
+      "journey": "create-and-update-work",
+      "description": "Persist a project via db.entity('project').create.",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "reads": [
+            "projectOwnerId",
+            "displayName",
+            "memberId"
+          ],
+          "writes": [
+            "projectId",
+            "projectOwnerName",
+            "createdBy",
+            "updatedAt"
+          ],
+          "behavior": "derive the stored project owner name, creator id, generated project id, and updated timestamp from the selected owner and signed-in user"
+        },
+        {
+          "type": "persistence",
+          "reads": [
+            "projectTitle",
+            "projectDescription",
+            "clientName",
+            "projectStatus",
+            "projectOwnerId",
+            "projectOwnerName",
+            "projectDueDate",
+            "createdBy",
+            "updatedAt"
+          ],
+          "writes": [
+            "projectId",
+            "projectTitle",
+            "projectDescription",
+            "clientName",
+            "projectStatus",
+            "projectOwnerId",
+            "projectOwnerName",
+            "projectDueDate",
+            "createdBy",
+            "updatedAt"
+          ],
+          "capability": "crud",
+          "capabilityMethod": "create"
+        }
+      ]
+    },
+    {
+      "id": "create-task",
+      "kind": "create",
+      "entity": "task",
+      "journey": "create-and-update-work",
+      "description": "Persist a task via db.entity('task').create.",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "reads": [
+            "projectId",
+            "projectTitle",
+            "taskOwnerId",
+            "displayName",
+            "memberId"
+          ],
+          "writes": [
+            "taskId",
+            "projectTitle",
+            "taskOwnerName",
+            "createdBy",
+            "updatedAt"
+          ],
+          "behavior": "derive the stored project title, task owner name, creator id, generated task id, and updated timestamp from the selected project, selected owner, and signed-in user"
+        },
+        {
+          "type": "persistence",
+          "reads": [
+            "taskId",
+            "projectId",
+            "projectTitle",
+            "taskTitle",
+            "taskDescription",
+            "taskOwnerId",
+            "taskOwnerName",
+            "taskStatus",
+            "taskPriority",
+            "taskDueDate",
+            "createdBy",
+            "updatedAt"
+          ],
+          "writes": [
+            "taskId",
+            "projectId",
+            "projectTitle",
+            "taskTitle",
+            "taskDescription",
+            "taskOwnerId",
+            "taskOwnerName",
+            "taskStatus",
+            "taskPriority",
+            "taskDueDate",
+            "createdBy",
+            "updatedAt"
+          ],
+          "capability": "crud",
+          "capabilityMethod": "create"
+        }
+      ]
+    },
+    {
+      "id": "update-task-status",
+      "kind": "update",
+      "entity": "task",
+      "journey": "create-and-update-work",
+      "description": "Persist a task status change via db.entity('task').update.",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "reads": [
+            "taskId",
+            "taskStatus"
+          ],
+          "writes": [
+            "updatedAt"
+          ],
+          "behavior": "set an updated timestamp when task status changes"
+        },
+        {
+          "type": "persistence",
+          "reads": [
+            "taskId",
+            "taskStatus",
+            "updatedAt"
+          ],
+          "writes": [
+            "taskStatus",
+            "updatedAt"
+          ],
+          "capability": "crud",
+          "capabilityMethod": "update"
+        }
+      ]
+    },
+    {
+      "id": "filter-board-tasks",
+      "kind": "search",
+      "entity": "task",
+      "journey": "filter-board-view",
+      "description": "Return visible board tasks matching transient project, owner, and status filters.",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "reads": [
+            "projectFilterId",
+            "ownerFilterId",
+            "statusFilter",
+            "projectId",
+            "taskOwnerName",
+            "taskStatus"
+          ],
+          "writes": [],
+          "behavior": "filter loaded task records by selected project, selected owner, and selected status without mutating saved task records",
+          "outputEffect": {
+            "type": "transient_result",
+            "effect": "read_result",
+            "durable": false,
+            "operationKind": "search"
+          }
+        }
+      ]
+    },
+    {
+      "id": "clear-board-filters",
+      "kind": "update",
+      "entity": "filterCriteria",
+      "journey": "filter-board-view",
+      "description": "Reset transient board filters to all projects, all owners, and all statuses.",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "reads": [
+            "projectFilterId",
+            "ownerFilterId",
+            "statusFilter"
+          ],
+          "writes": [
+            "projectFilterId",
+            "ownerFilterId",
+            "statusFilter"
+          ],
+          "behavior": "clear board filter criteria without changing saved projects or tasks"
+        }
+      ]
+    }
+  ],
+  "journeys": [
+    {
+      "id": "create-and-update-work",
+      "stage": "primary_journey",
+      "steps": [
+        {
+          "action": "open the projects page",
+          "expect": "the projects page shows a create project control and a projects list",
+          "target": "/projects"
+        },
+        {
+          "action": "create a new project",
+          "expect": "the new project appears in the projects list with its title, client, owner, status, and due date",
+          "target": "new project form",
+          "operates": [
+            "create-project",
+            "projectTitle",
+            "projectDescription",
+            "clientName",
+            "projectStatus",
+            "projectOwnerId",
+            "projectDueDate"
+          ]
+        },
+        {
+          "action": "open the board page",
+          "expect": "the task board is visible with status columns for To Do, In Progress, Review, and Done",
+          "target": "/board"
+        },
+        {
+          "reads": [
+            "projectTitle"
+          ],
+          "action": "create a task assigned to a team member for the new project",
+          "expect": "the task card appears in the selected status column with its title, project, owner, priority, and due date",
+          "target": "new task form",
+          "operates": [
+            "create-task",
+            "projectId",
+            "taskTitle",
+            "taskDescription",
+            "taskOwnerId",
+            "taskPriority",
+            "taskStatus",
+            "taskDueDate"
+          ]
+        },
+        {
+          "reads": [
+            "taskTitle"
+          ],
+          "action": "change the task status to In Progress",
+          "expect": "the task card moves to the In Progress column and displays status In Progress",
+          "target": "task status control",
+          "operates": [
+            "update-task-status",
+            "taskStatus"
+          ]
+        },
+        {
+          "reads": [
+            "projectTitle",
+            "taskTitle",
+            "taskStatus"
+          ],
+          "action": "reload the application",
+          "expect": "after reload the signed-in session returns to the dashboard and the task is still visible in the In Progress column",
+          "target": "/board"
+        }
+      ],
+      "title": "A signed-in team member creates a project, creates an assigned task, updates its status, and recovers the changes after reload",
+      "priority": "primary",
+      "acceptance": [
+        "a created project remains visible after a full page reload",
+        "a created task remains visible after a full page reload",
+        "a changed task status remains visible after a full page reload"
+      ]
+    },
+    {
+      "id": "filter-board-view",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the board page",
+          "expect": "the board shows task cards and filter controls",
+          "target": "/board"
+        },
+        {
+          "action": "apply a project filter",
+          "expect": "only tasks for Website Refresh are shown on the board",
+          "target": "board project filter",
+          "operates": [
+            "filter-board-tasks",
+            "projectFilterId"
+          ],
+          "primitive": "selection",
+          "verificationValues": {
+            "projectFilterId": "Website Refresh"
+          }
+        },
+        {
+          "action": "apply owner and status filters",
+          "expect": "the board shows only In Progress tasks assigned to Morgan Lee",
+          "target": "board filter controls",
+          "operates": [
+            "filter-board-tasks",
+            "ownerFilterId",
+            "statusFilter"
+          ],
+          "primitive": "selection",
+          "verificationValues": {
+            "statusFilter": "In Progress",
+            "ownerFilterId": "Morgan Lee"
+          }
+        },
+        {
+          "action": "clear the board filters",
+          "expect": "all task cards are visible again across the status columns",
+          "target": "clear filters control",
+          "operates": [
+            "clear-board-filters"
+          ]
+        }
+      ],
+      "title": "A signed-in team member filters the board by project, owner, and status",
+      "priority": "secondary",
+      "acceptance": [
+        "project filtering hides tasks from other projects",
+        "combined owner and status filtering hides tasks that do not match both selected values"
+      ]
+    }
+  ],
+  "acceptance": [],
+  "states": [],
+  "deferred": [],
+  "imageIntents": [],
+  "integrations": []
+}

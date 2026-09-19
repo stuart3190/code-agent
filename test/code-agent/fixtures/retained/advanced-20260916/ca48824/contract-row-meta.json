@@ -1,0 +1,22 @@
+{
+  "id": "9f805991-c15c-41c8-9b61-d6e88f9b155e",
+  "owner": "7fc93b1e-7dc6-48c0-ae05-38ce4ee3050f",
+  "project_id": "038bd70b-b961-41f4-9223-ec543360c6d2",
+  "build_id": "328664d6-d96b-4e72-9dee-698dbcd0c5ef",
+  "version": 1,
+  "capabilities": [
+    {
+      "name": "crud",
+      "version": "1.0.0"
+    },
+    {
+      "name": "session",
+      "version": "1.1.0"
+    },
+    {
+      "name": "roles",
+      "version": "1.0.0"
+    }
+  ],
+  "created_at": "2026-09-16T12:49:49.701648+00:00"
+}

@@ -18,6 +18,7 @@ import { listApiTokens, renameApiToken } from "../lib/apiTokens.mjs";
 import { listNotifications, markRead, unreadCount } from "../lib/notifications/notificationHistory.mjs";
 import { notificationChannels, vapidPublicKey } from "../lib/notifications/notificationService.mjs";
 import { serviceClient } from "../lib/supabase.mjs";
+import { customerCredits } from "../lib/customerCredits.mjs";
 
 export async function handleSettings(_req, res, owner) {
   return wrap(async () => {
@@ -25,7 +26,7 @@ export async function handleSettings(_req, res, owner) {
     // Everything below is context around the budgets. Each is settled on its own so one
     // unavailable section leaves a gap the client can name, rather than failing the whole screen —
     // the failure mode Phase 1 spent its length removing.
-    const [tokens, unread, counts] = await Promise.all([
+    const [tokens, unread, counts, credits] = await Promise.all([
       listApiTokens(owner.id).catch((error) => {
         console.error(`[settings] tokens unavailable: ${describe(error)}`); return null;
       }),
@@ -34,6 +35,9 @@ export async function handleSettings(_req, res, owner) {
       }),
       accountCounts(owner.id).catch((error) => {
         console.error(`[settings] counts unavailable: ${describe(error)}`); return null;
+      }),
+      customerCredits(owner.id).catch((error) => {
+        console.error(`[settings] credits unavailable: ${describe(error)}`); return null;
       }),
     ]);
 
@@ -51,6 +55,7 @@ export async function handleSettings(_req, res, owner) {
         vapidPublicKey: vapidPublicKey(),
       },
       counts,
+      credits,
     });
   });
 }

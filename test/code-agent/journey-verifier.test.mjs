@@ -52,9 +52,17 @@ const BROKEN = WORKING
 let server = null;
 let baseUrl = "";
 let body = WORKING;
+let delayedHistoryMs = 0;
 
 before(async () => {
-  server = http.createServer((_req, res) => {
+  server = http.createServer((req, res) => {
+    if (req.url === "/history-delay" && delayedHistoryMs > 0) {
+      setTimeout(() => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end('{"ok":true}');
+      }, delayedHistoryMs);
+      return;
+    }
     res.writeHead(200, { "content-type": "text/html" });
     res.end(body);
   });
@@ -108,6 +116,358 @@ test("console errors and failed requests are collected as evidence", needsBrowse
   body = WORKING.replace("<script>", '<script>console.error("boom-from-the-app"); fetch("/missing-endpoint").catch(()=>{});\n');
   const result = await verifyJourneys({ previewUrl: baseUrl, contract: CONTRACT, timeoutMs: 90_000 });
   assert.ok(result.consoleErrors.some((e) => /boom-from-the-app/.test(e)));
+  body = WORKING;
+});
+
+test("visible evidence is not shadowed by an earlier hidden responsive copy", needsBrowser, async () => {
+  body = `<!doctype html><html><body>
+    <div style="display:none">model hierarchy properties panel</div>
+    <main><h1>Saved asset preview</h1><p>Model hierarchy and properties panel are visible.</p></main>
+  </body></html>`;
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: { journeys: [{
+    id: "saved", title: "Open saved asset", priority: "primary",
+    steps: [{ action: "open the saved asset", target: "/",
+      expect: "the asset preview, model hierarchy, and properties panel are visible" }],
+  }] } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys));
+  body = WORKING;
+});
+
+test("retained smoke regression: a visible observation-only section passes without an invented control", needsBrowser, async () => {
+  body = `<!doctype html><html><body>
+    <main>
+      <section><h1>Low Budget Competitions</h1></section>
+      <section id="live-competitions">
+        <h2>Competition cards are visible for prizes including £100 cash, £200 cash, shopping vouchers, and tech bundles</h2>
+        <article><h3>£100 cash</h3></article><article><h3>£200 cash</h3></article>
+        <article><h3>Shopping vouchers</h3></article><article><h3>Tech bundles</h3></article>
+      </section>
+    </main>
+  </body></html>`;
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: { journeys: [{
+    id: "browse-to-entry-summary", title: "Browse competitions", priority: "primary",
+    steps: [
+      { action: "open the homepage", target: "/", expect: "Low Budget Competitions is visible" },
+      { action: "view the live competitions section", target: "live competitions list",
+        expect: "competition cards are visible for prizes including £100 cash, £200 cash, shopping vouchers, and tech bundles" },
+    ],
+  }] } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys, null, 2));
+  const observation = result.journeys[0].steps[1];
+  assert.equal(observation.status, "pass");
+  assert.equal(observation.drove, false, "an observation must not invent or click a control");
+  assert.equal(observation.readOnlyAssertion, true);
+  body = WORKING;
+});
+
+test("retained competition regression: a labelled card list is driveable only with a real selection transition", needsBrowser, async () => {
+  body = `<!doctype html><html><body>
+    <main>
+      <h1>Budget Competitions</h1>
+      <div role="list" aria-label="competition Id">
+        <article><button type="button" aria-label="competition Id Cash Boost" aria-pressed="false">Enter Cash Boost</button></article>
+        <article><button type="button" aria-label="competition Id Gadget Draw" aria-pressed="false">Enter Gadget Draw</button></article>
+        <article><button type="button" aria-label="competition Id Voucher Draw" aria-pressed="false">Enter Voucher Draw</button></article>
+      </div>
+      <p id="panel">Choose a competition</p>
+    </main>
+    <script>
+      for (const button of document.querySelectorAll('[role="list"] button')) {
+        button.onclick = () => {
+          for (const option of document.querySelectorAll('[role="list"] button')) option.setAttribute('aria-pressed', 'false');
+          button.setAttribute('aria-pressed', 'true');
+          document.getElementById('panel').textContent = 'Competition detail entry panel opens with prize and demo payment notice';
+        };
+      }
+    </script>
+  </body></html>`;
+  const control = {
+    roles: ["button", "radio", "option", "combobox"],
+    purpose: "competitionId",
+    machineId: "ctl_1bf07ca5",
+    statePath: "enter-demo-competition.draft.competitionId",
+    logicalField: "competitionId",
+    selectedState: true,
+    accessibleName: "competition Id",
+    accessibleNames: ["competition Id"],
+  };
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: {
+    journeys: [{ id: "enter-demo-competition", title: "A visitor enters a demo competition", priority: "primary",
+      steps: [{ action: "choose a competition from the listing", target: "competition card enter button",
+        operates: ["competitionId"],
+        expect: "the competition detail entry panel opens showing the selected prize and a demo payment notice" }] }],
+    interactionContract: { flows: [{ id: "enter-demo-competition:2:selection:competitionid",
+      journeyId: "enter-demo-competition", stepIndex: 0, kind: "selection",
+      valueWritten: "competitionId", control }] },
+  } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys, null, 2));
+  assert.equal(result.journeys[0].steps[0].status, "pass");
+  assert.match(result.journeys[0].steps[0].detail, /selection (created|moved)/i);
+
+  body = body.replace("button.setAttribute('aria-pressed', 'true');", "/* deliberately no selected-state transition */");
+  const unchanged = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: {
+    journeys: [{ id: "enter-demo-competition", title: "A visitor enters a demo competition", priority: "primary",
+      steps: [{ action: "choose a competition from the listing", target: "competition card enter button",
+        operates: ["competitionId"],
+        expect: "the competition detail entry panel opens showing the selected prize and a demo payment notice" }] }],
+    interactionContract: { flows: [{ id: "enter-demo-competition:2:selection:competitionid",
+      journeyId: "enter-demo-competition", stepIndex: 0, kind: "selection",
+      valueWritten: "competitionId", control }] },
+  } });
+  assert.equal(unchanged.pass, false, "supporting labelled card lists must not weaken selection-state proof");
+  assert.equal(unchanged.journeys[0].steps[0].status, "fail");
+  assert.match(unchanged.journeys[0].steps[0].detail, /never gained a selected state/i);
+  body = WORKING;
+});
+
+test("an observation-only step with missing evidence fails instead of becoming undriveable", needsBrowser, async () => {
+  body = `<!doctype html><html><body><main><h1>Low Budget Competitions</h1></main></body></html>`;
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: { journeys: [{
+    id: "browse", title: "Browse competitions", priority: "primary",
+    steps: [{ action: "view the live competitions section", target: "live competitions list",
+      expect: "competition cards and tech bundles are visible" }],
+  }] } });
+  const observation = result.journeys[0].steps[0];
+  assert.equal(observation.status, "fail", JSON.stringify(observation));
+  assert.equal(observation.readOnlyAssertion, true);
+  body = WORKING;
+});
+
+test("an explicitly loading generated surface settles before contracted controls are driven", needsBrowser, async () => {
+  body = `<!doctype html><html><body>
+    <main id="app"><p role="status">Loading: checking whether a signed-in user can open the workspace.</p></main>
+    <script>
+      setTimeout(() => {
+        document.getElementById('app').innerHTML = [
+          '<label>Exclusion zones <input data-thrallo-control="ctl-exclusion-zones"></label>',
+          '<p>Labelled no-light zone and fitting-inside warning are visible.</p>',
+        ].join('');
+      }, 1400);
+    </script>
+  </body></html>`;
+  const control = { logicalField: "exclusionZones", accessibleName: "exclusion zones",
+    accessibleNames: ["exclusion zones"], machineId: "ctl-exclusion-zones",
+    roles: ["textbox"], inputTypes: ["text"], statePath: "plan.exclusionZones" };
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: {
+    journeys: [{ id: "zones", title: "Zones groups and heatmap", priority: "primary",
+      steps: [{ action: "draw a rectangular exclusion zone on the plan", target: "exclusion zones",
+        operates: ["exclusionZones"],
+        expect: "a labelled no-light zone and a fitting-inside warning are visible" }] }],
+    interactionContract: { flows: [{ journeyId: "zones", stepIndex: 0, kind: "input", control }] },
+  } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys));
+  assert.equal(result.journeys[0].steps[0].status, "pass");
+  body = WORKING;
+});
+
+test("invalid input tests only its owning form and never an unrelated page action", needsBrowser, async () => {
+  body = `<!doctype html><html><body>
+    <form><label>Size <input data-thrallo-control="ctl-size" value="2, 2, 2"></label>
+      <button type="submit">Save properties</button></form>
+    <p id="validation"></p><button id="unrelated" type="button">Continue to unrelated generator</button>
+    <script>
+      const input = document.querySelector('[data-thrallo-control="ctl-size"]');
+      const save = document.querySelector('button[type="submit"]');
+      input.addEventListener('input', () => {
+        const invalid = input.value.split(/[ ,]+/).some((value) => Number(value) <= 0);
+        save.disabled = invalid;
+        document.getElementById('validation').textContent = invalid
+          ? 'Readable validation message: export controls are disabled until corrected' : '';
+      });
+      document.getElementById('unrelated').onclick = () => { document.body.textContent = 'unrelated action advanced'; };
+    </script>
+  </body></html>`;
+  const control = { logicalField: "size", accessibleName: "size", accessibleNames: ["size"],
+    machineId: "ctl-size", roles: ["textbox"], inputTypes: ["text"], validity: "invalid",
+    statePath: "asset.draft.size" };
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: {
+    journeys: [{ id: "invalid", title: "Reject invalid size", priority: "primary",
+      steps: [{ action: "enter an invalid size value", target: "size", operates: ["size"],
+        expect: "a readable validation message is shown and export controls are disabled until corrected" }] }],
+    interactionContract: { flows: [{ journeyId: "invalid", stepIndex: 0, kind: "input", control }] },
+  } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys));
+  assert.doesNotMatch(result.journeys[0].steps[0].observation?.text || "", /unrelated action advanced/);
+  body = WORKING;
+});
+
+test("opaque control identity proves an invalid field remains mounted", needsBrowser, async () => {
+  body = `<!doctype html><html><body>
+    <form id="properties"><input data-thrallo-control="ctl-size" value="2, 2, 2">
+      <button>Save property changes</button></form><p id="validation"></p>
+    <script>
+      const input = document.querySelector('[data-thrallo-control="ctl-size"]');
+      input.addEventListener('input', () => {
+        const invalid = input.value.split(/[ ,]+/).some((value) => Number(value) <= 0);
+        document.querySelector('button').disabled = invalid;
+        document.getElementById('validation').textContent = invalid
+          ? 'Readable validation message: export controls are disabled until corrected' : '';
+      });
+    </script>
+  </body></html>`;
+  const control = { logicalField: "size", accessibleName: "size", accessibleNames: ["size"],
+    machineId: "ctl-size", roles: ["textbox"], inputTypes: ["text"], validity: "invalid",
+    statePath: "asset.draft.size" };
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: {
+    journeys: [{ id: "invalid", title: "Reject invalid size", priority: "primary",
+      steps: [{ action: "enter an invalid size value", target: "size", operates: ["size"],
+        expect: "a readable validation message is shown and export controls are disabled until corrected" }] }],
+    interactionContract: { flows: [{ journeyId: "invalid", stepIndex: 0, kind: "input", control }] },
+  } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys));
+  assert.equal(result.journeys[0].steps[0].controlEvidence?.fields?.[0]?.matchedBy, "machine=ctl-size");
+  body = WORKING;
+});
+
+test("generic action driving chooses the control whose name best matches the contracted target", needsBrowser, async () => {
+  body = `<!doctype html><html><body>
+    <aside><button id="asset">Duplicate asset</button></aside>
+    <main><button id="object">Duplicate selected object</button><p id="status"></p></main>
+    <script>
+      document.getElementById('asset').onclick = () => { document.getElementById('status').textContent = 'History asset copied'; };
+      document.getElementById('object').onclick = () => { document.getElementById('status').textContent = 'A second object with a distinct name appears in the hierarchy and the part count increases'; };
+    </script>
+  </body></html>`;
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: {
+    journeys: [{ id: "duplicate", title: "Duplicate a selected object", priority: "primary",
+      steps: [{ action: "duplicate the selected object", target: "duplicate object control",
+        reads: ["objectId"],
+        expect: "a second object with a distinct name appears in the hierarchy and the part count increases" }] }],
+  } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys));
+  assert.match(result.journeys[0].steps[0].detail || "", /second|distinct|name/i);
+  body = WORKING;
+});
+
+test("isolated durable setup waits for its asynchronously refreshed consumer entry", needsBrowser, async () => {
+  delayedHistoryMs = 1_200;
+  body = `<!doctype html><html><body>
+    <form id="generator"><label>Prompt <input data-thrallo-control="ctl-prompt"></label>
+      <button data-thrallo-action="act-generate" type="submit">Generate</button></form>
+    <p id="saved"></p><div id="history"></div><p id="opened"></p>
+    <script>
+      document.getElementById('generator').onsubmit = async (event) => {
+        event.preventDefault();
+        const value = document.querySelector('[data-thrallo-control="ctl-prompt"]').value;
+        document.getElementById('saved').textContent = 'Named saved asset ' + value;
+        await fetch('/history-delay');
+        document.getElementById('history').innerHTML = '<button data-thrallo-action="act-history">History item</button>';
+        document.querySelector('[data-thrallo-action="act-history"]').onclick = () => {
+          document.getElementById('opened').textContent = 'Asset preview hierarchy properties panel current version validation panel';
+        };
+      };
+    </script>
+  </body></html>`;
+  const primary = { id: "primary", title: "Create an asset", priority: "primary", steps: [] };
+  const secondary = { id: "edit", title: "Edit an existing asset", priority: "secondary", steps: [{
+    action: "open a saved generation", expect: "the asset preview, hierarchy, properties panel, current version, and validation panel are visible",
+  }] };
+  const primaryFlows = [
+    { id: "primary:input", journeyId: "primary", stepIndex: 0, kind: "input",
+      control: { logicalField: "prompt", accessibleName: "Prompt", accessibleNames: ["Prompt"],
+        machineId: "ctl-prompt", roles: ["textbox"], statePath: "primary.draft.prompt" } },
+    { id: "primary:mutation", journeyId: "primary", stepIndex: 0, kind: "mutation",
+      durableLifecycle: "crud:asset", observable: "a named saved asset appears",
+      control: { accessibleName: "Generate", machineId: "act-generate", roles: ["button"] },
+      writes: ["primary.durable.record"] },
+  ];
+  const secondaryFlows = [{ id: "edit:start", journeyId: "edit", stepIndex: 0, kind: "flow_start",
+    observable: secondary.steps[0].expect,
+    control: { accessibleName: "history item", machineId: "act-history", roles: ["button"], flowEntry: true } }];
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: {
+    journeys: [secondary], allJourneys: [primary, secondary],
+    prerequisiteInteractionContract: { flows: [...primaryFlows, ...secondaryFlows] },
+    interactionContract: { flows: secondaryFlows },
+  } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys, null, 2));
+  delayedHistoryMs = 0;
+  body = WORKING;
+});
+
+test("isolated durable setup waits for a client-rendered authentication form", needsBrowser, async () => {
+  body = `<!doctype html><html><body>
+    <button data-thrallo-action="act-account">Create account account form</button>
+    <script>
+      const renderEditor = () => {
+        document.body.innerHTML = '<form id="generator"><label>Prompt <input data-thrallo-control="ctl-prompt"></label>'
+          + '<button data-thrallo-action="act-generate" type="submit">Generate</button></form>'
+          + '<p id="saved"></p><div id="history"></div><p id="opened"></p>';
+        document.getElementById('generator').onsubmit = (event) => {
+          event.preventDefault();
+          const value = document.querySelector('[data-thrallo-control="ctl-prompt"]').value;
+          document.getElementById('saved').textContent = 'Named saved asset ' + value;
+          document.getElementById('history').innerHTML = '<button data-thrallo-action="act-history">History item</button>';
+          document.querySelector('[data-thrallo-action="act-history"]').onclick = () => {
+            document.getElementById('opened').textContent = 'Asset preview hierarchy properties panel current version validation panel';
+          };
+        };
+      };
+      document.querySelector('[data-thrallo-action="act-account"]').onclick = () => setTimeout(() => {
+        document.body.innerHTML = '<form id="auth"><label>Email <input type="email"></label>'
+          + '<label>Password <input type="password"></label><button type="submit">Create account</button></form>';
+        document.getElementById('auth').onsubmit = (event) => {
+          event.preventDefault(); history.pushState({}, '', '/app'); renderEditor();
+        };
+      }, 1200);
+    </script>
+  </body></html>`;
+  const primary = { id: "primary", title: "Create an asset", priority: "primary", steps: [] };
+  const secondary = { id: "edit", title: "Edit an existing asset", priority: "secondary", steps: [{
+    action: "open a saved generation",
+    expect: "the asset preview, hierarchy, properties panel, current version, and validation panel are visible",
+  }] };
+  const primaryFlows = [
+    { id: "primary:auth", journeyId: "primary", stepIndex: 0, kind: "flow_start",
+      control: { purpose: "account form", accessibleName: "account form", machineId: "act-account", roles: ["button"] } },
+    { id: "primary:input", journeyId: "primary", stepIndex: 1, kind: "input",
+      control: { logicalField: "prompt", accessibleName: "Prompt", accessibleNames: ["Prompt"],
+        machineId: "ctl-prompt", roles: ["textbox"], statePath: "primary.draft.prompt" } },
+    { id: "primary:mutation", journeyId: "primary", stepIndex: 1, kind: "mutation",
+      durableLifecycle: "crud:asset", observable: "a named saved asset appears",
+      control: { accessibleName: "Generate", machineId: "act-generate", roles: ["button"] },
+      writes: ["primary.durable.record"] },
+  ];
+  const secondaryFlows = [{ id: "edit:start", journeyId: "edit", stepIndex: 0, kind: "flow_start",
+    observable: secondary.steps[0].expect,
+    control: { accessibleName: "history item", machineId: "act-history", roles: ["button"], flowEntry: true } }];
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: {
+    journeys: [secondary], allJourneys: [primary, secondary],
+    prerequisiteInteractionContract: { flows: [...primaryFlows, ...secondaryFlows] },
+    interactionContract: { flows: secondaryFlows },
+  } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys, null, 2));
+  body = WORKING;
+});
+
+test("sign out is proved by the public auth entry replacing the private surface", needsBrowser, async () => {
+  body = `<!doctype html><html><body><main id="private">Private editor history
+    <button id="signout">Sign out</button></main><script>
+      document.getElementById('signout').onclick = () => {
+        document.body.innerHTML = '<main>Public landing screen <a href="/auth">Sign in</a></main>';
+      };
+    </script></body></html>`;
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: { journeys: [{
+    id: "signout", title: "Sign out", priority: "primary",
+    steps: [{ action: "sign out", target: "account menu",
+      expect: "the landing or sign-in screen is visible and private editor history is no longer visible" }],
+  }] } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys));
+  body = WORKING;
+});
+
+test("a mobile viewport is graded on visible controls and horizontal reflow", needsBrowser, async () => {
+  body = `<!doctype html><html><head><style>
+    .mobile-panels{display:none}@media(max-width:500px){.desktop{display:none}.mobile-panels{display:flex;gap:8px}}
+    body{margin:0;max-width:100%}
+  </style></head><body><div class="desktop">History hierarchy properties desktop sidebars</div>
+    <nav class="mobile-panels"><button>History panel</button><button>Hierarchy panel</button><button>Properties panel</button></nav>
+  </body></html>`;
+  const result = await verifyJourneys({ previewUrl: baseUrl, timeoutMs: 30_000, contract: { journeys: [{
+    id: "mobile", title: "Responsive editor", priority: "primary",
+    steps: [{ action: "resize to a mobile-width viewport", target: "browser viewport",
+      expect: "history, hierarchy, and properties are reachable through clearly labelled panel buttons with no horizontal scrollbar" }],
+  }] } });
+  assert.equal(result.pass, true, JSON.stringify(result.journeys));
   body = WORKING;
 });
 

@@ -4,16 +4,17 @@
 
 import { registerCapability } from "../capabilityRegistry.mjs";
 import { codeAgentStore } from "../codeAgentStore.mjs";
-import { assertRunWithinBudget, assertWithinRateLimits, budgetOverview } from "../usageBudgets.mjs";
+import {
+  assertRunWithinBudget, assertWithinRateLimits, budgetOverview, repositoryRunBudgetProvider,
+} from "../usageBudgets.mjs";
 import { activeAiProviderName } from "../aiCredentialStore.mjs";
 import { publicRun } from "../codeAgentContracts.mjs";
-import { startAppBuild, showPreview, repairApp, exportProject, runQaSweep } from "../appBuild/appBuildService.mjs";
+import { showPreview, exportProject, runQaSweep } from "../appBuild/appDeliveryService.mjs";
 import { publishApp, connectDomain, publishConfigured } from "../appBuild/appPublishService.mjs";
-import { openAIConfigured } from "../openAIProvider.mjs";
-import { anthropicConfigured } from "../anthropicCodingProvider.mjs";
 import { automationsStore, nextRunAt } from "../automationsStore.mjs";
 import { parseAutomationInput, publicAutomation } from "../automationService.mjs";
-import { v2BuildEligible, startAppBuildV2 } from "../builderV2/entry.mjs";
+import { startAppBuildV2, startExistingAppWorkV2 } from "../builderV2/entry.mjs";
+import { createBudgetLedger } from "../appBuild/budgetLedger.mjs";
 
 // Strict tool schemas (OpenAI Responses) require EVERY property in `required`; optionality
 // is expressed as a nullable type, and invokes treat null as absent.
@@ -54,33 +55,53 @@ export function registerCoreCapabilities() {
       description: str("Complete product brief: what the app does, who uses it, key screens/flows, branding hints from memory"),
       productName: optionalStr("Short product name (creates/updates the named product in memory)"),
     }),
-    requirements: () => (openAIConfigured() || anthropicConfigured()
-      ? { ok: true }
-      : { ok: false, reason: "No build-capable model is configured." }),
+    // Provider eligibility is owner-specific (managed, BYOK, Codex allowance or xAI), so a
+    // process-wide API-key check would incorrectly hide this capability from valid owners.
+    requirements: () => ({ ok: true }),
     async invoke(ctx, input) {
       // Managed builds need remaining budget; BYOK owners build on their own key.
-      const credentialProvider = await activeAiProviderName(ctx.owner).catch(() => "managed");
-      if (!["anthropic", "openai"].includes(credentialProvider)) {
+      const credentialProvider = await activeAiProviderName(ctx.owner);
+      if (credentialProvider === "managed") {
         const overview = await budgetOverview(ctx.owner, { store: codeAgentStore() });
-        if (!overview.unlimited && overview.budgets.managedTokens.remaining <= 0) {
+        const balance = await createBudgetLedger({ store: codeAgentStore() }).getBalance(ctx.owner);
+        if (!overview.unlimited && balance.total <= 0) {
           const error = new Error("The monthly managed-model allowance is used up; builds need budget or a BYOK key.");
           error.code = "budget_exceeded";
           throw error;
         }
       }
-      // Builder v2 shadow entry (WP-8): triple-gated, fails closed. An eligible owner
-      // routes to the v2 orchestrator; until WP-9 wires its model lanes the entry
-      // declines with a reason and v1 builds exactly as before.
-      const v2 = await v2BuildEligible(ctx.owner);
-      if (v2.eligible) {
-        const shadow = await startAppBuildV2(ctx, input);
-        if (shadow.handled) return shadow.result;
-        console.log(`[bv2] eligible owner declined by shadow entry: ${shadow.reason} — v1 build proceeds`);
-      }
-      return startAppBuild(ctx, {
-        description: String(input.description),
+      const accepted = await startAppBuildV2(ctx, input);
+      if (!accepted.handled) throw new Error("Builder V2 dispatch declined");
+      return accepted.result;
+    },
+  });
+
+  registerCapability({
+    id: "edit_app",
+    specialist: "Builder",
+    statusText: "Updating the app…",
+    description: "Change an existing generated app without rebuilding it from scratch. Use for requested features, copy, layout or behaviour changes to the app associated with this conversation. Builder V2 resumes the verified snapshot, applies a scoped patch and re-verifies affected journeys.",
+    costProfile: "run",
+    inputSchema: strings({
+      request: str("The requested change, preserving everything not named"),
+      productName: optionalStr("Which product to edit when the conversation has several"),
+    }),
+    requirements: () => ({ ok: true }),
+    async invoke(ctx, input) {
+      const { resolveConversationProject } = await import("../appBuild/projectScope.mjs");
+      const { project } = await resolveConversationProject(ctx, {
         productName: input.productName || null,
+        columns: "id,name,tree,product_id,created_at,updated_at,builder_version,bv2_green_snapshot_id",
       });
+      if (!project) {
+        const error = new Error("There's no existing app to edit — describe what you want built first.");
+        error.code = "nothing_to_edit";
+        throw error;
+      }
+      const accepted = await startExistingAppWorkV2(ctx, {
+        project, request: String(input.request), kind: "edit", trigger: "user", taskHint: String(input.request),
+      });
+      return accepted.result;
     },
   });
 
@@ -94,11 +115,31 @@ export function registerCoreCapabilities() {
       issue: str("The reported problem, verbatim plus any diagnostic detail"),
       productName: optionalStr("Which product to repair when the conversation has several"),
     }),
-    requirements: () => (openAIConfigured() || anthropicConfigured()
-      ? { ok: true }
-      : { ok: false, reason: "No build-capable model is configured." }),
+    requirements: () => ({ ok: true }),
     async invoke(ctx, input) {
-      return repairApp(ctx, { issue: String(input.issue), productName: input.productName || null });
+      const { resolveConversationProject } = await import("../appBuild/projectScope.mjs");
+      const { project } = await resolveConversationProject(ctx, {
+        productName: input.productName || null,
+        columns: "id,name,tree,product_id,created_at,updated_at,builder_version,bv2_green_snapshot_id,budget_approval_id",
+        // A failed first-green build has no green pointer yet. Repair must select that newest
+        // product-scoped project so Builder V2 can resume its retained checkpoint instead of
+        // silently falling back to an older green project for the same product.
+        includeUnverified: true,
+      });
+      if (!project) {
+        const error = new Error("There's no existing app to repair — describe what you want built instead.");
+        error.code = "nothing_to_repair";
+        throw error;
+      }
+      const request = [
+        `Repair only this reported problem in the existing app "${project.name}":`,
+        String(input.issue),
+        "Preserve the established product and visual design; make the smallest verified change.",
+      ].join("\n\n");
+      const accepted = await startExistingAppWorkV2(ctx, {
+        project, request, kind: "repair", trigger: "user", taskHint: String(input.issue),
+      });
+      return accepted.result;
     },
   });
 
@@ -362,7 +403,9 @@ async function dispatchRun(ctx, input, mode) {
   const store = codeAgentStore();
   const credentialProvider = await activeAiProviderName(ctx.owner).catch(() => "managed");
   await assertWithinRateLimits(ctx.owner, { store });
-  await assertRunWithinBudget(ctx.owner, { credentialProvider, store });
+  await assertRunWithinBudget(ctx.owner, {
+    credentialProvider: repositoryRunBudgetProvider(credentialProvider), store,
+  });
 
   const repositories = await store.listRepositories(ctx.owner);
   const ready = repositories.filter((repo) => repo.status === "ready");

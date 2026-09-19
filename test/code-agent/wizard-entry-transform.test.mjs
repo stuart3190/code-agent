@@ -1,0 +1,231 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  transformWizardEntryState,
+} from "../../shell/server/lib/appBuild/wizardEntryTransform.mjs";
+import { runStageGate } from "../../shell/server/lib/appBuild/stageGate.mjs";
+
+const contractFor = (name = "Start booking control") => ({
+  interactionContract: { flows: [{ kind: "flow_start", control: { accessibleName: name } }] },
+});
+
+const causalContractFor = ({ journeyId = "book", start = "Start booking control", field = "date" } = {}) => ({
+  interactionContract: { flows: [
+    { journeyId, stepIndex: 0, kind: "navigation", control: null, writes: [] },
+    { journeyId, stepIndex: 1, kind: "flow_start", control: { accessibleName: start },
+      writes: [`${journeyId}.flowStarted`] },
+    { journeyId, stepIndex: 2, kind: "selection",
+      control: { logicalField: field, accessibleName: field }, writes: [`${journeyId}.draft.${field}`] },
+  ] },
+});
+
+const causalTreeFor = ({ start = "Start booking control", field = "date", guarded = false } = {}) => ({
+  "src/components/Flow.jsx": `import { useCapabilityState, useSemanticAction, useSemanticSelection } from "../lib/capabilities";
+export function Flow() {
+  const wizardState = useCapabilityState({ getState() {}, subscribe() {} });
+  const values = wizardState.values || {};
+  const stepId = wizardState.stepId || wizardState.currentStep || "intro";
+  const start = useSemanticAction({ name: "${start}", label: "Begin", onActivate() {
+    restoreWizard({ stepId: "details", values: { ...values, flowStarted: true } });
+  } });
+  const firstSelection = useSemanticSelection({ name: "${field}", value: values.${field} || "", onSelect() {} });
+  const showStart = stepId === "intro";
+  return <main>
+    ${guarded ? `{showStart && <button aria-label="${start}" {...start.buttonProps}>Begin</button>}`
+    : `<button aria-label="${start}" {...start.buttonProps}>Begin</button>`}
+    {stepId !== "intro" && <section><div {...firstSelection.groupProps}>First outcome</div></section>}
+  </main>;
+}`,
+});
+
+const selectionEntryContract = {
+  interactionContract: { flows: [{
+    id: "submit-demo-entry:1:flow_start", journeyId: "submit-demo-entry", stepIndex: 0,
+    kind: "flow_start", writes: ["submit-demo-entry.flowStarted", "submit-demo-entry.draft.competitionId"],
+    control: {
+      logicalField: "competitionId", purpose: "competitionId",
+      accessibleName: "competition card enter button", machineId: "act_1277e8f4",
+    },
+    stateOwner: "src/components/browse-competitions/BrowseCompetitionsFlow.jsx",
+    responsibleModules: ["src/components/browse-competitions/BrowseCompetitionsFlow.jsx"],
+  }] },
+  scaffoldGraph: { journeyOwnership: [{
+    journeyId: "submit-demo-entry", mountedModule: "src/screens/scaffold/HomeScreen.jsx",
+  }] },
+};
+
+const selectionEntryTree = () => ({
+  "src/screens/scaffold/HomeScreen.jsx": `import { useSemanticSelection } from "../../lib/capabilities";
+export default function HomeScreen() {
+  const listingSelection = useSemanticSelection({
+    name: "competition Id", value: "", onSelect: (competitionId) => openCompetition(competitionId),
+  });
+  return <main><div {...listingSelection.groupProps}>{["one", "two"].map((competitionId) =>
+    <button key={competitionId} aria-label="competition card enter button"
+      {...listingSelection.optionProps(competitionId)}>Enter</button>)}</div></main>;
+}`,
+});
+
+const treeFor = ({ first = "intro", impossible = "home", name = "Start booking control" } = {}) => ({
+  "src/data/wizard.js": `import { makeWizardMachine } from "../lib/capabilities";
+export const STEPS = [{ id: "${first}", label: "Start" }, { id: "details", label: "Details" }];
+export const bookingWizard = makeWizardMachine({ id: "booking", steps: STEPS });`,
+  "src/components/Flow.jsx": `import { bookingWizard } from "../data/wizard";
+import { useCapabilityState, useSemanticAction } from "../lib/capabilities";
+export function Flow() {
+  const wizard = useCapabilityState(bookingWizard);
+  const rawStepId = wizard.stepId || wizard.currentStep || wizard.step;
+  const stepId = rawStepId || "${impossible}";
+  const start = useSemanticAction({ name: "${name}", label: "${name}", onActivate() {} });
+  const showStart = stepId === "${impossible}" && !wizard.values?.flowStarted;
+  return <main>{showStart && <button aria-label="${name}" {...start.buttonProps}>Start</button>}</main>;
+}`,
+});
+
+test("retained live shape — an impossible contracted wizard-entry guard aligns to the declared first step", () => {
+  const tree = treeFor();
+  const result = transformWizardEntryState(tree, { contract: contractFor() });
+  assert.equal(result.changes.length, 1);
+  assert.deepEqual(result.changes.map(({ from, to }) => ({ from, to })), [{ from: "home", to: "intro" }]);
+  assert.match(result.tree["src/components/Flow.jsx"], /const showStart = stepId === "intro"/);
+  assert.match(result.tree["src/components/Flow.jsx"], /rawStepId \|\| "home"/,
+    "only the provably impossible visibility predicate changes");
+});
+
+test("non-booking flow — the transform derives names and entry state from the app, not domain words", () => {
+  const tree = treeFor({ first: "welcome", impossible: "landing", name: "Start checkout control" });
+  const result = transformWizardEntryState(tree, { contract: contractFor("Start checkout control") });
+  assert.equal(result.changes.length, 1);
+  assert.equal(result.changes[0].to, "welcome");
+  assert.match(result.tree["src/components/Flow.jsx"], /stepId === "welcome"/);
+});
+
+test("a dynamic step declaration is ambiguous and is never rewritten", () => {
+  const tree = treeFor();
+  tree["src/data/wizard.js"] = `import { makeWizardMachine } from "../lib/capabilities";
+export const bookingWizard = makeWizardMachine({ id: "booking", steps: getStepsFromProductConfig() });`;
+  const result = transformWizardEntryState(tree, { contract: contractFor() });
+  assert.equal(result.changes.length, 0);
+  assert.strictEqual(result.tree, tree);
+});
+
+test("an unrelated conditional cannot be rewritten merely because the file has a start control", () => {
+  const tree = treeFor();
+  tree["src/components/Flow.jsx"] = tree["src/components/Flow.jsx"]
+    .replace("{showStart && <button", "{true && <button");
+  const result = transformWizardEntryState(tree, { contract: contractFor() });
+  assert.equal(result.changes.length, 0);
+});
+
+test("an unguarded contracted flow entry is causally latched to its first semantic outcome", () => {
+  const tree = causalTreeFor();
+  const result = transformWizardEntryState(tree, { contract: causalContractFor() });
+  assert.deepEqual(result.changes.map(({ code }) => code), ["wizard_flow_entry_latched"]);
+  assert.match(result.tree["src/components/Flow.jsx"],
+    /\{!values\.flowStarted && \(<button aria-label="Start booking control"/);
+  assert.match(result.tree["src/components/Flow.jsx"],
+    /\{values\.flowStarted && \(stepId !== "intro"\) && <section>/);
+});
+
+test("causal latching is domain-independent and augments an existing entry guard", () => {
+  const tree = causalTreeFor({ start: "Begin checkout control", field: "shippingMethod", guarded: true });
+  const result = transformWizardEntryState(tree, { contract: causalContractFor({
+    journeyId: "checkout", start: "Begin checkout control", field: "shippingMethod",
+  }) });
+  assert.deepEqual(result.changes.map(({ code }) => code), ["wizard_flow_entry_latched"]);
+  assert.match(result.tree["src/components/Flow.jsx"],
+    /\{!values\.flowStarted && \(showStart\) && <button aria-label="Begin checkout control"/);
+  assert.match(result.tree["src/components/Flow.jsx"],
+    /values\.flowStarted && \(stepId !== "intro"\)/);
+  const repeated = transformWizardEntryState(result.tree, { contract: causalContractFor({
+    journeyId: "checkout", start: "Begin checkout control", field: "shippingMethod",
+  }) });
+  assert.equal(repeated.changes.length, 0, "the causal transform is idempotent");
+  assert.strictEqual(repeated.tree, result.tree);
+});
+
+test("causal latching declines ambiguous components with multiple capability states", () => {
+  const tree = causalTreeFor();
+  tree["src/components/Flow.jsx"] = tree["src/components/Flow.jsx"].replace(
+    "const values = wizardState.values || {};",
+    "const values = wizardState.values || {};\n  const otherState = useCapabilityState(otherMachine);",
+  );
+  const result = transformWizardEntryState(tree, { contract: causalContractFor() });
+  assert.equal(result.changes.length, 0);
+  assert.strictEqual(result.tree, tree);
+});
+
+test("causal latching declines a contract without a statically matched first outcome", () => {
+  const tree = causalTreeFor();
+  const result = transformWizardEntryState(tree, { contract: causalContractFor({ field: "unknownField" }) });
+  assert.equal(result.changes.length, 0);
+  assert.strictEqual(result.tree, tree);
+});
+
+test("retained smoke shape — a selection-backed flow entry receives its exact action identity", () => {
+  const tree = selectionEntryTree();
+  const result = transformWizardEntryState(tree, { contract: selectionEntryContract });
+  assert.deepEqual(result.changes.map(({ code }) => code), ["flow_entry_action_identity_bound"]);
+  assert.match(result.tree["src/screens/scaffold/HomeScreen.jsx"],
+    /actionName: "competition card enter button"/);
+  assert.match(result.tree["src/screens/scaffold/HomeScreen.jsx"],
+    /listingSelection\.optionProps\(competitionId\)/,
+    "the existing state-producing handler was replaced instead of annotated");
+
+  const repeated = transformWizardEntryState(result.tree, { contract: selectionEntryContract });
+  assert.equal(repeated.changes.length, 0, "the flow-entry identity transform is not idempotent");
+  assert.strictEqual(repeated.tree, result.tree);
+});
+
+test("selection-backed flow-entry identity normalization declines ambiguous owners", () => {
+  const tree = selectionEntryTree();
+  tree["src/components/browse-competitions/BrowseCompetitionsFlow.jsx"] =
+    tree["src/screens/scaffold/HomeScreen.jsx"].replace("HomeScreen", "BrowseCompetitionsFlow");
+  const result = transformWizardEntryState(tree, { contract: selectionEntryContract });
+  assert.equal(result.changes.length, 0);
+  assert.strictEqual(result.tree, tree);
+});
+
+test("the stage gate adopts the zero-model wizard correction before compilation", async () => {
+  const generated = treeFor();
+  const tree = {
+    ...generated,
+    "src/lib/capabilities/index.js": "export const makeWizardMachine = () => ({}); export const useCapabilityState = () => ({}); export const useSemanticAction = () => ({});",
+    "package.json": JSON.stringify({ type: "module", scripts: { build: "vite build" } }),
+    "index.html": '<div id="root"></div>',
+    "vite.config.js": "export default {}",
+    "src/main.jsx": "export default null",
+  };
+  let compiled = null;
+  const result = await runStageGate(tree, {
+    contract: contractFor(),
+    compile: async (candidate) => { compiled = candidate; return { ok: true }; },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.deterministicRepair?.applied?.[0]?.code, "wizard_entry_state_aligned");
+  assert.match(compiled["src/components/Flow.jsx"], /stepId === "intro"/);
+  assert.equal(result.tree, compiled);
+});
+
+test("the stage gate adopts causal flow-entry latching before compilation", async () => {
+  const generated = causalTreeFor();
+  const tree = {
+    ...generated,
+    "src/lib/capabilities/index.js": "export const useCapabilityState = () => ({}); export const useSemanticAction = () => ({}); export const useSemanticSelection = () => ({});",
+    "package.json": JSON.stringify({ type: "module", scripts: { build: "vite build" } }),
+    "index.html": '<div id="root"></div>',
+    "vite.config.js": "export default {}",
+    "src/main.jsx": "export default null",
+  };
+  let compiled = null;
+  const result = await runStageGate(tree, {
+    contract: causalContractFor(),
+    compile: async (candidate) => { compiled = candidate; return { ok: true }; },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.deterministicRepair?.applied?.[0]?.code, "wizard_flow_entry_latched");
+  assert.match(compiled["src/components/Flow.jsx"], /!values\.flowStarted/);
+  assert.match(compiled["src/components/Flow.jsx"], /values\.flowStarted && \(stepId !== "intro"\)/);
+  assert.equal(result.tree, compiled);
+});

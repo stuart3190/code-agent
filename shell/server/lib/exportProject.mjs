@@ -539,10 +539,8 @@ export function buildProjectZip(project) {
   };
 }
 
-// Delegates to the shared rule set in lib/secretScrub.mjs. Thrallo had two independent secret
-// filters with different rules (this one, and scrubTree for repair checkpoints); a marker added
-// to one silently did not protect the other. The behaviour here is unchanged — export still
-// THROWS rather than redacting — only the rules are now shared.
+// Delegates to the canonical rule set in lib/secretScrub.mjs. Export refuses rather than
+// redacting so a suspicious artifact can never be mistaken for a complete source package.
 export function assertNoPlatformSecrets(files) {
   return sharedAssertNoPlatformSecrets(files);
 }

@@ -94,7 +94,7 @@ test("openaiEngineProvider speaks the engine runTurn contract over the Responses
       }),
     };
   };
-  const provider = createOpenAIEngineProvider({ model: "gpt-test", apiKey: "sk-unit", fetchImpl });
+  const provider = createOpenAIEngineProvider({ model: "gpt-5.6-terra", apiKey: "sk-unit", fetchImpl });
   const out = await provider.runTurn({
     systemPrompt: "SYSTEM",
     messages: [
@@ -108,7 +108,7 @@ test("openaiEngineProvider speaks the engine runTurn contract over the Responses
 
   assert.equal(captured.url, "https://api.openai.com/v1/responses");
   assert.equal(captured.auth, "Bearer sk-unit");
-  assert.equal(captured.body.model, "gpt-test");
+  assert.equal(captured.body.model, "gpt-5.6-terra");
   assert.equal(captured.body.instructions, "SYSTEM");
   assert.equal(captured.body.store, false);
   assert.deepEqual(captured.body.input[0], { role: "user", content: [{ type: "input_text", text: "build it" }] });
@@ -131,7 +131,7 @@ test("openaiEngineProvider speaks the engine runTurn contract over the Responses
 
 test("openaiEngineProvider surfaces HTTP errors with status", async () => {
   const provider = createOpenAIEngineProvider({
-    model: "gpt-test", apiKey: "sk-unit",
+    model: "gpt-5.6-terra", apiKey: "sk-unit",
     fetchImpl: async () => ({ ok: false, status: 429, text: async () => "rate limited" }),
   });
   await assert.rejects(

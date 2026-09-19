@@ -16,6 +16,15 @@ import { activeAiCredential } from "./aiCredentialStore.mjs";
 import { createRoutedCodingModel } from "./modelRouting.mjs";
 import { budgetOverview } from "./usageBudgets.mjs";
 import { notifyOwnerIfAway } from "./notifications/notificationService.mjs";
+import {
+  estimateLeadReservation, leadModelCallKey, leadModelReservations,
+} from "./leadModelReservations.mjs";
+import { creditsForUsage } from "../../../src/billing/costModel.mjs";
+import { classifyProviderFailure, replayUnsafe } from "./providerOutcome.mjs";
+import { createBudgetLedger } from "./appBuild/budgetLedger.mjs";
+import {
+  buildProfileBrief, latestBuildProfile, resolveBuildProfile,
+} from "../../shared/buildProfile.mjs";
 
 const MAX_TURNS = 12;
 const HISTORY_TURNS = 30;
@@ -72,7 +81,9 @@ function describeWorkspaceContext(context) {
   return parts.join("\n");
 }
 
-export async function postUserMessage(owner, { conversationId = null, text, workspaceContext = null, modelPref = null }, {
+export async function postUserMessage(owner, {
+  conversationId = null, text, workspaceContext = null, modelPref = null, buildProfile = null,
+}, {
   store = conversationStore(),
   processOptions = {},
 } = {}) {
@@ -81,6 +92,14 @@ export async function postUserMessage(owner, { conversationId = null, text, work
   if (!trimmed) throw inputError("Message text is required");
   if (trimmed.length > 20_000) throw inputError("Message is too long");
   const context = sanitizeWorkspaceContext(workspaceContext);
+  let productProfile = null;
+  if (!conversationId || buildProfile != null) {
+    try {
+      productProfile = resolveBuildProfile({ prompt: trimmed, input: buildProfile });
+    } catch (error) {
+      throw inputError(error.message, 400, error.code || "invalid_build_profile");
+    }
+  }
 
   let conversation = conversationId ? await store.getConversation(owner, conversationId) : null;
   if (conversationId && !conversation) throw inputError("Conversation not found", 404, "conversation_not_found");
@@ -100,13 +119,18 @@ export async function postUserMessage(owner, { conversationId = null, text, work
     throw inputError("The team is still working on the previous message.", 409, "conversation_busy");
   }
 
+  const turnPayload = {
+    ...(context ? { workspace_context: context } : {}),
+    ...(productProfile ? { build_profile: productProfile } : {}),
+  };
   await store.appendTurn(conversation, {
     role: "user", content: trimmed,
-    ...(context ? { payload: { workspace_context: context } } : {}),
+    ...(Object.keys(turnPayload).length ? { payload: turnPayload } : {}),
   });
   await store.appendEvent(conversation, "message", {
     role: "user", text: trimmed,
     ...(context ? { workspaceContext: { file: context.file || null, hasSelection: !!context.selection, diagnostics: context.diagnostics?.length || 0 } } : {}),
+    ...(productProfile ? { buildProfile: productProfile } : {}),
   });
   const claimed = await store.claimConversationThinking(conversation);
   if (!claimed) throw inputError("The team is still working on the previous message.", 409, "conversation_busy");
@@ -120,6 +144,82 @@ export async function postUserMessage(owner, { conversationId = null, text, work
 
 export const MAX_RECOVERY_ATTEMPTS = 2;
 
+const BARE_BUILD_RETRY = /^(?:try|retry|resume|continue)(?:\s+(?:it|again|the build|building|that))?[.!]*$/i;
+
+export function preservedBuildRetryTarget(turns = []) {
+  const latest = turns.at(-1);
+  if (latest?.role !== "user" || !BARE_BUILD_RETRY.test(String(latest.content || "").trim())) return null;
+  const intervening = [];
+  let terminal = null;
+  for (let index = turns.length - 2; index >= 0; index -= 1) {
+    const turn = turns[index];
+    if (turn?.role === "lead" && turn.payload?.pipelineVersion === "v2"
+      && turn.payload?.projectId && turn.payload?.jobId) {
+      terminal = turn;
+      break;
+    }
+    intervening.push(turn);
+  }
+  const onlySafePredispatchFailures = intervening.every((turn) => (
+    turn?.role === "user" && BARE_BUILD_RETRY.test(String(turn.content || "").trim())
+  ) || (
+    turn?.role === "lead" && (
+      turn.payload?.retryDispatchFailure === true
+      || String(turn.content || "") === "The retained build could not resume yet. Its checkpoint is preserved and no replacement project was created."
+    )
+  ));
+  if (terminal?.role !== "lead"
+    || terminal.payload?.pipelineVersion !== "v2"
+    || !terminal.payload?.projectId
+    || !terminal.payload?.jobId
+    || !onlySafePredispatchFailures) return null;
+  return {
+    jobId: String(terminal.payload.jobId),
+    projectId: String(terminal.payload.projectId),
+    failure: String(terminal.content || "Builder V2 stopped before verification."),
+  };
+}
+
+export function buildDispatchConfirmation(kind = "build") {
+  return kind === "resume"
+    ? "Builder V2 has resumed the preserved build from its retained checkpoint. The team will re-verify it before the preview appears here."
+    : "Builder V2 has started the build. The team will verify it before the preview appears here.";
+}
+
+async function dispatchPreservedBuildRetry({ ctx, target }) {
+  const [{ serviceClient }, { startExistingAppWorkV2 }] = await Promise.all([
+    import("./supabase.mjs"),
+    import("./builderV2/entry.mjs"),
+  ]);
+  const client = serviceClient();
+  const [{ data: job, error: jobError }, { data: project, error: projectError }] = await Promise.all([
+    client.from("build_jobs").select("id,owner,project_id,status,pipeline_version")
+      .eq("id", target.jobId).eq("owner", ctx.owner).maybeSingle(),
+    client.from("projects")
+      .select("id,owner,name,product_id,tree,created_at,updated_at,builder_version,bv2_green_snapshot_id,budget_approval_id")
+      .eq("id", target.projectId).eq("owner", ctx.owner).maybeSingle(),
+  ]);
+  if (jobError) throw new Error(`Builder V2 retry job lookup failed: ${jobError.message}`);
+  if (projectError) throw new Error(`Builder V2 retry project lookup failed: ${projectError.message}`);
+  if (!job || job.pipeline_version !== "v2" || job.status !== "failed"
+    || String(job.project_id) !== String(project?.id)) {
+    throw Object.assign(new Error("The preserved Builder V2 build is not in a retryable failed state."), {
+      code: "build_not_retryable",
+    });
+  }
+  return startExistingAppWorkV2(ctx, {
+    project,
+    request: [
+      "Continue this failed Builder V2 build from its retained immutable checkpoint.",
+      `Durable terminal failure: ${target.failure}`,
+      "Repair the named failure and re-verify; do not replay contract or core generation.",
+    ].join("\n\n"),
+    kind: "repair",
+    trigger: "automatic_retry",
+    taskHint: target.failure,
+  });
+}
+
 export async function processConversation(conversation, {
   store = conversationStore(),
   runStore = codeAgentStore(),
@@ -127,34 +227,62 @@ export async function processConversation(conversation, {
   modelFactory = null,
   overviewResolver = budgetOverview,
   credentialStoreFactory = null,
+  reservationStoreFactory = leadModelReservations,
+  retryDispatcher = dispatchPreservedBuildRetry,
   // Private recovery state — carried across automatic retries, never user-visible.
   recovery = { attempt: 0, fingerprints: [], briefings: [] },
 } = {}) {
   ensureCoreCapabilities();
   const emit = (type, payload) => store.appendEvent(conversation, type, payload);
   try {
+    const turns = await store.listTurns(conversation.owner, conversation.id, { limit: HISTORY_TURNS }) || [];
+    const productProfile = latestBuildProfile(turns);
+    const retryTarget = preservedBuildRetryTarget(turns);
+    if (retryTarget) {
+      const retryCtx = {
+        owner: conversation.owner,
+        conversation,
+        conversations: store,
+        buildProfile: productProfile,
+        emit,
+        relayRun: (runId) => relayRunEvents({ store, runStore, conversation, runId }),
+      };
+      await emit("agent_spawned", { agent: "Builder", status: "Resuming the retained build..." });
+      try {
+        const accepted = await retryDispatcher({ ctx: retryCtx, target: retryTarget });
+        if (!accepted?.handled || !accepted.result?.jobId || !accepted.result?.buildId) {
+          throw Object.assign(new Error("Builder V2 retry did not create a durable dispatch identity."), {
+            code: "retry_dispatch_missing_identity",
+          });
+        }
+        await emit("agent_done", { agent: "Builder", ok: true });
+        await finishWithMessage(store, conversation, buildDispatchConfirmation("resume"), {
+          projectId: accepted.result.projectId,
+          jobId: accepted.result.jobId,
+          buildId: accepted.result.buildId,
+          pipelineVersion: "v2",
+          dispatch: "resume",
+        });
+      } catch (error) {
+        console.error(`[bv2 retry ${retryTarget.jobId.slice(0, 8)}] ${error.code || "error"}: ${error.message}`);
+        await emit("agent_done", { agent: "Builder", ok: false });
+        await finishWithMessage(store, conversation,
+          error.publicMessage || "The retained build could not resume yet. Its checkpoint is preserved and no replacement project was created.",
+          {
+            projectId: retryTarget.projectId,
+            jobId: retryTarget.jobId,
+            pipelineVersion: "v2",
+            retryDispatchFailure: true,
+            errorCode: error.code || "retry_dispatch_failed",
+          });
+      }
+      return;
+    }
     let credential = await credentialResolver(conversation.owner)
       .catch(() => ({ provider: "managed", secret: null, routing: {} }));
 
-    // The line this replaces read: `if (provider === "codex") credential = { provider: "managed" }`.
-    // A silent lane rewrite — during a Codex-only verification build it ran four managed
-    // orchestration turns that bypassed both the provider policy and the settlement pause. The
-    // conversation orchestrator has no Codex adapter yet, and a lane the chosen policy cannot
-    // reach must STOP before spending, never switch billing lanes on the owner's behalf.
-    if (credential.provider === "codex") {
-      const { resolveProviderPolicy } = await import("./appBuild/providerPolicy.mjs");
-      if (!resolveProviderPolicy({ provider: "codex" }).allowManagedFallback) {
-        await finishWithMessage(store, conversation,
-          "Your AI connection is set to Codex, which powers your builds. The conversation "
-          + "orchestrator can't run on Codex yet, and I won't quietly bill your managed credits "
-          + "instead — switch your active connection (or add an API key) to chat, or keep Codex "
-          + "and use builds directly.");
-        return;
-      }
-      credential = { provider: "managed", secret: null, routing: {} };
-    }
-
-    let billingSource = credential.provider === "managed" ? "managed" : "byok";
+    let billingSource = credential.provider === "managed" ? "managed"
+      : credential.provider === "codex" ? "codex" : "byok";
     if (billingSource === "managed") {
       // The settlement kill switch covers EVERY managed dispatch in the product, not only
       // buildJobs — this lane's four paused-era turns are why that sentence has to exist.
@@ -164,7 +292,8 @@ export async function processConversation(conversation, {
         return;
       }
       const overview = await overviewResolver(conversation.owner, { store: runStore });
-      if (overview.budgets.managedTokens.remaining <= 0 && !overview.unlimited) {
+      const managedBalance = await createBudgetLedger({ store: runStore, overviewResolver }).getBalance(conversation.owner);
+      if (managedBalance.total <= 0 && !overview.unlimited) {
         // Exhausted — but a hard stop is the LAST resort. If the owner has another
         // provider connected, move the work there and carry on from this step.
         const quota = await import("./providerQuota.mjs");
@@ -210,6 +339,7 @@ export async function processConversation(conversation, {
       owner: conversation.owner,
       conversation,
       conversations: store,
+      buildProfile: productProfile,
       emit,
       relayRun: (runId) => relayRunEvents({ store, runStore, conversation, runId }),
     };
@@ -241,7 +371,7 @@ export async function processConversation(conversation, {
     // Provider fuel gauge: warn early and in plain language, offer the alternatives this
     // owner can actually reach, and show which model is doing the work.
     const quota = await import("./providerQuota.mjs");
-    const activeProvider = credential.provider === "codex" ? "managed" : (credential.provider || "managed");
+    const activeProvider = credential.provider || "managed";
     await announceQuotaState({
       store, conversation, emit, quota, owner: conversation.owner, provider: activeProvider,
       overviewResolver, runStore,
@@ -271,14 +401,138 @@ export async function processConversation(conversation, {
       await emit("agent_spawned", { agent: "Lead Agent", status: "Understanding request…" });
     }
 
+    // Every network dispatch receives a durable identity, including BYOK and connected Codex.
+    // Non-managed lanes allocate zero Thrallo credits but still need replay-safe ambiguity state.
+    const reservationStore = reservationStoreFactory({ runStore });
+    const requestTurn = (await store.listTurns(conversation.owner, conversation.id, { limit: 30 }) || [])
+      .filter((item) => item.role === "user").at(-1);
+    const requestIdentity = requestTurn?.id || `${requestTurn?.sequence || 0}:${requestTurn?.created_at || "unknown"}`;
     for (let turn = 1; turn <= MAX_TURNS; turn += 1) {
-      const response = await model.turn({
-        instructions: await leadInstructions(store, conversation),
-        input,
-        tools,
-        safetyIdentifier: conversation.owner,
-      });
-      await meterUsage(runStore, conversation.owner, response.usage, billingSource);
+      const instructions = await leadInstructions(store, conversation);
+      const maxOutputTokens = Math.max(1, Math.min(
+        Number(optionalEnv("LEAD_AGENT_MAX_OUTPUT_TOKENS", "8000")) || 8000,
+        32_000,
+      ));
+      const reservations = reservationStore;
+      let settledBillingLane = billingSource === "managed" ? "managed"
+        : billingSource === "codex" ? "connected_allowance" : "byok_api";
+      const beforeDispatch = async (candidate, { attemptOrder }) => {
+          const billingLane = leadBillingLane(candidate, billingSource);
+          const callKey = leadModelCallKey({
+            conversationId: conversation.id,
+            requestIdentity,
+            turn,
+            recoveryAttempt: recovery.attempt,
+            provider: candidate.provider,
+            model: candidate.model,
+            attemptOrder,
+          });
+          const hold = await reservations.reserve({
+            owner: conversation.owner,
+            conversationId: conversation.id,
+            callKey,
+            provider: candidate.provider,
+            model: candidate.model,
+            billingLane,
+            usageResponsibility: recovery.attempt > 0 && billingLane === "managed"
+              ? "platform_failure" : "customer_request",
+            reservedCredits: estimateLeadReservation({ instructions, input, tools, model: candidate.model, maxOutputTokens }),
+            metadata: { turn, recoveryAttempt: recovery.attempt, attemptOrder },
+          });
+          if (hold.acquired === false) throw replayUnsafe(new Error("Lead Agent provider dispatch identity was already used"), {
+            reservationId: hold.id,
+          });
+          return hold;
+        };
+      const afterDispatch = async (hold, candidate, result) => {
+          const usage = normalizeLeadUsage(result.usage);
+          const providerRequestIds = leadRequestIds(result);
+          try {
+            await reservations.settle(conversation.owner, hold.id, {
+              actualCredits: creditsForUsage({ usage, model: candidate.model }),
+              usage,
+              providerRequestIds,
+            });
+          } catch (error) {
+            try {
+              await reservations.markAmbiguous(conversation.owner, hold.id, {
+                reason: `provider completed but settlement failed: ${error?.message || "unknown error"}`,
+                providerRequestIds,
+              });
+            } catch (reconciliationError) {
+              error.reconciliationError = reconciliationError;
+            }
+            throw replayUnsafe(error, {
+              reservationId: hold.id,
+              providerRequestId: providerRequestIds[0] || null,
+            });
+          }
+          settledBillingLane = hold.billingLane || leadBillingLane(candidate, billingSource);
+        };
+      const dispatchFailed = async (hold, candidate, error) => {
+          const failure = classifyProviderFailure(error);
+          const usage = normalizeLeadUsage(error?.usage);
+          if (failure.hasUsage) {
+            const providerRequestIds = leadRequestIds(error);
+            try {
+              await reservations.settle(conversation.owner, hold.id, {
+                actualCredits: creditsForUsage({ usage, model: candidate.model }),
+                usage,
+                providerRequestIds,
+              });
+            } catch (settlementError) {
+              try {
+                await reservations.markAmbiguous(conversation.owner, hold.id, {
+                  reason: `provider returned usage but settlement failed: ${settlementError?.message || "unknown error"}`,
+                  providerRequestIds,
+                });
+              } catch (reconciliationError) {
+                settlementError.reconciliationError = reconciliationError;
+              }
+              throw replayUnsafe(settlementError, {
+                reservationId: hold.id,
+                providerRequestId: providerRequestIds[0] || null,
+              });
+            }
+            throw replayUnsafe(error, { reservationId: hold.id, providerRequestId: error?.providerRequestId || null });
+          }
+          if (failure.state === "before_dispatch" || failure.state === "provider_rejected") {
+            await reservations.release(conversation.owner, hold.id);
+            return;
+          }
+          await reservations.markAmbiguous(conversation.owner, hold.id, {
+            reason: error?.message || "provider dispatch ambiguous",
+            providerRequestIds: leadRequestIds(error),
+          });
+          throw replayUnsafe(error, { reservationId: hold.id, providerRequestId: error?.providerRequestId || null });
+        };
+      const turnInput = { instructions, input, tools, safetyIdentifier: conversation.owner, maxOutputTokens };
+      let response;
+      if (model.supportsDispatchAccounting === true) {
+        response = await model.turn({ ...turnInput, beforeDispatch, afterDispatch, dispatchFailed });
+      } else {
+        // The production router accounts around each candidate. An injected single-provider model
+        // still uses the same pre-dispatch contract so it cannot become an unreserved escape hatch.
+        const candidate = { provider: model.id || model.provider || "managed", model: model.model || "conversation" };
+        const hold = await beforeDispatch(candidate, { attemptOrder: 1, args: turnInput });
+        let providerCompleted = false;
+        try {
+          response = await model.turn(turnInput);
+          providerCompleted = true;
+          await afterDispatch(hold, candidate, response);
+        } catch (error) {
+          if (!providerCompleted) await dispatchFailed(hold, candidate, error);
+          throw error;
+        }
+      }
+      if (settledBillingLane !== "managed") {
+        try {
+          await meterUsage(runStore, conversation.owner, response.usage,
+            settledBillingLane === "connected_allowance" ? "codex" : "byok");
+        } catch (error) {
+          throw replayUnsafe(error, { providerRequestId: response?.usage?.providerRequestId || response?.id || null });
+        }
+      }
 
       // The router falls back between providers on its own; surface that as a calm
       // sentence, record WHY privately, and carry on from this exact step — the loop
@@ -338,6 +592,19 @@ export async function processConversation(conversation, {
         }
         if (specialist !== "Lead Agent") {
           await emit("agent_done", { agent: specialist, ok: output?.ok !== false });
+        }
+        if (["app_build", "edit_app", "repair_app"].includes(call.name)
+          && output?.jobId && output?.buildId && output?.projectId) {
+          await emit("agent_done", { agent: "Lead Agent" });
+          await finishWithMessage(store, conversation,
+            buildDispatchConfirmation(call.name === "app_build" ? "build" : "resume"), {
+              projectId: output.projectId,
+              jobId: output.jobId,
+              buildId: output.buildId,
+              pipelineVersion: "v2",
+              dispatch: call.name === "app_build" ? "build" : "resume",
+            });
+          return;
         }
         if (output?.__pause === "waiting_user") {
           await store.appendTurn(conversation, {
@@ -399,7 +666,8 @@ export async function processConversation(conversation, {
       const claimed = await store.claimConversationThinking(conversation).catch(() => conversation);
       await new Promise((resolve) => setTimeout(resolve, 400 * next.attempt));
       await processConversation(claimed || conversation, {
-        store, runStore, credentialResolver, modelFactory, overviewResolver, recovery: next,
+        store, runStore, credentialResolver, modelFactory, overviewResolver,
+        credentialStoreFactory, reservationStoreFactory, recovery: next,
       });
       await markIncidentResolved(incident.id, "recovered automatically");
       return;
@@ -515,8 +783,11 @@ export async function assembleInput(store, conversation) {
     // Workspace context rides the model turn only — the visible thread stays the user's
     // own words, marked with a transparent context chip by the shell.
     const context = turn.payload?.workspace_context;
-    const suffix = context
+    const contextSuffix = context
       ? `\n\n[Shared automatically from the user's editor — visible to them as a context chip]\n${describeWorkspaceContext(context)}`
+      : "";
+    const profileSuffix = turn.payload?.build_profile
+      ? `\n\n${buildProfileBrief(turn.payload.build_profile)}`
       : "";
     const content = String(turn.content);
     const capped = content.length > TURN_CHAR_CAP
@@ -524,7 +795,7 @@ export async function assembleInput(store, conversation) {
       : content;
     input.push({
       role: turn.role === "user" ? "user" : "assistant",
-      content: `${capped}${suffix}`,
+      content: `${capped}${contextSuffix}${profileSuffix}`,
     });
   }
   return input;
@@ -575,11 +846,11 @@ function relayRunEvents({ store, runStore, conversation, runId }) {
 
 // Last line of defence: EVERY closing message the user sees is sanitised, including text
 // the model wrote — a technical leak would need two independent failures.
-async function finishWithMessage(store, conversation, text) {
+async function finishWithMessage(store, conversation, text, payload = null) {
   const { sanitizeUserFacingText } = await import("./errorShield.mjs");
   const safe = sanitizeUserFacingText(text, "That's done — tell me what you'd like next.");
-  await store.appendTurn(conversation, { role: "lead", content: safe });
-  await store.appendEvent(conversation, "message", { role: "lead", text: safe });
+  await store.appendTurn(conversation, { role: "lead", content: safe, ...(payload ? { payload } : {}) });
+  await store.appendEvent(conversation, "message", { role: "lead", text: safe, ...(payload || {}) });
   await store.updateConversation(conversation, { state: "idle", last_activity_at: nowIso() });
 }
 
@@ -596,7 +867,39 @@ async function meterUsage(runStore, owner, usage = {}, billingSource) {
     amount_gbp: 0,
     billing_source: billingSource,
     metadata: { kind: "conversation", total_tokens: usage.totalTokens || 0 },
-  }).catch(() => {});
+  });
+}
+
+function leadBillingLane(candidate = {}, fallbackSource = "managed") {
+  if (["managed", "byok_api", "connected_allowance"].includes(candidate.billingLane)) {
+    return candidate.billingLane;
+  }
+  const provider = String(candidate.provider || "").toLowerCase();
+  if (provider === "managed") return "managed";
+  if (provider === "codex") return "connected_allowance";
+  if (fallbackSource === "managed" && !provider) return "managed";
+  return fallbackSource === "codex" ? "connected_allowance" : "byok_api";
+}
+
+function normalizeLeadUsage(usage = {}) {
+  const input = Number(usage.input ?? usage.inputTokens ?? 0);
+  const cached = Number(usage.cached ?? usage.cachedTokens ?? 0);
+  const output = Number(usage.output ?? usage.outputTokens ?? 0);
+  const reasoning = Number(usage.reasoning ?? usage.reasoningTokens ?? 0);
+  return {
+    input, cached, output, reasoning,
+    total: Number(usage.total ?? usage.totalTokens ?? input + output),
+  };
+}
+
+function leadRequestIds(value = {}) {
+  const usage = value.usage || value;
+  return [...new Set([
+    ...(Array.isArray(usage.providerRequestIds) ? usage.providerRequestIds : []),
+    usage.providerRequestId,
+    value.providerRequestId,
+    value.id,
+  ].filter(Boolean).map(String))].sort();
 }
 
 let recoveryTimer = null;

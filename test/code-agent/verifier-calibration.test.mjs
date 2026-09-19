@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import {
   selectionTransition, confirmationReflectsSelections, expectationOutcome, expectationKeywords, QUALITATIVE,
 } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
+import { MINIMAL_CONTRACT_VERIFIER_POLICY } from "../../shell/server/lib/appBuild/verifierPolicy.mjs";
 
 // ── selection semantics ───────────────────────────────────────────────────────────────────────
 
@@ -108,6 +109,37 @@ test("'a polished confirmation state' verifies confirmation behaviour, not the w
   const outcome = expectationOutcome({
     wanted, found: ["booking", "reference"], fresh: ["reference"], drove: true,
     action: "enter name, email and phone, accept the farm terms, and submit",
+  });
+  assert.equal(outcome.status, "pass", outcome.detail);
+});
+
+test("empty-state implementation wording does not dilute the visible catalogue assertion", () => {
+  const wanted = expectationKeywords(
+    "the favourites area is visible with an empty-state message when no favourites have been added",
+  );
+  assert.deepEqual(wanted, ["favourites", "added"]);
+  const outcome = expectationOutcome({
+    wanted, found: ["favourites"], fresh: [], drove: true,
+    action: "open the software catalogue", verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+  });
+  assert.equal(outcome.status, "pass", outcome.detail);
+});
+
+test("empty-state narrative prefixes do not outweigh the visible result copy", () => {
+  const wanted = expectationKeywords(
+    "an empty state message says no software matches the current search and filters",
+  );
+  assert.deepEqual(wanted, ["software", "matches", "current", "search", "filters"]);
+});
+
+test("accessibility structure wording does not dilute the named visible controls", () => {
+  const wanted = expectationKeywords(
+    "the page has a visible main heading naming Meridian Tools and a labelled catalogue search input",
+  );
+  assert.deepEqual(wanted, ["meridian", "tools", "catalogue", "search"]);
+  const outcome = expectationOutcome({
+    wanted, found: wanted, fresh: [], drove: true,
+    action: "open the public software catalogue", verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
   });
   assert.equal(outcome.status, "pass", outcome.detail);
 });

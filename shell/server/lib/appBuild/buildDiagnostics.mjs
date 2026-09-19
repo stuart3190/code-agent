@@ -3,7 +3,8 @@
 // of diag_steps: agent prompts, compiler/test/lint/runtime output, terminal logs, file
 // changes with diffs, token usage and cost per step. Steps are written incrementally and
 // asynchronously (fire-and-forget with warnings), so the trail survives crashes and never
-// blocks the pipeline. Nothing here is ever summarised at write time — raw output only.
+// blocks the pipeline. Evidence remains exact enough to debug, but secrets are redacted before
+// every write; persisted prompts/contracts and source diffs can be disabled independently.
 //
 // Failure explanations are evidence-or-nothing: explainBuildFailure quotes the exact
 // stored output, and when no diagnostics exist it says so and names it a platform bug —
@@ -12,12 +13,59 @@
 import { randomUUID } from "node:crypto";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { serviceClient } from "../supabase.mjs";
+import {
+  createManagedDirectDispatchAccounting, directModelReservations,
+} from "../directModelReservations.mjs";
+import { managedSettlementPaused } from "./providerPolicy.mjs";
 import { creditsForUsage } from "../../../../src/billing/costModel.mjs";
 
 const GZ_THRESHOLD = 16 * 1024;      // inline text beyond this is stored gzip+base64
 const STEP_INLINE_CAP = 12 * 1024;   // list/detail endpoints truncate outputs to this
 export const DIAG_DEFAULT_RETENTION_DAYS = 90;
 export const DIAG_RETENTION_CHOICES = [30, 90, 365, null]; // null = forever
+const REDACTED = "[REDACTED]";
+
+const SENSITIVE_ENV_NAME = /(?:api[_-]?key|secret|token|password|passwd|private[_-]?key|service[_-]?role|database_url|authorization|cookie)/i;
+const SENSITIVE_FIELD_NAME = /^(?:api[_-]?key|secret|access[_-]?token|refresh[_-]?token|token|password|passwd|client[_-]?secret|private[_-]?key|service[_-]?role[_-]?key|authorization|cookie)$/i;
+
+/** Capture controls preserve runtime context while allowing persisted prompts/source diffs off. */
+export function diagnosticCapturePolicy(env = process.env) {
+  return {
+    prompts: String(env.DIAG_CAPTURE_PROMPTS ?? "1") !== "0",
+    sourceDiffs: String(env.DIAG_CAPTURE_SOURCE_DIFFS ?? "1") !== "0",
+  };
+}
+
+/** Redact credential-shaped text and configured sensitive environment values before storage. */
+export function redactDiagnosticText(value, { env = process.env } = {}) {
+  if (value == null) return value;
+  let text = String(value);
+  text = text.replace(/-----BEGIN [^-\r\n]*(?:PRIVATE KEY|OPENSSH PRIVATE KEY)-----[\s\S]*?-----END [^-\r\n]*(?:PRIVATE KEY|OPENSSH PRIVATE KEY)-----/gi, "[REDACTED PRIVATE KEY]");
+  text = text.replace(/(\b(?:authorization|proxy-authorization)\s*[:=]\s*(?:bearer\s+)?)([^\s"'`,;]+)/gi, `$1${REDACTED}`);
+  text = text.replace(/((?:["']?(?:api[_-]?key|secret|access[_-]?token|refresh[_-]?token|password|passwd|client[_-]?secret|service[_-]?role[_-]?key)["']?)\s*[:=]\s*["']?)([^"'\s,;}]+)/gi, `$1${REDACTED}`);
+  text = text.replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{16,})\b/g, REDACTED);
+  text = text.replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, REDACTED);
+  text = text.replace(/(\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:)([^\s@/]+)(@)/gi, `$1${REDACTED}$3`);
+  const sensitiveValues = Object.entries(env || {})
+    .filter(([name, secret]) => SENSITIVE_ENV_NAME.test(name) && String(secret || "").length >= 8)
+    .map(([, secret]) => String(secret))
+    .sort((a, b) => b.length - a.length);
+  for (const secret of sensitiveValues) text = text.split(secret).join(REDACTED);
+  return text;
+}
+
+export function redactDiagnosticValue(value, options = {}, seen = new WeakSet()) {
+  if (value == null || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "string") return redactDiagnosticText(value, options);
+  if (typeof value !== "object") return redactDiagnosticText(String(value), options);
+  if (seen.has(value)) return "[REDACTED CIRCULAR]";
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((entry) => redactDiagnosticValue(entry, options, seen));
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
+    key,
+    SENSITIVE_FIELD_NAME.test(key) ? REDACTED : redactDiagnosticValue(entry, options, seen),
+  ]));
+}
 
 function now() { return new Date().toISOString(); }
 
@@ -86,6 +134,10 @@ export function normalizeTelemetry(usage) {
   if (!usage) return null;
   const input = Number(usage.input ?? usage.inputTokens ?? 0);
   const output = Number(usage.output ?? usage.outputTokens ?? 0);
+  const requestIds = [...new Set([
+    ...(Array.isArray(usage.providerRequestIds) ? usage.providerRequestIds : []),
+    usage.providerRequestId,
+  ].filter(Boolean).map(String))].sort();
   return {
     input,
     output,
@@ -95,9 +147,7 @@ export function normalizeTelemetry(usage) {
     // Provider response ids, when the provider surfaced them. Not numeric, deliberately carried:
     // normalisation used to strip them, which made the storage below silently never happen — the
     // 2026-08-05 incident could only be reconciled against tariff tables for exactly this reason.
-    providerRequestIds: Array.isArray(usage.providerRequestIds) && usage.providerRequestIds.length
-      ? usage.providerRequestIds.map(String)
-      : null,
+    providerRequestIds: requestIds.length ? requestIds : null,
   };
 }
 
@@ -112,10 +162,16 @@ export function providerForModel(model = "") {
 
 // ── The session ─────────────────────────────────────────────────────────────────────────
 
-export async function createDiagSession({ owner, projectId = null, conversationId = null, kind, prompt, model = null, client = null }) {
+export async function createDiagSession({
+  owner, projectId = null, conversationId = null, kind, prompt, model = null,
+  client = null, capturePolicy = diagnosticCapturePolicy(), redactionEnv = process.env,
+  existingRunId = null, strictWrites = false,
+}) {
   const db = client || serviceClient();
+  const redactText = (value) => redactDiagnosticText(value, { env: redactionEnv });
+  const redactValue = (value) => redactDiagnosticValue(value, { env: redactionEnv });
   const session = {
-    id: randomUUID(),
+    id: existingRunId || randomUUID(),
     db,
     owner,
     seq: 0,
@@ -129,20 +185,44 @@ export async function createDiagSession({ owner, projectId = null, conversationI
     _chain: Promise.resolve(),
   };
   const write = (fn) => {
-    session._chain = session._chain.then(fn).catch((error) =>
-      console.error(`[diag ${session.id.slice(0, 8)}]`, error.message));
+    session._chain = session._chain.then(async () => {
+      const result = await fn();
+      if (result?.error) throw new Error(result.error.message || "diagnostic persistence failed");
+      return result;
+    });
+    if (!strictWrites) {
+      session._chain = session._chain.catch((error) =>
+        console.error(`[diag ${session.id.slice(0, 8)}]`, error.message));
+    }
     return session._chain;
   };
-  write(() => db.from("diag_runs").insert({
-    id: session.id, owner, project_id: projectId, conversation_id: conversationId,
-    kind, status: "running", prompt: String(prompt || ""), model,
-    started_at: now(),
-  }));
+  session.flush = () => session._chain;
+  if (existingRunId) {
+    const { data: existing, error: existingError } = await db.from("diag_runs")
+      .select("id,owner,project_id,started_at").eq("id", existingRunId).eq("owner", owner).maybeSingle();
+    if (existingError || !existing || (projectId && existing.project_id !== projectId)) {
+      throw new Error(`diagnostics run ${existingRunId} is not owned by this project`);
+    }
+    const { data: lastStep, error: stepError } = await db.from("diag_steps")
+      .select("seq").eq("run_id", existingRunId).order("seq", { ascending: false }).limit(1).maybeSingle();
+    if (stepError) throw new Error(`diagnostics sequence resume failed: ${stepError.message}`);
+    session.seq = Number(lastStep?.seq || 0);
+    session.startedAt = new Date(existing.started_at).getTime() || Date.now();
+  } else {
+    const { error: insertError } = await db.from("diag_runs").insert({
+      id: session.id, owner, project_id: projectId, conversation_id: conversationId,
+      kind, status: "running", prompt: capturePolicy.prompts ? redactText(prompt || "") : null, model,
+      started_at: now(),
+    });
+    if (insertError) throw new Error(`diagnostics run create failed: ${insertError.message}`);
+  }
 
   // trace: optional { traceId, parentId, step } — the Builder v2 hierarchy (trace root =
   // the build; every model call/verification names its pipeline step). Columns exist since
   // the bv2 foundation migration; v1 callers simply leave them null.
   session.step = ({ agent = null, kind: stepKind = "log", label, status = "ok", prompt: stepPrompt = null, output = null, usage = null, model: stepModel = null, durationMs = null, round = session.round, contextMeta = null, trace = null }) => {
+    const safeOutput = output == null ? null : redactText(output);
+    const safePrompt = capturePolicy.prompts && stepPrompt != null ? redactText(stepPrompt) : null;
     session.seq += 1;
     if (agent) session.agents.add(agent);
     const norm = normalizeTelemetry(usage);
@@ -156,15 +236,15 @@ export async function createDiagSession({ owner, projectId = null, conversationI
         session.totals.cost += cost || 0;
       } catch { cost = null; }
     }
-    if (status === "failed" && output) {
-      session.failures.push({ label: label || stepKind, excerpt: tail(output) });
+    if (status === "failed" && safeOutput) {
+      session.failures.push({ label: redactText(label || stepKind), excerpt: tail(safeOutput) });
     }
     const seq = session.seq;
     write(() => db.from("diag_steps").insert({
       id: randomUUID(), run_id: session.id, seq, round,
-      agent, kind: stepKind, label: label || stepKind, status,
-      prompt: stepPrompt == null ? null : String(stepPrompt),
-      ...packOutput(output),
+      agent, kind: stepKind, label: redactText(label || stepKind), status,
+      prompt: safePrompt,
+      ...packOutput(safeOutput),
       usage: norm || null, cost,
       started_at: now(), duration_ms: durationMs,
       trace_id: trace?.traceId || null, parent_id: trace?.parentId || null,
@@ -174,7 +254,8 @@ export async function createDiagSession({ owner, projectId = null, conversationI
     if (norm) {
       const usedModel = stepModel || model || null;
       write(() => db.from("ai_requests").insert({
-        id: randomUUID(), owner, provider: providerForModel(usedModel), model: usedModel,
+        id: randomUUID(), owner,
+        provider: contextMeta?.routing?.provider || providerForModel(usedModel), model: usedModel,
         agent, input_tokens: norm.input, output_tokens: norm.output,
         provider_request_ids: norm.providerRequestIds?.length ? norm.providerRequestIds : null,
         cached_tokens: norm.cached, reasoning_tokens: norm.reasoning,
@@ -182,7 +263,7 @@ export async function createDiagSession({ owner, projectId = null, conversationI
         byok: session.byok,
         trigger: contextMeta?.trigger || null,
         run_id: contextMeta?.runId || null,
-        context: contextMeta ? { ...contextMeta, trigger: undefined, runId: undefined } : null,
+        context: contextMeta ? redactValue({ ...contextMeta, trigger: undefined, runId: undefined }) : null,
         trace_id: trace?.traceId || null, parent_id: trace?.parentId || null, step: trace?.step || null,
         created_at: now(),
       }));
@@ -197,13 +278,17 @@ export async function createDiagSession({ owner, projectId = null, conversationI
     write(() => db.from("diag_runs").update({ repair_rounds: session.repairRounds }).eq("id", session.id));
   };
 
-  session.setPlan = (plan) => write(() => db.from("diag_runs").update({ plan: String(plan || "").slice(0, 100_000) }).eq("id", session.id));
+  session.setPlan = (plan) => write(() => db.from("diag_runs").update({
+    plan: capturePolicy.prompts ? redactText(plan || "").slice(0, 100_000) : null,
+  }).eq("id", session.id));
 
   // The contract is kept on the session as well as written through, because the repair path and
   // the journey verifier both read it back within the same build rather than re-querying.
   session.setContract = (contract) => {
     session.contract = contract || null;
-    write(() => db.from("diag_runs").update({ contract: contract || null }).eq("id", session.id));
+    write(() => db.from("diag_runs").update({
+      contract: capturePolicy.prompts ? redactValue(contract || null) : null,
+    }).eq("id", session.id));
   };
   session.setByok = (value) => { session.byok = Boolean(value); };
   session.setModel = (m) => { if (m && !model) { model = m; write(() => db.from("diag_runs").update({ model: m }).eq("id", session.id)); } };
@@ -263,6 +348,7 @@ export async function createDiagSession({ owner, projectId = null, conversationI
       files: (baseline, tree, { label = "File changes" } = {}) => {
         const changes = treeChanges(baseline, tree);
         if (!changes.created.length && !changes.modified.length && !changes.deleted.length) return;
+        if (!capturePolicy.sourceDiffs) changes.diffs = {};
         session.step({
           agent: "Builder", kind: "files", label, round,
           output: JSON.stringify(changes, null, 2),
@@ -292,6 +378,7 @@ export function nullDiagSession() {
     setModel: noop, finish: noop, contract: null,
     failureEvidence: () => "No diagnostics were captured for this failure — that is a platform bug in the diagnostics recorder, not an explanation of the build failure.",
     rawFailureEvidence: () => "No diagnostics were captured for this failure — that is a platform bug in the diagnostics recorder, not an explanation of the build failure.",
+    flush: async () => {},
     recorderForJob: () => ({ sessionId: null, setModel: noop, setByok: noop, terminal: noop, step: noop, files: noop, jobEnd: noop }),
   };
 }
@@ -354,7 +441,11 @@ export function failingSteps(run) {
     && ["compiler", "test", "lint", "runtime", "verification", "terminal"].includes(step.kind));
 }
 
-export async function explainBuildFailure(owner, runId, { client = null, provider = null } = {}) {
+export async function explainBuildFailure(owner, runId, {
+  client = null,
+  provider = null,
+  reservationStoreFactory = directModelReservations,
+} = {}) {
   const run = await getDiagRun(owner, runId, { client, full: true });
   if (!run) return { found: false, explanation: "That Build ID has no stored diagnostics for your account." };
 
@@ -374,25 +465,52 @@ export async function explainBuildFailure(owner, runId, { client = null, provide
     `── ${step.label} (${step.kind}, round ${step.round}) ──\n${tail(step.output, 60, 6000)}`).join("\n\n");
   const quoted = `Exact stored output responsible:\n\n${evidence}`;
 
-  if (!provider) {
+  if (!provider && !managedSettlementPaused()) {
     try {
       const { createCodingModel } = await import("../modelGateway.mjs");
       provider = createCodingModel("auto");
     } catch { provider = null; }
   }
-  if (provider) {
+  if (provider && !managedSettlementPaused()) {
+    const candidate = {
+      provider: provider.provider || provider.id || "managed",
+      model: provider.model || "diagnostic-explanation",
+    };
+    const accounting = createManagedDirectDispatchAccounting({
+      owner,
+      kind: "diagnostic_explanation",
+      subjectId: randomUUID(),
+      reservations: reservationStoreFactory(),
+      maxOutputTokens: 1_000,
+      usageResponsibility: "platform_failure",
+      metadata: { diagnosticRunId: runId },
+    });
+    const hooks = accounting.forTurn(1);
+    const turnArgs = {
+      instructions: [
+        "You are explaining a failed software build to its owner using ONLY the stored diagnostic logs provided.",
+        "Rules: quote the exact failing lines verbatim (in code blocks) as your evidence; never speculate beyond what the logs show;",
+        "if the logs are insufficient to determine a cause, say exactly that. Keep it under 250 words, plain language, and end with the most likely smallest fix IF the logs support one.",
+      ].join(" "),
+      input: `Original request: ${String(run.prompt || "").slice(0, 500)}\nFinal status: ${run.status} after ${run.repair_rounds || 0} repair round(s).\n\nSTORED FAILING OUTPUT:\n${evidence}`,
+      tools: [],
+      maxOutputTokens: 1_000,
+      maxProviderRetries: 0,
+      allowParameterRetry: false,
+    };
+    let hold = null;
+    let providerCompleted = false;
     try {
-      const turn = await provider.turn({
-        instructions: [
-          "You are explaining a failed software build to its owner using ONLY the stored diagnostic logs provided.",
-          "Rules: quote the exact failing lines verbatim (in code blocks) as your evidence; never speculate beyond what the logs show;",
-          "if the logs are insufficient to determine a cause, say exactly that. Keep it under 250 words, plain language, and end with the most likely smallest fix IF the logs support one.",
-        ].join(" "),
-        input: `Original request: ${String(run.prompt || "").slice(0, 500)}\nFinal status: ${run.status} after ${run.repair_rounds || 0} repair round(s).\n\nSTORED FAILING OUTPUT:\n${evidence}`,
-        tools: [],
-      });
+      hold = await hooks.beforeDispatch(candidate, { attemptOrder: 1, args: turnArgs });
+      const turn = await provider.turn(turnArgs);
+      providerCompleted = true;
+      await hooks.afterDispatch(hold, candidate, turn);
       if (turn?.text?.trim()) return { found: true, explanation: turn.text.trim(), evidence: quoted };
     } catch (error) {
+      if (hold && !providerCompleted) {
+        try { await hooks.dispatchFailed(hold, candidate, error); }
+        catch (accountingError) { error = accountingError; }
+      }
       console.error("[diag] explain model call failed:", error.message);
     }
   }

@@ -12,6 +12,8 @@ import { fileURLToPath } from "node:url";
 
 function supabaseRef() {
   try {
+    const configured = process.env.VITE_SUPABASE_URL;
+    if (configured) return new URL(configured).hostname.split(".")[0] || null;
     const env = readFileSync(fileURLToPath(new URL("../shell/web/.env", import.meta.url)), "utf8");
     const url = env.match(/VITE_SUPABASE_URL\s*=\s*(\S+)/)?.[1] || "";
     return new URL(url).hostname.split(".")[0] || null;
@@ -81,6 +83,29 @@ async function stubApi(page) {
 }
 
 test.skip(!REF, "requires shell/web/.env auth config (skipped in CI)");
+
+const PROJECT_DRAWER_BREAKPOINT = 1024;
+
+async function revealProjects(page) {
+  if ((page.viewportSize()?.width ?? 0) > PROJECT_DRAWER_BREAKPOINT) return;
+  const layout = page.locator(".ct-home-layout");
+  if (!await layout.evaluate((element) => element.classList.contains("sidebar-open"))) {
+    await page.getByRole("button", { name: /^Projects/ }).click();
+  }
+  await expect(layout).toHaveClass(/sidebar-open/);
+}
+
+async function openProject(page, name) {
+  await revealProjects(page);
+  await page.getByRole("button", { name }).click();
+}
+
+async function deleteFirstProject(page) {
+  await revealProjects(page);
+  const project = page.locator(".ct-project:not(.ct-recent)").first();
+  await project.getByRole("button", { name: /Project actions for/ }).click();
+  await project.getByRole("menuitem", { name: "Delete project" }).click();
+}
 
 // The shell swaps to its narrow layout at the CSS breakpoint (max-width: 820px), NOT on touch
 // capability. Playwright's `isMobile` means touch — true for iPads — so branching on it made
@@ -161,10 +186,12 @@ test("background navigation: leave a running build, start another, return — st
     [1, "message", { role: "user", text: "Build me a big CRM called Atlas" }],
     [2, "agent_spawned", { agent: "Lead Agent", status: "Understanding request…" }],
     [3, "plan.created", { title: "Build Atlas", steps: ["Schema", "UI", "Verify"] }],
-    [4, "agent_spawned", { agent: "Builder", status: "Writing the schema…" }],
+    [4, "build_started", { jobId: "job-atlas", projectId: "p9" }],
+    [5, "agent_spawned", { agent: "Builder", status: "Writing the schema…" }],
   ];
   const afters = [];
   let created = false;
+  let atlasRunning = true;
   await page.unroute("**/api/v1/conversations");
   await page.route("**/api/v1/conversations", (route) => {
     if (route.request().method() === "POST") {
@@ -172,7 +199,14 @@ test("background navigation: leave a running build, start another, return — st
       return route.fulfill({ json: { conversation: { id: "c2", title: "Second Project", state: "thinking" } } });
     }
     return route.fulfill({ json: { conversations: [
-      { id: "c9", title: "Atlas", activity: { agent: "Builder", status: "Writing the schema…" } },
+      {
+        id: "c9", title: "Atlas",
+        activity: { agent: "Builder", status: "Writing the schema…", projectId: "p9" },
+        activeBuild: atlasRunning
+          ? { jobId: "job-atlas", projectId: "p9", status: "running", phase: "running" }
+          : null,
+        ...(atlasRunning ? {} : { verified: true, hasPreview: true }),
+      },
       ...(created ? [{ id: "c2", title: "Second Project" }] : []),
     ] } });
   });
@@ -186,10 +220,19 @@ test("background navigation: leave a running build, start another, return — st
     return route.fulfill({ contentType: "text/event-stream", body: sse(
       [[1, "message", { role: "user", text: "Start the second project" }]].filter(([s]) => s > after)) });
   });
+  await page.route("**/api/projects/p9/active-build", (route) => route.fulfill({ json: { job: atlasRunning
+    ? { jobId: "job-atlas", projectId: "p9", status: "running", phase: "running" }
+    : { jobId: "job-atlas", projectId: "p9", status: "complete", phase: "complete" } } }));
+  await page.route("**/api/builds/job-atlas/events", (route) => route.fulfill({
+    contentType: "text/event-stream",
+    body: `event: snapshot\ndata: ${JSON.stringify(atlasRunning
+      ? { jobId: "job-atlas", projectId: "p9", status: "running", phase: "running" }
+      : { jobId: "job-atlas", projectId: "p9", status: "complete", phase: "complete" })}\n\n`,
+  }));
   await page.goto("/");
 
   // 1. Open the long-running build. The back affordance is plainly visible mid-build.
-  await page.getByRole("button", { name: /Open Atlas/ }).click();
+  await openProject(page, /Open Atlas/);
   await expect(page.getByText("Build me a big CRM called Atlas")).toBeVisible();
   await expect(page.getByText("Plan · Build Atlas")).toBeVisible();
   const back = page.getByRole("button", { name: /Back to your projects/ });
@@ -198,12 +241,13 @@ test("background navigation: leave a running build, start another, return — st
   // 2. Press ← Projects. 3. Home shows the project's LIVE status while the build keeps
   // going server-side (its event log grows while we're away).
   await back.click();
-  await expect(page.getByText("Builder · Writing the schema…")).toBeVisible();
+  await expect(page.getByText("Builder · Building…")).toBeVisible();
   buildEvents.push(
-    [5, "message", { role: "lead", text: "Schema is in — wiring the UI now." }],
-    [6, "agent_status", { agent: "Builder", status: "Wiring the UI…" }],
-    [7, "preview_ready", { url: "https://demo.preview.thrallo.com/", projectId: "p9" }],
+    [6, "message", { role: "lead", text: "Schema is in — wiring the UI now." }],
+    [7, "agent_status", { agent: "Builder", status: "Wiring the UI…" }],
+    [8, "preview_ready", { url: "https://demo.preview.thrallo.com/", projectId: "p9" }],
   );
+  atlasRunning = false;
 
   // 4. Start another project immediately — the first build never pauses.
   await page.getByPlaceholder(/Describe anything/).fill("Start the second project");
@@ -213,7 +257,7 @@ test("background navigation: leave a running build, start another, return — st
 
   // 5. Return to the original project via ← Projects → its card.
   await back.click();
-  await page.getByRole("button", { name: /Open Atlas/ }).click();
+  await openProject(page, /Open Atlas/);
 
   // 6. Everything restored — history, plan, team state, preview — PLUS the work that
   // happened while we were away, proving the stream and build continued.
@@ -221,9 +265,9 @@ test("background navigation: leave a running build, start another, return — st
   await expect(page.getByText("Plan · Build Atlas")).toBeVisible();
   await expect(page.getByText("Schema is in — wiring the UI now.")).toBeVisible();
   if (isNarrow(page)) {
-    await expect(page.getByText("Builder — Wiring the UI…")).toBeVisible(); // team strip
+    await expect(page.getByText("The team is with you.")).toBeVisible(); // terminal team strip
   } else {
-    await expect(page.locator('.ct-agent[title="Builder — Wiring the UI…"]')).toBeVisible(); // compact rail
+    await expect(page.locator('.ct-agent[title="Builder — Finished"]')).toBeVisible(); // compact rail
   }
   await expect(page.locator(".ct-preview-thumb").first()).toBeVisible();
   await expect(back).toBeVisible();
@@ -247,20 +291,20 @@ test("model selector: Begin choice rides with the first message; in-conversation
   await page.route("**/api/v1/models", (r) => r.fulfill({ json: {
     options: [
       { value: "auto", provider: "auto", model: "Smart routing", source: "Thrallo managed", label: "Recommended", available: true },
-      { value: "openai:gpt-5.6-terra", provider: "openai", model: "gpt-5.6-terra", source: "Thrallo managed", label: "Balanced", relCost: "≈1.00×", available: true },
-      { value: "anthropic:claude-sonnet-5", provider: "anthropic", model: "claude-sonnet-5", source: "Your API key", label: "Best quality", relCost: "≈1.00×", available: true },
+      { value: "managed:openai:gpt-5.6-terra", provider: "openai", model: "gpt-5.6-terra", source: "Thrallo managed", label: "Balanced", relCost: "≈1.00×", available: true },
+      { value: "byok_api:anthropic:claude-sonnet-5", provider: "anthropic", model: "claude-sonnet-5", source: "Your API key", label: "Best quality", relCost: "≈1.00×", available: true },
     ],
     providers: [
       { id: "auto", name: "Auto", recommended: true, available: true, models: [] },
       { id: "openai", name: "OpenAI", available: true, source: "Thrallo managed", modes: MODES_STUB,
-        models: [{ id: "gpt-5.6-terra", name: "gpt-5.6-terra", tier: "Balanced", relCost: "≈1.00×", value: "openai:gpt-5.6-terra", stats: { successRate: 99.1, avgCostCredits: 1.1, avgDurationMs: 34_000, avgRepairRounds: 0.2, samples: 30 } }] },
+        models: [{ id: "gpt-5.6-terra", name: "gpt-5.6-terra", tier: "Balanced", relCost: "≈1.00×", value: "managed:openai:gpt-5.6-terra", stats: { successRate: 99.1, avgCostCredits: 1.1, avgDurationMs: 34_000, avgRepairRounds: 0.2, samples: 30 } }] },
       { id: "anthropic", name: "Anthropic", available: true, source: "Your API key", modes: MODES_STUB,
-        models: [{ id: "claude-sonnet-5", name: "claude-sonnet-5", tier: "Best quality", relCost: "≈1.00×", value: "anthropic:claude-sonnet-5", stats: { collecting: true, samples: 2 } }] },
+        models: [{ id: "claude-sonnet-5", name: "claude-sonnet-5", tier: "Best quality", relCost: "≈1.00×", value: "byok_api:anthropic:claude-sonnet-5", stats: { collecting: true, samples: 2 } }] },
       { id: "gemini", name: "Gemini", available: false, configure: true, models: [], modes: [] },
       { id: "xai", name: "xAI / Grok", available: false, configure: true, models: [], modes: [] },
     ],
     modes: MODES_STUB,
-    autoStrategy: { provider: "openai", model: "gpt-5.6-terra", mode: "balanced", reason: "Highest measured success rate for coding.", stats: { successRate: 98.9, avgCostCredits: 1.0, avgDurationMs: 38_000, avgRepairRounds: 0.2, samples: 40 } },
+    autoStrategy: { provider: "openai", model: "gpt-5.6-terra", lane: "managed", value: "managed:openai:gpt-5.6-terra", mode: "balanced", reason: "Highest measured success rate for coding.", stats: { successRate: 98.9, avgCostCredits: 1.0, avgDurationMs: 38_000, avgRepairRounds: 0.2, samples: 40 } },
     unconfigured: ["gemini", "xai"], allowFallback: true,
   } }));
   let startBody = null;
@@ -338,7 +382,7 @@ test("model selector: Begin choice rides with the first message; in-conversation
   const box = page.getByPlaceholder(/Describe anything/);
   await box.fill("Build me a store");
   await box.press("Enter");
-  await expect.poll(() => startBody?.modelPref).toBe("anthropic:claude-sonnet-5#deep");
+  await expect.poll(() => startBody?.modelPref).toBe("byok_api:anthropic:claude-sonnet-5#deep");
 
   // Inside the conversation: switch to OpenAI · Balanced — POST fires + confirmation toast.
   const dockPill = page.locator(".ct-model-dock .ct-model-pill");
@@ -348,7 +392,7 @@ test("model selector: Begin choice rides with the first message; in-conversation
   await expect(page.getByText(/99\.1%/)).toBeVisible(); // measured stars/stats, not generic labels
   await page.getByRole("option", { name: /gpt-5.6-terra/ }).click();
   await page.getByRole("option", { name: /Balanced/ }).click();
-  await expect.poll(() => modelPost?.value).toBe("openai:gpt-5.6-terra");
+  await expect.poll(() => modelPost?.value).toBe("managed:openai:gpt-5.6-terra");
   await expect(page.getByText("Future requests will use OpenAI · gpt-5.6-terra.")).toBeVisible();
 });
 
@@ -435,7 +479,7 @@ test("polish: drafts survive failed sends, Escape closes dialogs, palette keyboa
     return route.fulfill({ json: { conversations: [{ id: "c1", title: "FocusFlow", state: "idle", hasPreview: true }] } });
   });
   await page.goto("/");
-  await expect(page.getByText("FocusFlow")).toBeVisible();
+  await expect(page.locator(".ct-project", { hasText: "FocusFlow" })).toBeVisible();
 
   // A failed send reports the error and puts the draft back — never loses typed text.
   const box = page.getByPlaceholder(/Describe anything/);
@@ -445,11 +489,11 @@ test("polish: drafts survive failed sends, Escape closes dialogs, palette keyboa
   await expect(box).toHaveValue("build me a store");
 
   // Escape dismisses the delete confirmation without deleting anything.
-  await page.locator(".ct-pdelete").first().click();
+  await deleteFirstProject(page);
   await expect(page.getByText("Delete this project?")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByText("Delete this project?")).not.toBeVisible();
-  await expect(page.getByText("FocusFlow")).toBeVisible();
+  await expect(page.locator(".ct-project", { hasText: "FocusFlow" })).toBeVisible();
 
   // Palette is fully keyboard-driven: arrows move the selection, Enter opens it.
   await page.keyboard.press("Control+k");
@@ -487,17 +531,17 @@ test("soft delete → Recently Deleted → restore → Delete Now workflow", asy
     return route.fulfill({ json: { restored: true, id: "c1", title: "FocusFlow" } });
   });
   await page.goto("/");
-  await expect(page.getByText("FocusFlow")).toBeVisible();
+  await expect(page.locator(".ct-project", { hasText: "FocusFlow" })).toBeVisible();
 
   // Cancel does nothing.
-  await page.locator(".ct-pdelete").first().click();
+  await deleteFirstProject(page);
   await expect(page.getByText("Delete this project?")).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
-  await expect(page.getByText("FocusFlow")).toBeVisible();
+  await expect(page.locator(".ct-project", { hasText: "FocusFlow" })).toBeVisible();
   expect(softDeleted).toBe(false);
 
   // Confirm soft-deletes: card disappears immediately, project appears in Recently Deleted.
-  await page.locator(".ct-pdelete").first().click();
+  await deleteFirstProject(page);
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.getByText("Project moved to Recently Deleted.")).toBeVisible();
   await expect(page.locator(".ct-project:not(.ct-recent)")).toHaveCount(0);
@@ -514,7 +558,7 @@ test("soft delete → Recently Deleted → restore → Delete Now workflow", asy
   expect(restored).toBe(true);
 
   // Delete again, then Delete Now bypasses the waiting period after its own confirmation.
-  await page.locator(".ct-pdelete").first().click();
+  await deleteFirstProject(page);
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await page.getByRole("button", { name: /Recently Deleted \(1\)/ }).click();
   await page.getByRole("button", { name: "Delete now" }).click();
@@ -588,13 +632,17 @@ test("Stop build: contextual control, reaches the mounted cancel route, dispatch
     const after = Number(new URL(route.request().url()).searchParams.get("after") || 0);
     return route.fulfill({ contentType: "text/event-stream", body: sse(events.filter(([s]) => s > after)) });
   });
+  await page.route("**/api/builds/job-77/events", (route) => route.fulfill({
+    contentType: "text/event-stream",
+    body: `event: snapshot\ndata: ${JSON.stringify({ jobId: "job-77", projectId: "p-77", status: "running", phase: "running" })}\n\n`,
+  }));
   await page.route("**/api/builds/*/cancel", (route) => {
     cancelCalls.push(route.request().url());
     return route.fulfill({ json: { ok: true } });
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: /Open Booking/ }).click();
+  await openProject(page, /Open Booking/);
   await expect(page.getByText("Build me a booking system")).toBeVisible();
 
   // Present while the team is working — and addressed to the running job.
@@ -628,9 +676,86 @@ test("Stop build is absent when no build is running, and a completion race is no
     const after = Number(new URL(route.request().url()).searchParams.get("after") || 0);
     return route.fulfill({ contentType: "text/event-stream", body: sse(events.filter(([s]) => s > after)) });
   });
+  await page.route("**/api/builds/job-88/events", (route) => route.fulfill({
+    contentType: "text/event-stream",
+    body: `event: snapshot\ndata: ${JSON.stringify({ jobId: "job-88", projectId: "p-88", status: "complete", phase: "complete" })}\n\n`,
+  }));
   await page.goto("/");
-  await page.getByRole("button", { name: /Open Chat/ }).click();
+  await openProject(page, /Open Chat/);
   await expect(page.getByText("Just chatting")).toBeVisible();
   // The team finished: nothing to stop, so the control is gone.
   await expect(page.getByTestId("cancel-build")).toHaveCount(0);
+});
+
+test("advanced approval resumes exactly one build and reconstructs after refresh", async ({ page }) => {
+  await stubApi(page);
+  const approvalId = "00000000-0000-4000-8000-000000000060";
+  const build = {
+    jobId: "job-approved-60",
+    projectId: "project-approved-60",
+    status: "queued",
+    phase: "queued",
+  };
+  const approval = {
+    approvalId,
+    requestSummary: "Build an AI-powered Roblox model generator",
+    complexity: "advanced",
+    ceilingCredits: 60,
+    availableCredits: { included: 40, purchased: 30 },
+    status: "pending",
+  };
+  const events = [
+    [1, "message", { role: "user", text: "Build an AI-powered Roblox model generator" }],
+    [2, "message", { role: "lead", text: "Approve the build prompt that appeared, and I'll continue from there." }],
+    [3, "budget_approval_required", approval],
+  ];
+  let approved = false;
+  let approveCalls = 0;
+
+  await page.unroute("**/api/v1/conversations");
+  await page.route("**/api/v1/conversations", (route) => route.fulfill({
+    json: { conversations: [{
+      id: "c9",
+      title: "Roblox generator",
+      state: approved ? "building" : "waiting_for_approval",
+      activeBuild: approved ? build : null,
+    }] },
+  }));
+  await page.route("**/api/v1/conversations/c9/events**", (route) => {
+    const after = Number(new URL(route.request().url()).searchParams.get("after") || 0);
+    return route.fulfill({ contentType: "text/event-stream", body: sse(events.filter(([s]) => s > after)) });
+  });
+  await page.route(`**/api/v1/build-budget-approvals/${approvalId}`, (route) => route.fulfill({
+    json: { approval: { ...approval, status: approved ? "consumed" : "pending" }, build: approved ? build : null },
+  }));
+  await page.route(`**/api/v1/build-budget-approvals/${approvalId}/approve`, async (route) => {
+    approveCalls += 1;
+    approved = true;
+    events.push(
+      [4, "budget_approval_resolved", { approvalId, status: "consumed", build }],
+      [5, "build_started", build],
+      [6, "message", { role: "lead", text: "Approval accepted. Builder V2 started the build automatically." }],
+    );
+    return route.fulfill({ json: { approval: { ...approval, status: "consumed" }, build } });
+  });
+  await page.route("**/api/builds/job-approved-60/events", (route) => route.fulfill({
+    contentType: "text/event-stream",
+    body: `event: snapshot\ndata: ${JSON.stringify({ ...build, status: "running", phase: "running" })}\n\n`,
+  }));
+
+  await page.goto("/");
+  await openProject(page, /Open Roblox generator/);
+  await page.getByRole("button", { name: "Approve up to 60 credits" }).click();
+
+  await expect(page.getByText(/Approved .* the build has started\./)).toBeVisible();
+  await expect(page.getByText("Approval accepted. Builder V2 started the build automatically.")).toBeVisible();
+  await expect(page.getByTestId("cancel-build").locator("visible=true")).toBeVisible();
+  await expect.poll(() => approveCalls).toBe(1);
+
+  await page.reload();
+  await openProject(page, /Open Roblox generator/);
+  await expect(page.getByText(/Approved .* the build has started\./)).toBeVisible();
+  await expect(page.getByText("Approval accepted. Builder V2 started the build automatically.")).toBeVisible();
+  await expect(page.getByTestId("cancel-build").locator("visible=true")).toBeVisible();
+  await expect.poll(() => approveCalls).toBe(1);
 });

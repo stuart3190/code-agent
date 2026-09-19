@@ -1,5 +1,10 @@
 # BUILDER V2 — END-TO-END FINISH PLAN
 
+> **Historical plan — superseded 2026-08-08.** This file is retained for forensic sequencing and
+> design evidence only. Its shadow-week, dual-run, allowlisted, broad-rollout and elapsed-time V1
+> retirement gates are obsolete. The only active finish plan is
+> `docs/BUILDER-V2-V2-ONLY-CUTOVER.md`.
+
 Authored 2026-08-05, immediately after the foundations landed. This is the EXECUTION
 schedule from the current, verified state to Builder v1's retirement. The architecture,
 schemas, APIs and acceptance rules live in `docs/BUILDER-V2-MASTER-PLAN.md` (approved,

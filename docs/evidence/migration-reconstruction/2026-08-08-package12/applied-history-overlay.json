@@ -1,0 +1,28 @@
+{
+  "source": "Supabase plugin read-only schema_migrations ledger on zczgvcsokfafuyognvwx after Package 12 application",
+  "capturedAt": "2026-08-08T19:48:00.000Z",
+  "baseVersion": "20260808164259",
+  "ledgerCount": 70,
+  "migrations": [
+    {
+      "appliedOrder": 69,
+      "version": "20260808180841",
+      "name": "platform_erasure_audit",
+      "filename": "20260808180841_platform_erasure_audit.sql",
+      "statementCount": 23,
+      "sqlSha256": "4f7059467b46cf5909838bc45f33fccd2606f20ed8eb4a7dfe405ab4f00352c1",
+      "canonicalSqlSha256": "4f7059467b46cf5909838bc45f33fccd2606f20ed8eb4a7dfe405ab4f00352c1",
+      "localCanonicalSqlSha256": "31c8f602719792b374d5719c342d5be85b23910cc128c59e4aa56242b185c77a"
+    },
+    {
+      "appliedOrder": 70,
+      "version": "20260808180845",
+      "name": "shared_atomic_rate_limits",
+      "filename": "20260808180845_shared_atomic_rate_limits.sql",
+      "statementCount": 13,
+      "sqlSha256": "f5e5df8d8aafe025d5061c285add6d9fe162b8cd288c30ad453292f0327c2fa3",
+      "canonicalSqlSha256": "f5e5df8d8aafe025d5061c285add6d9fe162b8cd288c30ad453292f0327c2fa3",
+      "localCanonicalSqlSha256": "f4b3ba804e3ebf553528bb1d48a525b3ce8bc30f24df240205c4bf5d93e7125b"
+    }
+  ]
+}

@@ -1,0 +1,203 @@
+{
+  "summary": "Alder Studio task list: search the list, then clear all filters",
+  "projectType": "dashboard",
+  "version": 1,
+  "auth": {
+    "required": false
+  },
+  "routes": [
+    {
+      "path": "/tasks",
+      "name": "Tasks",
+      "auth": false,
+      "purpose": "task list with search and filters"
+    }
+  ],
+  "entities": [
+    {
+      "name": "task",
+      "owned": false,
+      "fields": [
+        {
+          "name": "taskId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "projectId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "taskTitle",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "taskDescription",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "taskOwnerId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "priority",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "dueDate",
+          "type": "date",
+          "required": true
+        },
+        {
+          "name": "taskStatus",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "createdBy",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "storage": "durable",
+      "relationships": [
+        "a task belongs to one project",
+        "a task owner references one member",
+        "a task creator references one authenticated user"
+      ]
+    },
+    {
+      "name": "taskFilter",
+      "owned": false,
+      "fields": [
+        {
+          "name": "searchText",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "statusFilter",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "ownerFilter",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "clearFilters",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "name": "matchedTaskIds",
+          "type": "array",
+          "required": false
+        }
+      ],
+      "storage": "transient",
+      "relationships": [
+        "taskFilter reads task rows and member rows but is not persisted"
+      ]
+    }
+  ],
+  "operations": [
+    {
+      "id": "filter-tasks",
+      "kind": "search",
+      "entity": "taskFilter",
+      "journey": "filter-board-and-list-views",
+      "description": "return matching tasks for board and list views from current transient filter controls",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "reads": [
+            "searchText",
+            "statusFilter",
+            "ownerFilter",
+            "taskTitle",
+            "taskStatus",
+            "taskOwnerId"
+          ],
+          "writes": [
+            "matchedTaskIds"
+          ],
+          "behavior": "match saved tasks by search text, selected status, and selected owner; all-statuses and all-owners are all-options sentinels"
+        }
+      ]
+    }
+  ],
+  "journeys": [
+    {
+      "id": "filter-board-and-list-views",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the task list page",
+          "expect": "the list view shows task rows and search and filter controls",
+          "target": "/tasks"
+        },
+        {
+          "action": "search the list for a matching task title while leaving status at the all-statuses sentinel",
+          "expect": "the task list shows at least one row containing Kickoff and no rows that omit the word Kickoff",
+          "target": "task list search and filters",
+          "operates": [
+            "searchText",
+            "statusFilter",
+            "filter-tasks"
+          ],
+          "primitive": "textbox",
+          "verificationValues": {
+            "searchText": "Kickoff",
+            "statusFilter": "all-statuses"
+          }
+        },
+        {
+          "action": "clear all filters",
+          "expect": "the filter summary disappears and the full task list is visible again",
+          "target": "clear filters button",
+          "operates": [
+            "clearFilters"
+          ]
+        }
+      ],
+      "title": "A team member filters board and list views to find matching tasks",
+      "priority": "secondary",
+      "acceptance": [
+        "board filters visibly hide tasks that do not match the selected status and owner",
+        "list search visibly returns only rows matching the entered search text",
+        "clearing filters restores unfiltered board or list results"
+      ]
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "a1",
+      "kind": "functional",
+      "journey": "filter-board-and-list-views",
+      "statement": "searching the list hides rows that do not match"
+    },
+    {
+      "id": "a2",
+      "kind": "functional",
+      "journey": "filter-board-and-list-views",
+      "statement": "clearing all filters shows the full task list again"
+    },
+    {
+      "id": "a3",
+      "kind": "functional",
+      "journey": "filter-board-and-list-views",
+      "statement": "the filter summary disappears after clearing"
+    }
+  ],
+  "states": [],
+  "deferred": [],
+  "imageIntents": [],
+  "integrations": []
+}

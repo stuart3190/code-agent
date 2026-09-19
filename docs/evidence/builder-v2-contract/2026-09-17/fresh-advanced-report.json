@@ -1,0 +1,57 @@
+{
+  "request": "Build Northwind Field Ops, a field-service operations workspace for a maintenance company.\nDispatchers, technicians and admins sign in with email and password.\nDispatchers create work orders (title, site, priority, scheduled date, assigned technician, status) and update them later;\neach work order references one customer site and one assigned technician.\nEvery work order opens on its own detail route where a technician logs visits (arrival time, notes, parts used) that belong to that work order,\nand updates the order's status from the same screen.\nA sites screen lists customer sites (name, region, contact email) with a filter by region and a search by name; dispatchers can add sites.\nAn analytics screen shows the number of open, in-progress and completed work orders and the average number of visits per work order,\ncomputed from the saved data.\nAn admin screen lets an admin manage team member accounts and their roles (dispatcher, technician, admin); technicians must be denied access to it.\nAll saved data must survive a page reload.",
+  "model": "gpt-5.5",
+  "calls": 2,
+  "durationMs": 176605,
+  "usage": {
+    "input": 3098,
+    "output": 9635,
+    "reasoning": 1552,
+    "cached": 0,
+    "total": 12733,
+    "providerRequestId": "codex:response:resp_0176499a426a5781016aac2a766ce087d187975ebe7a471e31"
+  },
+  "hash": "aff570e2dc065bca32dde508ba1760507472ab4205b6410215b9134caf309a64",
+  "agent": {
+    "error": "ONE_CALL_ONLY: the contract agent asked for a second model call"
+  },
+  "validator": {
+    "ok": false,
+    "problems": [
+      "dispatcher-create-work-order step 2 verificationValues names \"authEmail\", which is not an operated entity field",
+      "dispatcher-update-work-order step 1 verificationValues names \"authEmail\", which is not an operated entity field",
+      "technician-log-visit step 1 verificationValues names \"authEmail\", which is not an operated entity field",
+      "dispatcher-manage-sites step 1 verificationValues names \"authEmail\", which is not an operated entity field",
+      "admin-manage-team step 1 verificationValues names \"authEmail\", which is not an operated entity field",
+      "technician-denied-admin step 1 verificationValues names \"authEmail\", which is not an operated entity field",
+      "view-analytics step 1 verificationValues names \"authEmail\", which is not an operated entity field"
+    ],
+    "warnings": []
+  },
+  "gate": [
+    "technician-log-visit:2:navigation reads state before it is produced: technician-log-visit.custom.workOrderId",
+    "technician-log-visit:3:operation:createvisit reads state before it is produced: technician-log-visit.custom.workOrderId",
+    "technician-log-visit:4:mutation reads state before it is produced: technician-log-visit.custom.workOrderId",
+    "technician-log-visit:5:recovery reads state before it is produced: technician-log-visit.custom.workOrderId"
+  ],
+  "incomplete": [],
+  "authIssues": [
+    "dispatcher-create-work-order #2 pre-fills credentials in verificationValues",
+    "dispatcher-update-work-order #1 pre-fills credentials in verificationValues",
+    "technician-log-visit #1 pre-fills credentials in verificationValues",
+    "dispatcher-manage-sites #1 pre-fills credentials in verificationValues",
+    "admin-manage-team #1 pre-fills credentials in verificationValues",
+    "technician-denied-admin #1 pre-fills credentials in verificationValues",
+    "view-analytics #1 pre-fills credentials in verificationValues"
+  ],
+  "unresolvedRoutes": [],
+  "unqualified": [],
+  "provenance": [],
+  "counts": {
+    "journeys": 7,
+    "steps": 32,
+    "entities": 4,
+    "operations": 15,
+    "routes": 6
+  }
+}

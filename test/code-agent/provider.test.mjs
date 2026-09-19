@@ -10,7 +10,7 @@ test("commercial OpenAI adapter sends Responses tool input and normalizes output
   let request;
   const provider = createOpenAIProvider({
     apiKey: "test-key",
-    model: "gpt-test",
+    model: "gpt-5.6-terra",
     reasoningEffort: "low",
     fetchImpl: async (_url, options) => {
       request = JSON.parse(options.body);
@@ -26,7 +26,7 @@ test("commercial OpenAI adapter sends Responses tool input and normalizes output
     safetyIdentifier: "owner-id",
   });
   assert.equal(request.store, false);
-  assert.equal(request.model, "gpt-test");
+  assert.equal(request.model, "gpt-5.6-terra");
   assert.deepEqual(request.reasoning, { effort: "low" });
   assert.equal(result.text, "Done");
   assert.equal(result.usage.totalTokens, 13);
@@ -36,7 +36,7 @@ test("Gemini Interactions adapter is stateless and round-trips tool history", as
   let request;
   const provider = createGeminiCodingProvider({
     apiKey: `AIza${"x".repeat(36)}`,
-    model: "gemini-test",
+    model: "gemini-3.6-flash",
     fetchImpl: async (_url, options) => {
       request = JSON.parse(options.body);
       return new Response(JSON.stringify({

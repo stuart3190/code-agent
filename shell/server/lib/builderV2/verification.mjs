@@ -2,33 +2,101 @@
 // Parts 2 §10/§11 and 9).
 //
 // ONE entry over the existing, production-proven gates — nothing is reimplemented. What v2
-// adds is discipline: every D3 failure must be ATTRIBUTED to owning modules (or it degrades
-// to a warning: a failure that names nothing cannot brief a targeted repair), and journeys
+// adds is discipline: every D3 failure is ATTRIBUTED to owning modules when possible. An
+// attribution miss is a separate platform defect and NEVER changes the journey verdict;
+// repair instead receives a broad, bounded fallback file set. Journeys
 // whose owning modules' content is unchanged REUSE their cached verdict — recorded as
 // `reused` with the original evidence, never silently.
 
 import crypto from "node:crypto";
 import { runStageGate } from "../appBuild/stageGate.mjs";
 import { verifyJourneys, journeySummary } from "../appBuild/journeyVerifier.mjs";
+import { MINIMAL_CONTRACT_VERIFIER_POLICY } from "../appBuild/verifierPolicy.mjs";
+import { bindCapabilities } from "./contractTiering.mjs";
+import { runStaticApplicationGate } from "./staticApplicationGate.mjs";
+import { scaffoldJourneyOwners } from "./scaffoldGraph.mjs";
 
 const sha256 = (text) => crypto.createHash("sha256").update(text).digest("hex");
+const canonical = (value) => {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
+};
+
+export const VERIFICATION_CACHE_VERSION = "journey-verifier/2026-08-25.7";
+export const DEFAULT_VERIFICATION_CONTEXT = Object.freeze({
+  verifierVersion: VERIFICATION_CACHE_VERSION,
+  verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+  backendVersion: "generated-backend/1",
+  runtimeVersion: "react-vite-runtime/1",
+  environmentVersion: "preview-environment/1",
+  configVersion: "journey-verification-config/1",
+});
 
 // ── attribution ───────────────────────────────────────────────────────────────────────────────
 
+const FALLBACK_FILE_LIMIT = 16;
+const FALLBACK_TOKEN_LIMIT = 6_000;
+
+/** Deterministic emergency context for an unattributed failure, below repair's hard budget. */
+export function boundedAttributionFallback(graph, {
+  maxFiles = FALLBACK_FILE_LIMIT,
+  maxTokens = FALLBACK_TOKEN_LIMIT,
+} = {}) {
+  if (!graph || maxFiles <= 0 || maxTokens <= 0) return [];
+  const priority = (path) => {
+    if (/^src\/(?:App|main|index)\.[^/]+$/i.test(path)) return 0;
+    if (/^src\/(?:routes|components|data|lib)\//i.test(path)) return 1;
+    if (/^src\//i.test(path)) return 2;
+    return 3;
+  };
+  const candidates = graph.paths().slice().sort((a, b) => {
+    const rank = priority(a) - priority(b);
+    if (rank) return rank;
+    const size = Number(graph.file(a)?.tokens || 0) - Number(graph.file(b)?.tokens || 0);
+    return size || a.localeCompare(b);
+  });
+  const selected = [];
+  let usedTokens = 0;
+  for (const path of candidates) {
+    if (selected.length >= maxFiles) break;
+    const tokens = Math.max(0, Number(graph.file(path)?.tokens || 0));
+    if (usedTokens + tokens > maxTokens) continue;
+    selected.push(path);
+    usedTokens += tokens;
+  }
+  return selected;
+}
+
 /**
- * Attach owning modules to every journey verdict. A FAILED journey that maps to no modules
- * downgrades to `warn`: it cannot brief a repair, so treating it as blocking would block a
- * build on evidence nobody can act on. Pure; exported for direct proof.
+ * Attach owning modules to every journey verdict. A failed journey with no owner remains
+ * failed. The miss is recorded separately and repair receives bounded fallback references.
  */
 export function attributeFailures(journeyResults, graph, contract) {
   const journeysById = new Map((contract?.journeys || []).map((j) => [j.id, j]));
+  let fallbackRefs = null;
   return (journeyResults?.journeys || []).map((result) => {
     const journey = journeysById.get(result.id) || { id: result.id, title: result.title };
-    const owners = graph ? graph.owners(journey) : [];
+    const scaffoldActive = Boolean(graph?.file?.("src/lib/scaffolds/composed/manifest.js"));
+    const owners = [...new Set([
+      ...(graph ? graph.owners(journey) : []),
+      ...(scaffoldActive ? scaffoldJourneyOwners(contract?.scaffoldGraph, journey.id) : []),
+    ])].filter((path) => !/^src\/lib\/scaffolds\/composed\//.test(path));
     if (result.status === "fail" && owners.length === 0) {
-      return { ...result, status: "warn", owners, downgraded: "failure attributed to no owning module" };
+      fallbackRefs ||= boundedAttributionFallback(graph);
+      return {
+        ...result,
+        owners,
+        fallbackRefs,
+        attributionStatus: "missing",
+        attributionDefect: {
+          code: "journey_ownership_missing",
+          journeyId: result.id,
+          message: "failed journey attributed to no owning module",
+        },
+      };
     }
-    return { ...result, owners };
+    return { ...result, owners, attributionStatus: result.status === "fail" ? "attributed" : "not_required" };
   });
 }
 
@@ -39,7 +107,25 @@ export function attributeFailures(journeyResults, graph, contract) {
  * Parity with direct runStageGate calls is asserted by test — the facade may never drift.
  */
 export async function verifyStage(tree, options = {}) {
-  const gate = await runStageGate(tree, options);
+  const staticGate = runStaticApplicationGate(tree, {
+    contract: options.contract,
+    modulePlan: options.modulePlan || [],
+    journeys: options.stage?.journeys || options.contract?.journeys || [],
+  });
+  if (!staticGate.ok) {
+    return {
+      ok: false,
+      layers: { d0d2: { ok: false, checks: staticGate.checks,
+        problems: staticGate.blocking.map((finding) => finding.message),
+        failure: { kind: "static_application", findings: staticGate.blocking } } },
+      advisory: staticGate.advisory,
+      tree,
+      deterministicRepair: null,
+    };
+  }
+  // Builder V2 runs the expectation-copy check as advisory: the browser verifier drives the
+  // real page and is the authority on whether an outcome appeared. See validationSeverity.mjs.
+  const gate = await runStageGate(tree, { expectationsAdvisory: true, ...options });
   // A repair round can only fix what its brief names: "the project does not compile" with
   // no compiler output sent a live booking build into blind guessing until the stop rule.
   // The stderr excerpt rides WITH the problem so the next round sees file, line and error.
@@ -50,23 +136,28 @@ export async function verifyStage(tree, options = {}) {
   }
   return {
     ok: gate.ok,
-    layers: { d0d2: { ok: gate.ok, checks: gate.checks, problems } },
+    layers: { d0d2: { ok: gate.ok, checks: [...staticGate.checks, ...(gate.checks || [])], problems,
+      failure: gate.failure || null } },
+    advisory: [...(staticGate.advisory || []), ...(gate.advisory || [])],
     tree: gate.tree,
     deterministicRepair: gate.deterministicRepair || null,
   };
 }
 
 /** D3 browser journeys through the existing verifier, with mandatory attribution. */
-export async function verifyJourneysAttributed({ previewUrl, contract, graph, timeoutMs }) {
-  const raw = await verifyJourneys({ previewUrl, contract, timeoutMs });
+export async function verifyJourneysAttributed({ previewUrl, contract, graph, timeoutMs,
+  verifierPolicy = MINIMAL_CONTRACT_VERIFIER_POLICY }) {
+  const raw = await verifyJourneys({ previewUrl, contract, timeoutMs, verifierPolicy });
   const attributed = attributeFailures(raw, graph, contract);
   const failures = attributed.filter((j) => j.status === "fail");
+  const platformDefects = attributed.flatMap((j) => j.attributionDefect ? [j.attributionDefect] : []);
   return {
     ...raw,
     journeys: attributed,
     failures,
     pass: raw.unavailable ? null : failures.filter((j) => j.priority === "primary").length === 0,
-    failureRefs: [...new Set(failures.flatMap((j) => j.owners))],
+    failureRefs: [...new Set(failures.flatMap((j) => [...j.owners, ...(j.fallbackRefs || [])]))],
+    platformDefects,
     summary: journeySummary(raw),
   };
 }
@@ -80,34 +171,118 @@ export function ownersHashOf(journey, graph) {
   return sha256(pairs.join("\n"));
 }
 
-export function memoryVerificationCache() {
+/**
+ * Full differential-cache identity. The existing `owners_hash` database column stores the
+ * final content-addressed key; all components are retained in verdict.cacheIdentity so a
+ * reuse can prove exactly why it was valid without a schema migration.
+ */
+export function verificationCacheIdentity({ journey, contract, graph, context = {} }) {
+  const effectiveContext = { ...DEFAULT_VERIFICATION_CONTEXT, ...context };
+  const scaffoldActive = Boolean(graph?.file?.("src/lib/scaffolds/composed/manifest.js"));
+  const owners = [...new Set([
+    ...graph.owners(journey), ...(scaffoldActive ? scaffoldJourneyOwners(contract?.scaffoldGraph, journey.id) : []),
+  ])].sort();
+  const closure = new Set();
+  const frontier = [...owners];
+  while (frontier.length) {
+    const path = frontier.shift();
+    for (const dependency of graph.importsOf(path)) {
+      if (owners.includes(dependency) || closure.has(dependency)) continue;
+      closure.add(dependency);
+      frontier.push(dependency);
+    }
+  }
+  const fileIdentity = (path) => ({ path, contentHash: graph.file(path)?.contentHash || "missing" });
+  const runtimeFiles = graph.paths()
+    .filter((path) => /^src\/lib\/(?:backend|capabilities|scaffolds\/composed)\//.test(path)
+      || path === "src/lib/visitorSession.js")
+    .sort().map(fileIdentity);
+  const components = {
+    journeyId: journey.id,
+    journeyDefinitionHash: sha256(canonical(journey)),
+    contractHash: sha256(canonical(contract)),
+    verifierVersion: effectiveContext.verifierVersion,
+    owningModules: owners.map(fileIdentity),
+    transitiveDependencyClosure: [...closure].sort().map(fileIdentity),
+    capabilityVersions: bindCapabilities(contract)
+      .map(({ name, version }) => ({ name, version })).sort((a, b) => a.name.localeCompare(b.name)),
+    backendVersion: effectiveContext.backendVersion,
+    runtimeVersion: effectiveContext.runtimeVersion,
+    runtimeFiles,
+    environmentVersion: effectiveContext.environmentVersion,
+    configVersion: effectiveContext.configVersion,
+  };
+  return { key: sha256(canonical(components)), components, owners, cacheable: owners.length > 0 };
+}
+
+const DEFAULT_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
+
+export function memoryVerificationCache({ retentionMs = DEFAULT_RETENTION_MS, now = () => Date.now() } = {}) {
   const rows = new Map();
   const key = (o, p, j, h) => `${o}:${p}:${j}:${h}`;
   return {
     async get(owner, projectId, journeyId, ownersHash) {
-      return rows.get(key(owner, projectId, journeyId, ownersHash)) || null;
+      const cacheKey = key(owner, projectId, journeyId, ownersHash);
+      const row = rows.get(cacheKey) || null;
+      if (row && now() - Date.parse(row.created_at) > retentionMs) {
+        rows.delete(cacheKey);
+        return null;
+      }
+      return row;
     },
     async put(owner, projectId, journeyId, ownersHash, verdict, snapshotId) {
-      rows.set(key(owner, projectId, journeyId, ownersHash), { verdict, snapshot_id: snapshotId, created_at: new Date().toISOString() });
+      rows.set(key(owner, projectId, journeyId, ownersHash), { verdict, snapshot_id: snapshotId, created_at: new Date(now()).toISOString() });
+    },
+    async invalidate(owner, projectId, journeyId = null) {
+      let removed = 0;
+      const prefix = `${owner}:${projectId}:`;
+      for (const cacheKey of rows.keys()) {
+        if (!cacheKey.startsWith(prefix) || (journeyId && !cacheKey.startsWith(`${prefix}${journeyId}:`))) continue;
+        rows.delete(cacheKey);
+        removed += 1;
+      }
+      return removed;
+    },
+    async prune() {
+      let removed = 0;
+      for (const [cacheKey, row] of rows) {
+        if (now() - Date.parse(row.created_at) <= retentionMs) continue;
+        rows.delete(cacheKey);
+        removed += 1;
+      }
+      return removed;
     },
   };
 }
 
-export function supabaseVerificationCache(client) {
+export function supabaseVerificationCache(client, { retentionMs = DEFAULT_RETENTION_MS, now = () => Date.now() } = {}) {
+  const cutoff = () => new Date(now() - retentionMs).toISOString();
   return {
     async get(owner, projectId, journeyId, ownersHash) {
       const { data, error } = await client.from("bv2_verification_cache").select("verdict,snapshot_id,created_at")
         .eq("owner", owner).eq("project_id", projectId)
-        .eq("journey_id", journeyId).eq("owners_hash", ownersHash).maybeSingle();
+        .eq("journey_id", journeyId).eq("owners_hash", ownersHash).gte("created_at", cutoff()).maybeSingle();
       if (error) return null; // a broken cache means re-verification, never a wrong reuse
       return data;
     },
     async put(owner, projectId, journeyId, ownersHash, verdict, snapshotId) {
       const { error } = await client.from("bv2_verification_cache").upsert({
         owner, project_id: projectId, journey_id: journeyId, owners_hash: ownersHash,
-        verdict, snapshot_id: snapshotId,
+        verdict, snapshot_id: snapshotId, created_at: new Date(now()).toISOString(),
       }, { onConflict: "owner,project_id,journey_id,owners_hash" });
       if (error) console.error(`[bv2] verification cache write failed (re-verification will occur): ${error.message}`);
+    },
+    async invalidate(owner, projectId, journeyId = null) {
+      let query = client.from("bv2_verification_cache").delete({ count: "exact" }).eq("owner", owner).eq("project_id", projectId);
+      if (journeyId) query = query.eq("journey_id", journeyId);
+      const { error, count } = await query;
+      if (error) throw new Error(`verification cache invalidation: ${error.message}`);
+      return count || 0;
+    },
+    async prune() {
+      const { error, count } = await client.from("bv2_verification_cache").delete({ count: "exact" }).lt("created_at", cutoff());
+      if (error) throw new Error(`verification cache retention: ${error.message}`);
+      return count || 0;
     },
   };
 }
@@ -117,16 +292,27 @@ export function supabaseVerificationCache(client) {
  * Reuse requires: a cached verdict under the journey's current owners-hash AND a passing one —
  * failures are always re-driven (a cached failure must never block a fixed build).
  */
-export async function planJourneyVerification({ owner, projectId, contract, graph, cache, snapshotId = null }) {
+export async function planJourneyVerification({
+  owner, projectId, contract, identityContract = contract, graph, cache, verificationContext = {}, snapshotId = null,
+}) {
   const drive = [];
   const reused = [];
   for (const journey of contract?.journeys || []) {
-    const ownersHash = ownersHashOf(journey, graph);
+    const identity = verificationCacheIdentity({ journey, contract: identityContract, graph, context: verificationContext });
+    const ownersHash = identity.key; // legacy column/API name; now the complete identity hash
+    if (!identity.cacheable) {
+      drive.push({ journey, ownersHash, identity, cacheable: false, reason: "journey has zero owning modules" });
+      continue;
+    }
     const cached = await cache.get(owner, projectId, journey.id, ownersHash);
     if (cached && cached.verdict?.status === "pass") {
-      reused.push({ journeyId: journey.id, ownersHash, verdict: cached.verdict, evidenceSnapshot: cached.snapshot_id });
+      reused.push({
+        journeyId: journey.id, ownersHash, identity, verdict: cached.verdict,
+        originalEvidence: cached.verdict, evidenceSnapshot: cached.snapshot_id,
+        reuseReason: "complete cache identity matched and original verdict passed",
+      });
     } else {
-      drive.push({ journey, ownersHash });
+      drive.push({ journey, ownersHash, identity, cacheable: true, reason: cached ? "cached verdict did not pass" : "no valid cache entry" });
     }
   }
   return {
@@ -140,10 +326,17 @@ export async function planJourneyVerification({ owner, projectId, contract, grap
 /** Store fresh verdicts after a drive so the NEXT identical state reuses them. */
 export async function recordJourneyVerdicts({ owner, projectId, cache, plan, results, snapshotId }) {
   const byId = new Map((results?.journeys || []).map((j) => [j.id, j]));
-  for (const { journey, ownersHash } of plan.drive) {
+  for (const { journey, ownersHash, identity, cacheable } of plan.drive) {
+    if (!cacheable) continue;
     const outcome = byId.get(journey.id);
     if (!outcome) continue;
     await cache.put(owner, projectId, journey.id, ownersHash,
-      { status: outcome.status, failedSteps: outcome.failedSteps || 0 }, snapshotId);
+      {
+        status: outcome.status,
+        failedSteps: outcome.failedSteps || 0,
+        steps: outcome.steps || [],
+        backendEvidence: outcome.backendEvidence || null,
+        cacheIdentity: identity.components,
+      }, snapshotId);
   }
 }

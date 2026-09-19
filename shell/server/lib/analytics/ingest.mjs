@@ -20,8 +20,8 @@ const MAX_MESSAGE = 500;
 const siteCache = new Map();
 const SITE_TTL_MS = 60_000;
 
-export async function resolveSite(appId, client = serviceClient()) {
-  const cached = siteCache.get(appId);
+export async function resolveSite(appId, client = serviceClient(), { fresh = false } = {}) {
+  const cached = fresh ? null : siteCache.get(appId);
   if (cached && cached.at > Date.now() - SITE_TTL_MS) return cached.site;
   const { data } = await client.from("published_sites")
     .select("owner,project_id,slug,unpublished_at").eq("slug", appId).maybeSingle();

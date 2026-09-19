@@ -3,7 +3,9 @@
 // Everything Pexels-shaped lives HERE — the Asset Service and the builder never see a
 // provider API. fetch is injectable so the whole service is provable on recorded payloads.
 //
-// C6 LICENSING GATE — terms verified against https://www.pexels.com/license/ on 2026-08-05:
+// C6 LICENSING GATE — licence and API guidelines verified on 2026-08-06. The general
+// licence does not mandate attribution, but API integrations must show a prominent Pexels
+// link and should link photographer credit to the photo page.
 //   free for commercial use · attribution NOT required ("not necessary but always
 //   appreciated") · modification permitted · hotlinking the CDN supported. Prohibited:
 //   reselling unaltered copies as physical products, redistribution on other stock
@@ -16,6 +18,8 @@ export const PEXELS_LICENSE_SNAPSHOT = Object.freeze({
   name: "Pexels License",
   url: "https://www.pexels.com/license/",
   attributionRequired: false,
+  apiLinkRequired: true,
+  photographerCreditRecommended: true,
   commercialUse: true,
   modificationAllowed: true,
   prohibited: [
@@ -25,7 +29,7 @@ export const PEXELS_LICENSE_SNAPSHOT = Object.freeze({
     "use in trademarks or business names",
     "identifiable people shown in a bad light",
   ],
-  verifiedAt: "2026-08-05",
+  verifiedAt: "2026-08-06",
 });
 
 const PEXELS_SEARCH = "https://api.pexels.com/v1/search";
@@ -41,7 +45,10 @@ export function pexelsProvider({ apiKey = process.env.PEXELS_API_KEY, fetchImpl 
       if (!apiKey) throw new Error("pexels: no API key configured");
       const params = new URLSearchParams({ query: String(query), per_page: String(Math.min(Math.max(perPage, 1), 15)) });
       if (["landscape", "portrait", "square"].includes(orientation)) params.set("orientation", orientation);
-      const res = await fetchImpl(`${PEXELS_SEARCH}?${params}`, { headers: { Authorization: apiKey } });
+      const res = await fetchImpl(`${PEXELS_SEARCH}?${params}`, {
+        headers: { Authorization: apiKey },
+        signal: AbortSignal.timeout(10_000),
+      });
       if (!res.ok) throw new Error(`pexels search failed: HTTP ${res.status}`);
       const data = await res.json();
       return (data.photos || []).map((photo) => ({
@@ -58,6 +65,8 @@ export function pexelsProvider({ apiKey = process.env.PEXELS_API_KEY, fetchImpl 
           : null,
         alt: photo.alt || String(query),
         photographer: photo.photographer || null,
+        photographerUrl: photo.photographer_url || null,
+        photoUrl: photo.url || null,
         tags: (photo.alt || "").toLowerCase().match(/[a-z]{4,}/g) || [],
       })).filter((photo) => photo.urls.large);
     },

@@ -258,7 +258,8 @@ test("focus moves into the dashboard on open and returns to the opener on close"
   await stub(page);
   await page.goto("/");
   const card = page.locator(".ct-project").filter({ hasText: "FocusFlow" });
-  await card.getByRole("button", { name: "Health" }).click();
+  await card.getByRole("button", { name: /Project actions for/ }).click();
+  await card.getByRole("menuitem", { name: "Health" }).click();
   await expect(dash(page)).toBeVisible();
 
   // The heading, so a screen reader announces what opened before offering its controls.
@@ -266,8 +267,9 @@ test("focus moves into the dashboard on open and returns to the opener on close"
 
   await dash(page).getByRole("button", { name: "Done" }).click();
   await expect(dash(page)).toHaveCount(0);
-  // Back to the button that opened it, not the top of the document.
-  await expect.poll(() => page.evaluate(() => document.activeElement?.textContent)).toBe("Health");
+  // Back to the project action trigger that opened it, not the top of the document.
+  await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute("aria-label")))
+    .toBe("Project actions for FocusFlow");
 });
 
 test("typing in the log search does not refetch on every keystroke", async ({ page }) => {

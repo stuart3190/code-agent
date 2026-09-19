@@ -1,5 +1,9 @@
 # Thrallo v1.0 — release readiness
 
+> **Historical pre-Builder-V2 audit — launch verdict superseded 2026-08-08.** The earlier
+> “ready to launch” verdict predates the production remediation and V2-only product decision. It
+> must not be used as current release authority. See `docs/BUILDER-V2-V2-ONLY-CUTOVER.md`.
+
 Dated 2026-08-04, against production at https://app.thrallo.com (VPS 51.195.136.189,
 Supabase `zczgvcsokfafuyognvwx`).
 

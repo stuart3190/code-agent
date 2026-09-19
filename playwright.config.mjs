@@ -61,6 +61,18 @@ export default defineConfig({
     url: `${baseURL}/api/v1/capabilities`,
     reuseExistingServer: false,
     timeout: 60_000,
-    env: { SHELL_PORT: String(port), SHELL_HOST: "127.0.0.1", CODE_AGENT_WORKER: "off" },
+    env: {
+      SHELL_PORT: String(port),
+      SHELL_HOST: "127.0.0.1",
+      CODE_AGENT_STORE: "memory",
+      CODE_AGENT_WORKER: "off",
+      // Keep the browser suite hermetic even when a developer has production-style credentials in
+      // shell/.env. Empty process values take precedence over loadEnv(), and memory mode does not
+      // need Supabase for either request admission or persistence.
+      SUPABASE_URL: "",
+      SUPABASE_ANON_KEY: "",
+      SUPABASE_SERVICE_ROLE_KEY: "",
+      SUPABASE_SERVICE_ROLE: "",
+    },
   },
 });

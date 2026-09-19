@@ -1,0 +1,44 @@
+[
+  {
+    "id": "7b9fe1b6-e2bf-40eb-b7b3-6d6d9cfe38ed",
+    "reason": "foundation:scaffold",
+    "created_at": "2026-09-16T09:20:30.621+00:00",
+    "tree_hash": "d87d35ccedf637bd2caf6099cabdcad68b788f082d167b25557b0b6a15b57b5b",
+    "state": "ready"
+  },
+  {
+    "id": "0c3a4db6-5d8b-45b6-be35-4cc33f93d063",
+    "reason": "candidate:core:1",
+    "created_at": "2026-09-16T09:21:18.842+00:00",
+    "tree_hash": "fd24eeaa55f32afc651498980093811ed21449b6c49b86134e3185e22ba60d73",
+    "state": "ready"
+  },
+  {
+    "id": "28581e47-94e0-40e3-a386-c95275793b13",
+    "reason": "candidate:core:1",
+    "created_at": "2026-09-16T09:24:13.301+00:00",
+    "tree_hash": "23e6dacaf244f2fce201f3eab835973e43345ca4bba5650089392319937136e6",
+    "state": "ready"
+  },
+  {
+    "id": "aa7dba78-4a80-461d-87de-1f898997edf4",
+    "reason": "candidate:core:1",
+    "created_at": "2026-09-16T09:24:52.423+00:00",
+    "tree_hash": "3fab89453f08f7ad641723bc40898bb486c7400889045db2f4df11ec591fb574",
+    "state": "ready"
+  },
+  {
+    "id": "a56fbefb-1407-41e7-81c0-4f42c8826a08",
+    "reason": "candidate:core:2",
+    "created_at": "2026-09-16T09:25:28.978+00:00",
+    "tree_hash": "07408e20a18c74a0c9ab54d532a11a5c11997e4bc79c78498c5ee1897707dce7",
+    "state": "ready"
+  },
+  {
+    "id": "2beb0d3e-2b1d-4281-af05-f30681a09710",
+    "reason": "candidate:core:2",
+    "created_at": "2026-09-16T09:25:55.98+00:00",
+    "tree_hash": "176747e4fa6a95d30cc03b99f9de40bb638428fd3411982f8b3ba80afd442e85",
+    "state": "ready"
+  }
+]

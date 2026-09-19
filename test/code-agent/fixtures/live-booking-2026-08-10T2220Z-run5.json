@@ -1,0 +1,2189 @@
+{
+  "provenance": {
+    "note": "RETAINED LIVE EVIDENCE — run 5, the first qualification graded by the current verifier.",
+    "projectId": "66a6d96c-1d04-4f7f-b175-abfa02740ae5",
+    "publicBuildId": "27be60ab-b484-4801-9152-19b6030a2d40",
+    "bv2BuildId": "b4117c3a-2002-47a0-af5d-5a58f289f3c4",
+    "startedAt": "2026-08-10T22:18:58.366Z",
+    "finishedAt": "2026-08-10T22:27:34.895Z",
+    "sandboxImageDigest": "sha256:73dac3d98673af12181e5185257b0db627c3db395f5f388b7c87361fd179d431",
+    "generatedSourceRetained": false,
+    "generatedSourceNote": "Working snapshots 5c644195/3cbbef88/f1d44668 were erased by the disposable-project cleanup (projectSurvivors: 0); bv2_snapshots is empty. bv2_patches records changed PATHS only, never content. The exact generated source is NOT recoverable."
+  },
+  "contract": {
+    "auth": {
+      "model": "guest booking reference plus matching email",
+      "rules": [
+        "a visitor can only recover booking details when both the booking reference and matching guest email are provided",
+        "a cancelled booking cannot be cancelled again",
+        "booking references are visible after confirmation and after lookup"
+      ],
+      "required": false
+    },
+    "tiers": {
+      "essential": {
+        "entities": [
+          "booking"
+        ],
+        "journeys": [
+          "reserve-supper-club-seats"
+        ],
+        "operations": [
+          "create-booking",
+          "read-booking-by-reference",
+          "read-active-bookings-for-capacity",
+          "cancel-booking"
+        ]
+      },
+      "secondary": {
+        "entities": [],
+        "journeys": [
+          "recover-existing-booking",
+          "cancel-booking",
+          "capacity-protection",
+          "contact-validation"
+        ],
+        "operations": []
+      }
+    },
+    "routes": [
+      {
+        "auth": false,
+        "name": "Booking",
+        "path": "/",
+        "purpose": "Public Ember Table marketing page and multi-step booking wizard"
+      },
+      {
+        "auth": false,
+        "name": "Manage Booking",
+        "path": "/manage",
+        "purpose": "Lookup, recover and cancel an existing booking by reference and matching email"
+      }
+    ],
+    "states": [
+      {
+        "empty": "a message says no Ember Table seats are available for the selected date",
+        "error": "a save failure shows a visible message saying the booking could not be completed and invites the guest to try again",
+        "loading": "a refined loading skeleton is visible while availability and existing bookings load",
+        "success": "a confirmation panel shows status Confirmed and a durable booking reference",
+        "surface": "booking wizard",
+        "validation": "missing required contact fields, invalid email, invalid phone, and party size over capacity each show visible inline messages"
+      },
+      {
+        "empty": "sold-out slots are marked Sold out and cannot be selected",
+        "error": "an availability loading failure shows a retry control",
+        "loading": "slot cards show loading placeholders while capacity is calculated",
+        "success": "the selected date and slot are highlighted in the wizard",
+        "surface": "date and slot selection",
+        "validation": "attempting to continue without a date or slot shows a visible prompt to choose one"
+      },
+      {
+        "empty": "an unknown reference or non-matching email shows a message saying no booking was found",
+        "error": "a lookup or cancellation failure shows a visible retry message",
+        "loading": "a loading indicator is visible while the booking lookup runs",
+        "success": "confirmed bookings show Confirmed and cancelled bookings show Cancelled",
+        "surface": "manage booking page",
+        "validation": "empty reference and invalid email show visible validation messages"
+      }
+    ],
+    "summary": "A polished multi-step booking application for Ember Table where guests reserve supper club seats, receive a durable booking reference, recover the booking after reload, and cancel it into a persisted cancelled state.",
+    "version": 1,
+    "deferred": [
+      {
+        "item": "online card payment",
+        "reason": "the requested flow only confirms and manages supper club bookings"
+      },
+      {
+        "item": "staff administration calendar",
+        "reason": "the requested guest flow does not include staff editing of dates or slots"
+      },
+      {
+        "item": "email or SMS confirmation delivery",
+        "reason": "no external notification integration is available in the fixed scaffold"
+      },
+      {
+        "item": "waitlist management",
+        "reason": "the requested capacity behavior is to honestly block sold-out or over-capacity bookings"
+      },
+      {
+        "item": "user accounts",
+        "reason": "guests manage bookings by booking reference and matching email rather than signing in"
+      }
+    ],
+    "entities": [
+      {
+        "name": "booking",
+        "owned": false,
+        "fields": [
+          {
+            "name": "reference",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "dateId",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "slotId",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "slotLabel",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "partySize",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "guestName",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "guestEmail",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "guestPhone",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "dietaryNote",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "createdAt",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "cancelledAt",
+            "type": "string",
+            "required": false
+          }
+        ],
+        "relationships": [
+          "a booking references one in-code Ember Table date by dateId",
+          "a booking references one in-code Ember Table slot by slotId",
+          "active confirmed bookings consume slot capacity",
+          "cancelled bookings no longer consume slot capacity"
+        ]
+      }
+    ],
+    "journeys": [
+      {
+        "id": "reserve-supper-club-seats",
+        "stage": "primary_journey",
+        "steps": [
+          {
+            "action": "open the booking application",
+            "expect": "the Ember Table editorial hero, supper club description, and a visible start booking control are shown",
+            "target": "/"
+          },
+          {
+            "action": "start the booking flow",
+            "expect": "step 1 shows available dates and the current wizard step indicator",
+            "target": "start booking control"
+          },
+          {
+            "action": "select a date with availability",
+            "expect": "available slots for that date are displayed with remaining seat counts",
+            "target": "date selection step"
+          },
+          {
+            "action": "select an available slot",
+            "expect": "the selected slot is visually highlighted and the continue control becomes enabled",
+            "target": "slot selection cards"
+          },
+          {
+            "action": "choose a party size within the slot's remaining capacity",
+            "expect": "the selected party size is displayed and no capacity warning is shown",
+            "target": "party size control"
+          },
+          {
+            "action": "enter guest name, email, phone and any dietary note",
+            "expect": "valid contact fields are accepted and the continue control becomes enabled",
+            "target": "contact details form"
+          },
+          {
+            "action": "review the booking",
+            "expect": "the exact selected date, time, party size, guest name, email and phone are visible before confirmation",
+            "target": "review step"
+          },
+          {
+            "action": "confirm the booking",
+            "expect": "a confirmation screen appears with status Confirmed and a durable booking reference",
+            "target": "confirm booking control"
+          },
+          {
+            "action": "reload the page",
+            "expect": "the confirmed booking state is recovered and the same booking reference remains visible",
+            "target": "browser reload"
+          }
+        ],
+        "title": "A guest books an available Ember Table supper club slot",
+        "priority": "primary",
+        "acceptance": [
+          "a completed booking shows a visible booking reference",
+          "the review step displays the same date, slot, party size and contact details that were entered earlier",
+          "a confirmed booking remains visible with the same reference after a full browser reload"
+        ]
+      },
+      {
+        "id": "recover-existing-booking",
+        "stage": "supporting",
+        "steps": [
+          {
+            "action": "open the booking lookup area",
+            "expect": "a booking reference lookup form is visible",
+            "target": "/manage"
+          },
+          {
+            "action": "enter a valid confirmed booking reference and matching email",
+            "expect": "the booking details are displayed with status Confirmed",
+            "target": "lookup form"
+          },
+          {
+            "action": "reload the page",
+            "expect": "the recovered booking remains displayed with the same status and reference",
+            "target": "browser reload"
+          }
+        ],
+        "title": "A guest looks up a confirmed booking by reference",
+        "priority": "secondary",
+        "acceptance": [
+          "a valid booking reference and matching email display the persisted booking",
+          "an unknown reference shows a visible message saying no booking was found"
+        ]
+      },
+      {
+        "id": "cancel-booking",
+        "stage": "supporting",
+        "steps": [
+          {
+            "action": "open a confirmed booking",
+            "expect": "the booking details and a cancel booking control are visible",
+            "target": "/manage"
+          },
+          {
+            "action": "choose to cancel the booking",
+            "expect": "a cancellation confirmation prompt is displayed",
+            "target": "cancel booking control"
+          },
+          {
+            "action": "confirm cancellation",
+            "expect": "the booking status changes to Cancelled and the booking reference remains visible",
+            "target": "confirm cancellation control"
+          },
+          {
+            "action": "reload the page",
+            "expect": "the booking reloads into an explicit Cancelled state with no active cancel control",
+            "target": "browser reload"
+          }
+        ],
+        "title": "A guest cancels a confirmed booking and sees the cancelled state after reload",
+        "priority": "secondary",
+        "acceptance": [
+          "a cancelled booking visibly shows status Cancelled",
+          "a cancelled booking remains cancelled after a full browser reload"
+        ]
+      },
+      {
+        "id": "capacity-protection",
+        "stage": "data",
+        "steps": [
+          {
+            "action": "select a date and slot with limited remaining seats",
+            "expect": "the slot card displays its remaining seat count",
+            "target": "slot selection step"
+          },
+          {
+            "action": "choose a party size larger than the remaining seats",
+            "expect": "a visible capacity warning is shown and the continue control is disabled",
+            "target": "party size control"
+          },
+          {
+            "action": "choose a party size within the remaining seats",
+            "expect": "the warning disappears and the continue control becomes enabled",
+            "target": "party size control"
+          }
+        ],
+        "title": "The booking flow prevents guests from exceeding slot capacity",
+        "priority": "secondary",
+        "acceptance": [
+          "party sizes greater than remaining capacity cannot be confirmed",
+          "slot remaining seats decrease after confirmed bookings and increase after cancellation"
+        ]
+      },
+      {
+        "id": "contact-validation",
+        "stage": "supporting",
+        "steps": [
+          {
+            "action": "advance to the contact details step",
+            "expect": "name, email, phone and dietary note fields are visible",
+            "target": "booking wizard"
+          },
+          {
+            "action": "enter an invalid email address",
+            "expect": "an email validation message is shown and the continue control remains disabled",
+            "target": "email field"
+          },
+          {
+            "action": "enter a valid email address and required details",
+            "expect": "validation messages clear and the continue control becomes enabled",
+            "target": "contact details form"
+          }
+        ],
+        "title": "The contact details step blocks invalid guest information",
+        "priority": "secondary",
+        "acceptance": [
+          "invalid email addresses cannot proceed to review",
+          "required name, email and phone fields show visible validation messages when missing"
+        ]
+      }
+    ],
+    "acceptance": [
+      {
+        "id": "a1",
+        "kind": "persistence",
+        "journey": "reserve-supper-club-seats",
+        "statement": "after a guest confirms a booking, a confirmation screen displays status Confirmed and a non-empty booking reference"
+      },
+      {
+        "id": "a2",
+        "kind": "persistence",
+        "journey": "reserve-supper-club-seats",
+        "statement": "after a full browser reload, the confirmed booking screen still displays the same booking reference, date, slot and party size"
+      },
+      {
+        "id": "a3",
+        "kind": "validation",
+        "journey": "reserve-supper-club-seats",
+        "statement": "the review step visibly shows the exact selected date, slot, party size, guest name, email and phone before confirmation"
+      },
+      {
+        "id": "a4",
+        "kind": "validation",
+        "journey": "capacity-protection",
+        "statement": "a party size greater than the displayed remaining seat count shows a capacity warning and cannot be confirmed"
+      },
+      {
+        "id": "a5",
+        "kind": "persistence",
+        "journey": "cancel-booking",
+        "statement": "after cancelling a booking and reloading the page, the booking displays status Cancelled and no active cancel booking control is shown"
+      },
+      {
+        "id": "a6",
+        "kind": "validation",
+        "journey": "contact-validation",
+        "statement": "entering an invalid email on the contact details step shows a visible email validation message and keeps the continue control disabled"
+      },
+      {
+        "id": "a7",
+        "kind": "capacity",
+        "journey": "capacity-protection",
+        "statement": "a sold-out slot is visibly marked Sold out and cannot be selected"
+      },
+      {
+        "id": "a8",
+        "kind": "polish",
+        "journey": "reserve-supper-club-seats",
+        "statement": "the public page uses an editorial Ember Table visual presentation with a visible supper club title, chef-led description, polished typography, and multi-step progress indicator"
+      }
+    ],
+    "operations": [
+      {
+        "id": "create-booking",
+        "kind": "create",
+        "entity": "booking",
+        "journey": "reserve-supper-club-seats",
+        "description": "Persist a confirmed booking with reference, date, slot, party size, contact details and status Confirmed via db.entity('booking').create"
+      },
+      {
+        "id": "read-booking-by-reference",
+        "kind": "read",
+        "entity": "booking",
+        "journey": "recover-existing-booking",
+        "description": "Read bookings by reference and matching guest email so the manage page can display confirmed or cancelled details"
+      },
+      {
+        "id": "read-active-bookings-for-capacity",
+        "kind": "read",
+        "entity": "booking",
+        "journey": "capacity-protection",
+        "description": "Read confirmed bookings for a slot to display honest remaining capacity before confirmation"
+      },
+      {
+        "id": "cancel-booking",
+        "kind": "update",
+        "entity": "booking",
+        "journey": "cancel-booking",
+        "description": "Update an existing booking status to Cancelled and set cancelledAt via db.entity('booking').update"
+      }
+    ],
+    "projectType": "booking",
+    "imageIntents": [
+      {
+        "slot": "hero",
+        "intent": "A polished multi-step booking application for Ember Table where guests reserve s",
+        "orientation": "landscape"
+      },
+      {
+        "slot": "route:/manage",
+        "intent": "A polished multi-step booking application for Ember Table where guests reserve s — Manage Booking",
+        "orientation": "landscape"
+      }
+    ],
+    "integrations": [
+      {
+        "name": "none",
+        "purpose": "",
+        "required": false
+      }
+    ],
+    "interactionContract": {
+      "flows": [
+        {
+          "id": "reserve-supper-club-seats:1:navigation",
+          "kind": "navigation",
+          "reads": [],
+          "action": "open the booking application",
+          "writes": [],
+          "control": null,
+          "dependsOn": [],
+          "journeyId": "reserve-supper-club-seats",
+          "stepIndex": 0,
+          "capability": "makeWizardMachine",
+          "observable": "the Ember Table editorial hero, supper club description, and a visible start booking control are shown",
+          "stateOwner": "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx",
+          "valueWritten": null,
+          "semanticPurpose": "open the booking application",
+          "responsibleModules": [
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "the Ember Table editorial hero, supper club description, and a visible start booking control are shown"
+        },
+        {
+          "id": "reserve-supper-club-seats:3:selection:dateid",
+          "kind": "selection",
+          "reads": [],
+          "action": "select a date with availability",
+          "writes": [
+            "reserve-supper-club-seats.draft.dateId"
+          ],
+          "control": {
+            "roles": [
+              "button",
+              "radio",
+              "option",
+              "combobox"
+            ],
+            "purpose": "dateId",
+            "statePath": "reserve-supper-club-seats.draft.dateId",
+            "downstream": [
+              "reserve-supper-club-seats:7:review",
+              "reserve-supper-club-seats:8:mutation"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "dateId",
+            "selectedState": true,
+            "accessibleName": "date Id",
+            "accessibleNames": [
+              "date Id",
+              "date",
+              "day"
+            ],
+            "validationOwner": null
+          },
+          "dependsOn": [],
+          "journeyId": "reserve-supper-club-seats",
+          "stepIndex": 2,
+          "capability": "makeWizardMachine",
+          "observable": "available slots for that date are displayed with remaining seat counts",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "dateId",
+          "semanticPurpose": "select a date with availability",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "available slots for that date are displayed with remaining seat counts"
+        },
+        {
+          "id": "reserve-supper-club-seats:4:selection:slotid",
+          "kind": "selection",
+          "reads": [],
+          "action": "select an available slot",
+          "writes": [
+            "reserve-supper-club-seats.draft.slotId"
+          ],
+          "control": {
+            "roles": [
+              "button",
+              "radio",
+              "option",
+              "combobox"
+            ],
+            "purpose": "slotId",
+            "statePath": "reserve-supper-club-seats.draft.slotId",
+            "downstream": [
+              "reserve-supper-club-seats:7:review",
+              "reserve-supper-club-seats:8:mutation"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "slotId",
+            "selectedState": true,
+            "accessibleName": "slot Id",
+            "accessibleNames": [
+              "slot Id",
+              "slot",
+              "time"
+            ],
+            "validationOwner": null
+          },
+          "dependsOn": [],
+          "journeyId": "reserve-supper-club-seats",
+          "stepIndex": 3,
+          "capability": "makeWizardMachine",
+          "observable": "the selected slot is visually highlighted and the continue control becomes enabled",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "slotId",
+          "semanticPurpose": "select an available slot",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "the selected slot is visually highlighted and the continue control becomes enabled"
+        },
+        {
+          "id": "reserve-supper-club-seats:5:selection:slotid",
+          "kind": "selection",
+          "reads": [],
+          "action": "choose a party size within the slot's remaining capacity",
+          "writes": [
+            "reserve-supper-club-seats.draft.slotId"
+          ],
+          "control": {
+            "roles": [
+              "button",
+              "radio",
+              "option",
+              "combobox"
+            ],
+            "purpose": "slotId",
+            "statePath": "reserve-supper-club-seats.draft.slotId",
+            "downstream": [
+              "reserve-supper-club-seats:7:review",
+              "reserve-supper-club-seats:8:mutation"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "slotId",
+            "selectedState": true,
+            "accessibleName": "slot Id",
+            "accessibleNames": [
+              "slot Id",
+              "slot",
+              "time"
+            ],
+            "validationOwner": null
+          },
+          "dependsOn": [],
+          "journeyId": "reserve-supper-club-seats",
+          "stepIndex": 4,
+          "capability": "makeWizardMachine",
+          "observable": "the selected party size is displayed and no capacity warning is shown",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "slotId",
+          "semanticPurpose": "choose a party size within the slot's remaining capacity",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "the selected party size is displayed and no capacity warning is shown"
+        },
+        {
+          "id": "reserve-supper-club-seats:5:selection:partysize",
+          "kind": "selection",
+          "reads": [],
+          "action": "choose a party size within the slot's remaining capacity",
+          "writes": [
+            "reserve-supper-club-seats.draft.partySize"
+          ],
+          "control": {
+            "roles": [
+              "button",
+              "radio",
+              "option",
+              "combobox"
+            ],
+            "purpose": "partySize",
+            "statePath": "reserve-supper-club-seats.draft.partySize",
+            "downstream": [
+              "reserve-supper-club-seats:7:review",
+              "reserve-supper-club-seats:8:mutation"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "partySize",
+            "selectedState": true,
+            "accessibleName": "party Size",
+            "accessibleNames": [
+              "party Size",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": null
+          },
+          "dependsOn": [],
+          "journeyId": "reserve-supper-club-seats",
+          "stepIndex": 4,
+          "capability": "makeWizardMachine",
+          "observable": "the selected party size is displayed and no capacity warning is shown",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "partySize",
+          "semanticPurpose": "choose a party size within the slot's remaining capacity",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "the selected party size is displayed and no capacity warning is shown"
+        },
+        {
+          "id": "reserve-supper-club-seats:6:input:guestname",
+          "kind": "input",
+          "reads": [],
+          "action": "enter guest name, email, phone and any dietary note",
+          "writes": [
+            "reserve-supper-club-seats.draft.guestName"
+          ],
+          "control": {
+            "roles": [
+              "textbox",
+              "spinbutton",
+              "combobox"
+            ],
+            "purpose": "guestName",
+            "editable": true,
+            "statePath": "reserve-supper-club-seats.draft.guestName",
+            "downstream": [
+              "reserve-supper-club-seats:7:review",
+              "reserve-supper-club-seats:8:mutation"
+            ],
+            "inputTypes": [
+              "text"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "guestName",
+            "accessibleName": "guest Name",
+            "accessibleNames": [
+              "guest Name",
+              "name",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": "src/data/wizard.js"
+          },
+          "dependsOn": [],
+          "journeyId": "reserve-supper-club-seats",
+          "stepIndex": 5,
+          "capability": "makeWizardMachine",
+          "observable": "valid contact fields are accepted and the continue control becomes enabled",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "guestName",
+          "semanticPurpose": "enter guest name, email, phone and any dietary note",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "valid contact fields are accepted and the continue control becomes enabled"
+        },
+        {
+          "id": "reserve-supper-club-seats:6:input:guestemail",
+          "kind": "input",
+          "reads": [],
+          "action": "enter guest name, email, phone and any dietary note",
+          "writes": [
+            "reserve-supper-club-seats.draft.guestEmail"
+          ],
+          "control": {
+            "roles": [
+              "textbox",
+              "spinbutton",
+              "combobox"
+            ],
+            "purpose": "guestEmail",
+            "editable": true,
+            "statePath": "reserve-supper-club-seats.draft.guestEmail",
+            "downstream": [
+              "reserve-supper-club-seats:7:review",
+              "reserve-supper-club-seats:8:mutation"
+            ],
+            "inputTypes": [
+              "email"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "guestEmail",
+            "accessibleName": "guest Email",
+            "accessibleNames": [
+              "guest Email",
+              "email",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": "src/data/wizard.js"
+          },
+          "dependsOn": [],
+          "journeyId": "reserve-supper-club-seats",
+          "stepIndex": 5,
+          "capability": "makeWizardMachine",
+          "observable": "valid contact fields are accepted and the continue control becomes enabled",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "guestEmail",
+          "semanticPurpose": "enter guest name, email, phone and any dietary note",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "valid contact fields are accepted and the continue control becomes enabled"
+        },
+        {
+          "id": "reserve-supper-club-seats:6:input:guestphone",
+          "kind": "input",
+          "reads": [],
+          "action": "enter guest name, email, phone and any dietary note",
+          "writes": [
+            "reserve-supper-club-seats.draft.guestPhone"
+          ],
+          "control": {
+            "roles": [
+              "textbox",
+              "spinbutton",
+              "combobox"
+            ],
+            "purpose": "guestPhone",
+            "editable": true,
+            "statePath": "reserve-supper-club-seats.draft.guestPhone",
+            "downstream": [
+              "reserve-supper-club-seats:7:review",
+              "reserve-supper-club-seats:8:mutation"
+            ],
+            "inputTypes": [
+              "tel",
+              "text"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "guestPhone",
+            "accessibleName": "guest Phone",
+            "accessibleNames": [
+              "guest Phone",
+              "phone",
+              "telephone",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": "src/data/wizard.js"
+          },
+          "dependsOn": [],
+          "journeyId": "reserve-supper-club-seats",
+          "stepIndex": 5,
+          "capability": "makeWizardMachine",
+          "observable": "valid contact fields are accepted and the continue control becomes enabled",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "guestPhone",
+          "semanticPurpose": "enter guest name, email, phone and any dietary note",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "valid contact fields are accepted and the continue control becomes enabled"
+        },
+        {
+          "id": "reserve-supper-club-seats:6:input:dietarynote",
+          "kind": "input",
+          "reads": [],
+          "action": "enter guest name, email, phone and any dietary note",
+          "writes": [
+            "reserve-supper-club-seats.draft.dietaryNote"
+          ],
+          "control": {
+            "roles": [
+              "textbox",
+              "spinbutton",
+              "combobox"
+            ],
+            "purpose": "dietaryNote",
+            "editable": true,
+            "statePath": "reserve-supper-club-seats.draft.dietaryNote",
+            "downstream": [
+              "reserve-supper-club-seats:7:review",
+              "reserve-supper-club-seats:8:mutation"
+            ],
+            "inputTypes": [
+              "text"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "dietaryNote",
+            "accessibleName": "dietary Note",
+            "accessibleNames": [
+              "dietary Note"
+            ],
+            "validationOwner": "src/data/wizard.js"
+          },
+          "dependsOn": [],
+          "journeyId": "reserve-supper-club-seats",
+          "stepIndex": 5,
+          "capability": "makeWizardMachine",
+          "observable": "valid contact fields are accepted and the continue control becomes enabled",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "dietaryNote",
+          "semanticPurpose": "enter guest name, email, phone and any dietary note",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "valid contact fields are accepted and the continue control becomes enabled"
+        },
+        {
+          "id": "reserve-supper-club-seats:6:input:partysize",
+          "kind": "input",
+          "reads": [],
+          "action": "enter guest name, email, phone and any dietary note",
+          "writes": [
+            "reserve-supper-club-seats.draft.partySize"
+          ],
+          "control": {
+            "roles": [
+              "textbox",
+              "spinbutton",
+              "combobox"
+            ],
+            "purpose": "partySize",
+            "editable": true,
+            "statePath": "reserve-supper-club-seats.draft.partySize",
+            "downstream": [
+              "reserve-supper-club-seats:7:review",
+              "reserve-supper-club-seats:8:mutation"
+            ],
+            "inputTypes": [
+              "number",
+              "text"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "partySize",
+            "accessibleName": "party Size",
+            "accessibleNames": [
+              "party Size",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": "src/data/wizard.js"
+          },
+          "dependsOn": [],
+          "journeyId": "reserve-supper-club-seats",
+          "stepIndex": 5,
+          "capability": "makeWizardMachine",
+          "observable": "valid contact fields are accepted and the continue control becomes enabled",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "partySize",
+          "semanticPurpose": "enter guest name, email, phone and any dietary note",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "valid contact fields are accepted and the continue control becomes enabled"
+        },
+        {
+          "id": "reserve-supper-club-seats:7:review",
+          "kind": "review",
+          "reads": [
+            "reserve-supper-club-seats.draft.dateId",
+            "reserve-supper-club-seats.draft.slotId",
+            "reserve-supper-club-seats.draft.partySize",
+            "reserve-supper-club-seats.draft.guestName",
+            "reserve-supper-club-seats.draft.guestEmail",
+            "reserve-supper-club-seats.draft.guestPhone",
+            "reserve-supper-club-seats.draft.dietaryNote"
+          ],
+          "action": "review the booking",
+          "writes": [],
+          "control": null,
+          "dependsOn": [
+            "reserve-supper-club-seats.draft.dateId",
+            "reserve-supper-club-seats.draft.slotId",
+            "reserve-supper-club-seats.draft.partySize",
+            "reserve-supper-club-seats.draft.guestName",
+            "reserve-supper-club-seats.draft.guestEmail",
+            "reserve-supper-club-seats.draft.guestPhone",
+            "reserve-supper-club-seats.draft.dietaryNote"
+          ],
+          "journeyId": "reserve-supper-club-seats",
+          "stepIndex": 6,
+          "capability": "makeWizardMachine",
+          "observable": "the exact selected date, time, party size, guest name, email and phone are visible before confirmation",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": null,
+          "semanticPurpose": "review the booking",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "the exact selected date, time, party size, guest name, email and phone are visible before confirmation"
+        },
+        {
+          "id": "reserve-supper-club-seats:8:mutation",
+          "kind": "mutation",
+          "reads": [
+            "reserve-supper-club-seats.draft.dateId",
+            "reserve-supper-club-seats.draft.slotId",
+            "reserve-supper-club-seats.draft.partySize",
+            "reserve-supper-club-seats.draft.guestName",
+            "reserve-supper-club-seats.draft.guestEmail",
+            "reserve-supper-club-seats.draft.guestPhone",
+            "reserve-supper-club-seats.draft.dietaryNote"
+          ],
+          "action": "confirm the booking",
+          "writes": [
+            "reserve-supper-club-seats.durable.record",
+            "reserve-supper-club-seats.durable.reference"
+          ],
+          "control": {
+            "roles": [
+              "button"
+            ],
+            "purpose": "confirm booking control",
+            "statePath": "reserve-supper-club-seats.durable.record",
+            "downstream": [
+              "reserve-supper-club-seats:9:recovery"
+            ],
+            "stateOwner": "src/data/booking.js",
+            "accessibleName": "confirm booking control",
+            "validationOwner": null
+          },
+          "dependsOn": [
+            "reserve-supper-club-seats.draft.dateId",
+            "reserve-supper-club-seats.draft.slotId",
+            "reserve-supper-club-seats.draft.partySize",
+            "reserve-supper-club-seats.draft.guestName",
+            "reserve-supper-club-seats.draft.guestEmail",
+            "reserve-supper-club-seats.draft.guestPhone",
+            "reserve-supper-club-seats.draft.dietaryNote"
+          ],
+          "journeyId": "reserve-supper-club-seats",
+          "stepIndex": 7,
+          "capability": "makeBookingSystem",
+          "observable": "a confirmation screen appears with status Confirmed and a durable booking reference",
+          "stateOwner": "src/data/booking.js",
+          "valueWritten": null,
+          "semanticPurpose": "confirm the booking",
+          "responsibleModules": [
+            "src/data/booking.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "a confirmation screen appears with status Confirmed and a durable booking reference"
+        },
+        {
+          "id": "reserve-supper-club-seats:9:recovery",
+          "kind": "recovery",
+          "reads": [
+            "reserve-supper-club-seats.durable.record"
+          ],
+          "action": "reload the page",
+          "writes": [
+            "reserve-supper-club-seats.restored"
+          ],
+          "control": null,
+          "dependsOn": [
+            "reserve-supper-club-seats.durable.record"
+          ],
+          "journeyId": "reserve-supper-club-seats",
+          "stepIndex": 8,
+          "capability": "makeWizardMachine",
+          "observable": "the confirmed booking state is recovered and the same booking reference remains visible",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": null,
+          "semanticPurpose": "reload the page",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "the confirmed booking state is recovered and the same booking reference remains visible"
+        },
+        {
+          "id": "recover-existing-booking:1:lookup",
+          "kind": "lookup",
+          "reads": [
+            "recover-existing-booking.durable.reference"
+          ],
+          "action": "open the booking lookup area",
+          "writes": [
+            "recover-existing-booking.restored"
+          ],
+          "control": {
+            "roles": [
+              "button"
+            ],
+            "purpose": "/manage",
+            "statePath": "recover-existing-booking.restored",
+            "downstream": [],
+            "stateOwner": "src/data/booking.js",
+            "accessibleName": "/manage",
+            "validationOwner": null
+          },
+          "dependsOn": [
+            "recover-existing-booking.durable.reference"
+          ],
+          "journeyId": "recover-existing-booking",
+          "stepIndex": 0,
+          "capability": "makeBookingSystem",
+          "observable": "a booking reference lookup form is visible",
+          "stateOwner": "src/data/booking.js",
+          "valueWritten": null,
+          "semanticPurpose": "open the booking lookup area",
+          "responsibleModules": [
+            "src/data/booking.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "a booking reference lookup form is visible"
+        },
+        {
+          "id": "recover-existing-booking:2:input:reference",
+          "kind": "input",
+          "reads": [],
+          "action": "enter a valid confirmed booking reference and matching email",
+          "writes": [
+            "recover-existing-booking.draft.reference"
+          ],
+          "control": {
+            "roles": [
+              "textbox",
+              "spinbutton",
+              "combobox"
+            ],
+            "purpose": "reference",
+            "editable": true,
+            "statePath": "recover-existing-booking.draft.reference",
+            "downstream": [],
+            "inputTypes": [
+              "text"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "reference",
+            "accessibleName": "reference",
+            "accessibleNames": [
+              "reference"
+            ],
+            "validationOwner": "src/data/wizard.js"
+          },
+          "dependsOn": [],
+          "journeyId": "recover-existing-booking",
+          "stepIndex": 1,
+          "capability": "makeWizardMachine",
+          "observable": "the booking details are displayed with status Confirmed",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "reference",
+          "semanticPurpose": "enter a valid confirmed booking reference and matching email",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "the booking details are displayed with status Confirmed"
+        },
+        {
+          "id": "recover-existing-booking:2:input:guestemail",
+          "kind": "input",
+          "reads": [],
+          "action": "enter a valid confirmed booking reference and matching email",
+          "writes": [
+            "recover-existing-booking.draft.guestEmail"
+          ],
+          "control": {
+            "roles": [
+              "textbox",
+              "spinbutton",
+              "combobox"
+            ],
+            "purpose": "guestEmail",
+            "editable": true,
+            "statePath": "recover-existing-booking.draft.guestEmail",
+            "downstream": [],
+            "inputTypes": [
+              "email"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "guestEmail",
+            "accessibleName": "guest Email",
+            "accessibleNames": [
+              "guest Email",
+              "email",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": "src/data/wizard.js"
+          },
+          "dependsOn": [],
+          "journeyId": "recover-existing-booking",
+          "stepIndex": 1,
+          "capability": "makeWizardMachine",
+          "observable": "the booking details are displayed with status Confirmed",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "guestEmail",
+          "semanticPurpose": "enter a valid confirmed booking reference and matching email",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "the booking details are displayed with status Confirmed"
+        },
+        {
+          "id": "recover-existing-booking:2:lookup",
+          "kind": "lookup",
+          "reads": [
+            "recover-existing-booking.durable.reference"
+          ],
+          "action": "enter a valid confirmed booking reference and matching email",
+          "writes": [
+            "recover-existing-booking.restored"
+          ],
+          "control": {
+            "roles": [
+              "button"
+            ],
+            "purpose": "lookup form",
+            "statePath": "recover-existing-booking.restored",
+            "downstream": [],
+            "stateOwner": "src/data/booking.js",
+            "accessibleName": "lookup form",
+            "validationOwner": null
+          },
+          "dependsOn": [
+            "recover-existing-booking.durable.reference"
+          ],
+          "journeyId": "recover-existing-booking",
+          "stepIndex": 1,
+          "capability": "makeBookingSystem",
+          "observable": "the booking details are displayed with status Confirmed",
+          "stateOwner": "src/data/booking.js",
+          "valueWritten": null,
+          "semanticPurpose": "enter a valid confirmed booking reference and matching email",
+          "responsibleModules": [
+            "src/data/booking.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "the booking details are displayed with status Confirmed"
+        },
+        {
+          "id": "recover-existing-booking:3:recovery",
+          "kind": "recovery",
+          "reads": [
+            "recover-existing-booking.durable.reference"
+          ],
+          "action": "reload the page",
+          "writes": [
+            "recover-existing-booking.restored"
+          ],
+          "control": null,
+          "dependsOn": [
+            "recover-existing-booking.durable.reference"
+          ],
+          "journeyId": "recover-existing-booking",
+          "stepIndex": 2,
+          "capability": "makeWizardMachine",
+          "observable": "the recovered booking remains displayed with the same status and reference",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": null,
+          "semanticPurpose": "reload the page",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "the recovered booking remains displayed with the same status and reference"
+        },
+        {
+          "id": "cancel-booking:1:navigation",
+          "kind": "navigation",
+          "reads": [],
+          "action": "open a confirmed booking",
+          "writes": [],
+          "control": null,
+          "dependsOn": [],
+          "journeyId": "cancel-booking",
+          "stepIndex": 0,
+          "capability": "makeWizardMachine",
+          "observable": "the booking details and a cancel booking control are visible",
+          "stateOwner": "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx",
+          "valueWritten": null,
+          "semanticPurpose": "open a confirmed booking",
+          "responsibleModules": [
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "the booking details and a cancel booking control are visible"
+        },
+        {
+          "id": "cancel-booking:2:selection:cancel",
+          "kind": "selection",
+          "reads": [],
+          "action": "choose to cancel the booking",
+          "writes": [
+            "cancel-booking.draft.cancel"
+          ],
+          "control": {
+            "roles": [
+              "button",
+              "radio",
+              "option",
+              "combobox"
+            ],
+            "purpose": "cancel",
+            "statePath": "cancel-booking.draft.cancel",
+            "downstream": [
+              "cancel-booking:3:mutation"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "cancel",
+            "selectedState": true,
+            "accessibleName": "cancel",
+            "accessibleNames": [
+              "cancel"
+            ],
+            "validationOwner": null
+          },
+          "dependsOn": [],
+          "journeyId": "cancel-booking",
+          "stepIndex": 1,
+          "capability": "makeWizardMachine",
+          "observable": "a cancellation confirmation prompt is displayed",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "cancel",
+          "semanticPurpose": "choose to cancel the booking",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "a cancellation confirmation prompt is displayed"
+        },
+        {
+          "id": "cancel-booking:2:selection:booking",
+          "kind": "selection",
+          "reads": [],
+          "action": "choose to cancel the booking",
+          "writes": [
+            "cancel-booking.draft.booking"
+          ],
+          "control": {
+            "roles": [
+              "button",
+              "radio",
+              "option",
+              "combobox"
+            ],
+            "purpose": "booking",
+            "statePath": "cancel-booking.draft.booking",
+            "downstream": [
+              "cancel-booking:3:mutation"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "booking",
+            "selectedState": true,
+            "accessibleName": "booking",
+            "accessibleNames": [
+              "booking"
+            ],
+            "validationOwner": null
+          },
+          "dependsOn": [],
+          "journeyId": "cancel-booking",
+          "stepIndex": 1,
+          "capability": "makeWizardMachine",
+          "observable": "a cancellation confirmation prompt is displayed",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "booking",
+          "semanticPurpose": "choose to cancel the booking",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "a cancellation confirmation prompt is displayed"
+        },
+        {
+          "id": "cancel-booking:2:cancellation",
+          "kind": "cancellation",
+          "reads": [
+            "cancel-booking.durable.reference"
+          ],
+          "action": "choose to cancel the booking",
+          "writes": [
+            "cancel-booking.durable.status"
+          ],
+          "control": {
+            "roles": [
+              "button"
+            ],
+            "purpose": "cancel booking control",
+            "statePath": "cancel-booking.durable.status",
+            "downstream": [],
+            "stateOwner": "src/data/booking.js",
+            "accessibleName": "cancel booking control",
+            "validationOwner": null
+          },
+          "dependsOn": [
+            "cancel-booking.durable.reference"
+          ],
+          "journeyId": "cancel-booking",
+          "stepIndex": 1,
+          "capability": "makeBookingSystem",
+          "observable": "a cancellation confirmation prompt is displayed",
+          "stateOwner": "src/data/booking.js",
+          "valueWritten": null,
+          "semanticPurpose": "choose to cancel the booking",
+          "responsibleModules": [
+            "src/data/booking.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "a cancellation confirmation prompt is displayed"
+        },
+        {
+          "id": "cancel-booking:3:mutation",
+          "kind": "mutation",
+          "reads": [
+            "cancel-booking.draft.cancel",
+            "cancel-booking.draft.booking"
+          ],
+          "action": "confirm cancellation",
+          "writes": [
+            "cancel-booking.durable.record",
+            "cancel-booking.durable.reference"
+          ],
+          "control": {
+            "roles": [
+              "button"
+            ],
+            "purpose": "confirm cancellation control",
+            "statePath": "cancel-booking.durable.record",
+            "downstream": [
+              "cancel-booking:4:recovery"
+            ],
+            "stateOwner": "src/data/booking.js",
+            "accessibleName": "confirm cancellation control",
+            "validationOwner": null
+          },
+          "dependsOn": [
+            "cancel-booking.draft.cancel",
+            "cancel-booking.draft.booking"
+          ],
+          "journeyId": "cancel-booking",
+          "stepIndex": 2,
+          "capability": "makeBookingSystem",
+          "observable": "the booking status changes to Cancelled and the booking reference remains visible",
+          "stateOwner": "src/data/booking.js",
+          "valueWritten": null,
+          "semanticPurpose": "confirm cancellation",
+          "responsibleModules": [
+            "src/data/booking.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "the booking status changes to Cancelled and the booking reference remains visible"
+        },
+        {
+          "id": "cancel-booking:4:recovery",
+          "kind": "recovery",
+          "reads": [
+            "cancel-booking.durable.record"
+          ],
+          "action": "reload the page",
+          "writes": [
+            "cancel-booking.restored"
+          ],
+          "control": null,
+          "dependsOn": [
+            "cancel-booking.durable.record"
+          ],
+          "journeyId": "cancel-booking",
+          "stepIndex": 3,
+          "capability": "makeWizardMachine",
+          "observable": "the booking reloads into an explicit Cancelled state with no active cancel control",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": null,
+          "semanticPurpose": "reload the page",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "the booking reloads into an explicit Cancelled state with no active cancel control"
+        },
+        {
+          "id": "capacity-protection:1:selection:dateid",
+          "kind": "selection",
+          "reads": [],
+          "action": "select a date and slot with limited remaining seats",
+          "writes": [
+            "capacity-protection.draft.dateId"
+          ],
+          "control": {
+            "roles": [
+              "button",
+              "radio",
+              "option",
+              "combobox"
+            ],
+            "purpose": "dateId",
+            "statePath": "capacity-protection.draft.dateId",
+            "downstream": [],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "dateId",
+            "selectedState": true,
+            "accessibleName": "date Id",
+            "accessibleNames": [
+              "date Id",
+              "date",
+              "day"
+            ],
+            "validationOwner": null
+          },
+          "dependsOn": [],
+          "journeyId": "capacity-protection",
+          "stepIndex": 0,
+          "capability": "makeWizardMachine",
+          "observable": "the slot card displays its remaining seat count",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "dateId",
+          "semanticPurpose": "select a date and slot with limited remaining seats",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "the slot card displays its remaining seat count"
+        },
+        {
+          "id": "capacity-protection:1:selection:slotid",
+          "kind": "selection",
+          "reads": [],
+          "action": "select a date and slot with limited remaining seats",
+          "writes": [
+            "capacity-protection.draft.slotId"
+          ],
+          "control": {
+            "roles": [
+              "button",
+              "radio",
+              "option",
+              "combobox"
+            ],
+            "purpose": "slotId",
+            "statePath": "capacity-protection.draft.slotId",
+            "downstream": [],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "slotId",
+            "selectedState": true,
+            "accessibleName": "slot Id",
+            "accessibleNames": [
+              "slot Id",
+              "slot",
+              "time"
+            ],
+            "validationOwner": null
+          },
+          "dependsOn": [],
+          "journeyId": "capacity-protection",
+          "stepIndex": 0,
+          "capability": "makeWizardMachine",
+          "observable": "the slot card displays its remaining seat count",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "slotId",
+          "semanticPurpose": "select a date and slot with limited remaining seats",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "the slot card displays its remaining seat count"
+        },
+        {
+          "id": "capacity-protection:2:selection:partysize",
+          "kind": "selection",
+          "reads": [],
+          "action": "choose a party size larger than the remaining seats",
+          "writes": [
+            "capacity-protection.draft.partySize"
+          ],
+          "control": {
+            "roles": [
+              "button",
+              "radio",
+              "option",
+              "combobox"
+            ],
+            "purpose": "partySize",
+            "statePath": "capacity-protection.draft.partySize",
+            "downstream": [],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "partySize",
+            "selectedState": true,
+            "accessibleName": "party Size",
+            "accessibleNames": [
+              "party Size",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": null
+          },
+          "dependsOn": [],
+          "journeyId": "capacity-protection",
+          "stepIndex": 1,
+          "capability": "makeWizardMachine",
+          "observable": "a visible capacity warning is shown and the continue control is disabled",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "partySize",
+          "semanticPurpose": "choose a party size larger than the remaining seats",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "a visible capacity warning is shown and the continue control is disabled"
+        },
+        {
+          "id": "capacity-protection:3:selection:partysize",
+          "kind": "selection",
+          "reads": [],
+          "action": "choose a party size within the remaining seats",
+          "writes": [
+            "capacity-protection.draft.partySize"
+          ],
+          "control": {
+            "roles": [
+              "button",
+              "radio",
+              "option",
+              "combobox"
+            ],
+            "purpose": "partySize",
+            "statePath": "capacity-protection.draft.partySize",
+            "downstream": [],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "partySize",
+            "selectedState": true,
+            "accessibleName": "party Size",
+            "accessibleNames": [
+              "party Size",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": null
+          },
+          "dependsOn": [],
+          "journeyId": "capacity-protection",
+          "stepIndex": 2,
+          "capability": "makeWizardMachine",
+          "observable": "the warning disappears and the continue control becomes enabled",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "partySize",
+          "semanticPurpose": "choose a party size within the remaining seats",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "the warning disappears and the continue control becomes enabled"
+        },
+        {
+          "id": "contact-validation:2:input:guestemail",
+          "kind": "input",
+          "reads": [],
+          "action": "enter an invalid email address",
+          "writes": [
+            "contact-validation.draft.guestEmail"
+          ],
+          "control": {
+            "roles": [
+              "textbox",
+              "spinbutton",
+              "combobox"
+            ],
+            "purpose": "guestEmail",
+            "editable": true,
+            "statePath": "contact-validation.draft.guestEmail",
+            "downstream": [],
+            "inputTypes": [
+              "email"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "guestEmail",
+            "accessibleName": "guest Email",
+            "accessibleNames": [
+              "guest Email",
+              "email",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": "src/data/wizard.js"
+          },
+          "dependsOn": [],
+          "journeyId": "contact-validation",
+          "stepIndex": 1,
+          "capability": "makeWizardMachine",
+          "observable": "an email validation message is shown and the continue control remains disabled",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "guestEmail",
+          "semanticPurpose": "enter an invalid email address",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "an email validation message is shown and the continue control remains disabled"
+        },
+        {
+          "id": "contact-validation:3:input:guestemail",
+          "kind": "input",
+          "reads": [],
+          "action": "enter a valid email address and required details",
+          "writes": [
+            "contact-validation.draft.guestEmail"
+          ],
+          "control": {
+            "roles": [
+              "textbox",
+              "spinbutton",
+              "combobox"
+            ],
+            "purpose": "guestEmail",
+            "editable": true,
+            "statePath": "contact-validation.draft.guestEmail",
+            "downstream": [],
+            "inputTypes": [
+              "email"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "guestEmail",
+            "accessibleName": "guest Email",
+            "accessibleNames": [
+              "guest Email",
+              "email",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": "src/data/wizard.js"
+          },
+          "dependsOn": [],
+          "journeyId": "contact-validation",
+          "stepIndex": 2,
+          "capability": "makeWizardMachine",
+          "observable": "validation messages clear and the continue control becomes enabled",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "guestEmail",
+          "semanticPurpose": "enter a valid email address and required details",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "validation messages clear and the continue control becomes enabled"
+        },
+        {
+          "id": "contact-validation:3:input:guestname",
+          "kind": "input",
+          "reads": [],
+          "action": "enter a valid email address and required details",
+          "writes": [
+            "contact-validation.draft.guestName"
+          ],
+          "control": {
+            "roles": [
+              "textbox",
+              "spinbutton",
+              "combobox"
+            ],
+            "purpose": "guestName",
+            "editable": true,
+            "statePath": "contact-validation.draft.guestName",
+            "downstream": [],
+            "inputTypes": [
+              "text"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "guestName",
+            "accessibleName": "guest Name",
+            "accessibleNames": [
+              "guest Name",
+              "name",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": "src/data/wizard.js"
+          },
+          "dependsOn": [],
+          "journeyId": "contact-validation",
+          "stepIndex": 2,
+          "capability": "makeWizardMachine",
+          "observable": "validation messages clear and the continue control becomes enabled",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "guestName",
+          "semanticPurpose": "enter a valid email address and required details",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "validation messages clear and the continue control becomes enabled"
+        },
+        {
+          "id": "contact-validation:3:input:guestphone",
+          "kind": "input",
+          "reads": [],
+          "action": "enter a valid email address and required details",
+          "writes": [
+            "contact-validation.draft.guestPhone"
+          ],
+          "control": {
+            "roles": [
+              "textbox",
+              "spinbutton",
+              "combobox"
+            ],
+            "purpose": "guestPhone",
+            "editable": true,
+            "statePath": "contact-validation.draft.guestPhone",
+            "downstream": [],
+            "inputTypes": [
+              "tel",
+              "text"
+            ],
+            "stateOwner": "src/data/wizard.js",
+            "logicalField": "guestPhone",
+            "accessibleName": "guest Phone",
+            "accessibleNames": [
+              "guest Phone",
+              "phone",
+              "telephone",
+              "party size",
+              "guests",
+              "people"
+            ],
+            "validationOwner": "src/data/wizard.js"
+          },
+          "dependsOn": [],
+          "journeyId": "contact-validation",
+          "stepIndex": 2,
+          "capability": "makeWizardMachine",
+          "observable": "validation messages clear and the continue control becomes enabled",
+          "stateOwner": "src/data/wizard.js",
+          "valueWritten": "guestPhone",
+          "semanticPurpose": "enter a valid email address and required details",
+          "responsibleModules": [
+            "src/data/wizard.js",
+            "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx"
+          ],
+          "nextStateRequirement": "validation messages clear and the continue control becomes enabled"
+        }
+      ],
+      "valid": true,
+      "version": 1,
+      "problems": []
+    }
+  },
+  "liveVerdict": {
+    "steps": [
+      {
+        "drove": true,
+        "action": "open the booking application",
+        "detail": "found: ember, table, editorial, hero, supper",
+        "expect": "the Ember Table editorial hero, supper club description, and a visible start booking control are shown",
+        "status": "pass"
+      },
+      {
+        "drove": true,
+        "action": "start the booking flow",
+        "detail": "found: available, dates, current, wizard, indicator (new: current, indicator)",
+        "expect": "step 1 shows available dates and the current wizard step indicator",
+        "status": "pass"
+      },
+      {
+        "drove": true,
+        "action": "select a date with availability",
+        "detail": "no clickable option was identified",
+        "expect": "available slots for that date are displayed with remaining seat counts",
+        "status": "fail",
+        "groupId": 0,
+        "groupKey": "id:date",
+        "selectedText": null,
+        "controlEvidence": {
+          "aliases": [
+            "date",
+            "day",
+            "dateid"
+          ],
+          "contractedField": "dateId",
+          "selectedOptions": [],
+          "selectedGroupContext": " date id friday, october 18\nsmoke, roots and ember-fired sauces\ndate id saturday, october 19\na shared-table harvest menu\ndate id sunday, october 20\nlate supper with live-fire desserts"
+        }
+      },
+      {
+        "action": "select an available slot",
+        "detail": "not reached because step 3 was fail",
+        "expect": "the selected slot is visually highlighted and the continue control becomes enabled",
+        "status": "not_reached",
+        "blockedBy": 2
+      },
+      {
+        "action": "choose a party size within the slot's remaining capacity",
+        "detail": "not reached because step 3 was fail",
+        "expect": "the selected party size is displayed and no capacity warning is shown",
+        "status": "not_reached",
+        "blockedBy": 2
+      },
+      {
+        "action": "enter guest name, email, phone and any dietary note",
+        "detail": "not reached because step 3 was fail",
+        "expect": "valid contact fields are accepted and the continue control becomes enabled",
+        "status": "not_reached",
+        "blockedBy": 2
+      },
+      {
+        "action": "review the booking",
+        "detail": "not reached because step 3 was fail",
+        "expect": "the exact selected date, time, party size, guest name, email and phone are visible before confirmation",
+        "status": "not_reached",
+        "blockedBy": 2
+      },
+      {
+        "action": "confirm the booking",
+        "detail": "not reached because step 3 was fail",
+        "expect": "a confirmation screen appears with status Confirmed and a durable booking reference",
+        "status": "not_reached",
+        "blockedBy": 2
+      },
+      {
+        "action": "reload the page",
+        "detail": "not reached because step 3 was fail",
+        "expect": "the confirmed booking state is recovered and the same booking reference remains visible",
+        "status": "not_reached",
+        "blockedBy": 2
+      }
+    ],
+    "status": "fail",
+    "failedSteps": 1,
+    "cacheIdentity": {
+      "journeyId": "reserve-supper-club-seats",
+      "contractHash": "935e5c0edb473413901777708369934b695430fc62b16356e7afd6c68d6eb30c",
+      "runtimeFiles": [
+        {
+          "path": "src/lib/backend/index.js",
+          "contentHash": "fe689464d5e8517b6b7195a59ed3a3c849ff7154b37bcb979491acdeacbd9dbc"
+        },
+        {
+          "path": "src/lib/backend/supabaseBackend.js",
+          "contentHash": "71e7a0689fb458e41be87b852070149b10cf7637fd6c460acd522db7360276b5"
+        },
+        {
+          "path": "src/lib/capabilities/booking.js",
+          "contentHash": "ef1ecde5c94effb0dcb4792c9a9b830a1bc86cc9aa8a30f325dacd8c08d359d6"
+        },
+        {
+          "path": "src/lib/capabilities/crud.js",
+          "contentHash": "c48f5620ec2ddd10dd248acdf315c96c5e686f0e799d5736959fb3730e937846"
+        },
+        {
+          "path": "src/lib/capabilities/forms.js",
+          "contentHash": "dd68f40f82fcc08be09a7fc3043876516f45f43dc9abcab3abf416bd4592873f"
+        },
+        {
+          "path": "src/lib/capabilities/index.js",
+          "contentHash": "8792625648e16fea557ba97c566b86a771852636e59a72b96ec6100013203e9f"
+        },
+        {
+          "path": "src/lib/capabilities/react.js",
+          "contentHash": "aba6153c3e8d07298a4d7cbb0385205e3c9f15fba6696664c14a1210e5803931"
+        },
+        {
+          "path": "src/lib/capabilities/roles.js",
+          "contentHash": "f93e3d2f04092bffde2691f927c907c1b1abf418ecd7a5cdc9be12df0b2449e9"
+        },
+        {
+          "path": "src/lib/capabilities/session.js",
+          "contentHash": "c278daf7cf98d12898a8fbba511f8fdd56bb5e82836e59eab310ff5167db8236"
+        },
+        {
+          "path": "src/lib/capabilities/wizard.js",
+          "contentHash": "015d94ef919518a4bdaf66b62e9a6c3d8984cba99a99af6db8fa679c39b18057"
+        },
+        {
+          "path": "src/lib/visitorSession.js",
+          "contentHash": "1dac1efac84ac4a61d402d74d39f5891b7d4dfb305291a7aed5abef9ccf48524"
+        }
+      ],
+      "configVersion": "journey-verification-config/1",
+      "owningModules": [
+        {
+          "path": "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsConfirmation.jsx",
+          "contentHash": "59dd6c3a19c171e28d513bb4f83d2e9a5dd9c2489e7500fee7c8fba429f1dd6d"
+        },
+        {
+          "path": "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx",
+          "contentHash": "67ae29fbcf1d6c11ff0b1daad727397a09187542353ea91244fa9545f42e2211"
+        },
+        {
+          "path": "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsReview.jsx",
+          "contentHash": "7c4d9863f83eefaababd308fc3a87136977ec4bb629c9a6e7089400dd88ed82b"
+        },
+        {
+          "path": "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsStatus.jsx",
+          "contentHash": "423784544a71a4a168c9a954003fd210374cadea86965bc2a82508579dd5705e"
+        },
+        {
+          "path": "src/components/ui/table.jsx",
+          "contentHash": "18a9f6369bfc068ab674e612f0c3bb7d4ea368a065594ea374e3864b79732a59"
+        },
+        {
+          "path": "src/data/emberTableDates.js",
+          "contentHash": "208c9b2f069418c475b171c17ade92ec7a829c1c00259a46174ca03f475511a6"
+        }
+      ],
+      "backendVersion": "generated-backend/1",
+      "runtimeVersion": "react-vite-runtime/1",
+      "verifierVersion": "journey-v2",
+      "capabilityVersions": [
+        {
+          "name": "booking",
+          "version": "1.0.0"
+        },
+        {
+          "name": "contact",
+          "version": "1.0.0"
+        },
+        {
+          "name": "crud",
+          "version": "1.0.0"
+        },
+        {
+          "name": "session",
+          "version": "1.0.0"
+        },
+        {
+          "name": "wizard",
+          "version": "1.0.0"
+        }
+      ],
+      "environmentVersion": "unknown",
+      "journeyDefinitionHash": "ff77a94590daa19f1282a8f771711576e8c16549a707a8146d4164ffbd3828f6",
+      "transitiveDependencyClosure": [
+        {
+          "path": "src/data/booking.js",
+          "contentHash": "986ead3cfad2cd7d9700709f86e4a684a67e6750ce157a23db730b385b1745be"
+        },
+        {
+          "path": "src/data/contact.js",
+          "contentHash": "d1b6a1da4a8eb6059177b9c0acbfe97e722fafdf56512689fdf5978b0e28eea5"
+        },
+        {
+          "path": "src/data/wizard.js",
+          "contentHash": "35ede6ac8ffdc664aa59fff147bdc199d67bdde9e391c5db6c86d403da958e33"
+        },
+        {
+          "path": "src/lib/assetData.js",
+          "contentHash": "ca6a406af687378f525bc346e1f151e2ff6e7efbcd0bea70a9396f33af4f6f40"
+        },
+        {
+          "path": "src/lib/assets.js",
+          "contentHash": "a9a87a36e4e0d971551e6f9d2c701d934e2ca0d6c6a822c3572879d4c9814e21"
+        },
+        {
+          "path": "src/lib/backend/index.js",
+          "contentHash": "fe689464d5e8517b6b7195a59ed3a3c849ff7154b37bcb979491acdeacbd9dbc"
+        },
+        {
+          "path": "src/lib/backend/supabaseBackend.js",
+          "contentHash": "71e7a0689fb458e41be87b852070149b10cf7637fd6c460acd522db7360276b5"
+        },
+        {
+          "path": "src/lib/capabilities/booking.js",
+          "contentHash": "ef1ecde5c94effb0dcb4792c9a9b830a1bc86cc9aa8a30f325dacd8c08d359d6"
+        },
+        {
+          "path": "src/lib/capabilities/crud.js",
+          "contentHash": "c48f5620ec2ddd10dd248acdf315c96c5e686f0e799d5736959fb3730e937846"
+        },
+        {
+          "path": "src/lib/capabilities/forms.js",
+          "contentHash": "dd68f40f82fcc08be09a7fc3043876516f45f43dc9abcab3abf416bd4592873f"
+        },
+        {
+          "path": "src/lib/capabilities/index.js",
+          "contentHash": "8792625648e16fea557ba97c566b86a771852636e59a72b96ec6100013203e9f"
+        },
+        {
+          "path": "src/lib/capabilities/react.js",
+          "contentHash": "aba6153c3e8d07298a4d7cbb0385205e3c9f15fba6696664c14a1210e5803931"
+        },
+        {
+          "path": "src/lib/capabilities/roles.js",
+          "contentHash": "f93e3d2f04092bffde2691f927c907c1b1abf418ecd7a5cdc9be12df0b2449e9"
+        },
+        {
+          "path": "src/lib/capabilities/session.js",
+          "contentHash": "c278daf7cf98d12898a8fbba511f8fdd56bb5e82836e59eab310ff5167db8236"
+        },
+        {
+          "path": "src/lib/capabilities/wizard.js",
+          "contentHash": "015d94ef919518a4bdaf66b62e9a6c3d8984cba99a99af6db8fa679c39b18057"
+        },
+        {
+          "path": "src/lib/utils.js",
+          "contentHash": "231eee9157c8517cca95e6517b52dcbff4f28696389fa1cde8ee7cb5a83c709b"
+        },
+        {
+          "path": "src/lib/visitorSession.js",
+          "contentHash": "1dac1efac84ac4a61d402d74d39f5891b7d4dfb305291a7aed5abef9ccf48524"
+        }
+      ]
+    },
+    "backendEvidence": {
+      "required": false
+    }
+  },
+  "finalVerificationDiagnostics": [
+    {
+      "code": "interaction_verification_failure",
+      "status": "fail",
+      "journeyId": "reserve-supper-club-seats",
+      "stepIndex": 2,
+      "userAction": "select a date with availability",
+      "stateOwners": [
+        "src/data/wizard.js"
+      ],
+      "capabilities": [
+        "makeWizardMachine"
+      ],
+      "dataOperations": [
+        "create-booking"
+      ],
+      "controlEvidence": {
+        "aliases": [
+          "date",
+          "day",
+          "dateid"
+        ],
+        "contractedField": "dateId",
+        "selectedOptions": [],
+        "selectedGroupContext": " date id friday, october 18\nsmoke, roots and ember-fired sauces\ndate id saturday, october 19\na shared-table harvest menu\ndate id sunday, october 20\nlate supper with live-fire desserts"
+      },
+      "expectedControls": [
+        {
+          "field": "dateId",
+          "roles": [
+            "button",
+            "radio",
+            "option",
+            "combobox"
+          ],
+          "accessibleNames": [
+            "date Id",
+            "date",
+            "day"
+          ],
+          "expectedStateOwner": "src/data/wizard.js"
+        }
+      ],
+      "attemptedLocators": [],
+      "expectedStateAfter": "available slots for that date are displayed with remaining seat counts",
+      "responsibleModules": [
+        "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsConfirmation.jsx",
+        "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsFlow.jsx",
+        "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsReview.jsx",
+        "src/components/reserve-supper-club-seats/ReserveSupperClubSeatsStatus.jsx",
+        "src/components/ui/table.jsx",
+        "src/data/emberTableDates.js",
+        "src/data/wizard.js"
+      ],
+      "actualObservedState": "no clickable option was identified",
+      "expectedStateBefore": [
+        "dateId:unselected"
+      ],
+      "renderedControlFacts": [],
+      "downstreamDependencies": [
+        "reserve-supper-club-seats:7:review",
+        "reserve-supper-club-seats:8:mutation"
+      ]
+    }
+  ],
+  "liveDomProbe": {
+    "url": "https://p66a6d96c1d044f7fb175abfa02740ae5.preview.thrallo.com/",
+    "method": "zero-model Playwright probe against the still-running qualification preview, before cleanup",
+    "beforeClick": [
+      {
+        "name": "date Id",
+        "aria": "date Id Friday, October 18",
+        "pressed": "false",
+        "text": "Date Id Friday, October 18 / Smoke, roots and e"
+      },
+      {
+        "name": "date Id",
+        "aria": "date Id Saturday, October 19",
+        "pressed": "false",
+        "text": "Date Id Saturday, October 19 / A shared-table h"
+      },
+      {
+        "name": "date Id",
+        "aria": "date Id Sunday, October 20",
+        "pressed": "false",
+        "text": "Date Id Sunday, October 20 / Late supper with l"
+      },
+      {
+        "name": null,
+        "aria": null,
+        "pressed": null,
+        "text": "Look up booking"
+      }
+    ],
+    "afterClick": {
+      "stillTagged": 0,
+      "dateButtonsPresent": 0,
+      "bodyHead": "EMBER TABLE EDITORIAL HERO / Reserve supper club seats at Ember Table / ... / Booking wizard: success / Available slo",
+      "visibleButtons": [
+        {
+          "name": "slot Id",
+          "aria": "slot Id 6:30 PM",
+          "pressed": "false",
+          "text": "Slot Id 6:30 PM / Infinity remaining seats"
+        },
+        {
+          "name": "slot Id",
+          "aria": "slot Id 8:30 PM",
+          "pressed": "false",
+          "text": "Slot Id 8:30 PM / Infinity remaining seats"
+        },
+        {
+          "name": null,
+          "aria": null,
+          "pressed": null,
+          "text": "Continue"
+        },
+        {
+          "name": null,
+          "aria": null,
+          "pressed": null,
+          "text": "Look up booking"
+        }
+      ]
+    }
+  }
+}

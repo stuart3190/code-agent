@@ -1,0 +1,10 @@
+[Unit]
+Description=Copy each nightly Thrallo backup to encrypted off-host storage
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 UTC
+Persistent=true
+RandomizedDelaySec=20min
+
+[Install]
+WantedBy=timers.target

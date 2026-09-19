@@ -11,6 +11,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { GENERATED_DEPENDENCIES } from "./dependencyCatalog.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const sdk = (rel) => readFileSync(path.join(HERE, "reactVite", rel), "utf8");
@@ -47,6 +48,7 @@ export const REACT_VITE = {
         "lucide-react": "^1.23.0",
         "tailwind-merge": "^2.6.0",
         "tailwindcss-animate": "^1.0.7",
+        ...GENERATED_DEPENDENCIES,
       },
       devDependencies: {
         "@vitejs/plugin-react": "^4.3.1",
@@ -323,7 +325,38 @@ export default function HomePage() {
   "src/lib/capabilities/session.js": sdk("lib/capabilities/session.js"),
   "src/lib/capabilities/roles.js": sdk("lib/capabilities/roles.js"),
   "src/lib/capabilities/booking.js": sdk("lib/capabilities/booking.js"),
+  "src/lib/capabilities/wizard.js": sdk("lib/capabilities/wizard.js"),
   "src/lib/capabilities/forms.js": sdk("lib/capabilities/forms.js"),
+  "src/lib/capabilities/react.js": sdk("lib/capabilities/react.js"),
+  // Platform modules (WP3+): versioned runtime the composer binds per application. Protected.
+  "src/lib/modules/identity.js": sdk("lib/modules/identity.js"),
+  "src/lib/modules/identityReact.js": sdk("lib/modules/identityReact.js"),
+  "src/lib/modules/policy.js": sdk("lib/modules/policy.js"),
+  "src/lib/modules/accounts.js": sdk("lib/modules/accounts.js"),
+  "src/lib/modules/accountsReact.js": sdk("lib/modules/accountsReact.js"),
+  "src/lib/modules/schema.js": sdk("lib/modules/schema.js"),
+  "src/lib/modules/entities.js": sdk("lib/modules/entities.js"),
+  "src/lib/modules/entitiesReact.js": sdk("lib/modules/entitiesReact.js"),
+  "src/lib/modules/routing.js": sdk("lib/modules/routing.js"),
+  "src/lib/modules/router.js": sdk("lib/modules/router.js"),
+  "src/lib/modules/query.js": sdk("lib/modules/query.js"),
+  "src/lib/modules/collections.js": sdk("lib/modules/collections.js"),
+  "src/lib/modules/forms.js": sdk("lib/modules/forms.js"),
+  "src/lib/modules/asyncState.js": sdk("lib/modules/asyncState.js"),
+  "src/lib/modules/settings.js": sdk("lib/modules/settings.js"),
+  "src/lib/modules/audit.js": sdk("lib/modules/audit.js"),
+  "src/lib/modules/workflow.js": sdk("lib/modules/workflow.js"),
+  "src/lib/modules/workspace.js": sdk("lib/modules/workspace.js"),
+  "src/lib/modules/editor.js": sdk("lib/modules/editor.js"),
+  "src/lib/modules/files.js": sdk("lib/modules/files.js"),
+  "src/lib/modules/notifications.js": sdk("lib/modules/notifications.js"),
+  "src/lib/modules/realtime.js": sdk("lib/modules/realtime.js"),
+  "src/lib/modules/analytics.js": sdk("lib/modules/analytics.js"),
+  "src/lib/modules/exports.js": sdk("lib/modules/exports.js"),
+  "src/lib/modules/billing.js": sdk("lib/modules/billing.js"),
+  "src/lib/modules/jobs.js": sdk("lib/modules/jobs.js"),
+  "src/lib/modules/connectors.js": sdk("lib/modules/connectors.js"),
+  "src/lib/modules/uiReact.js": sdk("lib/modules/uiReact.js"),
 
   // Asset helpers (Builder v2, master plan Part 18): picture/srcset/lazy/blur rendering
   // for the imagery the Asset Service resolves. Headless props-builders, no JSX.

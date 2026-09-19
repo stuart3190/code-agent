@@ -4,15 +4,19 @@
 // db.entity() with a stable, minimal surface; records come back flat as { id, ...fields }
 // so screens never touch row internals. Persistence NEVER lives in components — components
 // import a store made here (usually via a src/data/ module that names the entity once).
+//
+// The session prerequisite is handled by the runtime: every operation below establishes this
+// app's visitor session first, so no screen has to remember ensureVisitorSession().
 
-import { db } from "../backend/index.js";
+import { db as defaultDb } from "../backend/index.js";
 
 function flatten(row) {
   if (!row) return null;
   return { id: row.id, createdAt: row.created_at, ...(row.data || {}) };
 }
 
-export function makeEntityStore(type) {
+export function makeEntityStore(type, deps = {}) {
+  const db = deps.db || defaultDb;
   const entity = () => db.entity(type);
   return {
     async list(options = {}) {

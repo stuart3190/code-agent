@@ -9,12 +9,30 @@
 // chosen in the composer, and there is no account-level default for it to write to.
 
 import React from "react";
+import { accountErasureManifest, permanentlyDeleteAccount } from "../lib/codeAgentApi.js";
 
 const THEMES = [["light", "Light"], ["dark", "Dark"], ["system", "System"]];
 
 export default function PreferencesTab({
-  user, theme, setTheme, data, onSection, onPreviewPlan,
+  user, theme, setTheme, data, onSection, onPreviewPlan, onConfirm, showToast,
 }) {
+  const requestDeletion = async () => {
+    try {
+      const manifest = await accountErasureManifest();
+      onConfirm({
+        title: "Permanently delete your account?",
+        body: `This removes ${manifest.projectCount} project${manifest.projectCount === 1 ? "" : "s"}, published data, builds, snapshots, assets and account access. This cannot be undone.`,
+        confirmLabel: "Delete account permanently",
+        destructive: true,
+        onConfirm: async () => {
+          await permanentlyDeleteAccount(manifest.manifestSha256);
+          window.location.assign("/");
+        },
+      });
+    } catch (error) {
+      showToast?.(error?.message || "The deletion manifest could not be prepared.", "error");
+    }
+  };
   return (
     <div className="st-tab">
       <div className="st-headline">
@@ -98,6 +116,19 @@ export default function PreferencesTab({
           </div>
         </div>
       )}
+
+      <div className="st-section">
+        <h3>Delete account</h3>
+        <div className="st-row">
+          <div>
+            Permanently erase your Thrallo account
+            <div className="ct-hint">
+              Removes projects, generated apps, publishing, artifacts, diagnostics and account access across every store.
+            </div>
+          </div>
+          <button className="ct-btn-quiet" onClick={requestDeletion}>Delete account</button>
+        </div>
+      </div>
     </div>
   );
 }

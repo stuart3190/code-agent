@@ -117,17 +117,17 @@ test("keyboard focus reaches the composer and the cards", async ({ page }) => {
 
   // Cards are focusable in DOM order on every engine — WebKit in particular does not put
   // non-form controls in the tab order unless they carry an explicit tabindex, which these do.
-  const card = page.locator(".ct-project").first();
+  const card = page.locator(".ct-project").first().locator(".ct-project-open-button");
   await card.focus();
   await expect(card).toBeFocused();
-  await expect(card).toHaveAttribute("tabindex", "0");
+  await expect(card).toHaveAttribute("type", "button");
 });
 
 test("the event stream API the shell reads events with exists", async ({ page }) => {
   await stub(page);
   await page.goto("/");
   // The conversation stream is read with fetch + ReadableStream rather than EventSource, because
-  // it needs an Authorization header. Both matter: logs use EventSource, conversations use the
+  // it needs an Authorization header. Logs and conversations both use authenticated streaming
   // reader. An engine missing either would break a core surface silently.
   const api = await page.evaluate(() => ({
     readableStream: typeof ReadableStream === "function",

@@ -17,6 +17,7 @@ import {
 
 const sha256 = (text) => crypto.createHash("sha256").update(text).digest("hex");
 const CODE_FILE = /\.(jsx?|tsx?|mjs|cjs)$/;
+export const INDEXER_VERSION = "babel-v1";
 
 export { tokensOf, treeHashOf, diffIndex };
 
@@ -81,9 +82,10 @@ export function indexFile(path, source) {
 
   let symbols = null;
   try {
+    const typescript = /\.tsx?$/.test(path);
     const ast = parse(text, {
       sourceType: "module",
-      plugins: ["jsx"],
+      plugins: [typescript ? "typescript" : null, /\.(?:jsx|tsx)$/.test(path) ? "jsx" : null].filter(Boolean),
       errorRecovery: true, // recover enough to REPORT errors; recovered files stay opaque
     });
     if (!ast.errors?.length) symbols = symbolsFromAst(ast, text);

@@ -21,54 +21,65 @@ const CONTRACT = {
   summary: "Sunny Acres strawberry farm booking site",
   entities: [{ name: "booking" }, { name: "newslettersignup" }],
   operations: [{ id: "create-booking", description: "create a booking reservation" }],
-  routes: [{ path: "/", name: "Home" }, { path: "/book", name: "Booking" }],
+  routes: [{ path: "/book", name: "Booking" }, { path: "/newsletter", name: "Newsletter" },
+    { path: "/about", name: "About" }],
   auth: { required: false },
   journeys: [
     { id: "book-a-visit", title: "Book a farm visit", priority: "primary",
-      steps: [{ action: "submit the booking form", expect: "booking confirmed" }] },
+      steps: [{ action: "submit the booking form", target: "/book", expect: "booking confirmed" }] },
     { id: "newsletter-signup", title: "Newsletter signup", priority: "secondary",
-      steps: [{ action: "enter an email", expect: "newsletter subscribed" }] },
+      steps: [{ action: "enter an email", target: "/newsletter", expect: "newsletter subscribed" }] },
     { id: "browse-info", title: "Browse farm information", priority: "secondary",
-      steps: [{ action: "open the about section", expect: "about the farm" }] },
+      steps: [{ action: "open the about section", target: "/about", expect: "about the farm" }] },
   ],
 };
 
 const CORE_PATCH = [{
-  newFile: "src/routes/BookPage.jsx",
+  replaceFile: "src/screens/scaffold/BookingScreen.jsx",
   content: `import React, { useState } from "react";
+import { ASSET_CREDITS } from "../../lib/assetData.js";
+import { makeBookingSystem } from "../../lib/capabilities/index.js";
 
-export default function BookPage() {
+const booking = makeBookingSystem({ entity: "booking" });
+
+export default function BookingScreen() {
   const [state, setState] = useState("idle");
   return (
     <main>
       <h1>Book a farm visit</h1>
       {state === "confirmed" ? <p role="status">Booking confirmed — reference SA-1</p> : null}
-      <button onClick={() => setState("confirmed")}>Submit booking</button>
+      <button onClick={async () => { await booking.createBooking({ date: "2026-08-10", slot: "10:00", partySize: 2 }); setState("confirmed"); }}>Submit booking</button>
+      <footer><a href="https://www.pexels.com">Photos provided by Pexels</a>{ASSET_CREDITS.map((credit) => credit.photoUrl ? <a key={credit.photoUrl} href={credit.photoUrl}>{credit.photographer}</a> : null)}</footer>
     </main>
   );
 }
 `,
 }];
 const NEWSLETTER_PATCH = [{
-  newFile: "src/routes/NewsletterPanel.jsx",
+  replaceFile: "src/screens/scaffold/NewsletterScreen.jsx",
   content: `import React, { useState } from "react";
+import { makeNewsletter } from "../../lib/capabilities/index.js";
 
-export default function NewsletterPanel() {
+const newsletter = makeNewsletter({ entity: "newslettersignup" });
+
+export default function NewsletterScreen() {
   const [state, setState] = useState("idle");
+  const [email, setEmail] = useState("");
   return (
     <section>
       {state === "done" ? <p role="status">Newsletter subscribed</p> : null}
-      <button onClick={() => setState("done")}>Subscribe</button>
+      <label>Email address<input type="email" name="email" aria-label="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+      <button onClick={async () => { await newsletter.subscribe(email || "reader@example.test"); setState("done"); }}>Subscribe</button>
     </section>
   );
 }
 `,
 }];
 const BROWSE_PATCH = [{
-  newFile: "src/routes/AboutSection.jsx",
+  replaceFile: "src/screens/scaffold/AboutScreen.jsx",
   content: `import React from "react";
 
-export default function AboutSection() {
+export default function AboutScreen() {
   return <section><h2>About the farm</h2><p>Family-run strawberry fields since 1987.</p></section>;
 }
 `,
@@ -76,15 +87,17 @@ export default function AboutSection() {
 
 // The edit: reword ONLY the newsletter panel's confirmation.
 const EDIT_PATCH = [{
-  file: "src/routes/NewsletterPanel.jsx",
+  file: "src/screens/scaffold/NewsletterScreen.jsx",
   ops: [{
-    op: "replace_symbol", symbol: "NewsletterPanel",
-    content: `export default function NewsletterPanel() {
+    op: "replace_symbol", symbol: "NewsletterScreen",
+    content: `export default function NewsletterScreen() {
   const [state, setState] = useState("idle");
+  const [email, setEmail] = useState("");
   return (
     <section>
       {state === "done" ? <p role="status">Newsletter subscribed — welcome aboard</p> : null}
-      <button onClick={() => setState("done")}>Subscribe</button>
+      <label>Email address<input type="email" name="email" aria-label="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+      <button onClick={async () => { await newsletter.subscribe(email || "reader@example.test"); setState("done"); }}>Subscribe</button>
     </section>
   );
 }`,
@@ -123,7 +136,7 @@ function recordedAssetService() {
   };
   const provider = pexelsProvider({
     apiKey: "k",
-    fetchImpl: async () => ({ ok: true, json: async () => ({ photos: [{ id: 1, width: 2000, height: 1300, alt: "farm rows in light", src: { original: "https://images.pexels.com/1/o.jpg", large2x: "https://images.pexels.com/1/l.jpg", medium: "https://images.pexels.com/1/m.jpg" } }] }) }),
+    fetchImpl: async () => ({ ok: true, json: async () => ({ photos: [{ id: 1, width: 2000, height: 1300, alt: "farm rows in light", photographer: "T", photographer_url: "https://www.pexels.com/@t", url: "https://www.pexels.com/photo/farm-1/", src: { original: "https://images.pexels.com/1/o.jpg", large2x: "https://images.pexels.com/1/l.jpg", medium: "https://images.pexels.com/1/m.jpg" } }] }) }),
   });
   return createAssetService({ providers: [provider], client: { from: chain }, now: () => new Date("2026-08-06T08:00:00Z") });
 }
@@ -134,7 +147,9 @@ function editHarness() {
   const verificationCache = memoryVerificationCache();
   const assetService = recordedAssetService();
   const journeyDrives = [];
+  const knowledgeFacts = [];
   let editPatches = EDIT_PATCH;
+  let failJourneys = new Set();
   const orchestrator = createOrchestrator({
     contractFn: async () => CONTRACT,
     patchesFn: async ({ step }) => ({
@@ -146,15 +161,17 @@ function editHarness() {
     assetService, snapshotStore, buildStore, verificationCache,
     journeysFn: async ({ journeys }) => {
       journeyDrives.push(journeys.map((j) => j.id));
-      return { journeys: journeys.map((j) => ({ id: j.id, title: j.title, priority: j.priority, status: "pass" })) };
+      return { journeys: journeys.map((j) => ({ id: j.id, title: j.title, priority: j.priority, status: failJourneys.has(j.id) ? "fail" : "pass" })) };
     },
     baseTree: () => clone(fromScaffold(REACT_VITE)),
     baseline: REACT_VITE,
+    events: { knowledge: async (fact) => { knowledgeFacts.push(fact); } },
   });
-  return { orchestrator, snapshotStore, journeyDrives, assetService, setEditPatches: (p) => { editPatches = p; } };
+  return { orchestrator, snapshotStore, journeyDrives, knowledgeFacts, assetService, setEditPatches: (p) => { editPatches = p; },
+    failJourneys: (ids) => { failJourneys = new Set(ids); } };
 }
 
-test("WP10 — an edit re-drives EXACTLY the touched journey; the others reuse cached verdicts", async () => {
+test("WP10/C3 — an edit re-drives the touched journey and every zero-owner journey", async () => {
   const h = editHarness();
   const build = await h.orchestrator.runBuild({ owner: "o", projectId: "p1", request: "booking site" });
   assert.equal(build.state, "green");
@@ -162,19 +179,24 @@ test("WP10 — an edit re-drives EXACTLY the touched journey; the others reuse c
 
   const edit = await h.orchestrator.runEdit({ owner: "o", projectId: "p1", request: "reword the newsletter confirmation", contract: CONTRACT });
   assert.equal(edit.state, "green", JSON.stringify(edit));
-  assert.deepEqual(edit.drove, ["newsletter-signup"], "EXACTLY the journey whose owning module changed");
-  assert.deepEqual(edit.reused.sort(), ["book-a-visit", "browse-info"], "unchanged owners reuse cached PASS verdicts");
-  assert.deepEqual(h.journeyDrives.slice(drivesBefore), [["newsletter-signup"]], "the browser drove one journey, once");
+  assert.deepEqual(edit.drove, ["newsletter-signup"],
+    "the changed mounted owner invalidates exactly its journey");
+  assert.deepEqual(edit.reused, ["book-a-visit", "browse-info"],
+    "complete unchanged mounted owners reuse their PASS verdicts");
+  assert.deepEqual(h.journeyDrives.slice(drivesBefore), [["newsletter-signup"]]);
 
   // Lineage + promotion: the edit snapshot's parent is the prior green, pointer moved.
   const pointer = await h.snapshotStore.pointer("o", "p1", "green");
   assert.equal(pointer, edit.snapshotId);
   const snap = await h.snapshotStore.getSnapshot(edit.snapshotId);
-  assert.equal(snap.reason, "edit");
+  assert.equal(snap.reason, "working:edit");
   assert.equal(snap.parent_snapshot, edit.parentSnapshotId);
   const tree = await h.snapshotStore.materialize("o", pointer);
-  assert.match(tree["src/routes/NewsletterPanel.jsx"], /welcome aboard/);
+  assert.match(tree["src/screens/scaffold/NewsletterScreen.jsx"], /welcome aboard/);
   assert.equal(edit.providerCalls, undefined, "no asset resolution ran at all");
+  assert.equal(h.knowledgeFacts.length, 1);
+  assert.equal(h.knowledgeFacts[0].value.text, "reword the newsletter confirmation");
+  assert.equal(h.knowledgeFacts[0].value.verifiedSnapshot, edit.snapshotId);
 });
 
 test("WP10 — a failed edit promotes NOTHING: the prior green keeps serving", async () => {
@@ -182,19 +204,22 @@ test("WP10 — a failed edit promotes NOTHING: the prior green keeps serving", a
   const build = await h.orchestrator.runBuild({ owner: "o", projectId: "p1", request: "booking site" });
   const before = await h.snapshotStore.pointer("o", "p1", "green");
 
-  // An edit that vandalises the ESSENTIAL journey's outcome text: the gate's expectation
-  // check fails it deterministically, twice → stop rule → blocked.
+  // An edit that vandalises the ESSENTIAL journey's outcome. The browser — not a lexical
+  // pre-compile proxy — is what fails it, which is the whole point of the correction: the
+  // edit RUNS, its behaviour is verified, and only then is it refused promotion.
+  h.failJourneys(["book-a-visit"]);
   h.setEditPatches([{
-    file: "src/routes/BookPage.jsx",
-    ops: [{ op: "replace_symbol", symbol: "BookPage",
-      content: "export default function BookPage() {\n  return <main><h1>Placeholder</h1></main>;\n}" }],
+    file: "src/screens/scaffold/BookingScreen.jsx",
+    ops: [{ op: "replace_symbol", symbol: "BookingScreen",
+      content: "export default function BookingScreen() {\n  return <main><h1>Placeholder</h1></main>;\n}" }],
   }]);
   const edit = await h.orchestrator.runEdit({ owner: "o", projectId: "p1", request: "break it", contract: CONTRACT });
   assert.equal(edit.state, "blocked");
   assert.equal(await h.snapshotStore.pointer("o", "p1", "green"), before, "pointer untouched");
   const tree = await h.snapshotStore.materialize("o", before);
-  assert.match(tree["src/routes/BookPage.jsx"], /Booking confirmed/, "the served tree still works");
+  assert.match(tree["src/screens/scaffold/BookingScreen.jsx"], /Booking confirmed/, "the served tree still works");
   assert.equal(build.state, "green");
+  assert.equal(h.knowledgeFacts.length, 0, "a failed edit must not become project knowledge");
 });
 
 test("WP10 — editTargets ranks generated files by request keywords, deterministically", () => {

@@ -1,0 +1,6 @@
+# Authoritative migration statements are forensic ledger records. Preserve every byte and do not
+# let platform-specific Git settings rewrite line endings or non-ASCII SQL comments.
+supabase/migrations/*.sql -text
+supabase/migration-history-archive/**/*.sql -text
+*.sh text eol=lf
+test/code-agent/fixtures/live-journeyVerifier-b45a327.mjs -text

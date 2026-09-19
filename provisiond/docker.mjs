@@ -25,6 +25,18 @@ export const PROXY_SUBNET = "10.83.7.0/24";
 export const PROXY_GATEWAY = "10.83.7.1";
 export const CADDY_PROXY_IP = "10.83.7.2";       // must match the `bind` line in Caddyfile + Caddyfile.tls
 
+// The shared TLS front retains certificates and active ACME state for every live preview host.
+// Production measured 710 MiB anonymous RSS immediately before a 768 MiB cgroup OOM severed an
+// in-flight verifier connection. One GiB is the next bounded container tier (about 31% headroom),
+// not an unbounded host allocation; memory-swap remains equal so the proxy cannot spill to swap.
+export function caddyRuntimeArgs(env = process.env) {
+  const memory = String(env.CADDY_MEMORY_LIMIT || "1g").trim().toLowerCase();
+  if (!/^\d+(?:\.\d+)?[kmgt]?b?$/.test(memory)) {
+    throw new Error("CADDY_MEMORY_LIMIT must be a Docker memory value such as 1024m or 1g");
+  }
+  return ["--memory", memory, "--memory-swap", memory, "--restart", "unless-stopped"];
+}
+
 // Per-container isolation hardening — copied verbatim from the proven spike.
 const HARDENING = [
   "--cap-drop", "ALL",
@@ -80,11 +92,17 @@ export async function ensureCaddy(opts) {
   const running = await docker(["ps", "--filter", `name=^${CADDY_NAME}$`, "--format", "{{.Names}}"]);
   if (running === CADDY_NAME) {
     const cur = await docker(["inspect", "-f", '{{ index .Config.Labels "buildr.scheme" }}', CADDY_NAME], { ok: true });
-    if (cur === scheme) return; // right front already up
+    if (cur === scheme) {
+      // Resource updates are live and do not restart Caddy. Reconcile here because three
+      // provisioner services share this front and whichever starts first may have created it.
+      await docker(["update", ...caddyRuntimeArgs(), CADDY_NAME]);
+      return;
+    }
   }
   await docker(["rm", "-f", CADDY_NAME], { ok: true });
   // Static --ip on the proxy net so the Caddyfile can `bind` its listener to this address only.
-  const args = ["run", "-d", "--name", CADDY_NAME, "--label", `buildr.scheme=${scheme}`, "--network", PROXY_NET, "--ip", CADDY_PROXY_IP];
+  const args = ["run", "-d", "--name", CADDY_NAME, "--label", `buildr.scheme=${scheme}`,
+    "--network", PROXY_NET, "--ip", CADDY_PROXY_IP, ...caddyRuntimeArgs()];
   for (const p of publish) args.push("-p", p);
   for (const [k, v] of Object.entries(env)) args.push("-e", `${k}=${v}`);
   // Persist Caddy's /data (issued certs + ACME account) across recreations so we don't re-issue the
@@ -161,14 +179,65 @@ export async function listPreviewContainers({ all = false } = {}) {
   return out ? out.split("\n").filter(Boolean) : [];
 }
 
-// Boot orphan cleanup: remove labelled preview networks that have no container attached (left behind
-// if a provision crashed between net-create and container-create). Never touches live containers/nets.
+export function stoppedPreviewLabelsToPrune(entries = [], { olderThanMs, retain, now }) {
+  const stopped = [...entries].sort((left, right) => right.finishedMs - left.finishedMs);
+  return stopped.filter((entry, index) => {
+    const expired = entry.finishedMs === 0 || now - entry.finishedMs > olderThanMs;
+    return expired || index >= Math.max(0, retain);
+  }).map((entry) => entry.label);
+}
+
+// Docker reports a freshly created container as `created` until `docker start` completes. The
+// periodic capacity sweep can overlap that short provisioning window, so only a genuinely stopped
+// (`exited`) preview belongs in the retention cache. Treating every non-running state as stopped
+// lets the sweep delete a new container while its provision request is still starting it.
+export const isPrunableStoppedPreviewState = (state) => state === "exited";
+
+/**
+ * Bound the stopped-preview cache so per-project bridge networks cannot exhaust Docker's address
+ * pools. Running previews are never touched. Older entries are disposable source/dependency caches
+ * and can be recreated by the normal provision path.
+ */
+export async function pruneStoppedPreviews({ olderThanMs = 6 * 60 * 60_000, retain = 8,
+  now = Date.now() } = {}) {
+  const labels = await listPreviewContainers({ all: true });
+  const stopped = [];
+  for (const label of labels) {
+    const raw = await docker(["inspect", "-f", "{{.State.Status}}\t{{.State.FinishedAt}}", label], { ok: true });
+    const [state, finishedAt] = raw.split("\t");
+    if (!isPrunableStoppedPreviewState(state)) continue;
+    const finishedMs = Date.parse(finishedAt);
+    stopped.push({ label, finishedMs: Number.isFinite(finishedMs) ? finishedMs : 0 });
+  }
+  const targets = stoppedPreviewLabelsToPrune(stopped, { olderThanMs, retain, now });
+  const removed = [];
+  for (const label of targets) {
+    if (await destroy(label)) removed.push(label);
+  }
+  return removed;
+}
+
+// Boot/maintenance orphan cleanup. Caddy may still be the sole endpoint after a provision or
+// preflight crashes; that proxy-only endpoint must not keep the subnet allocated forever.
 export async function removeDanglingNets() {
   const nets = await docker(["network", "ls", "--filter", "label=buildr.preview=1", "--format", "{{.Name}}"]);
+  const previewContainers = new Set(await listPreviewContainers({ all: true }));
   const removed = [];
   for (const n of (nets ? nets.split("\n").filter(Boolean) : [])) {
-    const attached = await docker(["network", "inspect", "-f", "{{len .Containers}}", n], { ok: true });
-    if (attached === "0") { await docker(["network", "rm", n], { ok: true }); removed.push(n); }
+    const expectedContainer = n.endsWith("-net") ? n.slice(0, -4) : null;
+    if (expectedContainer && previewContainers.has(expectedContainer)) continue;
+    const raw = await docker(["network", "inspect", n], { ok: true });
+    let containers = [];
+    try {
+      const inspected = JSON.parse(raw);
+      containers = Object.values(inspected?.[0]?.Containers || {}).map((entry) => entry?.Name).filter(Boolean);
+    } catch { continue; }
+    if (containers.some((name) => name !== CADDY_NAME)) continue;
+    if (containers.includes(CADDY_NAME)) {
+      await docker(["network", "disconnect", "-f", n, CADDY_NAME], { ok: true });
+    }
+    await docker(["network", "rm", n], { ok: true });
+    removed.push(n);
   }
   return removed;
 }

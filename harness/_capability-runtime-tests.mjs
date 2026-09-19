@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { auditCapabilityTree } from "../shell/server/lib/capabilityAudit.mjs";
-import { buildMetaTargeting, normalizeMetaPublishAt, openAiCostGbp, safeRuntimeFetch } from "../shell/server/lib/capabilityRuntime.mjs";
-import { CAPABILITY_PRESETS } from "../shell/server/lib/capabilities.mjs";
+import {
+  RUNTIME_CAPABILITY_OPERATIONS, buildMetaTargeting, normalizeMetaPublishAt, openAiCostGbp, safeRuntimeFetch,
+} from "../shell/server/lib/capabilityRuntime.mjs";
 
-const migration = await readFile(new URL("../supabase/migrations/20260721224922_capability_runtime.sql", import.meta.url), "utf8");
+const migration = await readFile(new URL("../supabase/migration-history-archive/pre-authoritative-reconstruction-2026-08-06/20260721224922_capability_runtime.sql", import.meta.url), "utf8");
 for (const name of ["project_actions", "app_jobs", "runtime_usage", "app_usage_ledger", "action_schedules", "knowledge_bases", "knowledge_documents", "knowledge_chunks"]) {
   assert.match(migration, new RegExp(`create table if not exists public\\.${name}`));
   assert.match(migration, new RegExp(`alter table public\\.${name} enable row level security`));
@@ -16,10 +17,15 @@ for (const fn of ["reserve_runtime_credits", "settle_runtime_credits", "reserve_
 assert.match(migration, /runtime-assets/);
 assert.match(migration, /revoke all on public\.project_actions/);
 
-const presetIds = new Set(CAPABILITY_PRESETS.map((item) => item.id));
-for (const id of ["ai_text", "ai_image", "replicate_video", "media_finish", "pdf_extract", "pdf_merge", "archive", "meta_accounts", "meta_page_post", "meta_create_ad", "knowledge_ingest", "safe_http"]) {
-  assert.ok(presetIds.has(id), `missing capability preset ${id}`);
-}
+assert.deepEqual(RUNTIME_CAPABILITY_OPERATIONS, {
+  openai: ["text", "structured", "image", "embeddings"],
+  replicate: ["prediction"],
+  http: ["request"],
+  media: ["compose", "image_convert"],
+  document: ["pdf_extract", "pdf_merge", "archive"],
+  knowledge: ["ingest", "search"],
+  meta: ["accounts", "page_post", "create_ad"],
+});
 
 const safe = auditCapabilityTree({ "src/App.jsx": "await actions.invoke('ai_text', { prompt })" }, [{ key: "ai_text" }]);
 assert.equal(safe.ok, true);
@@ -44,7 +50,7 @@ const runtimeEnv = await readFile(new URL("../shell/server/lib/runtimeEnv.mjs", 
 assert.match(runtimeEnv, /src\/lib\/backend\/supabaseBackend\.js/);
 assert.match(runtimeEnv, /VITE_CONNECTORS_URL/);
 
-const metaMigration = await readFile(new URL("../supabase/migrations/20260722091357_meta_publishing_connectors.sql", import.meta.url), "utf8");
+const metaMigration = await readFile(new URL("../supabase/migration-history-archive/pre-authoritative-reconstruction-2026-08-06/20260722091357_meta_publishing_connectors.sql", import.meta.url), "utf8");
 for (const name of ["app_user_integrations", "app_connector_oauth_states"]) {
   assert.match(metaMigration, new RegExp(`create table if not exists public\\.${name}`));
   assert.match(metaMigration, new RegExp(`alter table public\\.${name} enable row level security`));

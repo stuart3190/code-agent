@@ -1,0 +1,214 @@
+{
+  "id": "92361522-3e3b-4825-a287-e064e0e16622",
+  "owner": "7fc93b1e-7dc6-48c0-ae05-38ce4ee3050f",
+  "project_id": "de17a679-ec4b-4f13-86c9-a55d8c169d40",
+  "build_id": "5ee9a5ef-fdf5-4e14-83ed-36c7fc0cad39",
+  "version": 2,
+  "contract_hash": "cb01f1f197da73aec2fdebb355d570185a18b8a9857fcfa1b031c3cf9f883801",
+  "complexity_band": "complex_interactive",
+  "envelope": {
+    "stages": [
+      {
+        "id": "contract",
+        "required": true,
+        "dependencyIds": [],
+        "fundingSource": "customer_generation",
+        "estimatedCredits": 1.23,
+        "estimatedDurationMs": 105000,
+        "estimatedInputTokens": 6600,
+        "estimatedOutputTokens": 4800
+      },
+      {
+        "id": "capability_preflight",
+        "required": true,
+        "dependencyIds": [
+          "contract"
+        ],
+        "fundingSource": "platform",
+        "estimatedCredits": 0,
+        "estimatedDurationMs": 45000,
+        "estimatedInputTokens": 0,
+        "estimatedOutputTokens": 0
+      },
+      {
+        "id": "core_generation",
+        "required": true,
+        "dependencyIds": [
+          "capability_preflight"
+        ],
+        "fundingSource": "customer_generation",
+        "estimatedCredits": 5.39,
+        "estimatedDurationMs": 314000,
+        "estimatedInputTokens": 20840,
+        "estimatedOutputTokens": 15200
+      },
+      {
+        "id": "journey_generation:browse-library-route",
+        "required": true,
+        "dependencyIds": [
+          "core_generation"
+        ],
+        "fundingSource": "customer_generation",
+        "estimatedCredits": 0.47,
+        "estimatedDurationMs": 51000,
+        "estimatedInputTokens": 2940,
+        "estimatedOutputTokens": 1860
+      },
+      {
+        "id": "journey_generation:export-and-print-summary",
+        "required": true,
+        "dependencyIds": [
+          "core_generation"
+        ],
+        "fundingSource": "customer_generation",
+        "estimatedCredits": 0.53,
+        "estimatedDurationMs": 59000,
+        "estimatedInputTokens": 3160,
+        "estimatedOutputTokens": 2040
+      },
+      {
+        "id": "journey_generation:view-settings-route",
+        "required": true,
+        "dependencyIds": [
+          "core_generation"
+        ],
+        "fundingSource": "customer_generation",
+        "estimatedCredits": 0.47,
+        "estimatedDurationMs": 51000,
+        "estimatedInputTokens": 2940,
+        "estimatedOutputTokens": 1860
+      },
+      {
+        "id": "compile",
+        "required": true,
+        "dependencyIds": [
+          "journey_generation:browse-library-route",
+          "journey_generation:export-and-print-summary",
+          "journey_generation:view-settings-route"
+        ],
+        "fundingSource": "platform",
+        "estimatedCredits": 0,
+        "estimatedDurationMs": 97000,
+        "estimatedInputTokens": 0,
+        "estimatedOutputTokens": 0
+      },
+      {
+        "id": "fresh_browser_verification",
+        "required": true,
+        "dependencyIds": [
+          "compile"
+        ],
+        "fundingSource": "platform",
+        "estimatedCredits": 0,
+        "estimatedDurationMs": 570000,
+        "estimatedInputTokens": 0,
+        "estimatedOutputTokens": 0
+      },
+      {
+        "id": "promotion_projection",
+        "required": true,
+        "dependencyIds": [
+          "fresh_browser_verification"
+        ],
+        "fundingSource": "platform",
+        "estimatedCredits": 0,
+        "estimatedDurationMs": 30000,
+        "estimatedInputTokens": 0,
+        "estimatedOutputTokens": 0
+      }
+    ],
+    "version": 2,
+    "execution": {
+      "startedAt": "2026-09-16T10:42:47.612Z",
+      "expectedCalls": 10,
+      "expectedDurationMs": 1597000,
+      "hardSafetyDurationMs": 4791000,
+      "softTargetDurationMs": null,
+      "expectedBrowserPasses": 6,
+      "lastDurableProgressAt": "2026-09-16T10:42:47.612Z"
+    },
+    "contractHash": "cb01f1f197da73aec2fdebb355d570185a18b8a9857fcfa1b031c3cf9f883801",
+    "complexityBand": "complex_interactive",
+    "thralloRecovery": {
+      "heldCredits": 0,
+      "approvedCredits": 174.29,
+      "consumedCredits": 0,
+      "strategyCapacity": 20,
+      "strategyCostPlan": [
+        {
+          "id": "contract_protocol_correction",
+          "basis": {
+            "journeys": 6
+          },
+          "estimatedCredits": 1.23
+        },
+        {
+          "id": "deterministic_patch_correction",
+          "basis": {
+            "modules": 13
+          },
+          "estimatedCredits": 2.86
+        },
+        {
+          "id": "exact_owning_file_repair",
+          "basis": {
+            "steps": 25,
+            "journeys": 6
+          },
+          "estimatedCredits": 5.65
+        },
+        {
+          "id": "causal_dependency_repair",
+          "basis": {
+            "owningModules": 0
+          },
+          "estimatedCredits": 0.8
+        },
+        {
+          "id": "owner_module_regeneration",
+          "basis": {
+            "uniqueOwnerModules": 0
+          },
+          "estimatedCredits": 1
+        }
+      ],
+      "exceptionalApproval": null,
+      "fixedCorrectionCredits": 4.09,
+      "repairRoundCreditAllowance": 8.51
+    },
+    "approvalRequired": false,
+    "customerGeneration": {
+      "heldCredits": 0,
+      "plannedCredits": 8.09,
+      "approvedCredits": 60,
+      "consumedCredits": 0,
+      "remainingRequiredCredits": 8.09
+    },
+    "runtimeRequirements": {
+      "accounts": true,
+      "durableMutation": true
+    },
+    "recoveryProviderPolicy": {
+      "resolvedAt": "2026-09-16T10:38:05.496Z",
+      "selectedBy": "thrallo_recovery_authority",
+      "billingLane": "connected_allowance",
+      "fundingSource": "thrallo",
+      "managedFallback": false,
+      "primaryProvider": "codex",
+      "executionAuthority": "platform_connected_codex",
+      "usageResponsibility": "thrallo_repair",
+      "allowManagedFallback": false,
+      "recoveryPolicyVersion": "owner_connected_recovery_v1",
+      "allowedFallbackProviders": []
+    },
+    "generationProviderPolicy": {
+      "resolvedAt": "2026-09-16T10:38:05.326Z",
+      "selectedBy": "active_connection",
+      "billingLane": "connected_allowance",
+      "primaryProvider": "codex",
+      "allowManagedFallback": false,
+      "allowedFallbackProviders": []
+    }
+  },
+  "created_at": "2026-09-16T10:42:47.709739+00:00"
+}

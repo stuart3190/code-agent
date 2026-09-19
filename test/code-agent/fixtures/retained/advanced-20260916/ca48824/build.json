@@ -1,0 +1,39 @@
+{
+  "id": "328664d6-d96b-4e72-9dee-698dbcd0c5ef",
+  "owner": "7fc93b1e-7dc6-48c0-ae05-38ce4ee3050f",
+  "project_id": "038bd70b-b961-41f4-9223-ec543360c6d2",
+  "profile": "advanced",
+  "request": "Build an interactive SVG floor-planning workspace for Lumen Layouts. Users sign in,\ncreate and name plans, pan and zoom the canvas, drag fixtures from a library, select fixtures, edit\nposition, rotation, and brightness in an inspector, undo and redo changes, switch plans, save and\nreload durable state, export a plan summary, and print it. Include accessible keyboard alternatives\nfor canvas actions and separate workspace, library, reports, and settings routes. Use platform\nauthentication and durable capabilities.\n\nQualification instance 1; create a fresh implementation.",
+  "state": "blocked",
+  "budget_credits": 60,
+  "spent_credits": 79.19822,
+  "contract_id": "9f805991-c15c-41c8-9b61-d6e88f9b155e",
+  "final_snapshot": null,
+  "error": "required contracted journeys remain red: required journey create-edit-save-plan is fail; required journey keyboard-canvas-actions is undriveable; required journey undo-redo-fixture-change is undriveable; required journey switch-between-plans is undriveable; required journey settings-and-sign-out-boundary is undriveable; required backend-row check failed (undo-redo-fixture-change); required backend-row check failed (switch-between-plans); required backend-row check failed (settings-and-sign-out-boundary)",
+  "started_at": "2026-09-16T12:45:31.836+00:00",
+  "finished_at": "2026-09-16T13:16:12.139+00:00",
+  "project_id_text": "038bd70b-b961-41f4-9223-ec543360c6d2",
+  "max_repair_dispatches": 1000,
+  "envelope_version": 2,
+  "customer_state": "failed",
+  "spent_breakdown": {
+    "thrallo_recovery:thrallo_repair:connected_allowance": 70.98452,
+    "customer_generation:customer_request:connected_allowance": 8.2137
+  },
+  "failure": {
+    "code": "contracted_journeys_red",
+    "action": "stop",
+    "retryable": false,
+    "checkpointId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+    "classification": "generated_app",
+    "internalDetail": "required contracted journeys remain red: required journey create-edit-save-plan is fail; required journey keyboard-canvas-actions is undriveable; required journey undo-redo-fixture-change is undriveable; required journey switch-between-plans is undriveable; required journey settings-and-sign-out-boundary is undriveable; required backend-row check failed (undo-redo-fixture-change); required backend-row check failed (switch-between-plans); required backend-row check failed (settings-and-sign-out-boundary) [contracted_journeys_red]",
+    "providerCallMade": null,
+    "reservationState": "not_created",
+    "customerMessageKey": "build_checking_repairs",
+    "customerActionRequired": false
+  },
+  "last_durable_progress_at": "2026-09-16T12:58:16.128+00:00",
+  "expected_duration_ms": 1678000,
+  "hard_safety_duration_ms": 5034000,
+  "verifier_policy": "minimal_contract_v1"
+}

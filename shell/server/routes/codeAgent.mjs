@@ -17,7 +17,9 @@ import {
   retrieveRepositoryMap,
 } from "../lib/repositoryIndexer.mjs";
 import { requestRepositoryRefresh } from "../lib/repositoryIndexService.mjs";
-import { assertRunWithinBudget, assertWithinRateLimits, budgetOverview } from "../lib/usageBudgets.mjs";
+import {
+  assertRunWithinBudget, assertWithinRateLimits, budgetOverview, repositoryRunBudgetProvider,
+} from "../lib/usageBudgets.mjs";
 import { activeAiProviderName } from "../lib/aiCredentialStore.mjs";
 import { listPullRequests } from "../lib/githubApp.mjs";
 import { completeCode, parseCompletionInput } from "../lib/completions.mjs";
@@ -26,7 +28,7 @@ async function assertBudgetAllowsRun(ownerId) {
   const credentialProvider = await activeAiProviderName(ownerId).catch(() => "managed");
   try {
     await assertWithinRateLimits(ownerId);
-    await assertRunWithinBudget(ownerId, { credentialProvider });
+    await assertRunWithinBudget(ownerId, { credentialProvider: repositoryRunBudgetProvider(credentialProvider) });
   } catch (error) {
     throw new CodeAgentInputError(error.message, error.status || 402, error.code || "budget_exceeded");
   }

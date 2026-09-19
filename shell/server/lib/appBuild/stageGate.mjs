@@ -12,8 +12,10 @@
 import { preflightImports, preflightSummary } from "./importPreflight.mjs";
 import { honestyScan } from "./honestyScan.mjs";
 import { transformPersistence, transformSummary } from "./persistenceTransform.mjs";
+import { transformWizardEntryState, wizardEntryTransformSummary } from "./wizardEntryTransform.mjs";
 import { expectationKeywords } from "./journeyVerifier.mjs";
 import { modularityCheck, modularitySummary } from "./modularity.mjs";
+import { validateDependencyPlan } from "../builderV2/dependencyPlan.mjs";
 
 // Files the generated app must not lose or corrupt. A stage that deletes vite.config.js compiles
 // nothing afterwards, and the resulting error names a missing module rather than the real cause.
@@ -48,6 +50,19 @@ export function validateBuildConfig(tree, { baseline = null } = {}) {
     if (!manifest.scripts?.build) problems.push("package.json has no build script");
     if (manifest.type && manifest.type !== "module") {
       problems.push(`package.json sets "type": "${manifest.type}" — the scaffold is ESM`);
+    }
+  }
+
+  if (manifest && baseline?.["package.json"]) {
+    let baselineManifest = null;
+    try { baselineManifest = JSON.parse(baseline["package.json"]); } catch {}
+    for (const section of ["dependencies", "devDependencies"]) {
+      const installed = baselineManifest?.[section] || {};
+      for (const [name, version] of Object.entries(manifest?.[section] || {})) {
+        if (installed[name] === version) continue;
+        problems.push(`package.json requests ${name}@${version}, but the network-isolated compiler only `
+          + `contains ${installed[name] ? `${name}@${installed[name]}` : "the approved scaffold dependency catalogue"}`);
+      }
     }
   }
 
@@ -95,14 +110,16 @@ export function validateBuildConfig(tree, { baseline = null } = {}) {
  */
 export async function runStageGate(tree, {
   nodeModules, baseline = null, compile = null, log = () => {},
-  contract = null, stage = null, previousGreen = null,
+  contract = null, stage = null, previousGreen = null, expectationsAdvisory = false,
 } = {}) {
   const checks = [];
+  const advisory = [];
   const record = (name, ok, detail) => { checks.push({ name, ok, detail }); return ok; };
 
   // 1. imports — milliseconds, and the fault class that cost a whole build in production.
   let working = tree;
   let corrections = [];
+  let deterministicRepair = null;
   try {
     const preflight = await preflightImports(tree, { nodeModules });
     corrections = preflight.corrections;
@@ -112,6 +129,7 @@ export async function runStageGate(tree, {
       return {
         ok: false, checks, tree: working, corrections,
         problems: preflight.problems.map((p) => p.message),
+        failure: { kind: "imports", findings: preflight.problems },
       };
     }
   } catch (error) {
@@ -122,7 +140,34 @@ export async function runStageGate(tree, {
   // 2. build configuration — also cheap, and produces a far clearer message than the compiler will.
   const config = validateBuildConfig(working, { baseline });
   if (!record("config", config.ok, config.ok ? "intact" : config.problems.join("; "))) {
-    return { ok: false, checks, tree: working, corrections, problems: config.problems };
+    return { ok: false, checks, tree: working, corrections, problems: config.problems,
+      failure: { kind: "config", findings: config.problems.map((message) => ({ file: "package.json", message })) } };
+  }
+
+  if (contract?.dependencyPlan) {
+    const dependencies = validateDependencyPlan(working, contract.dependencyPlan);
+    if (!record("dependencies", dependencies.ok,
+      dependencies.ok ? "approved runtime capabilities present" : `${dependencies.problems.length} runtime dependency problem(s)`)) {
+      return { ok: false, checks, tree: working, corrections,
+        problems: dependencies.problems.map((finding) => finding.message),
+        failure: { kind: "runtime_dependency", findings: dependencies.problems } };
+    }
+  }
+
+  // A generated component can correctly bind a contracted Start control and still make it
+  // unreachable by comparing the live wizard state with a step the machine never declares. That
+  // is a cross-file compiler invariant, not a browser judgement. Align it locally when (and only
+  // when) the concrete machine, control, guard and static first step all resolve unambiguously.
+  if (contract?.interactionContract?.flows?.some((flow) => flow.kind === "flow_start")) {
+    const aligned = transformWizardEntryState(working, { contract });
+    if (aligned.changes.length) {
+      working = aligned.tree;
+      deterministicRepair = {
+        applied: aligned.changes,
+        summary: `wizard entry aligned with no model call: ${wizardEntryTransformSummary(aligned)}`,
+      };
+      log(`stage-gate: deterministic transform — ${deterministicRepair.summary}`);
+    }
   }
 
   // 2b. modularity — static and instant. The monolith shape (one App.jsx owning every journey)
@@ -133,28 +178,17 @@ export async function runStageGate(tree, {
     const modular = modularityCheck(working, { contract, previousGreen });
     for (const flag of modular.flags) log(`stage-gate: modularity exception — ${flag}`);
     if (!record("modularity", modular.ok, modular.ok ? modularitySummary(modular) : `${modular.problems.length} structural problem(s)`)) {
-      return { ok: false, checks, tree: working, corrections, problems: modular.problems };
+      return { ok: false, checks, tree: working, corrections, problems: modular.problems,
+        failure: { kind: "modularity", findings: modular.problems.map((message) => ({ message })) } };
     }
   }
 
-  // 3. the compiler — the expensive one, last.
-  if (compile) {
-    const built = await compile(working);
-    if (!record("compile", !!built.ok, built.ok ? "passed" : "failed")) {
-      return {
-        ok: false, checks, tree: working, corrections,
-        problems: ["the project does not compile"],
-        stderr: built.stderr || "",
-      };
-    }
-  }
-
-  // 4. honesty, IN the stage that created the defect. The 24.26-credit booking build wrote
+  // 3. honesty, IN the stage that created the defect and BEFORE compilation. The 24.26-credit
+  // booking build wrote
   // localStorage persistence in its data stage and heard about it twenty minutes later, at final
   // verification, when the budget left no room to fix it. The scan costs milliseconds; the safe
   // deterministic transforms cost nothing; and a defect the transform cannot fix feeds the CHEAP
   // in-stage repair (scoped context, two attempts) instead of a whole-build repair round.
-  let deterministicRepair = null;
   if (contract) {
     let scan = honestyScan(working, { contract, stageScoped: true });
     if (scan.findings.length) {
@@ -162,19 +196,13 @@ export async function runStageGate(tree, {
       if (fixed.fixed.length) {
         const rescanned = honestyScan(fixed.tree, { contract, stageScoped: true });
         if (rescanned.findings.length < scan.findings.length) {
-          // Adopt the transform — and the compile must still pass on the transformed tree.
-          if (compile) {
-            const rebuilt = await compile(fixed.tree);
-            if (!rebuilt.ok) {
-              return {
-                ok: false, checks, tree: working, corrections,
-                problems: ["the deterministic persistence transform broke the build", ...(scan.findings.map((f) => f.message))],
-                stderr: rebuilt.stderr || "",
-              };
-            }
-          }
+          // Adopt the transform. The single compiler pass below validates the transformed tree.
           working = { ...fixed.tree };
-          deterministicRepair = { applied: fixed.fixed, summary: transformSummary(fixed) };
+          const persistenceRepair = { applied: fixed.fixed, summary: transformSummary(fixed) };
+          deterministicRepair = deterministicRepair
+            ? { applied: [...deterministicRepair.applied, ...persistenceRepair.applied],
+              summary: `${deterministicRepair.summary}; ${persistenceRepair.summary}` }
+            : persistenceRepair;
           scan = rescanned;
           log(`stage-gate: deterministic transform — ${deterministicRepair.summary}`);
         }
@@ -185,11 +213,12 @@ export async function runStageGate(tree, {
       return {
         ok: false, checks, tree: working, corrections, deterministicRepair,
         problems: scan.findings.map((f) => f.message),
+        failure: { kind: "honesty", findings: scan.findings },
       };
     }
   }
 
-  // 5. expectation presence — only for the stage that owns journeys, and only the strong signal.
+  // 4. expectation presence — only for the stage that owns journeys, and only the strong signal.
   // If NONE of a step's verifier keywords appear anywhere in the app's rendered source, the
   // outcome was never built; the verifier will fail it later at fifty times the price. A partial
   // match proves nothing either way and is deliberately not checked.
@@ -207,13 +236,37 @@ export async function runStageGate(tree, {
         }
       }
     }
-    if (!record("expectations", absent.length === 0,
-      absent.length ? `${absent.length} outcome(s) with no trace in the UI` : "all step outcomes have some trace")) {
-      return { ok: false, checks, tree: working, corrections, deterministicRepair, problems: absent };
+    // Builder V2 treats this as ADVISORY. It is a lexical proxy for something the browser tests
+    // directly and better: the verifier drives the real page and decides whether the outcome
+    // appeared. Blocking here discarded candidates whose copy simply read differently — and cost
+    // a generation attempt to do it. V1 keeps the strict behaviour it was tuned against.
+    const passed = absent.length === 0;
+    record("expectations", passed || expectationsAdvisory,
+      passed ? "all step outcomes have some trace"
+        : `${absent.length} outcome(s) with no trace in the UI${expectationsAdvisory ? " (advisory)" : ""}`);
+    if (!passed) {
+      if (!expectationsAdvisory) {
+        return { ok: false, checks, tree: working, corrections, deterministicRepair, problems: absent,
+          failure: { kind: "expectations", findings: absent.map((message) => ({ message })) } };
+      }
+      advisory.push(...absent.map((message) => ({ code: "expectation_copy_absent", message })));
     }
   }
 
-  return { ok: true, checks, tree: working, corrections, deterministicRepair, problems: [] };
+  // 5. the compiler — the expensive check, strictly after every static/honesty verdict.
+  if (compile) {
+    const built = await compile(working);
+    if (!record("compile", !!built.ok, built.ok ? "passed" : "failed")) {
+      return {
+        ok: false, checks, tree: working, corrections, deterministicRepair,
+        problems: ["the project does not compile"],
+        stderr: built.stderr || "",
+        failure: { kind: "compile", findings: [], stderr: built.stderr || "" },
+      };
+    }
+  }
+
+  return { ok: true, checks, tree: working, corrections, deterministicRepair, problems: [], advisory };
 }
 
 /** One line for the diagnostics step and the job log. */

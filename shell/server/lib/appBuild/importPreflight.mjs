@@ -203,6 +203,64 @@ function applySubstitution(source, specifier, from, to) {
   ));
 }
 
+function importLocals(statement) {
+  return [
+    statement.default,
+    statement.namespace,
+    ...(statement.named || []).map((entry) => entry.local),
+  ].filter(Boolean);
+}
+
+function identifierAppearsOutsideImport(source, rawImport, identifier) {
+  const withoutImport = String(source).replace(rawImport, "");
+  const escaped = String(identifier).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^A-Za-z0-9_$])${escaped}(?![A-Za-z0-9_$])`).test(withoutImport);
+}
+
+function removeUnusedImport(source, rawImport) {
+  return String(source).replace(rawImport, "");
+}
+
+// ── the composed router ─────────────────────────────────────────────────────────────────────────
+// The composed scaffold owns the application router and ships its own primitives (RouteLink/Link,
+// NavLink, useRouteParams/useParams, useNavigate, useLocation, Navigate). react-router-dom is not
+// installed in the isolated compiler. A screen written against the ecosystem names is therefore
+// REWRITTEN to import them from the primitives module - deterministically, from the tree's own copy
+// of that module - and a screen that declares a nested router (Routes/Route/BrowserRouter/Outlet…)
+// is refused with the reason, because no substitution can make a second router correct.
+const ROUTER_PACKAGES = new Set(["react-router-dom", "react-router"]);
+const PRIMITIVES_MODULE = /(?:^|\/)lib\/scaffolds\/composed\/primitives\.jsx$/;
+
+export function composedRouterPrimitives(tree) {
+  const file = Object.keys(tree || {}).find((path) => PRIMITIVES_MODULE.test(path)
+    && /ScaffoldRouteContext/.test(String(tree[path] || "")));
+  if (!file) return null;
+  const source = String(tree[file]);
+  const exports = new Set();
+  for (const match of source.matchAll(/export\s+(?:async\s+)?(?:function|const|let|var|class)\s+([A-Za-z_$][\w$]*)/g)) exports.add(match[1]);
+  for (const match of source.matchAll(/export\s*\{([^}]*)\}/g)) {
+    for (const part of match[1].split(",")) {
+      const name = part.trim().split(/\s+as\s+/).at(-1)?.trim();
+      if (name && /^[A-Za-z_$][\w$]*$/.test(name)) exports.add(name);
+    }
+  }
+  return { path: file, exports };
+}
+
+function relativeSpecifier(fromFile, toFile) {
+  const from = String(fromFile).split("/").slice(0, -1);
+  const to = String(toFile).split("/");
+  while (from.length && to.length && from[0] === to[0]) { from.shift(); to.shift(); }
+  const specifier = `${"../".repeat(from.length)}${to.join("/")}`;
+  return specifier.startsWith(".") ? specifier : `./${specifier}`;
+}
+
+function rewriteImportSpecifier(source, rawImport, from, to) {
+  const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rewritten = rawImport.replace(new RegExp(`(["'])${escaped}\\1`), `$1${to}$1`);
+  return String(source).replace(rawImport, rewritten);
+}
+
 // ── the preflight ────────────────────────────────────────────────────────────────────────────
 /**
  * Check every import in the tree.
@@ -256,6 +314,34 @@ export async function preflightImports(tree, { nodeModules, autoCorrect = true }
         ? specifier.split("/").slice(0, 2).join("/")
         : specifier.split("/")[0];
       if (specifier.startsWith("node:")) continue;
+      if (ROUTER_PACKAGES.has(packageName)) {
+        const primitives = composedRouterPrimitives(working);
+        if (primitives) {
+          const unsupported = statement.default || statement.namespace
+            ? [statement.default ? `default import ${statement.default}` : `namespace import ${statement.namespace}`]
+            : named.map((entry) => entry.name).filter((name) => !primitives.exports.has(name));
+          if (!unsupported.length && named.length && autoCorrect) {
+            const to = relativeSpecifier(file, primitives.path);
+            edit(file, rewriteImportSpecifier(working[file] ?? tree[file], statement.raw, specifier, to));
+            corrections.push({
+              kind: "rewrote_router_import", file, line, specifier, package: packageName,
+              from: specifier, to, names: named.map((entry) => entry.name),
+              message: `${file}:${line} imported ${named.map((entry) => entry.name).join(", ")} from "${specifier}", which is not installed. `
+                + `Rewrote the import to the composed router primitives (${to}).`,
+            });
+            continue;
+          }
+          problems.push({
+            kind: "unsupported_router_import", file, line, specifier, package: packageName,
+            names: unsupported,
+            message: `${file}:${line} imports ${unsupported.join(", ")} from "${specifier}", which is not installed and has no `
+              + `equivalent in the composed router (${primitives.path}). The composed shell owns the router and already `
+              + "mounts every contracted route: use RouteLink/Link, NavLink, useRouteParams/useParams, useNavigate, "
+              + "useLocation or Navigate from that module, and never declare Routes, Route, a BrowserRouter or an Outlet inside a screen.",
+          });
+          continue;
+        }
+      }
       if (!declared.has(packageName)) {
         // Declared is not the same as resolvable. `vite.config.js` imports `vite` and
         // `@vitejs/plugin-react`, which live in the shared scaffold's node_modules and are
@@ -263,6 +349,19 @@ export async function preflightImports(tree, { nodeModules, autoCorrect = true }
         // build, which is the exact failure mode this preflight exists to prevent. The honest
         // question is whether the import RESOLVES, so ask node_modules before reporting.
         if (nodeModules && await isInstalled(packageName, nodeModules)) continue;
+        const locals = importLocals(statement);
+        if (autoCorrect && !statement.sideEffect && locals.length
+          && locals.every((local) => !identifierAppearsOutsideImport(
+            working[file] ?? tree[file], statement.raw, local,
+          ))) {
+          edit(file, removeUnusedImport(working[file] ?? tree[file], statement.raw));
+          corrections.push({
+            kind: "removed_unused_missing_dependency", file, line, specifier, package: packageName, locals,
+            from: specifier, to: "removed unused import",
+            message: `${file}:${line} imported only unused bindings from unavailable package "${packageName}". Removed the dead import.`,
+          });
+          continue;
+        }
         problems.push({
           kind: "missing_dependency", file, line, specifier, package: packageName,
           message: `${file}:${line} imports "${specifier}", but "${packageName}" is neither in package.json nor installed.`,
@@ -271,6 +370,16 @@ export async function preflightImports(tree, { nodeModules, autoCorrect = true }
       }
 
       // 3. named imports — only when the surface is KNOWN, and only for the package root.
+      // Declaring a package is not installing it. Production compilation is offline and links the
+      // fixed sandbox node_modules tree, so an arbitrary package.json edit cannot make a package
+      // available. Refuse the mismatch before entering the compiler.
+      if (nodeModules && !(await isInstalled(packageName, nodeModules))) {
+        problems.push({
+          kind: "dependency_not_installed", file, line, specifier, package: packageName,
+          message: `${file}:${line} imports "${specifier}" and declares "${packageName}", but that package is not installed in the isolated compiler.`,
+        });
+        continue;
+      }
       if (!named.length || specifier !== packageName || !nodeModules) continue;
       const surface = await exportSurface(packageName, { nodeModules });
       if (!surface) continue; // unreadable or CJS — unknown, so say nothing

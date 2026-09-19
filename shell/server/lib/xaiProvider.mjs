@@ -12,6 +12,8 @@
 // generated application.
 
 import { optionalEnv } from "./env.mjs";
+import { assertProviderModel } from "./modelCatalogue.mjs";
+import { DISPATCH_STATES, providerFailure } from "./providerOutcome.mjs";
 
 const XAI_BASE = () => optionalEnv("XAI_BASE_URL", "https://api.x.ai/v1");
 
@@ -22,9 +24,9 @@ const XAI_BASE = () => optionalEnv("XAI_BASE_URL", "https://api.x.ai/v1");
 export const XAI_MODELS = {
   "grok-4.5": {
     label: "Grok 4.5", tier: "quality",
-    contextLimit: 262_144, longContextThreshold: 128_000,
-    usdPerMInput: 3.0, usdPerMCachedInput: 0.75, usdPerMOutput: 15.0,
-    usdPerMInputLong: 6.0, usdPerMOutputLong: 30.0,
+    contextLimit: 500_000, longContextThreshold: 200_000,
+    usdPerMInput: 2.0, usdPerMCachedInput: 0.30, usdPerMOutput: 6.0,
+    usdPerMInputLong: 4.0, usdPerMCachedInputLong: 0.60, usdPerMOutputLong: 12.0,
     reasoning: true, tools: true, structuredOutputs: true,
     rateLimit: { rpm: 480, tpm: 2_000_000 },
   },
@@ -33,17 +35,17 @@ export const XAI_MODELS = {
   // guesses — and the adapter self-corrects anyway if an API disagrees.
   "grok-4.3": {
     label: "Grok 4.3", tier: "fast",
-    contextLimit: 131_072, longContextThreshold: 128_000,
-    usdPerMInput: 0.6, usdPerMCachedInput: 0.15, usdPerMOutput: 2.4,
-    usdPerMInputLong: 1.2, usdPerMOutputLong: 4.8,
+    contextLimit: 1_000_000, longContextThreshold: 200_000,
+    usdPerMInput: 1.25, usdPerMCachedInput: 0.20, usdPerMOutput: 2.50,
+    usdPerMInputLong: 2.50, usdPerMCachedInputLong: 0.40, usdPerMOutputLong: 5.0,
     reasoning: true, tools: true, structuredOutputs: true,
     rateLimit: { rpm: 600, tpm: 4_000_000 },
   },
   "grok-build-0.1": {
     label: "Grok Build 0.1 (coding preview)", tier: "balanced",
-    contextLimit: 262_144, longContextThreshold: 128_000,
-    usdPerMInput: 1.2, usdPerMCachedInput: 0.3, usdPerMOutput: 6.0,
-    usdPerMInputLong: 2.4, usdPerMOutputLong: 12.0,
+    contextLimit: 256_000, longContextThreshold: 200_000,
+    usdPerMInput: 1.0, usdPerMCachedInput: 0.20, usdPerMOutput: 2.0,
+    usdPerMInputLong: 2.0, usdPerMCachedInputLong: 0.40, usdPerMOutputLong: 4.0,
     // Probed: this model REJECTS the reasoning parameter (400 invalid-argument).
     reasoning: false, tools: true, structuredOutputs: true,
     rateLimit: { rpm: 300, tpm: 1_000_000 },
@@ -91,7 +93,7 @@ export function xaiCostForUsage({ model, inputTokens = 0, cachedTokens = 0, outp
   const long = inputTokens > meta.longContextThreshold;
   const freshInput = Math.max(inputTokens - cachedTokens, 0);
   const usd = (freshInput / 1e6) * (long ? meta.usdPerMInputLong : meta.usdPerMInput)
-    + (cachedTokens / 1e6) * meta.usdPerMCachedInput
+    + (cachedTokens / 1e6) * (long ? (meta.usdPerMCachedInputLong || meta.usdPerMCachedInput) : meta.usdPerMCachedInput)
     + (outputTokens / 1e6) * (long ? meta.usdPerMOutputLong : meta.usdPerMOutput);
   const usdGbp = Number(optionalEnv("USD_GBP_RATE", "0.79"));
   return { usd: Number(usd.toFixed(6)), gbp: Number((usd * usdGbp).toFixed(6)), longContext: long };
@@ -170,7 +172,9 @@ export function normalizeXaiError(payload, status) {
   return error;
 }
 
-const RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+// Only explicit HTTP rejections that guarantee no provider work may retry inside the adapter.
+// Ambiguous 5xx responses and transport timeouts must return to the reservation-aware caller.
+const RETRYABLE_STATUS = new Set([408, 409, 425, 429]);
 
 // ── Shared transport: one POST to /responses with retries, timeout, cancellation ────────
 
@@ -180,7 +184,8 @@ function unsupportedParameter(error) {
   return /does not support parameter\s+(\w+)/i.exec(String(error?.message || ""))?.[1] || null;
 }
 
-async function xaiResponsesCall({ apiKey, body, fetchImpl, signal, timeoutMs, maxRetries }) {
+async function xaiResponsesCall({ apiKey, body, fetchImpl, signal, timeoutMs, maxRetries,
+  allowParameterRetry = true }) {
   let lastError;
   let retries = 0;
   if (body?.model && NO_REASONING.has(body.model)) delete body.reasoning;
@@ -201,10 +206,11 @@ async function xaiResponsesCall({ apiKey, body, fetchImpl, signal, timeoutMs, ma
       });
       if (!response.ok) {
         const error = normalizeXaiError(await safeJson(response), response.status);
+        error.providerRequestId = response.headers?.get?.("x-request-id") || null;
         // Self-correcting capability discovery: strip the rejected parameter and retry
         // immediately (this attempt doesn't count against the retry budget).
         const unsupported = unsupportedParameter(error);
-        if (unsupported && unsupported in body) {
+        if (allowParameterRetry && unsupported && unsupported in body) {
           if (unsupported === "reasoning" && body.model) NO_REASONING.add(body.model);
           delete body[unsupported];
           attempt -= 1;
@@ -216,7 +222,8 @@ async function xaiResponsesCall({ apiKey, body, fetchImpl, signal, timeoutMs, ma
           await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
           continue;
         }
-        throw error;
+        throw providerFailure(error, { state: response.status < 500 ? DISPATCH_STATES.rejected : DISPATCH_STATES.ambiguous,
+          providerRequestId: error.providerRequestId, retrySafe: [408, 409, 425, 429].includes(response.status) });
       }
       const payload = await response.json();
       return { payload, retries };
@@ -224,14 +231,13 @@ async function xaiResponsesCall({ apiKey, body, fetchImpl, signal, timeoutMs, ma
       if (error.code === "xai_cancelled" || signal?.aborted) {
         const cancelled = new Error("xAI request cancelled.");
         cancelled.code = "xai_cancelled";
-        throw cancelled;
+        throw providerFailure(cancelled, { state: DISPATCH_STATES.ambiguous });
       }
       if (error.name === "TimeoutError" || error.name === "AbortError") {
         const timeoutError = new Error("xAI request timed out.");
         timeoutError.code = "xai_timeout";
         timeoutError.status = 408;
-        if (attempt < maxRetries) { lastError = timeoutError; retries += 1; continue; }
-        throw timeoutError;
+        throw providerFailure(timeoutError, { state: DISPATCH_STATES.ambiguous });
       }
       if (error.status && RETRYABLE_STATUS.has(error.status) && attempt < maxRetries) {
         lastError = error;
@@ -239,7 +245,8 @@ async function xaiResponsesCall({ apiKey, body, fetchImpl, signal, timeoutMs, ma
         await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
         continue;
       }
-      throw error;
+      throw providerFailure(error, { state: error?.dispatchState || DISPATCH_STATES.ambiguous,
+        providerRequestId: error?.providerRequestId || null, usage: error?.usage || null });
     }
   }
   throw lastError;
@@ -277,19 +284,24 @@ export function createXaiProvider({
     error.code = "xai_not_configured";
     throw error;
   }
+  const executableModel = assertProviderModel({ provider: "xai", model }).model;
   const effort = reasoningEffort || xaiPolicy().defaultReasoning;
   return {
     provider: "xai",
-    model,
-    async turn({ instructions, input, tools, safetyIdentifier }) {
+    model: executableModel,
+    async turn({ instructions, input, tools, safetyIdentifier, maxOutputTokens = null,
+      maxProviderRetries = maxRetries, allowParameterRetry = true }) {
       void safetyIdentifier; // xAI has no safety-identifier field; never forward user ids
       const { payload, retries } = await xaiResponsesCall({
-        apiKey: key, fetchImpl, signal, timeoutMs, maxRetries,
+        apiKey: key, fetchImpl, signal, timeoutMs,
+        maxRetries: Math.max(0, Math.min(maxRetries, Number(maxProviderRetries) || 0)),
+        allowParameterRetry,
         body: {
-          model, instructions, input, tools,
-          ...(supportsReasoning(model) ? { reasoning: { effort } } : {}),
+          model: executableModel, instructions, input, tools,
+          ...(supportsReasoning(executableModel) ? { reasoning: { effort } } : {}),
           parallel_tool_calls: false,
           store: false,
+          ...(maxOutputTokens ? { max_output_tokens: Math.max(1, Math.floor(maxOutputTokens)) } : {}),
         },
       });
       return {
@@ -329,22 +341,27 @@ export function createXaiEngineProvider({
 } = {}) {
   const key = apiKey || optionalEnv("XAI_API_KEY");
   if (!key) throw new Error("An xAI API key is required for Grok builds.");
+  const executableModel = assertProviderModel({ provider: "xai", model }).model;
   const effort = reasoningEffort || xaiPolicy().defaultReasoning;
   const maxRetries = xaiPolicy().maxRetries;
 
-  async function runTurn({ systemPrompt, messages, tools }) {
+  async function runTurn({ systemPrompt, messages, tools, signal: callSignal = null, maxOutputTokens = null,
+    maxProviderRetries = maxRetries, allowParameterRetry = true }) {
     const { payload, retries } = await xaiResponsesCall({
-      apiKey: key, fetchImpl, signal, timeoutMs, maxRetries,
+      apiKey: key, fetchImpl, signal: callSignal || signal, timeoutMs,
+      maxRetries: Math.max(0, Math.min(maxRetries, Number(maxProviderRetries) || 0)),
+      allowParameterRetry,
       body: {
-        model,
+        model: executableModel,
         instructions: systemPrompt,
         input: toInputItems(messages),
         tools: tools?.length ? tools.map((t) => ({
           type: "function", name: t.name, description: t.description, parameters: t.parameters, strict: false,
         })) : undefined,
-        ...(supportsReasoning(model) ? { reasoning: { effort } } : {}),
+        ...(supportsReasoning(executableModel) ? { reasoning: { effort } } : {}),
         parallel_tool_calls: false,
         store: false,
+        ...(maxOutputTokens ? { max_output_tokens: Math.max(1, Math.floor(maxOutputTokens)) } : {}),
       },
     });
     const toolCalls = (payload.output || [])
@@ -362,9 +379,10 @@ export function createXaiEngineProvider({
         input: usage.inputTokens, output: usage.outputTokens,
         reasoning: usage.reasoningTokens, cached: usage.cachedTokens,
         cacheWrite: 0, total: usage.totalTokens, retries,
+        providerRequestId: payload.id || null,
       },
     };
   }
 
-  return { model, provider: "xai", runTurn };
+  return { model: executableModel, provider: "xai", runTurn };
 }

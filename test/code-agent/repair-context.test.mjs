@@ -9,7 +9,6 @@ import assert from "node:assert/strict";
 import {
   buildRepairBrief, headlineError, redact, referencesDiagnosticsOnly,
 } from "../../shell/server/lib/appBuild/repairContext.mjs";
-import { planEndAction } from "../../shell/server/lib/appBuild/appBuildService.mjs";
 
 // The exact output rollup produced in both failed production runs.
 const LUCIDE_FAILURE = `> booking-site@0.0.0 build
@@ -122,53 +121,6 @@ test("very long output keeps the tail, where the error is", () => {
   const brief = buildRepairBrief({ output: `${noise}${LUCIDE_FAILURE}` });
   assert.match(brief, /"Instagram" is not exported by/);
   assert.match(brief, /earlier characters omitted/);
-});
-
-// The shape a compile failure ACTUALLY arrives in: the job completes and reports buildOk false.
-// (It is not `status: "failed"` — that classifies as a permanent failure and never reaches repair.)
-const COMPILE_FAILED = { status: "complete", result: { buildOk: false, tree: {}, qualityWarnings: [] } };
-
-test("planEndAction dispatches the repair with the real diagnostics attached", () => {
-  const action = planEndAction(COMPILE_FAILED, {
-    attempt: 2,
-    previousFingerprints: [],
-    diagnostics: {
-      command: "npm run build",
-      output: LUCIDE_FAILURE,
-      changedFiles: ["src/App.jsx"],
-      manifest: JSON.stringify({ dependencies: { "lucide-react": "0.263.1" } }),
-    },
-  });
-  assert.equal(action.kind, "repair");
-  assert.match(action.brief, /"Instagram" is not exported by/);
-  assert.match(action.brief, /Attempt 2 of 3/);
-  assert.ok(!referencesDiagnosticsOnly(action.brief));
-});
-
-test("a compile failure is called a compile failure, not a quality check", () => {
-  // The exact mislabelling behind "addressing the build quality/lint failure": every compiler
-  // error was reported to the repair agent as "the build's quality checks failed".
-  const withDiag = planEndAction(COMPILE_FAILED, {
-    attempt: 1, previousFingerprints: [],
-    diagnostics: { command: "npm run build", output: LUCIDE_FAILURE },
-  });
-  assert.match(withDiag.brief, /the compiler rejected the project/);
-  assert.match(withDiag.brief, /"Instagram" is not exported by/);
-  assert.ok(!/quality checks failed/.test(withDiag.brief), "must not be described as a quality problem");
-
-  // And with no output captured at all it still says compile, not quality.
-  const bare = planEndAction(COMPILE_FAILED, { attempt: 1, previousFingerprints: [] });
-  assert.match(bare.brief, /failed to compile/);
-});
-
-test("without diagnostics the brief still stands on the reason list", () => {
-  // Quality-warning rounds have no compiler output; they must not regress into an empty brief.
-  const action = planEndAction(
-    { status: "complete", result: { buildOk: false, qualityWarnings: ["the hero image is missing"] } },
-    { attempt: 2, previousFingerprints: [] },
-  );
-  assert.equal(action.kind, "repair");
-  assert.match(action.brief, /failed to compile/);
 });
 
 test("referencesDiagnosticsOnly catches the exact regression it exists for", () => {

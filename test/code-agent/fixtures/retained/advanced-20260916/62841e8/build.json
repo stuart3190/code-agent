@@ -1,0 +1,39 @@
+{
+  "id": "13ab5175-4114-41d8-b649-73ab1654a776",
+  "owner": "7fc93b1e-7dc6-48c0-ae05-38ce4ee3050f",
+  "project_id": "321371a3-5759-4316-9890-70ec83f51949",
+  "profile": "advanced",
+  "request": "Build an interactive SVG floor-planning workspace for Lumen Layouts. Users sign in,\ncreate and name plans, pan and zoom the canvas, drag fixtures from a library, select fixtures, edit\nposition, rotation, and brightness in an inspector, undo and redo changes, switch plans, save and\nreload durable state, export a plan summary, and print it. Include accessible keyboard alternatives\nfor canvas actions and separate workspace, library, reports, and settings routes. Use platform\nauthentication and durable capabilities.\n\nQualification instance 1; create a fresh implementation.",
+  "state": "failed",
+  "budget_credits": 60,
+  "spent_credits": 5.32092,
+  "contract_id": "494d41e6-3635-4e8d-8c03-937ac9e02069",
+  "final_snapshot": null,
+  "error": "Builder V2 call cannot fit a useful response inside approved headroom",
+  "started_at": "2026-09-16T09:02:29.975+00:00",
+  "finished_at": "2026-09-16T09:08:40.633+00:00",
+  "project_id_text": "321371a3-5759-4316-9890-70ec83f51949",
+  "max_repair_dispatches": 1000,
+  "envelope_version": 2,
+  "customer_state": "failed",
+  "spent_breakdown": {
+    "thrallo_recovery:thrallo_repair:connected_allowance": 0.60572,
+    "customer_generation:customer_request:connected_allowance": 4.7152
+  },
+  "failure": {
+    "code": "failed",
+    "action": "stop",
+    "retryable": false,
+    "checkpointId": "ba4850a5-c5f0-484e-8d8f-dd8923fb47f6",
+    "classification": "generated_app",
+    "internalDetail": "Builder V2 call cannot fit a useful response inside approved headroom [failed]",
+    "providerCallMade": null,
+    "reservationState": "not_created",
+    "customerMessageKey": "build_checking_repairs",
+    "customerActionRequired": false
+  },
+  "last_durable_progress_at": "2026-09-16T09:06:51.83+00:00",
+  "expected_duration_ms": 1546000,
+  "hard_safety_duration_ms": 4638000,
+  "verifier_policy": "minimal_contract_v1"
+}

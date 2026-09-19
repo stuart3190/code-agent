@@ -1,0 +1,201 @@
+{
+  "id": "358d916d-46c7-4a2d-a45d-a9547493522f",
+  "owner": "7fc93b1e-7dc6-48c0-ae05-38ce4ee3050f",
+  "project_id": "0c39d317-64ca-4ae4-9dc0-ad102eb03b74",
+  "build_id": "7739f39e-cbf8-4037-904b-10ae9f50519e",
+  "version": 2,
+  "contract_hash": "350b32519f84cd7a7057fff6870b7a02eb9059ff316aef36053a733fabf08038",
+  "complexity_band": "complex_interactive",
+  "envelope": {
+    "stages": [
+      {
+        "id": "contract",
+        "required": true,
+        "dependencyIds": [],
+        "fundingSource": "customer_generation",
+        "estimatedCredits": 1.31,
+        "estimatedDurationMs": 110000,
+        "estimatedInputTokens": 6950,
+        "estimatedOutputTokens": 5100
+      },
+      {
+        "id": "capability_preflight",
+        "required": true,
+        "dependencyIds": [
+          "contract"
+        ],
+        "fundingSource": "platform",
+        "estimatedCredits": 0,
+        "estimatedDurationMs": 45000,
+        "estimatedInputTokens": 0,
+        "estimatedOutputTokens": 0
+      },
+      {
+        "id": "core_generation",
+        "required": true,
+        "dependencyIds": [
+          "capability_preflight"
+        ],
+        "fundingSource": "customer_generation",
+        "estimatedCredits": 5.145,
+        "estimatedDurationMs": 286000,
+        "estimatedInputTokens": 20540,
+        "estimatedOutputTokens": 13800
+      },
+      {
+        "id": "journey_generation:library-route-browse-fixtures",
+        "required": true,
+        "dependencyIds": [
+          "core_generation"
+        ],
+        "fundingSource": "customer_generation",
+        "estimatedCredits": 0.53,
+        "estimatedDurationMs": 59000,
+        "estimatedInputTokens": 3160,
+        "estimatedOutputTokens": 2040
+      },
+      {
+        "id": "journey_generation:export-and-print-report",
+        "required": true,
+        "dependencyIds": [
+          "core_generation"
+        ],
+        "fundingSource": "customer_generation",
+        "estimatedCredits": 0.59,
+        "estimatedDurationMs": 67000,
+        "estimatedInputTokens": 3380,
+        "estimatedOutputTokens": 2220
+      },
+      {
+        "id": "compile",
+        "required": true,
+        "dependencyIds": [
+          "journey_generation:library-route-browse-fixtures",
+          "journey_generation:export-and-print-report"
+        ],
+        "fundingSource": "platform",
+        "estimatedCredits": 0,
+        "estimatedDurationMs": 85000,
+        "estimatedInputTokens": 0,
+        "estimatedOutputTokens": 0
+      },
+      {
+        "id": "fresh_browser_verification",
+        "required": true,
+        "dependencyIds": [
+          "compile"
+        ],
+        "fundingSource": "platform",
+        "estimatedCredits": 0,
+        "estimatedDurationMs": 665000,
+        "estimatedInputTokens": 0,
+        "estimatedOutputTokens": 0
+      },
+      {
+        "id": "promotion_projection",
+        "required": true,
+        "dependencyIds": [
+          "fresh_browser_verification"
+        ],
+        "fundingSource": "platform",
+        "estimatedCredits": 0,
+        "estimatedDurationMs": 30000,
+        "estimatedInputTokens": 0,
+        "estimatedOutputTokens": 0
+      }
+    ],
+    "version": 2,
+    "execution": {
+      "startedAt": "2026-09-16T09:20:09.643Z",
+      "expectedCalls": 9,
+      "expectedDurationMs": 1622000,
+      "hardSafetyDurationMs": 4866000,
+      "softTargetDurationMs": null,
+      "expectedBrowserPasses": 7,
+      "lastDurableProgressAt": "2026-09-16T09:20:09.643Z"
+    },
+    "contractHash": "350b32519f84cd7a7057fff6870b7a02eb9059ff316aef36053a733fabf08038",
+    "complexityBand": "complex_interactive",
+    "thralloRecovery": {
+      "heldCredits": 0,
+      "approvedCredits": 207.06,
+      "consumedCredits": 0,
+      "strategyCapacity": 23,
+      "strategyCostPlan": [
+        {
+          "id": "contract_protocol_correction",
+          "basis": {
+            "journeys": 7
+          },
+          "estimatedCredits": 1.31
+        },
+        {
+          "id": "deterministic_patch_correction",
+          "basis": {
+            "modules": 10
+          },
+          "estimatedCredits": 2.2
+        },
+        {
+          "id": "exact_owning_file_repair",
+          "basis": {
+            "steps": 30,
+            "journeys": 7
+          },
+          "estimatedCredits": 6.65
+        },
+        {
+          "id": "causal_dependency_repair",
+          "basis": {
+            "owningModules": 0
+          },
+          "estimatedCredits": 0.8
+        },
+        {
+          "id": "owner_module_regeneration",
+          "basis": {
+            "uniqueOwnerModules": 0
+          },
+          "estimatedCredits": 1
+        }
+      ],
+      "exceptionalApproval": null,
+      "fixedCorrectionCredits": 3.51,
+      "repairRoundCreditAllowance": 8.85
+    },
+    "approvalRequired": false,
+    "customerGeneration": {
+      "heldCredits": 0,
+      "plannedCredits": 7.575,
+      "approvedCredits": 60,
+      "consumedCredits": 0,
+      "remainingRequiredCredits": 7.575
+    },
+    "runtimeRequirements": {
+      "accounts": true,
+      "durableMutation": true
+    },
+    "recoveryProviderPolicy": {
+      "resolvedAt": "2026-09-16T09:17:19.271Z",
+      "selectedBy": "thrallo_recovery_authority",
+      "billingLane": "connected_allowance",
+      "fundingSource": "thrallo",
+      "managedFallback": false,
+      "primaryProvider": "codex",
+      "executionAuthority": "platform_connected_codex",
+      "usageResponsibility": "thrallo_repair",
+      "allowManagedFallback": false,
+      "recoveryPolicyVersion": "owner_connected_recovery_v1",
+      "allowedFallbackProviders": []
+    },
+    "generationProviderPolicy": {
+      "resolvedAt": "2026-09-16T09:17:19.137Z",
+      "selectedBy": "active_connection",
+      "billingLane": "connected_allowance",
+      "primaryProvider": "codex",
+      "allowManagedFallback": false,
+      "allowedFallbackProviders": []
+    }
+  },
+  "created_at": "2026-09-16T09:20:09.717086+00:00"
+}

@@ -139,7 +139,7 @@ test("the welcome and security notifications say the right thing", async () => {
 // ── The security boundary ───────────────────────────────────────────────────────────────
 
 test("column grants make `source` a claim only the service role can make", async () => {
-  const sql = await read("../../supabase/migrations/20260801220000_app_notifications.sql");
+  const sql = await read("../../supabase/migrations/20260801203017_app_notifications_column_grants.sql");
   const ddl = sql.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
 
   // Both alternatives were tried against production and rejected: a single `for all` policy let
@@ -184,7 +184,7 @@ test("app-auth carries both real event integrations and cannot break auth", asyn
 
   // The security alert is written BEFORE the response is returned, so it cannot be skipped.
   const confirm = fn.slice(fn.indexOf('action === "reset-confirm"'));
-  assert.ok(confirm.indexOf('"password_changed"') < confirm.indexOf("return json(200"),
+  assert.ok(confirm.indexOf('"password_changed"') < confirm.indexOf("return reply(200"),
     "the alert must be recorded before the success response");
 });
 

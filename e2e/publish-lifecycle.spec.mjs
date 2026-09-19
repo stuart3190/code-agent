@@ -109,6 +109,10 @@ async function stub(page, initial, { onUnpublish = null } = {}) {
 }
 
 const card = (page, title) => page.locator(".ct-project").filter({ hasText: title });
+const actions = async (project) => {
+  await project.getByRole("button", { name: /Project actions for/ }).click();
+  return project.getByRole("menu");
+};
 
 test.skip(!REF, "requires shell/web/.env auth config (skipped in CI)");
 
@@ -126,9 +130,8 @@ test("a changed project keeps its live URL and says Update Available", async ({ 
   await page.goto("/");
   const c = card(page, "FocusFlow");
   await expect(c.locator(".ct-badge.tone-update")).toHaveText("UPDATE AVAILABLE");
-  // The site is still online, so the URL must still be shown and still be a link.
-  await expect(c.locator(".ct-pubrow-url")).toHaveText("focusflow.app.thrallo.com");
-  await expect(c.locator(".ct-pubrow-url")).toHaveAttribute("href", SITE.url);
+  await expect(c.locator(".ct-pubrow-url")).toHaveCount(0);
+  await expect((await actions(c)).getByRole("menuitem", { name: "View live site" })).toHaveAttribute("href", SITE.url);
 });
 
 test("an unpublished project shows Unpublished and no live link", async ({ page }) => {
@@ -136,9 +139,10 @@ test("an unpublished project shows Unpublished and no live link", async ({ page 
   await page.goto("/");
   const c = card(page, "FocusFlow");
   await expect(c.locator(".ct-badge.tone-muted")).toHaveText("UNPUBLISHED");
-  await expect(c.locator(".ct-pubrow-url.offline")).toBeVisible();
-  await expect(c.getByRole("link", { name: "Open Live Site" })).toHaveCount(0);
-  await expect(c.getByRole("button", { name: "Publish Again" })).toBeVisible();
+  await expect(c.locator(".ct-pubrow-url")).toHaveCount(0);
+  const menu = await actions(c);
+  await expect(menu.getByRole("menuitem", { name: "View live site" })).toHaveCount(0);
+  await expect(menu.getByRole("menuitem", { name: "Publish again" })).toBeVisible();
 });
 
 // ── Tabs ────────────────────────────────────────────────────────────────────────────────
@@ -188,7 +192,7 @@ test("Published → Unpublished settles on the dashboard with no reload", async 
   await page.goto("/");
   await expect(card(page, "FocusFlow").locator(".ct-badge.tone-live")).toHaveText("LIVE");
 
-  await card(page, "FocusFlow").getByRole("button", { name: "Unpublish" }).click();
+  await (await actions(card(page, "FocusFlow"))).getByRole("menuitem", { name: "Unpublish" }).click();
   const dialog = page.getByRole("dialog", { name: /offline/i });
   await expect(dialog).toContainText("focusflow.app.thrallo.com");
   await expect(dialog).toContainText("publish history");           // says what survives
@@ -205,7 +209,7 @@ test("cancelling the dialog leaves the site alone", async ({ page }) => {
   let called = false;
   await stub(page, [PUBLISHED], { onUnpublish: (route) => { called = true; return route.fulfill({ json: {} }); } });
   await page.goto("/");
-  await card(page, "FocusFlow").getByRole("button", { name: "Unpublish" }).click();
+  await (await actions(card(page, "FocusFlow"))).getByRole("menuitem", { name: "Unpublish" }).click();
   await page.getByRole("dialog", { name: /offline/i }).getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByRole("dialog", { name: /offline/i })).toHaveCount(0);
   await expect(card(page, "FocusFlow").locator(".ct-badge.tone-live")).toHaveText("LIVE");
@@ -217,7 +221,7 @@ test("a failed unpublish says so and keeps the site listed as live", async ({ pa
     onUnpublish: (route) => route.fulfill({ status: 500, json: { error: "The site could not be taken offline. Please try again." } }),
   });
   await page.goto("/");
-  await card(page, "FocusFlow").getByRole("button", { name: "Unpublish" }).click();
+  await (await actions(card(page, "FocusFlow"))).getByRole("menuitem", { name: "Unpublish" }).click();
   await page.getByRole("dialog", { name: /offline/i }).getByRole("button", { name: "Unpublish" }).click();
   await expect(page.getByRole("dialog", { name: /offline/i })).toContainText("could not be taken offline");
   await page.getByRole("dialog", { name: /offline/i }).getByRole("button", { name: "Cancel" }).click();
@@ -234,7 +238,7 @@ test("Unpublished → Published again posts to the right conversation", async ({
     return r.fulfill({ json: { ok: true } });
   });
   await page.goto("/");
-  await card(page, "FocusFlow").getByRole("button", { name: "Publish Again" }).click();
+  await (await actions(card(page, "FocusFlow"))).getByRole("menuitem", { name: "Publish again" }).click();
 
   // `send` reads the active conversation from its closure; publishing from a CARD must still reach
   // that card's conversation rather than starting a new one.
@@ -247,8 +251,9 @@ test("Copy URL on a card copies the live address without opening the project", a
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await stub(page, [PUBLISHED]);
   await page.goto("/");
-  await card(page, "FocusFlow").getByRole("button", { name: "Copy URL" }).click();
-  await expect(card(page, "FocusFlow").getByRole("button", { name: "Copied" })).toBeVisible();
+  const menu = await actions(card(page, "FocusFlow"));
+  await menu.getByRole("menuitem", { name: "Copy live URL" }).click();
+  await expect(menu.getByRole("menuitem", { name: "Copied" })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(SITE.url);
   // The card's own click opens the project — the action buttons must not.
   await expect(page.locator(".ct-begin")).toBeVisible();
@@ -258,10 +263,10 @@ test("a published card offers exactly the actions that work", async ({ page }) =
   await stub(page, [PUBLISHED]);
   await page.goto("/");
   const c = card(page, "FocusFlow");
-  await expect(c.getByRole("link", { name: "Open Live Site" })).toHaveAttribute("href", SITE.url);
-  for (const name of ["Copy URL", "Publish Update", "Unpublish", "Project Settings"]) {
-    await expect(c.getByRole("button", { name })).toBeVisible();
+  const menu = await actions(c);
+  await expect(menu.getByRole("menuitem", { name: "View live site" })).toHaveAttribute("href", SITE.url);
+  for (const name of ["Copy live URL", "Publish update", "Unpublish", "Health", "Analytics", "Project settings"]) {
+    await expect(menu.getByRole("menuitem", { name })).toBeVisible();
   }
-  await expect(c).toContainText("Production");
-  await expect(c).toContainText("published 6 minutes ago");
+  await expect(c.locator(".ct-pubrow")).toHaveCount(0);
 });

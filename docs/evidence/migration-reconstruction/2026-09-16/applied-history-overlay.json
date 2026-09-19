@@ -1,0 +1,20 @@
+{
+  "source": "Supabase MCP apply_migration on zczgvcsokfafuyognvwx, applied 2026-09-16 by Claude at Stuart's instruction; ledger read back via schema_migrations",
+  "capturedAt": "2026-09-16T12:37:12.002Z",
+  "baseVersion": "20260825105631",
+  "ledgerCount": 84,
+  "note": "settle_bv2_build_terminal moves a platform-assumed customer hold to thrallo_recovery under owner_connected_recovery_v1 (check-constraint fix). The MCP assigned apply-time version 20260916123552; version keeps the local file identity. The applied SQL is byte-identical to the local file (LF).",
+  "migrations": [
+    {
+      "appliedOrder": 84,
+      "version": "20260916120000",
+      "name": "bv2_terminal_platform_failure_pool",
+      "filename": "20260916120000_bv2_terminal_platform_failure_pool.sql",
+      "statementCount": 1,
+      "sqlSha256": "b811253f9660da199b2fd65e6ebbc45c37d2f01fe7831e37dace80675198945d",
+      "canonicalSqlSha256": "b811253f9660da199b2fd65e6ebbc45c37d2f01fe7831e37dace80675198945d",
+      "localCanonicalSqlSha256": "b811253f9660da199b2fd65e6ebbc45c37d2f01fe7831e37dace80675198945d",
+      "appliedVersion": "20260916123552"
+    }
+  ]
+}

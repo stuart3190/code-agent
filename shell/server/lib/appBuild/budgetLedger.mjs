@@ -16,12 +16,14 @@ import { TOKENS_PER_CREDIT } from "../../../../src/cost.mjs";
 // with its own flat rule while every reporting surface used costModel — right in the report,
 // wrong on the debit.
 import { creditsForUsage } from "../../../../src/billing/costModel.mjs";
+import { serviceClient } from "../supabase.mjs";
 
 const r4 = (n) => Math.round(n * 10_000) / 10_000;
 
 export function createBudgetLedger({
   store = codeAgentStore(),
   overviewResolver = budgetOverview,
+  client = null,
 } = {}) {
   async function getBalance(owner) {
     const overview = await overviewResolver(owner, { store });
@@ -29,7 +31,36 @@ export function createBudgetLedger({
     const credits = overview.unlimited
       ? 1_000_000
       : r4(Math.max(0, overview.budgets.managedTokens.remaining) / TOKENS_PER_CREDIT);
-    return { bundle: credits, topup: 0, total: credits };
+    let topup = 0;
+    let protectedCredits = 0;
+    try {
+      const db = client || serviceClient();
+      const { data, error } = await db.from("credit_ledger").select("delta,bucket,kind")
+        .eq("owner", owner);
+      if (error) throw error;
+      topup = r4(Math.max(0, (data || []).filter((row) => row.bucket === "topup")
+        .reduce((sum, row) => sum + Number(row.delta || 0), 0)));
+      // Included-usage rows remain immutable billing evidence. A failed Builder V2 build restores
+      // that allowance through an idempotent bundle refund/service-credit entry, so both the
+      // original provider telemetry and the customer protection remain auditable.
+      protectedCredits = r4(Math.max(0, (data || [])
+        .filter((row) => row.bucket === "bundle" && ["refund", "service_credit"].includes(row.kind))
+        .reduce((sum, row) => sum + Number(row.delta || 0), 0)));
+    } catch (error) {
+      // A configured Supabase runtime must fail closed: treating an unreadable purchased balance
+      // as zero would strand paid credits and make the pre-dispatch contract disagree with SQL.
+      if (process.env.CODE_AGENT_STORE === "supabase") throw error;
+    }
+    return {
+      bundle: r4(credits + protectedCredits),
+      included: r4(credits + protectedCredits),
+      topup,
+      purchased: topup,
+      total: r4(credits + protectedCredits + topup),
+      periodStart: overview.period?.start || new Date(0).toISOString(),
+      usageRowCount: Number(overview.usageRowCount || 0),
+      unlimited: overview.unlimited === true,
+    };
   }
 
   async function debit({ owner, usage, model, ref, allowPartial = false }) {

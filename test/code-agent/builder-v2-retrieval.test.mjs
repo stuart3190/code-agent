@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { indexTree, tokensOf } from "../../shell/server/lib/builderV2/indexerV0.mjs";
+import { indexTree as indexTreeV1 } from "../../shell/server/lib/builderV2/indexer.mjs";
 import { memoryGraph } from "../../shell/server/lib/builderV2/graphStore.mjs";
 import { retrieve } from "../../shell/server/lib/builderV2/retrieval.mjs";
 
@@ -82,4 +83,12 @@ test("K — planned-but-absent target paths carry nothing and break nothing", ()
   });
   assert.ok(result.full.some((f) => f.path === "src/data/bookings.js"));
   assert.ok(!result.trace.included.some((f) => f.path === "src/data/toBeCreated.js"));
+});
+
+test("H12 — an opaque required file is never demoted behind a read_file tool that does not exist", () => {
+  const tree = { "src/routes/Broken.tsx": "export default function Broken(: Props) { return <div />; }" };
+  const opaqueGraph = memoryGraph("o", "p", indexTreeV1(tree));
+  const result = retrieve({ graph: opaqueGraph, tree, targets: ["src/routes/Broken.tsx"], budgetTokens: 1 });
+  assert.deepEqual(result.requiredUnavailable.map((row) => row.path), ["src/routes/Broken.tsx"]);
+  assert.ok(![...result.interfaces, ...result.summaries].some((row) => row.path === "src/routes/Broken.tsx"));
 });

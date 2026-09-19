@@ -15,6 +15,7 @@ import { indexTree } from "../../shell/server/lib/builderV2/indexerV0.mjs";
 import { memoryGraph } from "../../shell/server/lib/builderV2/graphStore.mjs";
 import { createSnapshotStore, memorySnapshotStorage } from "../../shell/server/lib/builderV2/snapshotStore.mjs";
 import { persistIndex, loadIndex, supabaseGraph, supabaseSnapshotStorage } from "../../shell/server/lib/builderV2/supabaseTwins.mjs";
+import { createFakeBv2Supabase } from "./helpers/fake-bv2-supabase.mjs";
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 const TREE = JSON.parse(readFileSync(path.join(FIXTURES, "run17b6513f-tree.json"), "utf8"));
@@ -28,7 +29,7 @@ function fakeSupabase() {
   const rowsOf = (name) => { if (!tables.has(name)) tables.set(name, []); return tables.get(name); };
 
   function chain(tableName) {
-    const state = { filters: [], op: "select", payload: null, single: false, maybe: false, order: null, onConflict: null };
+    const state = { filters: [], op: "select", payload: null, single: false, maybe: false, order: null, onConflict: null, selectAfter: false };
     const matches = (row) => state.filters.every(([col, val]) => row[col] === val);
     const runQuery = () => {
       const rows = rowsOf(tableName);
@@ -59,7 +60,9 @@ function fakeSupabase() {
         return { data: null, error: null };
       }
       if (state.op === "update") {
-        for (const row of rows) if (matches(row)) Object.assign(row, state.payload);
+        const updated = [];
+        for (const row of rows) if (matches(row)) { Object.assign(row, state.payload); updated.push({ ...row }); }
+        if (state.selectAfter) return { data: state.single || state.maybe ? (updated[0] || null) : updated, error: null };
         return { data: null, error: null };
       }
       if (state.op === "delete") {
@@ -158,7 +161,7 @@ test("PARITY — large blobs route through the bucket and round-trip byte-identi
 // ── graph round-trip parity on the real production tree ──────────────────────────────────────
 
 test("PARITY — the persisted graph answers exactly like the in-memory graph (round-trip)", async () => {
-  const client = fakeSupabase();
+  const client = createFakeBv2Supabase();
   const treeIndex = indexTree(TREE);
   const manifest = Object.fromEntries([...treeIndex.files].map(([p, f]) => [p, f.contentHash]));
 

@@ -124,3 +124,4 @@ create policy "ca_model_evaluation_results_browser_deny"
   on public.ca_model_evaluation_results
   as restrictive for all to anon, authenticated
   using (false) with check (false);
+

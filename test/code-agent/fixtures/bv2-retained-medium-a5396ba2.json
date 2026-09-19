@@ -1,0 +1,974 @@
+{
+  "summary": "Alder Studio team members use an authenticated multi-route operations dashboard to create durable projects and tasks, assign owners, update task status, filter work views, manage roles, view analytics, and recover changes after reload.",
+  "projectType": "dashboard",
+  "journeys": [
+    {
+      "id": "create-and-update-project-work",
+      "title": "A signed-in team member creates a project, adds a task, updates the task, and recovers the change after reload",
+      "priority": "primary",
+      "stage": "primary_journey",
+      "durableState": [
+        "create-and-update-project-work.durable.reference"
+      ],
+      "steps": [
+        {
+          "action": "open the projects page as an authenticated team member",
+          "target": "/projects",
+          "expect": "the Alder Studio Projects heading, New Project button, and project list area are visible"
+        },
+        {
+          "action": "create a new project with a client, owner, target date, and active status",
+          "target": "new project form",
+          "operates": [
+            "projectTitle",
+            "clientName",
+            "projectDescription",
+            "projectOwnerId",
+            "targetDate",
+            "projectStatus",
+            "create-project"
+          ],
+          "primitive": "textbox",
+          "expect": "the created project appears in the project list with its title, client, owner, target date, and Active status"
+        },
+        {
+          "action": "open the created project detail page",
+          "target": "created project card",
+          "reads": [
+            "projectId",
+            "projectTitle"
+          ],
+          "expect": "the project detail page shows the project title, task section, and Add Task button"
+        },
+        {
+          "action": "create a task for the project with a title, owner, priority, due date, and To Do status",
+          "target": "add task form",
+          "operates": [
+            "taskTitle",
+            "taskDescription",
+            "taskOwnerId",
+            "priority",
+            "dueDate",
+            "taskStatus",
+            "create-task"
+          ],
+          "reads": [
+            "projectId"
+          ],
+          "primitive": "textbox",
+          "expect": "the new task is visible in the project task list with its owner, priority, due date, and To Do status badge"
+        },
+        {
+          "action": "change the task status to In Progress",
+          "target": "task status selector",
+          "operates": [
+            "taskStatus",
+            "update-task-status"
+          ],
+          "reads": [
+            "taskId"
+          ],
+          "primitive": "selection",
+          "expect": "the task row immediately shows an In Progress status badge"
+        },
+        {
+          "action": "reload the project detail page",
+          "target": "/projects/:projectId",
+          "reads": [
+            "projectId",
+            "taskId",
+            "taskStatus"
+          ],
+          "expect": "the same project and task are still visible and the task still shows In Progress"
+        }
+      ],
+      "acceptance": [
+        "a project created in the browser is still visible after a full page reload",
+        "a task created under that project is still visible after a full page reload",
+        "a task status update to In Progress survives a full page reload"
+      ]
+    },
+    {
+      "id": "filter-board-and-list-views",
+      "title": "A team member filters board and list views to find matching tasks",
+      "priority": "secondary",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the board page as an authenticated team member",
+          "target": "/board",
+          "expect": "the board view shows columns for To Do, In Progress, Review, Blocked, and Done"
+        },
+        {
+          "action": "filter the board by a non-default status and owner",
+          "target": "board filters",
+          "operates": [
+            "statusFilter",
+            "ownerFilter",
+            "filter-tasks"
+          ],
+          "primitive": "selection",
+          "verificationValues": {
+            "statusFilter": "todo",
+            "ownerFilter": "sample-member-ada"
+          },
+          "expect": "only task cards matching To Do status and Ada Morgan as owner are visible, and a visible filter summary names To Do and Ada Morgan"
+        },
+        {
+          "action": "open the task list page",
+          "target": "/tasks",
+          "expect": "the list view shows task rows and search and filter controls"
+        },
+        {
+          "action": "search the list for a matching task title while leaving status at the all-statuses sentinel",
+          "target": "task list search and filters",
+          "operates": [
+            "searchText",
+            "statusFilter",
+            "filter-tasks"
+          ],
+          "primitive": "textbox",
+          "verificationValues": {
+            "searchText": "Kickoff",
+            "statusFilter": "all-statuses"
+          },
+          "expect": "the task list shows at least one row containing Kickoff and no rows that omit the word Kickoff"
+        },
+        {
+          "action": "clear all filters",
+          "target": "clear filters button",
+          "operates": [
+            "clearFilters"
+          ],
+          "expect": "the filter summary disappears and the full task list is visible again"
+        }
+      ],
+      "acceptance": [
+        "board filters visibly hide tasks that do not match the selected status and owner",
+        "list search visibly returns only rows matching the entered search text",
+        "clearing filters restores unfiltered board or list results"
+      ]
+    },
+    {
+      "id": "view-analytics-summary",
+      "title": "A team member views an analytics summary for current durable project and task data",
+      "priority": "secondary",
+      "stage": "supporting",
+      "durableState": [
+        "view-analytics-summary.draft.projectStatus",
+        "view-analytics-summary.draft.taskStatus",
+        "view-analytics-summary.draft.dueDate"
+      ],
+      "steps": [
+        {
+          "action": "open the analytics page as an authenticated team member",
+          "target": "/analytics",
+          "expect": "the Analytics Summary heading and metric cards are visible"
+        },
+        {
+          "action": "load the current summary",
+          "target": "analytics summary panel",
+          "operates": [
+            "calculate-analytics-summary"
+          ],
+          "reads": [
+            "projectStatus",
+            "taskStatus",
+            "dueDate"
+          ],
+          "expect": "metric cards show total projects, total tasks, completed tasks, blocked tasks, overdue tasks, and completion rate"
+        },
+        {
+          "action": "open the status breakdown section",
+          "target": "status breakdown",
+          "expect": "a visible breakdown lists counts for To Do, In Progress, Review, Blocked, and Done"
+        },
+        {
+          "action": "reload the analytics page",
+          "target": "/analytics",
+          "expect": "the same metric cards are recalculated from saved projects and tasks and remain visible after reload"
+        }
+      ],
+      "acceptance": [
+        "analytics shows numeric totals for saved projects and tasks",
+        "status breakdown displays a count for each supported task status",
+        "analytics remains available after a page reload"
+      ]
+    },
+    {
+      "id": "administrator-manages-member-roles",
+      "title": "An administrator changes a team member role",
+      "priority": "secondary",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the administrator page as an authenticated administrator",
+          "target": "/admin",
+          "expect": "the Team Administration heading, members table, and role controls are visible"
+        },
+        {
+          "action": "select a member row to edit",
+          "target": "members table",
+          "operates": [
+            "userId"
+          ],
+          "produces": [
+            "displayName",
+            "email"
+          ],
+          "primitive": "selection",
+          "expect": "the selected member row is highlighted and its current role is displayed"
+        },
+        {
+          "action": "change the selected member role to Administrator",
+          "target": "role selector",
+          "operates": [
+            "role",
+            "update-member-role"
+          ],
+          "reads": [
+            "userId"
+          ],
+          "primitive": "selection",
+          "expect": "the selected row shows an Administrator role badge and a saved confirmation message"
+        },
+        {
+          "action": "reload the administrator page",
+          "target": "/admin",
+          "reads": [
+            "userId",
+            "role"
+          ],
+          "expect": "the same member still shows the Administrator role badge after reload"
+        }
+      ],
+      "acceptance": [
+        "an administrator can see and use role controls",
+        "a changed member role is visible immediately after saving",
+        "a changed member role persists after reload"
+      ]
+    },
+    {
+      "id": "member-access-boundaries",
+      "title": "A signed-in non-administrator is blocked from administrator-only controls",
+      "priority": "secondary",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the administrator page as an authenticated member without administrator role",
+          "target": "/admin",
+          "expect": "an Access denied message is visible and member role editing controls are not visible"
+        },
+        {
+          "action": "open the projects page as the same member",
+          "target": "/projects",
+          "expect": "the project dashboard is visible and the member can see project and task navigation"
+        }
+      ],
+      "acceptance": [
+        "non-administrator members cannot see role editing controls",
+        "non-administrator members can still access operational project and task pages"
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "path": "/login",
+      "name": "Sign In",
+      "purpose": "allows Alder Studio team members to authenticate with platform email and password authentication",
+      "auth": false
+    },
+    {
+      "path": "/projects",
+      "name": "Projects",
+      "purpose": "shows saved projects and provides the create project workflow",
+      "auth": true
+    },
+    {
+      "path": "/projects/:projectId",
+      "name": "Project Detail",
+      "purpose": "shows one saved project and its saved tasks, with controls to create tasks and update task details",
+      "auth": true
+    },
+    {
+      "path": "/board",
+      "name": "Board",
+      "purpose": "shows saved tasks grouped by status with status and owner filters",
+      "auth": true
+    },
+    {
+      "path": "/tasks",
+      "name": "Task List",
+      "purpose": "shows a searchable and filterable table of saved tasks across projects",
+      "auth": true
+    },
+    {
+      "path": "/analytics",
+      "name": "Analytics",
+      "purpose": "shows calculated project and task summary metrics from durable data",
+      "auth": true
+    },
+    {
+      "path": "/admin",
+      "name": "Team Administration",
+      "purpose": "allows administrators to view members and update member roles",
+      "auth": true,
+      "role": "administrator"
+    }
+  ],
+  "entities": [
+    {
+      "name": "project",
+      "storage": "durable",
+      "fields": [
+        {
+          "name": "projectId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "projectTitle",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "clientName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "projectDescription",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "projectOwnerId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "targetDate",
+          "type": "date",
+          "required": true
+        },
+        {
+          "name": "projectStatus",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "createdBy",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "owned": false,
+      "relationships": [
+        "a project has many tasks",
+        "a project owner references one member",
+        "a project creator references one authenticated user"
+      ]
+    },
+    {
+      "name": "task",
+      "storage": "durable",
+      "fields": [
+        {
+          "name": "taskId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "projectId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "taskTitle",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "taskDescription",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "taskOwnerId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "priority",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "dueDate",
+          "type": "date",
+          "required": true
+        },
+        {
+          "name": "taskStatus",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "createdBy",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "owned": false,
+      "relationships": [
+        "a task belongs to one project",
+        "a task owner references one member",
+        "a task creator references one authenticated user"
+      ]
+    },
+    {
+      "name": "member",
+      "storage": "durable",
+      "fields": [
+        {
+          "name": "userId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "displayName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "email",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "role",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "active",
+          "type": "boolean",
+          "required": true
+        }
+      ],
+      "owned": false,
+      "relationships": [
+        "a member maps to one authenticated platform user",
+        "members can own projects",
+        "members can own tasks"
+      ]
+    },
+    {
+      "name": "taskFilter",
+      "storage": "transient",
+      "fields": [
+        {
+          "name": "searchText",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "statusFilter",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "ownerFilter",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "clearFilters",
+          "type": "boolean",
+          "required": false
+        },
+        {
+          "name": "matchedTaskIds",
+          "type": "array",
+          "required": false
+        }
+      ],
+      "owned": true,
+      "relationships": [
+        "taskFilter reads task rows and member rows but is not persisted"
+      ]
+    },
+    {
+      "name": "analyticsSummary",
+      "storage": "transient",
+      "fields": [
+        {
+          "name": "totalProjects",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "totalTasks",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "completedTasks",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "blockedTasks",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "overdueTasks",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "completionRate",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "statusBreakdown",
+          "type": "object",
+          "required": true
+        }
+      ],
+      "owned": true,
+      "relationships": [
+        "analyticsSummary is calculated from durable project and task rows and is not persisted"
+      ]
+    }
+  ],
+  "auth": {
+    "required": true,
+    "model": "email + password via the backend SDK",
+    "rules": [
+      "signed-out visitors are redirected to /login when opening any dashboard route",
+      "authenticated members can read shared Alder Studio projects, tasks, and member display information",
+      "authenticated members can create projects and tasks",
+      "authenticated members can update task status and task owner",
+      "only administrators can open /admin and update member roles",
+      "non-administrator members see Access denied on /admin and cannot see role editing controls"
+    ]
+  },
+  "operations": [
+    {
+      "id": "create-project",
+      "entity": "project",
+      "kind": "create",
+      "description": "persist a new project via db.entity('project').create",
+      "journey": "create-and-update-project-work",
+      "responsibilities": [
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "create",
+          "reads": [
+            "projectTitle",
+            "clientName",
+            "projectDescription",
+            "projectOwnerId",
+            "targetDate",
+            "projectStatus",
+            "createdBy"
+          ],
+          "writes": [
+            "projectId",
+            "projectTitle",
+            "clientName",
+            "projectDescription",
+            "projectOwnerId",
+            "targetDate",
+            "projectStatus",
+            "createdBy"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "update-project",
+      "entity": "project",
+      "kind": "update",
+      "description": "update saved project fields via db.entity('project').update",
+      "journey": "create-and-update-project-work",
+      "responsibilities": [
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "update",
+          "reads": [
+            "projectId",
+            "projectTitle",
+            "clientName",
+            "projectDescription",
+            "projectOwnerId",
+            "targetDate",
+            "projectStatus"
+          ],
+          "writes": [
+            "projectTitle",
+            "clientName",
+            "projectDescription",
+            "projectOwnerId",
+            "targetDate",
+            "projectStatus"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "create-task",
+      "entity": "task",
+      "kind": "create",
+      "description": "persist a new task under a project via db.entity('task').create",
+      "journey": "create-and-update-project-work",
+      "responsibilities": [
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "create",
+          "reads": [
+            "projectId",
+            "taskTitle",
+            "taskDescription",
+            "taskOwnerId",
+            "priority",
+            "dueDate",
+            "taskStatus",
+            "createdBy"
+          ],
+          "writes": [
+            "taskId",
+            "projectId",
+            "taskTitle",
+            "taskDescription",
+            "taskOwnerId",
+            "priority",
+            "dueDate",
+            "taskStatus",
+            "createdBy"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "update-task-status",
+      "entity": "task",
+      "kind": "update",
+      "description": "update the status of an existing task via db.entity('task').update",
+      "journey": "create-and-update-project-work",
+      "responsibilities": [
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "update",
+          "reads": [
+            "taskId",
+            "taskStatus"
+          ],
+          "writes": [
+            "taskStatus"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "update-task-owner",
+      "entity": "task",
+      "kind": "update",
+      "description": "update the owner of an existing task via db.entity('task').update",
+      "journey": "create-and-update-project-work",
+      "responsibilities": [
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "update",
+          "reads": [
+            "taskId",
+            "taskOwnerId"
+          ],
+          "writes": [
+            "taskOwnerId"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "filter-tasks",
+      "entity": "taskFilter",
+      "kind": "search",
+      "description": "return matching tasks for board and list views from current transient filter controls",
+      "journey": "filter-board-and-list-views",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "behavior": "match saved tasks by search text, selected status, and selected owner; all-statuses and all-owners are all-options sentinels",
+          "reads": [
+            "searchText",
+            "statusFilter",
+            "ownerFilter",
+            "taskTitle",
+            "taskStatus",
+            "taskOwnerId"
+          ],
+          "writes": [
+            "matchedTaskIds"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "calculate-analytics-summary",
+      "entity": "analyticsSummary",
+      "kind": "read",
+      "description": "calculate visible analytics metrics from durable project and task data",
+      "journey": "view-analytics-summary",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "behavior": "count projects and tasks, count tasks by status, count overdue incomplete tasks using due dates, and calculate completion rate",
+          "reads": [
+            "projectStatus",
+            "taskStatus",
+            "dueDate"
+          ],
+          "writes": [
+            "totalProjects",
+            "totalTasks",
+            "completedTasks",
+            "blockedTasks",
+            "overdueTasks",
+            "completionRate",
+            "statusBreakdown"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "update-member-role",
+      "entity": "member",
+      "kind": "update",
+      "description": "administrator updates a member role via db.entity('member').update",
+      "journey": "administrator-manages-member-roles",
+      "responsibilities": [
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "update",
+          "reads": [
+            "userId",
+            "role"
+          ],
+          "writes": [
+            "role"
+          ]
+        }
+      ]
+    }
+  ],
+  "integrations": [
+    {
+      "name": "backend auth",
+      "purpose": "authenticate Alder Studio members with platform auth.currentUser, signIn, and signOut",
+      "required": true
+    },
+    {
+      "name": "backend database",
+      "purpose": "persist projects, tasks, and member roles with db.entity CRUD",
+      "required": true
+    }
+  ],
+  "states": [
+    {
+      "surface": "authenticated layout",
+      "loading": "checking signed-in user",
+      "empty": "no dashboard content until authentication completes",
+      "validation": "email and password are required on the sign-in form",
+      "error": "sign in failed, check your credentials",
+      "success": "signed in navigation shows Projects, Board, Tasks, Analytics, and Sign out"
+    },
+    {
+      "surface": "projects page",
+      "loading": "project list skeleton while projects load",
+      "empty": "No projects yet. Create your first Alder Studio project.",
+      "validation": "project title, client name, owner, target date, and status are required",
+      "error": "project could not be saved, try again",
+      "success": "project saved"
+    },
+    {
+      "surface": "project detail page",
+      "loading": "project and task skeleton while records load",
+      "empty": "No tasks yet for this project",
+      "validation": "task title, owner, priority, due date, and status are required",
+      "error": "task change could not be saved, try again",
+      "success": "task saved"
+    },
+    {
+      "surface": "board page",
+      "loading": "board columns show loading placeholders while tasks load",
+      "empty": "No tasks match the current filters",
+      "validation": "filter selections must use available status and member options",
+      "error": "tasks could not be loaded",
+      "success": "visible filter summary shows active status and owner filters"
+    },
+    {
+      "surface": "task list page",
+      "loading": "table skeleton while tasks load",
+      "empty": "No tasks match your search",
+      "validation": "search text may be blank or any visible text",
+      "error": "task list could not be loaded",
+      "success": "matching task count is visible"
+    },
+    {
+      "surface": "analytics page",
+      "loading": "metric cards show loading placeholders while summary is calculated",
+      "empty": "No project data yet",
+      "validation": "analytics uses saved project and task rows only",
+      "error": "analytics could not be calculated",
+      "success": "metric cards and status breakdown are visible"
+    },
+    {
+      "surface": "administrator page",
+      "loading": "members table skeleton while members load",
+      "empty": "No members found",
+      "validation": "role must be Member or Administrator",
+      "error": "role could not be saved",
+      "success": "role saved"
+    }
+  ],
+  "sampleData": {
+    "members": [
+      {
+        "userId": "sample-admin-riley",
+        "displayName": "Riley Chen",
+        "email": "riley@alder.example",
+        "role": "administrator",
+        "active": true
+      },
+      {
+        "userId": "sample-member-ada",
+        "displayName": "Ada Morgan",
+        "email": "ada@alder.example",
+        "role": "member",
+        "active": true
+      }
+    ],
+    "projects": [
+      {
+        "projectId": "sample-project-launch",
+        "projectTitle": "Brand Launch",
+        "clientName": "Northstar Goods",
+        "projectDescription": "Launch operations sample project",
+        "projectOwnerId": "sample-member-ada",
+        "targetDate": "2026-12-15",
+        "projectStatus": "active",
+        "createdBy": "sample-admin-riley"
+      }
+    ],
+    "tasks": [
+      {
+        "taskId": "sample-task-kickoff",
+        "projectId": "sample-project-launch",
+        "taskTitle": "Kickoff checklist",
+        "taskDescription": "Prepare launch kickoff materials",
+        "taskOwnerId": "sample-member-ada",
+        "priority": "high",
+        "dueDate": "2026-11-01",
+        "taskStatus": "todo",
+        "createdBy": "sample-admin-riley"
+      }
+    ]
+  },
+  "acceptance": [
+    {
+      "id": "a1",
+      "statement": "a signed-out visitor opening /projects is redirected to /login or shown a sign-in form instead of dashboard data",
+      "journey": "member-access-boundaries",
+      "kind": "auth"
+    },
+    {
+      "id": "a2",
+      "statement": "a submitted project is visible in the project list after a full page reload",
+      "journey": "create-and-update-project-work",
+      "kind": "persistence"
+    },
+    {
+      "id": "a3",
+      "statement": "a submitted task is visible under its project after a full page reload",
+      "journey": "create-and-update-project-work",
+      "kind": "persistence"
+    },
+    {
+      "id": "a4",
+      "statement": "changing a task status to In Progress remains visible after a full page reload",
+      "journey": "create-and-update-project-work",
+      "kind": "persistence"
+    },
+    {
+      "id": "a5",
+      "statement": "board filters show only tasks matching the selected status and owner and display an active filter summary",
+      "journey": "filter-board-and-list-views",
+      "kind": "functional"
+    },
+    {
+      "id": "a6",
+      "statement": "task list search for Kickoff shows matching rows and hides non-matching rows",
+      "journey": "filter-board-and-list-views",
+      "kind": "functional"
+    },
+    {
+      "id": "a7",
+      "statement": "analytics displays numeric total projects, total tasks, completed tasks, blocked tasks, overdue tasks, and completion rate metrics",
+      "journey": "view-analytics-summary",
+      "kind": "functional"
+    },
+    {
+      "id": "a8",
+      "statement": "a non-administrator opening /admin sees Access denied and no role editing controls",
+      "journey": "member-access-boundaries",
+      "kind": "auth"
+    },
+    {
+      "id": "a9",
+      "statement": "an administrator role change for a member remains visible after a full page reload",
+      "journey": "administrator-manages-member-roles",
+      "kind": "persistence"
+    }
+  ],
+  "deferred": [
+    {
+      "item": "time tracking and billable hour reporting",
+      "reason": "the request asks for project and task operations, filtering, and analytics summary, not timesheets"
+    },
+    {
+      "item": "file attachments",
+      "reason": "the request does not require uploading or managing project files"
+    },
+    {
+      "item": "external calendar or notification integrations",
+      "reason": "the fixed scaffold allows backend SDK capabilities only and the request does not require external integrations"
+    },
+    {
+      "item": "granular per-project permissions",
+      "reason": "the request specifies member and administrator roles, not custom access rules per project"
+    }
+  ],
+  "version": 2,
+  "buildProfile": {
+    "version": 1,
+    "requestedBuildType": "auto",
+    "resolvedBuildType": "application",
+    "applicationSubtype": "auto",
+    "requirementSignals": [
+      "user_accounts",
+      "saved_data"
+    ],
+    "inferenceSource": "auto",
+    "confidence": 0.89
+  }
+}

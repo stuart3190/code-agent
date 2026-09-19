@@ -15,7 +15,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { managedUsageGuard } from "../../shell/server/lib/buildJobs.mjs";
-import { byokJobCeiling } from "../../shell/server/lib/appBuild/appBuildService.mjs";
 import { expectationOutcome, expectationKeywords } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 import { planStages, stagePrompt } from "../../shell/server/lib/appBuild/stagePlan.mjs";
 import { buildStageContext } from "../../shell/server/lib/appBuild/contextBuilder.mjs";
@@ -73,27 +72,6 @@ test("CEILING — a 25-credit job stops before the call that cannot fit, and can
   // The paid work of the final completed turn was APPLIED before the abort, and its usage kept.
   assert.equal(Object.keys(tree).length, calls.count, "every paid turn's writes survive");
   assert.equal(tracked.rows.length, calls.count, "metered usage for completed turns is retained");
-});
-
-test("CEILING — every lane derives the same in-job cap; Codex gets it net of lifecycle spend", () => {
-  const lifecycle = (over) => ({
-    managed: false, byokSafety: { maxCostPerBuild: null }, costCeiling: 25,
-    budget: { totals: { credits: 0 } }, ...over,
-  });
-  assert.equal(byokJobCeiling(lifecycle()), 25, "codex/BYOK carries the build ceiling into the job");
-  assert.equal(byokJobCeiling(lifecycle({ budget: { totals: { credits: 20.5 } } })), 4.5, "net of what the lifecycle already spent");
-  assert.equal(byokJobCeiling(lifecycle({ byokSafety: { maxCostPerBuild: 3 } })), 3, "the user's own tighter cap wins");
-  assert.equal(byokJobCeiling(lifecycle({ costCeiling: null })), null, "no ceiling configured → no cap invented");
-  assert.equal(byokJobCeiling({ managed: true }), null, "managed lanes keep their own allowance guard");
-
-  // Source pins: the BYOK/Codex lane arms the SAME guard, and dispatches carry the derived cap.
-  const jobs = readFileSync("shell/server/lib/buildJobs.mjs", "utf8");
-  assert.match(jobs, /byok\s*\?\s*\(job\.byokCostLimit \? managedUsageGuard\(Number\(job\.byokCostLimit\)/);
-  const service = readFileSync("shell/server/lib/appBuild/appBuildService.mjs", "utf8");
-  assert.equal((service.match(/byokCostLimit: byokJobCeiling\(lifecycle\)/g) || []).length, 5,
-    "every dispatch site derives the in-job cap; none hands the raw per-build setting");
-  // And no managed reservation machinery is touched by any of it: the guard throws, nothing else.
-  assert.ok(!/reservations/.test(jobs.slice(jobs.indexOf("export function managedUsageGuard"), jobs.indexOf("export function managedUsageGuard") + 900)));
 });
 
 // ── the freshness rule, pure ──────────────────────────────────────────────────────────────────

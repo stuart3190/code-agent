@@ -5,7 +5,7 @@
 import { createSupabaseBackend } from "../../../../src/scaffolds/reactVite/lib/backend/supabaseBackend.js";
 
 const url = import.meta.env.VITE_SUPABASE_URL;
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export const backendConfigured = !!(url && anonKey);
 
@@ -18,7 +18,7 @@ export const apiBase = () => desktopHost()?.server?.replace(/\/$/, "") || "";
 let _backend = null;
 export function backend() {
   if (!backendConfigured) {
-    throw new Error("Supabase is not configured — set VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY in shell/web/.env");
+    throw new Error("Supabase is not configured — set the public Supabase URL and publishable key for the web build");
   }
   if (!_backend) _backend = createSupabaseBackend({ url, anonKey });
   return _backend;

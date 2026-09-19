@@ -1,0 +1,4857 @@
+[
+  {
+    "classification": "platform",
+    "journey_id": "undo-redo-fixture-change",
+    "step_id": "4",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "4",
+      "version": 1,
+      "defectId": "3bb77d720be0861ba0b40e1d39ef46e2",
+      "journeyId": "undo-redo-fixture-change",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|undo-redo-fixture-change|4|act_5006323c",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-plan/Inspector.jsx",
+        "src/components/create-edit-save-plan/WorkspaceSections.jsx",
+        "src/components/create-edit-save-plan/AuthBoundary.jsx",
+        "src/components/create-edit-save-plan/CanvasPanel.jsx",
+        "src/components/create-edit-save-plan/CreateEditSavePlanFlow.jsx",
+        "src/components/create-edit-save-plan/flowUtils.js",
+        "src/extensions/custom/create-edit-save-plan.js",
+        "src/extensions/custom/undo-redo-fixture-change.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "expectedState": "the inspector again displays brightness 35% and the fixture appears dimmer",
+      "observedState": "not reached: the journey's required starting state could not be established (authentication form: the account form exposed no submit control)",
+      "owningModules": [
+        "src/components/create-edit-save-plan/CreateEditSavePlanFlow.jsx"
+      ],
+      "actionIdentity": {
+        "action": "redo the brightness change",
+        "stepId": 4,
+        "journeyId": "undo-redo-fixture-change"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": {
+        "id": "act_5006323c",
+        "logicalField": "redo control"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "switch-between-plans",
+    "step_id": "0",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "0",
+      "version": 1,
+      "defectId": "16405763637018ff81d4d994ea591f48",
+      "journeyId": "switch-between-plans",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|switch-between-plans|0|-",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-plan/AuthBoundary.jsx",
+        "src/components/create-edit-save-plan/CanvasPanel.jsx",
+        "src/components/create-edit-save-plan/CreateEditSavePlanFlow.jsx",
+        "src/components/create-edit-save-plan/Inspector.jsx",
+        "src/components/create-edit-save-plan/WorkspaceSections.jsx",
+        "src/components/create-edit-save-plan/flowUtils.js",
+        "src/components/ui/switch.jsx",
+        "src/extensions/custom/create-edit-save-plan.js",
+        "src/extensions/custom/switch-between-plans.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "expectedState": "the plan switcher shows Atrium Lighting Plan",
+      "observedState": "not reached: the journey's required starting state could not be established (authentication form: the account form exposed no submit control)",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "open the workspace route",
+        "stepId": 0,
+        "journeyId": "switch-between-plans"
+      },
+      "classification": "platform",
+      "identityStatus": "identity_absent",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": null,
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "switch-between-plans",
+    "step_id": "1",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "1",
+      "version": 1,
+      "defectId": "3c6ed1f68f41d3767e26140a369c2683",
+      "journeyId": "switch-between-plans",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|switch-between-plans|1|act_76ade473",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-plan/Inspector.jsx",
+        "src/components/create-edit-save-plan/WorkspaceSections.jsx",
+        "src/components/create-edit-save-plan/AuthBoundary.jsx",
+        "src/components/create-edit-save-plan/CanvasPanel.jsx",
+        "src/components/create-edit-save-plan/CreateEditSavePlanFlow.jsx",
+        "src/components/create-edit-save-plan/flowUtils.js",
+        "src/components/ui/switch.jsx",
+        "src/extensions/custom/create-edit-save-plan.js",
+        "src/extensions/custom/switch-between-plans.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "expectedState": "Gallery Track Plan becomes the active plan with an empty canvas",
+      "observedState": "not reached: the journey's required starting state could not be established (authentication form: the account form exposed no submit control)",
+      "owningModules": [
+        "src/components/create-edit-save-plan/CreateEditSavePlanFlow.jsx"
+      ],
+      "actionIdentity": {
+        "action": "create another named plan",
+        "stepId": 1,
+        "journeyId": "switch-between-plans"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": {
+        "id": "act_76ade473",
+        "logicalField": "name"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "switch-between-plans",
+    "step_id": "2",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "2",
+      "version": 1,
+      "defectId": "4cc7e506e3f59e06fe4cf4fee001d4e4",
+      "journeyId": "switch-between-plans",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|switch-between-plans|2|ctl_749ba81f",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-plan/WorkspaceSections.jsx",
+        "src/components/create-edit-save-plan/AuthBoundary.jsx",
+        "src/components/create-edit-save-plan/CanvasPanel.jsx",
+        "src/components/create-edit-save-plan/CreateEditSavePlanFlow.jsx",
+        "src/components/create-edit-save-plan/Inspector.jsx",
+        "src/components/create-edit-save-plan/flowUtils.js",
+        "src/components/ui/switch.jsx",
+        "src/extensions/custom/create-edit-save-plan.js",
+        "src/extensions/custom/switch-between-plans.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "expectedState": "Atrium Lighting Plan becomes active and its Pendant Light fixture is visible",
+      "observedState": "not reached: the journey's required starting state could not be established (authentication form: the account form exposed no submit control)",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "switch back to the first plan",
+        "stepId": 2,
+        "journeyId": "switch-between-plans"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": {
+        "id": "ctl_749ba81f",
+        "logicalField": "planId"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "switch-between-plans",
+    "step_id": "3",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "3",
+      "version": 1,
+      "defectId": "28f4e4f600a13b2541397c74aec43251",
+      "journeyId": "switch-between-plans",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|switch-between-plans|3|ctl_749ba81f",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-plan/WorkspaceSections.jsx",
+        "src/components/create-edit-save-plan/AuthBoundary.jsx",
+        "src/components/create-edit-save-plan/CanvasPanel.jsx",
+        "src/components/create-edit-save-plan/CreateEditSavePlanFlow.jsx",
+        "src/components/create-edit-save-plan/Inspector.jsx",
+        "src/components/create-edit-save-plan/flowUtils.js",
+        "src/components/ui/switch.jsx",
+        "src/extensions/custom/create-edit-save-plan.js",
+        "src/extensions/custom/switch-between-plans.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "expectedState": "Gallery Track Plan becomes active and its canvas is empty",
+      "observedState": "not reached: the journey's required starting state could not be established (authentication form: the account form exposed no submit control)",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "switch to the second plan",
+        "stepId": 3,
+        "journeyId": "switch-between-plans"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": {
+        "id": "ctl_749ba81f",
+        "logicalField": "planId"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "settings-and-sign-out-boundary",
+    "step_id": "0",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "0",
+      "version": 1,
+      "defectId": "027e1da023c7d0022ba75d16e36eba6e",
+      "journeyId": "settings-and-sign-out-boundary",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|settings-and-sign-out-boundary|0|-",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-plan/AuthBoundary.jsx",
+        "src/extensions/custom/settings-and-sign-out-boundary.js",
+        "src/screens/scaffold/SettingsScreen.jsx",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "expectedState": "the settings page displays the signed-in account email and a sign-out control",
+      "observedState": "not reached: the journey's required starting state could not be established (authentication form: the account form exposed no submit control)",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/SettingsScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "open the settings route",
+        "stepId": 0,
+        "journeyId": "settings-and-sign-out-boundary"
+      },
+      "classification": "platform",
+      "identityStatus": "identity_absent",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": null,
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "settings-and-sign-out-boundary",
+    "step_id": "1",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "1",
+      "version": 1,
+      "defectId": "afb53d18790b79e720cc95812d0c3105",
+      "journeyId": "settings-and-sign-out-boundary",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|settings-and-sign-out-boundary|1|act_f1fcf21d",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-plan/Inspector.jsx",
+        "src/components/create-edit-save-plan/WorkspaceSections.jsx",
+        "src/components/create-edit-save-plan/AuthBoundary.jsx",
+        "src/extensions/custom/settings-and-sign-out-boundary.js",
+        "src/screens/scaffold/SettingsScreen.jsx",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "expectedState": "the signed-out home or sign-in screen is visible",
+      "observedState": "not reached: the journey's required starting state could not be established (authentication form: the account form exposed no submit control)",
+      "owningModules": [
+        "src/screens/scaffold/SettingsScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "sign out",
+        "stepId": 1,
+        "journeyId": "settings-and-sign-out-boundary"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": {
+        "id": "act_f1fcf21d",
+        "logicalField": "sign-out control"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "settings-and-sign-out-boundary",
+    "step_id": "2",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "2",
+      "version": 1,
+      "defectId": "4a1601ebe3c9ec1205ed66487c9fe71a",
+      "journeyId": "settings-and-sign-out-boundary",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|settings-and-sign-out-boundary|2|-",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-plan/AuthBoundary.jsx",
+        "src/extensions/custom/settings-and-sign-out-boundary.js",
+        "src/screens/scaffold/SettingsScreen.jsx",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "expectedState": "the sign-in panel is visible and no saved plan data is shown",
+      "observedState": "not reached: the journey's required starting state could not be established (authentication form: the account form exposed no submit control)",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "open the workspace route while signed out",
+        "stepId": 2,
+        "journeyId": "settings-and-sign-out-boundary"
+      },
+      "classification": "platform",
+      "identityStatus": "identity_absent",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": null,
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "durability",
+    "journey_id": "undo-redo-fixture-change",
+    "step_id": null,
+    "defect": {
+      "drove": null,
+      "owner": "app",
+      "stepId": null,
+      "version": 1,
+      "defectId": "2ecfdc7e17639511bc541dbf9cf6679b",
+      "journeyId": "undo-redo-fixture-change",
+      "pageState": null,
+      "signature": "durability|durable_row_missing|undo-redo-fixture-change|-|-",
+      "defectCode": "durable_row_missing",
+      "entityDiff": null,
+      "repairTier": "repair",
+      "entityAfter": null,
+      "failureRefs": [
+        "src/components/create-edit-save-plan/AuthBoundary.jsx",
+        "src/components/create-edit-save-plan/CanvasPanel.jsx",
+        "src/components/create-edit-save-plan/CreateEditSavePlanFlow.jsx",
+        "src/components/create-edit-save-plan/Inspector.jsx",
+        "src/components/create-edit-save-plan/WorkspaceSections.jsx",
+        "src/components/create-edit-save-plan/flowUtils.js",
+        "src/extensions/custom/create-edit-save-plan.js",
+        "src/extensions/custom/undo-redo-fixture-change.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": null,
+      "expectedState": null,
+      "observedState": "the browser journey passed without a corresponding app-scoped database mutation",
+      "owningModules": [
+        "src/extensions/custom/create-edit-save-plan.js",
+        "src/extensions/custom/undo-redo-fixture-change.js"
+      ],
+      "actionIdentity": null,
+      "classification": "durability",
+      "identityStatus": "identity_absent",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": null,
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "durability",
+    "journey_id": "switch-between-plans",
+    "step_id": null,
+    "defect": {
+      "drove": null,
+      "owner": "app",
+      "stepId": null,
+      "version": 1,
+      "defectId": "14b93e18227f05d744edb7f0fec2262e",
+      "journeyId": "switch-between-plans",
+      "pageState": null,
+      "signature": "durability|durable_row_missing|switch-between-plans|-|-",
+      "defectCode": "durable_row_missing",
+      "entityDiff": null,
+      "repairTier": "repair",
+      "entityAfter": null,
+      "failureRefs": [
+        "src/components/create-edit-save-plan/AuthBoundary.jsx",
+        "src/components/create-edit-save-plan/CanvasPanel.jsx",
+        "src/components/create-edit-save-plan/CreateEditSavePlanFlow.jsx",
+        "src/components/create-edit-save-plan/Inspector.jsx",
+        "src/components/create-edit-save-plan/WorkspaceSections.jsx",
+        "src/components/create-edit-save-plan/flowUtils.js",
+        "src/components/ui/switch.jsx",
+        "src/extensions/custom/create-edit-save-plan.js",
+        "src/extensions/custom/switch-between-plans.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": null,
+      "expectedState": null,
+      "observedState": "the browser journey passed without a corresponding app-scoped database mutation",
+      "owningModules": [
+        "src/extensions/custom/create-edit-save-plan.js",
+        "src/extensions/custom/switch-between-plans.js"
+      ],
+      "actionIdentity": null,
+      "classification": "durability",
+      "identityStatus": "identity_absent",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": null,
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "durability",
+    "journey_id": "settings-and-sign-out-boundary",
+    "step_id": null,
+    "defect": {
+      "drove": null,
+      "owner": "app",
+      "stepId": null,
+      "version": 1,
+      "defectId": "47a37ffed80d7737f3b619a5d45488a4",
+      "journeyId": "settings-and-sign-out-boundary",
+      "pageState": null,
+      "signature": "durability|durable_row_missing|settings-and-sign-out-boundary|-|-",
+      "defectCode": "durable_row_missing",
+      "entityDiff": null,
+      "repairTier": "repair",
+      "entityAfter": null,
+      "failureRefs": [
+        "src/components/create-edit-save-plan/AuthBoundary.jsx",
+        "src/extensions/custom/settings-and-sign-out-boundary.js",
+        "src/screens/scaffold/SettingsScreen.jsx",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": null,
+      "expectedState": null,
+      "observedState": "the browser journey passed without a corresponding app-scoped database mutation",
+      "owningModules": [
+        "src/extensions/custom/settings-and-sign-out-boundary.js"
+      ],
+      "actionIdentity": null,
+      "classification": "durability",
+      "identityStatus": "identity_absent",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": null,
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "keyboard-canvas-actions",
+    "step_id": "4",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "4",
+      "version": 1,
+      "defectId": "0b64278bfa6ecda1804f4a7ffb7df8c7",
+      "journeyId": "keyboard-canvas-actions",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|keyboard-canvas-actions|4|ctl_fd0c5087",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "failureRefs": [
+        "src/components/ui/input.jsx",
+        "src/components/ui/textarea.jsx",
+        "src/components/create-edit-save-plan/AuthBoundary.jsx",
+        "src/components/create-edit-save-plan/CanvasPanel.jsx",
+        "src/components/create-edit-save-plan/Inspector.jsx",
+        "src/components/create-edit-save-plan/WorkspaceSections.jsx",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "3c11302e20b7752962c664f30f16cba545e2d1f35f79b48ff6ec2821901841b5",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 1
+      },
+      "expectedState": "the inspector displays x 260 and y 180 and the fixture position visibly changes on the canvas",
+      "observedState": "not reached: the journey's required starting state could not be established (authentication form: the account form exposed no submit control)",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "move the selected fixture using keyboard controls",
+        "stepId": 4,
+        "journeyId": "keyboard-canvas-actions"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": {
+        "id": "ctl_fd0c5087",
+        "logicalField": "x"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "undo-redo-fixture-change",
+    "step_id": "0",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "0",
+      "version": 1,
+      "defectId": "48b2a6738d803e0fb55452a1bd773f96",
+      "journeyId": "undo-redo-fixture-change",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|undo-redo-fixture-change|0|-",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-plan/AuthBoundary.jsx",
+        "src/components/create-edit-save-plan/CanvasPanel.jsx",
+        "src/components/create-edit-save-plan/CreateEditSavePlanFlow.jsx",
+        "src/components/create-edit-save-plan/Inspector.jsx",
+        "src/components/create-edit-save-plan/WorkspaceSections.jsx",
+        "src/components/create-edit-save-plan/flowUtils.js",
+        "src/extensions/custom/create-edit-save-plan.js",
+        "src/extensions/custom/undo-redo-fixture-change.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "expectedState": "Atrium Lighting Plan is visible with the Pendant Light selected or selectable",
+      "observedState": "not reached: the journey's required starting state could not be established (authentication form: the account form exposed no submit control)",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "open the workspace route",
+        "stepId": 0,
+        "journeyId": "undo-redo-fixture-change"
+      },
+      "classification": "platform",
+      "identityStatus": "identity_absent",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": null,
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "undo-redo-fixture-change",
+    "step_id": "1",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "1",
+      "version": 1,
+      "defectId": "b6341b66d3e5d1052bdc47ed3b8f052e",
+      "journeyId": "undo-redo-fixture-change",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|undo-redo-fixture-change|1|ctl_804f503f",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-plan/WorkspaceSections.jsx",
+        "src/components/create-edit-save-plan/AuthBoundary.jsx",
+        "src/components/create-edit-save-plan/CanvasPanel.jsx",
+        "src/components/create-edit-save-plan/CreateEditSavePlanFlow.jsx",
+        "src/components/create-edit-save-plan/Inspector.jsx",
+        "src/components/create-edit-save-plan/flowUtils.js",
+        "src/extensions/custom/create-edit-save-plan.js",
+        "src/extensions/custom/undo-redo-fixture-change.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "expectedState": "the inspector shows the Pendant Light fixture details",
+      "observedState": "not reached: the journey's required starting state could not be established (authentication form: the account form exposed no submit control)",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "select the Pendant Light fixture",
+        "stepId": 1,
+        "journeyId": "undo-redo-fixture-change"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": {
+        "id": "ctl_804f503f",
+        "logicalField": "fixtureId"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "undo-redo-fixture-change",
+    "step_id": "2",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "2",
+      "version": 1,
+      "defectId": "c8ac33b4462ba79a98d4dae2eecf4463",
+      "journeyId": "undo-redo-fixture-change",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|undo-redo-fixture-change|2|ctl_34d0622a",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-plan/Inspector.jsx",
+        "src/components/create-edit-save-plan/WorkspaceSections.jsx",
+        "src/components/create-edit-save-plan/AuthBoundary.jsx",
+        "src/components/create-edit-save-plan/CanvasPanel.jsx",
+        "src/components/create-edit-save-plan/CreateEditSavePlanFlow.jsx",
+        "src/components/create-edit-save-plan/flowUtils.js",
+        "src/extensions/custom/create-edit-save-plan.js",
+        "src/extensions/custom/undo-redo-fixture-change.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "expectedState": "the inspector displays brightness 35% and the fixture appears dimmer",
+      "observedState": "not reached: the journey's required starting state could not be established (authentication form: the account form exposed no submit control)",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "change the fixture brightness",
+        "stepId": 2,
+        "journeyId": "undo-redo-fixture-change"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": {
+        "id": "ctl_34d0622a",
+        "logicalField": "brightness"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "undo-redo-fixture-change",
+    "step_id": "3",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "3",
+      "version": 1,
+      "defectId": "bd711657d9e9409b396666d165f84d47",
+      "journeyId": "undo-redo-fixture-change",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|undo-redo-fixture-change|3|act_d6a739ca",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-plan/Inspector.jsx",
+        "src/components/create-edit-save-plan/WorkspaceSections.jsx",
+        "src/components/create-edit-save-plan/AuthBoundary.jsx",
+        "src/components/create-edit-save-plan/CanvasPanel.jsx",
+        "src/components/create-edit-save-plan/CreateEditSavePlanFlow.jsx",
+        "src/components/create-edit-save-plan/flowUtils.js",
+        "src/extensions/custom/create-edit-save-plan.js",
+        "src/extensions/custom/undo-redo-fixture-change.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "expectedState": "the brightness returns to its previous visible value",
+      "observedState": "not reached: the journey's required starting state could not be established (authentication form: the account form exposed no submit control)",
+      "owningModules": [
+        "src/components/create-edit-save-plan/CreateEditSavePlanFlow.jsx"
+      ],
+      "actionIdentity": {
+        "action": "undo the brightness change",
+        "stepId": 3,
+        "journeyId": "undo-redo-fixture-change"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": {
+        "id": "act_d6a739ca",
+        "logicalField": "undo control"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "create-edit-save-plan",
+    "step_id": "1",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "1",
+      "version": 1,
+      "defectId": "a9db5f17b4d97bcf3c11edc627a243d2",
+      "journeyId": "create-edit-save-plan",
+      "pageState": null,
+      "signature": "platform|journey_prerequisite_control_missing|create-edit-save-plan|1|act_44e00d0b",
+      "defectCode": "journey_prerequisite_control_missing",
+      "entityDiff": null,
+      "repairTier": "none",
+      "entityAfter": null,
+      "failureRefs": [
+        "src/components/create-edit-save-plan/CreateEditSavePlanFlow.jsx"
+      ],
+      "entityBefore": null,
+      "expectedState": null,
+      "observedState": "the account form exposed no submit control",
+      "owningModules": [
+        "src/screens/scaffold/WorkspaceScreen.jsx",
+        "src/components/create-edit-save-plan/CreateEditSavePlanFlow.jsx"
+      ],
+      "actionIdentity": {
+        "action": "sign in or create an account with email and password",
+        "stepId": 1,
+        "journeyId": "create-edit-save-plan"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": {
+        "id": "act_44e00d0b",
+        "logicalField": "authentication form"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "durability",
+    "journey_id": "create-edit-save-plan",
+    "step_id": "6",
+    "defect": {
+      "drove": true,
+      "owner": "app",
+      "stepId": "6",
+      "version": 1,
+      "defectId": "522b2979ff542a09524b393fa86948ff",
+      "journeyId": "create-edit-save-plan",
+      "pageState": "HomeWorkspaceLibraryReportsSettings LUMEN LAYOUTS WORKSPACE Authenticated SVG floor-planning workspace Create durable plans, place and edit lighting fixtures, undo or redo workspace edits, switch between saved plans, and preserve the account boundary. Idle workspace ready. PLAN TOOLBAR Atrium Lighting Plan Saved at 2026-09-16T12:58:52.371Z save control undo control redo control Sign out New plan name new plan control Create plan Atrium Lighting Plan Fixture library panel Choose fixture Type, then create-fixture to place it on the canvas. Pendant Light Track Head Wall Washer fixture library Atr",
+      "signature": "durability|durable_outcome_missing|create-edit-save-plan|6|-",
+      "defectCode": "durable_outcome_missing",
+      "entityDiff": {
+        "changed": [],
+        "created": [
+          "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+          "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+          "babeffec-5f0a-4a2d-8303-b957f11a082b"
+        ],
+        "deleted": []
+      },
+      "repairTier": "repair",
+      "entityAfter": {
+        "hash": "3c11302e20b7752962c664f30f16cba545e2d1f35f79b48ff6ec2821901841b5",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 1
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-plan/AuthBoundary.jsx",
+        "src/components/create-edit-save-plan/CanvasPanel.jsx",
+        "src/components/create-edit-save-plan/CreateEditSavePlanFlow.jsx",
+        "src/components/create-edit-save-plan/Inspector.jsx",
+        "src/components/create-edit-save-plan/WorkspaceSections.jsx",
+        "src/components/create-edit-save-plan/flowUtils.js",
+        "src/extensions/custom/create-edit-save-plan.js",
+        "src/extensions/custom/switch-between-plans.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "5582668908f242213bb151fbe90ebbfdcbd1588e9b478fc2a1a6c36e13fdc949",
+        "appUsers": [],
+        "entities": [],
+        "entityCount": 0,
+        "appUserCount": 0
+      },
+      "expectedState": "Atrium Lighting Plan reloads with the Pendant Light still at x 240, y 160, rotation 45 degrees, and brightness 70%",
+      "observedState": "recovered state no longer shows: status",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "reload the page",
+        "stepId": 6,
+        "journeyId": "create-edit-save-plan"
+      },
+      "classification": "durability",
+      "identityStatus": "identity_absent",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": null,
+      "dependencyOwners": [],
+      "journeyAdvisories": [
+        {
+          "code": "text_freshness_not_observed",
+          "detail": "the contracted result was already visible",
+          "stepIndex": 3
+        },
+        {
+          "code": "text_freshness_not_observed",
+          "detail": "the contracted result was already visible",
+          "stepIndex": 4
+        },
+        {
+          "code": "text_freshness_not_observed",
+          "detail": "the contracted result was already visible",
+          "stepIndex": 6
+        }
+      ],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "keyboard-canvas-actions",
+    "step_id": "0",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "0",
+      "version": 1,
+      "defectId": "9b546630b94252777ac5b8f11823f349",
+      "journeyId": "keyboard-canvas-actions",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|keyboard-canvas-actions|0|-",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-plan/CanvasPanel.jsx",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "3c11302e20b7752962c664f30f16cba545e2d1f35f79b48ff6ec2821901841b5",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 1
+      },
+      "expectedState": "the saved Atrium Lighting Plan and its SVG canvas are visible",
+      "observedState": "not reached: the journey's required starting state could not be established (authentication form: the account form exposed no submit control)",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "open the workspace route",
+        "stepId": 0,
+        "journeyId": "keyboard-canvas-actions"
+      },
+      "classification": "platform",
+      "identityStatus": "identity_absent",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": null,
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "keyboard-canvas-actions",
+    "step_id": "1",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "1",
+      "version": 1,
+      "defectId": "525c68f8e8374bf101e193848875a202",
+      "journeyId": "keyboard-canvas-actions",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|keyboard-canvas-actions|1|ctl_03e7998c",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-plan/CanvasPanel.jsx",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "3c11302e20b7752962c664f30f16cba545e2d1f35f79b48ff6ec2821901841b5",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 1
+      },
+      "expectedState": "a visible focus outline and keyboard shortcut help are shown on the canvas",
+      "observedState": "not reached: the journey's required starting state could not be established (authentication form: the account form exposed no submit control)",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "focus the SVG canvas with the keyboard",
+        "stepId": 1,
+        "journeyId": "keyboard-canvas-actions"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": {
+        "id": "ctl_03e7998c",
+        "logicalField": "viewportZoom"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "keyboard-canvas-actions",
+    "step_id": "2",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "2",
+      "version": 1,
+      "defectId": "03603418d764886828933b525e282ecd",
+      "journeyId": "keyboard-canvas-actions",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|keyboard-canvas-actions|2|ctl_03e7998c",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-plan/CanvasPanel.jsx",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "3c11302e20b7752962c664f30f16cba545e2d1f35f79b48ff6ec2821901841b5",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 1
+      },
+      "expectedState": "the zoom indicator reads 125% and the pan coordinates read x 40 and y 20",
+      "observedState": "not reached: the journey's required starting state could not be established (authentication form: the account form exposed no submit control)",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "zoom and pan the canvas using keyboard controls",
+        "stepId": 2,
+        "journeyId": "keyboard-canvas-actions"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": {
+        "id": "ctl_03e7998c",
+        "logicalField": "viewportZoom"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  },
+  {
+    "classification": "platform",
+    "journey_id": "keyboard-canvas-actions",
+    "step_id": "3",
+    "defect": {
+      "drove": null,
+      "owner": "platform",
+      "stepId": "3",
+      "version": 1,
+      "defectId": "d17f608e52b66b1aabb3b4a26358a4e7",
+      "journeyId": "keyboard-canvas-actions",
+      "pageState": null,
+      "signature": "platform|contracted_control_undriveable|keyboard-canvas-actions|3|ctl_804f503f",
+      "defectCode": "contracted_control_undriveable",
+      "entityDiff": {
+        "changed": [],
+        "created": [],
+        "deleted": []
+      },
+      "repairTier": "none",
+      "entityAfter": {
+        "hash": "ce8bdc3f682b03fc8148a17127c1804a4d7237f8b3512198c15cd5138870a009",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          },
+          {
+            "id": "287dd255-1736-4b2f-955f-ba7ff16b59a0",
+            "createdAt": "2026-09-16T12:59:08.668801+00:00",
+            "authUserHash": "b166743511bbe92d4cb1"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 2
+      },
+      "failureRefs": [
+        "src/components/create-edit-save-plan/WorkspaceSections.jsx",
+        "src/components/create-edit-save-plan/CanvasPanel.jsx",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "entityBefore": {
+        "hash": "3c11302e20b7752962c664f30f16cba545e2d1f35f79b48ff6ec2821901841b5",
+        "appUsers": [
+          {
+            "id": "233d07d4-07ea-4b3a-819e-ed6bb54e1b76",
+            "createdAt": "2026-09-16T12:58:44.573299+00:00",
+            "authUserHash": "50fdf0f79466d4f64176"
+          }
+        ],
+        "entities": [
+          {
+            "id": "7fad1aaa-0e95-42a9-a357-09918edacc3d",
+            "type": "authSession",
+            "fields": {
+              "signedIn": {
+                "hash": "b5bea41b6c623f7c09f1",
+                "type": "boolean"
+              },
+              "authEmail": {
+                "hash": "9ab5a2a02b144f4e328f",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:45.444449+00:00"
+          },
+          {
+            "id": "ba87f2d6-ea95-4ddf-be2b-035dd40328d8",
+            "type": "plan",
+            "fields": {
+              "name": {
+                "hash": "0ce5895b3cfce590771d",
+                "type": "string"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "savedAt": {
+                "hash": "54be5eb03dab1c86d31b",
+                "type": "string"
+              },
+              "viewportPanX": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportPanY": {
+                "hash": "5feceb66ffc86f38d952",
+                "type": "number"
+              },
+              "viewportZoom": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:47.999048+00:00"
+          },
+          {
+            "id": "babeffec-5f0a-4a2d-8303-b957f11a082b",
+            "type": "fixture",
+            "fields": {
+              "x": {
+                "hash": "6af1f692e9496c6d0b66",
+                "type": "number"
+              },
+              "y": {
+                "hash": "a512db2741cd20693e4b",
+                "type": "number"
+              },
+              "planId": {
+                "hash": "28f42a01fa48be55abfb",
+                "type": "string"
+              },
+              "zIndex": {
+                "hash": "6b86b273ff34fce19d6b",
+                "type": "number"
+              },
+              "rotation": {
+                "hash": "811786ad1ae74adfdd20",
+                "type": "number"
+              },
+              "fixtureId": {
+                "hash": "2ff973b2743409fd254b",
+                "type": "string"
+              },
+              "brightness": {
+                "hash": "ff5a1ae012afa5d4c889",
+                "type": "number"
+              },
+              "fixtureType": {
+                "hash": "5753fc6c2a1a92219920",
+                "type": "string"
+              }
+            },
+            "createdAt": "2026-09-16T12:58:49.182292+00:00"
+          }
+        ],
+        "entityCount": 3,
+        "appUserCount": 1
+      },
+      "expectedState": "the Pendant Light is selected and the inspector shows its fields",
+      "observedState": "not reached: the journey's required starting state could not be established (authentication form: the account form exposed no submit control)",
+      "owningModules": [
+        "src/extensions/capabilityConfiguration.js",
+        "src/screens/scaffold/WorkspaceScreen.jsx"
+      ],
+      "actionIdentity": {
+        "action": "select the existing fixture using keyboard navigation",
+        "stepId": 3,
+        "journeyId": "keyboard-canvas-actions"
+      },
+      "classification": "platform",
+      "identityStatus": "identified",
+      "sourceTreeHash": "d1e2cf25af5fcd08f9b4d875eca6f450d3e2a08b6222400f6c5bd3f30699bac3",
+      "controlIdentity": {
+        "id": "ctl_804f503f",
+        "logicalField": "fixtureId"
+      },
+      "dependencyOwners": [],
+      "journeyAdvisories": [],
+      "consoleFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "requestFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "surfaceIntegration": null,
+      "candidateSnapshotId": "f391f8a0-c21f-4fb5-bf82-f7e2caa0b086",
+      "collectionMembership": null,
+      "capabilityOperationId": null
+    },
+    "created_at": "2026-09-16T12:59:36.243335+00:00"
+  }
+]

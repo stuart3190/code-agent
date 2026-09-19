@@ -1,0 +1,39 @@
+{
+  "id": "5f670fc9-bccb-403b-8893-bfc1df614e44",
+  "owner": "7fc93b1e-7dc6-48c0-ae05-38ce4ee3050f",
+  "project_id": "c8a24522-22ae-4070-b423-3ecec3647336",
+  "profile": "advanced",
+  "request": "Build an interactive SVG floor-planning workspace for Lumen Layouts. Users sign in,\ncreate and name plans, pan and zoom the canvas, drag fixtures from a library, select fixtures, edit\nposition, rotation, and brightness in an inspector, undo and redo changes, switch plans, save and\nreload durable state, export a plan summary, and print it. Include accessible keyboard alternatives\nfor canvas actions and separate workspace, library, reports, and settings routes. Use platform\nauthentication and durable capabilities.\n\nQualification instance 1; create a fresh implementation.",
+  "state": "cancelled",
+  "budget_credits": 60,
+  "spent_credits": 29.34608,
+  "contract_id": "5b2b87dc-1f28-45e7-a208-294d6359d511",
+  "final_snapshot": null,
+  "error": "Builder V2 build cancelled.",
+  "started_at": "2026-09-16T09:49:41.27+00:00",
+  "finished_at": "2026-09-16T10:11:45.411+00:00",
+  "project_id_text": "c8a24522-22ae-4070-b423-3ecec3647336",
+  "max_repair_dispatches": 1000,
+  "envelope_version": 2,
+  "customer_state": "failed",
+  "spent_breakdown": {
+    "thrallo_recovery:thrallo_repair:connected_allowance": 23.45322,
+    "customer_generation:customer_request:connected_allowance": 5.89286
+  },
+  "failure": {
+    "code": "cancelled",
+    "action": "stop",
+    "retryable": false,
+    "checkpointId": "e58a77db-eb1a-4d74-9edd-ebae79a495c4",
+    "classification": "generated_app",
+    "internalDetail": "Builder V2 build cancelled. [cancelled]",
+    "providerCallMade": null,
+    "reservationState": "not_created",
+    "customerMessageKey": "build_checking_repairs",
+    "customerActionRequired": false
+  },
+  "last_durable_progress_at": "2026-09-16T09:57:22.382+00:00",
+  "expected_duration_ms": 1423000,
+  "hard_safety_duration_ms": 4269000,
+  "verifier_policy": "minimal_contract_v1"
+}

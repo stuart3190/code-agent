@@ -11,11 +11,16 @@
 // mounted AND gated, without needing a real session or spending anything. The one status this
 // script exists to catch is 404.
 
+import { verifyPublicWebAuth } from "./lib/public-web-auth-smoke.mjs";
+import { resolvePublicAuthConfig } from "../shell/web/publicAuthConfig.mjs";
+
 const origin = (() => {
   const i = process.argv.indexOf("--origin");
   return (i === -1 ? process.env.THRALLO_SMOKE_ORIGIN || "https://app.thrallo.com" : process.argv[i + 1])
     .replace(/\/$/, "");
 })();
+
+const publicAuth = resolvePublicAuthConfig(process.env, { required: true });
 
 // `expect` is the set of acceptable statuses. 404 is never acceptable for a mounted route.
 const CHECKS = [
@@ -40,7 +45,7 @@ const CHECKS = [
   { method: "GET", path: "/api/v1/projects/00000000-0000-4000-8000-000000000001/analytics/export?format=csv", expect: [401], why: "analytics export" },
   { method: "POST", path: "/api/v1/projects/00000000-0000-4000-8000-000000000001/deployments/00000000-0000-4000-8000-000000000002/rollback", expect: [401], why: "rollback" },
   { method: "GET", path: "/api/v1/projects/00000000-0000-4000-8000-000000000001/deployments/00000000-0000-4000-8000-000000000002/download", expect: [401], why: "deployment source download" },
-  { method: "POST", path: "/api/analytics/collect", expect: [204], why: "the public beacon must always answer 204" },
+  { method: "POST", path: "/api/analytics/collect", expect: [415], why: "the public beacon rejects an invalid media type without disappearing" },
   { method: "GET", path: "/api/v1/ai/connections", expect: [401], why: "AI connections" },
   { method: "GET", path: "/api/v1/diagnostics", expect: [401], why: "build diagnostics" },
   { method: "GET", path: "/api/v1/tokens", expect: [401], why: "API tokens" },
@@ -87,6 +92,15 @@ async function check(entry) {
 const results = [];
 for (const entry of CHECKS) results.push(await check(entry));
 
+let authProof;
+try {
+  authProof = await verifyPublicWebAuth({ origin, config: publicAuth });
+  console.log(`PASS  public browser auth (${authProof.keyKind}, ${authProof.assets.length} assets, ${authProof.sourceMapCount} source maps)`);
+} catch (error) {
+  console.error(`FAIL  public browser auth — ${error.message}`);
+  process.exitCode = 1;
+}
+
 const failures = results.filter((r) => !r.ok);
 for (const r of results) {
   const mark = r.ok ? "PASS" : "FAIL";
@@ -103,3 +117,4 @@ if (failures.length) {
   }
   process.exit(1);
 }
+if (!authProof) process.exit(1);

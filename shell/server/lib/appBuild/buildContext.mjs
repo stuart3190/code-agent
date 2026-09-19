@@ -10,16 +10,113 @@
 // a Codex-connected owner seven managed gpt-5.6 calls. Every lane carries its provider
 // POLICY (providerPolicy.mjs), and a lane change is a policy decision, never a fallback.
 
-import { optionalEnv } from "../env.mjs";
-import { activeAiCredential } from "../aiCredentialStore.mjs";
+import { activeAiCredential, refreshCodexAuth } from "../aiCredentialStore.mjs";
 import { createOpenAIEngineProvider } from "./openaiEngineProvider.mjs";
 import { createRoutingProvider } from "../../../../src/providers/routingProvider.mjs";
 import { resolveProviderPolicy } from "./providerPolicy.mjs";
+import { approvedConfiguredModel } from "../modelCatalogue.mjs";
+import { createGeminiEngineProvider } from "./geminiEngineProvider.mjs";
+import { createStoredAccessTokenProvider } from "../../../../src/providers/auth.mjs";
+
+export const CONNECTED_RECOVERY_POLICY_VERSION = "owner_connected_recovery_v1";
+
+function connectedRecoveryAuthorityError(message) {
+  return Object.assign(new Error(message), {
+    code: "recovery_provider_unavailable",
+    classification: "platform",
+    retryable: true,
+    dispatchState: "before_dispatch",
+    customerActionRequired: false,
+  });
+}
 
 function managedModelForIntent(intent) {
+  if (intent === "fast") return approvedConfiguredModel("OPENAI_FAST_MODEL", "gpt-5.6-luna", { provider: "openai", tier: "fast" });
   return intent === "edit"
-    ? optionalEnv("OPENAI_BALANCED_MODEL", "gpt-5.6-terra")
-    : optionalEnv("OPENAI_QUALITY_MODEL", optionalEnv("OPENAI_MODEL", "gpt-5.6-sol"));
+    ? approvedConfiguredModel("OPENAI_BALANCED_MODEL", "gpt-5.6-terra", { provider: "openai", tier: "balanced" })
+    : approvedConfiguredModel("OPENAI_QUALITY_MODEL", "gpt-5.6-sol", { provider: "openai", tier: "quality" });
+}
+
+/**
+ * Internal recovery is a Thrallo service responsibility. It deliberately ignores the owner's
+ * active credential and can therefore never spend BYOK quota or a connected allowance. Callers
+ * must still label every reservation `thrallo_repair`; this context only fixes provider/payer
+ * selection, while the reservation authority fixes accounting.
+ */
+export function resolveManagedRecoveryContext() {
+  return {
+    byok: false,
+    providerLabel: "openai-managed",
+    strongModel: managedModelForIntent("generate"),
+    routing: null,
+    byokSafety: null,
+    policy: resolveProviderPolicy({ provider: "managed", selectedBy: "thrallo_recovery_policy" }),
+    buildProvider: (intent) => createOpenAIEngineProvider({ model: managedModelForIntent(intent) }),
+  };
+}
+
+/**
+ * Resolve Builder-owned correction and repair transport from the private platform recovery
+ * identity. The build owner is deliberately not an input: customer BYOK, connected allowance,
+ * provider preference, and request payloads cannot select or impersonate this authority.
+ *
+ * The credential remains in the existing encrypted owner credential store. This resolver only
+ * proves that the configured internal owner currently has Codex connected, then returns the same
+ * server-side Codex transport used by ordinary connected generation with a distinct funding
+ * policy identity. No token or owner identifier is copied into routing evidence or generated code.
+ */
+export async function resolveConnectedRecoveryContext({
+  env = process.env,
+  credentialResolver = activeAiCredential,
+} = {}) {
+  const recoveryOwnerId = String(env.THRALLO_BV2_RECOVERY_OWNER_ID || "").trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(recoveryOwnerId)) {
+    throw connectedRecoveryAuthorityError(
+      "Builder V2 platform Codex recovery authority is not configured.",
+    );
+  }
+
+  let credential;
+  try {
+    credential = await credentialResolver(recoveryOwnerId);
+  } catch {
+    throw connectedRecoveryAuthorityError(
+      "Builder V2 platform Codex recovery authority is unavailable.",
+    );
+  }
+  if (credential?.provider !== "codex" || !credential?.secret) {
+    throw connectedRecoveryAuthorityError(
+      "Builder V2 platform recovery owner does not have an active Codex connection.",
+    );
+  }
+
+  let context;
+  try {
+    context = await resolveBuildContext(recoveryOwnerId, {
+      credentialResolver: async () => credential,
+    });
+  } catch {
+    throw connectedRecoveryAuthorityError(
+      "Builder V2 platform Codex recovery transport could not be initialized.",
+    );
+  }
+  if (context.policy?.billingLane !== "connected_allowance"
+      || context.policy?.primaryProvider !== "codex") {
+    throw connectedRecoveryAuthorityError(
+      "Builder V2 platform recovery transport resolved outside connected Codex.",
+    );
+  }
+  return {
+    ...context,
+    providerLabel: "codex-platform-recovery",
+    policy: {
+      ...context.policy,
+      selectedBy: "thrallo_recovery_authority",
+      recoveryPolicyVersion: CONNECTED_RECOVERY_POLICY_VERSION,
+      executionAuthority: "platform_connected_codex",
+      allowManagedFallback: false,
+    },
+  };
 }
 
 // `preferProvider` is set only by an automatic provider fallback: the build continues on a
@@ -29,12 +126,9 @@ export async function resolveBuildContext(ownerId, {
   credentialResolver = activeAiCredential,
   preferProvider = null,
 } = {}) {
-  let credential;
-  try {
-    credential = await credentialResolver(ownerId);
-  } catch {
-    credential = { provider: "managed", secret: null };
-  }
+  // A credential lookup failure is not evidence that the owner selected managed billing. Falling
+  // back here silently changes both provider and payer, so resolution fails closed without a call.
+  let credential = await credentialResolver(ownerId);
 
   if (preferProvider && preferProvider !== credential.provider) {
     // A fallback may not widen the billing lane. Switching TO managed is a billing decision made
@@ -56,12 +150,14 @@ export async function resolveBuildContext(ownerId, {
   }
 
   if (credential.provider === "anthropic" && credential.secret) {
-    const strong = optionalEnv("ANTHROPIC_MODEL", "claude-sonnet-5");
+    const strong = approvedConfiguredModel("ANTHROPIC_MODEL", "claude-sonnet-5", { provider: "anthropic", tier: "balanced" });
     const config = { provider: "anthropic", strong, apiKey: credential.secret };
     return {
       byok: true,
       providerLabel: "anthropic",
       strongModel: strong,
+      routing: credential.routing || null,
+      byokSafety: credential.byokSafety || null,
       policy: resolveProviderPolicy(credential),
       buildProvider: (intent) => createRoutingProvider({ config, turnMeta: { intent } }),
     };
@@ -71,21 +167,25 @@ export async function resolveBuildContext(ownerId, {
     const { createXaiEngineProvider, xaiPolicy, xaiEligibleForAgent, xaiReasoningForTask } = await import("../xaiProvider.mjs");
     const policy = xaiPolicy();
     if (policy.enabled && xaiEligibleForAgent("build", policy)) {
-      const strong = optionalEnv("XAI_QUALITY_MODEL", "grok-4.5");
-      const editModel = optionalEnv("XAI_BALANCED_MODEL", "grok-build-0.1");
+      const strong = approvedConfiguredModel("XAI_QUALITY_MODEL", "grok-4.5", { provider: "xai", tier: "quality" });
+      const editModel = approvedConfiguredModel("XAI_BALANCED_MODEL", "grok-build-0.1", { provider: "xai", tier: "balanced" });
       return {
         byok: true,
         providerLabel: "xai",
         strongModel: strong,
+        routing: credential.routing || null,
+        byokSafety: credential.byokSafety || null,
         policy: resolveProviderPolicy(credential),
         buildProvider: (intent) => createXaiEngineProvider({
-          model: intent === "edit" ? editModel : strong,
+          model: intent === "fast" ? approvedConfiguredModel("XAI_FAST_MODEL", "grok-4.3", { provider: "xai", tier: "fast" }) : intent === "edit" ? editModel : strong,
           apiKey: credential.secret,
           reasoningEffort: xaiReasoningForTask(intent === "edit" ? "component_edit" : "full_build", policy),
         }),
       };
     }
-    // Grok connected but admin-disabled for builds — fall through to managed.
+    throw Object.assign(new Error("The selected xAI connection is not enabled for application builds."), {
+      code: "provider_unavailable",
+    });
   }
 
   if (credential.provider === "openai" && credential.secret) {
@@ -93,6 +193,8 @@ export async function resolveBuildContext(ownerId, {
       byok: true,
       providerLabel: "openai",
       strongModel: managedModelForIntent("generate"),
+      routing: credential.routing || null,
+      byokSafety: credential.byokSafety || null,
       policy: resolveProviderPolicy(credential),
       buildProvider: (intent) =>
         createOpenAIEngineProvider({ model: managedModelForIntent(intent), apiKey: credential.secret }),
@@ -109,21 +211,48 @@ export async function resolveBuildContext(ownerId, {
     // The transport's REAL wire model, not a cosmetic label: the ChatGPT-account backend rejects
     // "-codex"-suffixed names, and telemetry recording a model the wire never used would be the
     // same class of lie as recording null.
-    const strong = createCodexProvider().model;
+    // Codex auth is owner-scoped encrypted database state. The worker service account must not
+    // depend on a shared ~/.codex/auth.json belonging to the VPS operator. Rotated refresh tokens
+    // are persisted back to the same owner credential atomically through the credential store.
+    let storedAuth = credential.secret;
+    const tokenProvider = createStoredAccessTokenProvider({
+      loadAuth: async () => storedAuth,
+      persistAuth: async (auth) => {
+        storedAuth = JSON.stringify(auth);
+        await refreshCodexAuth(ownerId, storedAuth, credential.metadata || {});
+      },
+    });
+    const strong = createCodexProvider({ tokenProvider }).model;
     return {
       byok: true, // never reserves or debits managed credits
       providerLabel: "codex",
       strongModel: strong,
+      routing: credential.routing || null,
+      byokSafety: credential.byokSafety || null,
       policy: resolveProviderPolicy(credential),
-      buildProvider: () => createCodexProvider(),
+      buildProvider: () => createCodexProvider({ tokenProvider }),
     };
   }
 
-  return {
-    byok: false,
-    providerLabel: "openai-managed",
-    strongModel: managedModelForIntent("generate"),
-    policy: resolveProviderPolicy({ provider: "managed" }),
-    buildProvider: (intent) => createOpenAIEngineProvider({ model: managedModelForIntent(intent) }),
-  };
+  if (credential.provider === "gemini" && credential.secret) {
+    const strong = approvedConfiguredModel("GEMINI_QUALITY_MODEL", "gemini-3.6-flash", { provider: "gemini", tier: "quality" });
+    const fast = approvedConfiguredModel("GEMINI_FAST_MODEL", "gemini-3.5-flash-lite", { provider: "gemini", tier: "fast" });
+    return {
+      byok: true, providerLabel: "gemini", strongModel: strong,
+      routing: credential.routing || null, byokSafety: credential.byokSafety || null,
+      policy: resolveProviderPolicy(credential),
+      buildProvider: (intent) => createGeminiEngineProvider({
+        apiKey: credential.secret, model: intent === "fast" ? fast : strong,
+      }),
+    };
+  }
+
+  if (credential.provider !== "managed") {
+    throw Object.assign(new Error(`The selected ${credential.provider} connection cannot run application builds.`), {
+      code: "provider_unavailable",
+    });
+  }
+
+  return { ...resolveManagedRecoveryContext(), routing: credential.routing || null,
+    byokSafety: credential.byokSafety || null };
 }

@@ -61,7 +61,8 @@ test("the Anthropic call is bounded, like every other provider's", async () => {
   // A connection that opened and then went silent hung forever: the turn neither threw nor
   // returned, so no error path ran and nothing recovered it.
   assert.match(provider, /AbortController/, "the request must be abortable");
-  assert.match(provider, /signal: controller\.signal/, "and the signal must actually be passed");
+  assert.match(provider, /signal:\s*signal\s*\?\s*AbortSignal\.any\(\[controller\.signal, signal\]\)\s*:\s*controller\.signal/,
+    "the internal stall guard and caller cancellation signal must both reach fetch");
   assert.match(provider, /anthropic_timeout/, "a stall must be reported as a stall");
 
   // A stall timeout rather than a deadline: a long generation is healthy, silence is not.
@@ -198,14 +199,13 @@ test("a swallowed failure still says why", async () => {
 // ── Legacy that is NOT dead ─────────────────────────────────────────────────────────────
 
 test("the buildr101 preview origin stays in the CSP, because production still serves it", async () => {
-  const security = await readCode("../../shell/server/lib/httpSecurity.mjs");
-  const withComments = await read("../../shell/server/lib/httpSecurity.mjs");
+  const security = await read("../../shell/server/lib/httpSecurity.mjs");
   // Proven, not assumed: provisiond on the VPS runs with PREVIEW_PUBLIC_SUFFIX=preview.buildr101.com,
   // so every live preview iframe is on that origin. Removing it from frame-src would break every
   // preview in the product. It is documented rather than deleted.
   assert.match(security, /frame-src[^;]*\*\.preview\.buildr101\.com/,
     "removing this breaks every live preview until the suffix is migrated");
-  assert.match(withComments, /PREVIEW_PUBLIC_SUFFIX/,
+  assert.match(security, /PREVIEW_PUBLIC_SUFFIX/,
     "and the reason it is still here must be written down where someone would delete it");
 });
 
@@ -251,77 +251,72 @@ test("local development still works", async () => {
 
 // ── Builds that never reach a terminal state ────────────────────────────────────────────
 
-test("the job sweeps run in production, not only when the legacy surface is mounted", async () => {
+test("the durable worker owns build recovery and the legacy shell action worker is absent", async () => {
   const index = await readCode("../../shell/server/index.mjs");
-  // These sat inside `if (!CODE_AGENT_STANDALONE)`, and production runs with it ON. Thrallo's own
-  // app_build path calls createJob() and writes build_jobs regardless of that flag, so the sweep
-  // whose entire purpose is "no build shows building forever" never ran: five jobs were found in
-  // production stuck in queued/running for eleven and thirteen hours.
-  const guard = index.indexOf("if (!CODE_AGENT_STANDALONE && haveSupabaseEnv()) startActionWorker();");
-  for (const call of ["sweepInterrupted()", "sweepStaleJobs()", "sweepQaRuns()", "startCheckpointSweeper()"]) {
-    const at = index.indexOf(call);
-    assert.ok(at > 0, `${call} must still be called`);
-    assert.ok(at < guard || guard === -1,
-      `${call} must not sit behind the standalone flag — Thrallo builds exist either way`);
-  }
-  // The action worker genuinely is a Buildr101 surface and stays behind it.
-  assert.match(index, /if \(!CODE_AGENT_STANDALONE && haveSupabaseEnv\(\)\) startActionWorker\(\);/);
+  assert.match(index, /sweepQaRuns\(\)/, "QA retains its own database-backed stale-run sweep");
+  assert.doesNotMatch(index, /startActionWorker|sweepInterrupted|sweepStaleJobs|startStaleJobSweeper/,
+    "retired V1 shell workers and no-op build sweepers must not remain mounted");
+
+  const worker = await readCode("../../build-worker/index.mjs");
+  assert.match(worker, /await queue\.lease\(WORKER_ID, readiness\.jobTypes\(JOB_TYPES\), LEASE_SECONDS\)/,
+    "the durable worker may lease only job types whose current readiness proof permits dispatch");
+  assert.match(worker, /readinessJobTypes\(JOB_TYPES, previewIsolation/,
+    "the same readiness-filtered job types must be advertised atomically in the node heartbeat");
+  assert.match(worker, /await queue\.retireStaleNodes\(WORKER_ID, staleBefore\)/);
+  assert.match(worker, /await reconcileOrphanSandboxes\(client\)/);
 });
 
-test("stale builds are swept while the server is up, not only at boot", async () => {
+test("expired V2 work is reconciled continuously by durable lease authority", async () => {
   const jobs = await readCode("../../shell/server/lib/buildJobs.mjs");
-  assert.match(jobs, /export function startStaleJobSweeper/,
-    "a build that wedges on a server that stays up was never swept until the next deploy");
-  assert.match(jobs, /export function stopStaleJobSweeper/, "and it must be stoppable");
+  assert.doesNotMatch(jobs, /sweepInterrupted|sweepStaleJobs|startStaleJobSweeper/,
+    "the V2 public-job facade must not recreate an in-process lifecycle recovery loop");
   const index = await readCode("../../shell/server/index.mjs");
-  // Guarded on Supabase: without a database there are no job rows to sweep, and the call would
-  // only produce noise — or, before startCheckpointSweeper caught its own synchronous throw, kill
-  // the server at boot from inside the `listening` handler.
-  assert.match(index, /if \(haveSupabaseEnv\(\)\) startStaleJobSweeper\(\);/);
-  assert.match(index, /  stopStaleJobSweeper\(\);/, "started and stopped, like every other sweeper");
+  assert.match(index, /if \(haveSupabaseEnv\(\)\) startDomainVerifier\(\);/,
+    "the database-backed domain verifier must stay idle when no database authority is configured");
+
+  const queueSql = await readCode("../../supabase/migrations/20260806230625_durable_build_work_queue.sql");
+  assert.match(queueSql, /j\.state in \('leased', 'running', 'cancel_requested'\)[\s\S]*j\.lease_expires_at <= now\(\)/,
+    "every worker lease attempt reconciles expired durable work before claiming more");
+  assert.match(queueSql, /state = case when j\.cancel_requested then 'cancelled'[\s\S]*else 'expired' end/);
 });
 
-test("the sweeper cannot be configured into a busy loop", async () => {
-  const { startStaleJobSweeper, stopStaleJobSweeper } = await import("../../shell/server/lib/buildJobs.mjs");
-  // A one-second interval would hammer the database; the floor is a minute.
-  assert.doesNotThrow(() => startStaleJobSweeper({ intervalMs: 1 }));
-  stopStaleJobSweeper();
-  const jobs = await readCode("../../shell/server/lib/buildJobs.mjs");
-  assert.match(jobs, /Math\.max\(intervalMs, 60_000\)/);
+test("durable worker maintenance cannot be configured into a busy loop", async () => {
+  const worker = await readCode("../../build-worker/index.mjs");
+  assert.match(worker, /Math\.max\(250, Math\.min\(10_000,/,
+    "the queue poll interval has a hard lower bound");
+  assert.match(worker, /Date\.now\(\) - lastNodeRetirement > 60_000/);
+  assert.match(worker, /Date\.now\(\) - lastReconcile > 30_000/);
+  assert.match(worker, /Math\.max\(120_000, LEASE_SECONDS \* 3_000\)/,
+    "node retirement cannot classify a healthy worker stale immediately");
 });
 
 test("the interruption message a customer reads is not mojibake", async () => {
+  const worker = await read("../../build-worker/index.mjs");
+  assert.ok(!worker.includes("â€"), "no mangled UTF-8 in user-facing copy");
+  assert.match(worker, /The isolated build worker stopped before completion\./);
+  assert.match(worker, /Cancelled by user\./);
   const jobs = await read("../../shell/server/lib/buildJobs.mjs");
-  // These read "interrupted â€” please rebuild" — a UTF-8 em dash mangled through cp1252, in a
-  // string that goes straight to the customer as the reason their build stopped.
-  assert.ok(!jobs.includes("â€"), "no mangled UTF-8 in user-facing copy");
-  assert.match(jobs, /Build was interrupted before it could finish — please rebuild\./);
-  assert.match(jobs, /Build was interrupted by a server restart — please rebuild\./);
+  assert.doesNotMatch(jobs, /server restart|before it could finish/,
+    "the durable V2 facade must not synthesize legacy in-process restart failures");
 });
 
 // ── Claims that must match behaviour ────────────────────────────────────────────────────
 
 test("no plan promises faster builds, because no plan delivers them", async () => {
   const banner = await readCode("../../shell/web/src/billing/PlanBanner.jsx");
-  // Every plan runs at MAX_CONCURRENT_BUILDS_PER_USER = 1 with no priority and no queue jumping.
   assert.doesNotMatch(banner, /faster build/i,
     "this was a sentence a customer could pay for and never receive");
   const jobs = await readCode("../../shell/server/lib/buildJobs.mjs");
-  assert.match(jobs, /MAX_CONCURRENT_BUILDS_PER_USER = 1/,
-    "if this ever becomes plan-dependent, the copy may change back");
+  assert.match(jobs, /if \(live\) return \{ job: live, existing: true \}/,
+    "duplicate active requests reuse the durable build instead of buying queue priority");
+  assert.doesNotMatch(jobs, /priority:[^\n]*(?:plan|tier)/i,
+    "durable queue priority is not a paid-plan entitlement");
+  const migration = await readCode("../../supabase/migrations/20260807221000_bv2_runtime_composition.sql");
+  assert.match(migration, /build_jobs_one_active_project_idx[\s\S]*where status in \('queued', 'running'\)/i,
+    "the database prevents concurrent active builds for the same project");
   // What it says instead has to be true of the real catalogue.
   assert.match(banner, /more builds/);
   assert.match(banner, /analytics history|error reporting/);
-});
-
-test("a sweeper that cannot reach the database logs, it does not kill the server", async () => {
-  const recovery = await readCode("../../shell/server/lib/appBuild/checkpointRecovery.mjs");
-  // serviceClient() throws SYNCHRONOUSLY when Supabase is unconfigured, and this runs from the
-  // server's `listening` handler — so the throw escaped the promise chain and took the whole
-  // process down at boot. Maintenance failing is not a reason the server cannot serve.
-  assert.match(recovery, /try \{[\s\S]{0,200}sweepCheckpoints\(/,
-    "the synchronous construction must be inside the try, not just the promise");
-  assert.match(recovery, /sweep unavailable/);
 });
 
 // ── Unbounded growth in a long-lived view ───────────────────────────────────────────────

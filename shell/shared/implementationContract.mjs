@@ -13,10 +13,107 @@
 // Shared between server and web deliberately — the same vocabulary in the generator, the verifier
 // and the Diagnostics view, so the three cannot drift into describing different things.
 
-export const CONTRACT_VERSION = 1;
+export const CONTRACT_VERSION = 2;
+
+/** Modules whose records are platform-owned and never stored as generic application entities. */
+export const PLATFORM_RECORD_MODULES = new Set(["thrallo.identity", "thrallo.accounts", "thrallo.authorization", "thrallo.admin"]);
+/** Capabilities whose functional responsibilities output platform values rather than entity fields. */
+// WP8 adds settings and audit: a settings command's output is the stored setting and a history
+// read's is the event list — platform values, not declared entity fields.
+export const PLATFORM_OUTPUT_CAPABILITIES = new Set([
+  "session", "auth", "accounts", "admin", "authorization", "settings", "audit",
+  // WP15: a query's output is the records it matched, never a field it wrote.
+  "query",
+]);
 
 // The five stages PR5 generates in. Named here because the contract is what assigns work to them.
 export const STAGES = ["foundation", "data", "primary_journey", "supporting", "polish"];
+
+// A functional operation does not always mutate an entity field. Read-like operations and
+// terminal browser actions may instead return a transient result: rendered output, a downloadable
+// artifact, or another observable action result. That result is still a real semantic output, but
+// inventing a durable entity field for it would falsely turn an effect into persistence.
+//
+// This vocabulary is deliberately driven by the operation's structured `kind`, never its product
+// name or application prose. Mutating create/update/delete operations remain required to declare
+// their actual field writes.
+const TRANSIENT_RESULT_OPERATION_KINDS = new Map([
+  ["read", "read_result"], ["get", "read_result"], ["find", "read_result"],
+  ["lookup", "read_result"], ["view", "read_result"], ["fetch", "read_result"],
+  ["list", "read_result"], ["search", "read_result"], ["query", "read_result"],
+  ["export", "artifact"], ["download", "artifact"], ["print", "rendered_output"],
+]);
+
+const operationKind = (operation) => String(
+  operation?.kind || operation?.type || operation?.action || operation?.id || operation?.name || "",
+).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)[0] || "";
+
+const PERSISTENCE_OPERATION_KINDS = new Set([
+  "create", "insert", "add", "read", "get", "find", "lookup", "view", "fetch",
+  "list", "search", "query", "update", "edit", "delete", "remove", "destroy",
+]);
+const MUTATING_PERSISTENCE_OPERATION_KINDS = new Set([
+  "create", "insert", "add", "update", "edit", "delete", "remove", "destroy",
+]);
+const TRANSIENT_STORAGE = /\b(?:client(?:-only| side| session)?|browser(?:-only| session)?|session(?:-only| local)?|in[- ]?memory|local in-app|local state|ephemeral|transient|current (?:browser )?session|not (?:saved|stored|persisted)|no backend)\b/i;
+
+/**
+ * Structured entity state is not necessarily a database record. Its storage declaration is the
+ * authority that prevents local/session-only workflow state from acquiring invented CRUD.
+ */
+export function entityPersistencePolicy(contract, entityName) {
+  const entity = (contract?.entities || []).find((candidate) => (
+    normaliseReference(candidate?.name) === normaliseReference(entityName)
+  ));
+  if (!entity) return "unspecified";
+  // Contract agents commonly serialize enum-like authorities as `client_session`. Storage is a
+  // semantic declaration, so separators must not change whether it is recognized as transient.
+  const storage = [entity.storage, entity.persistence, entity.durability]
+    .filter(Boolean).join(" ").replace(/[_]+/g, " ");
+  return TRANSIENT_STORAGE.test(storage) ? "transient" : "unspecified";
+}
+
+export function operationUsesDurablePersistence(contract, operation) {
+  if ((operation?.responsibilities || []).some((responsibility) => responsibility?.type === "persistence")) {
+    return true;
+  }
+  // WP4: an operation owned by a module whose records never live in the generic entities table
+  // (identity, accounts, authorization, admin) persists through that module's service — so no
+  // automatic entity persistence is derived for it, and no entity store is composed for the
+  // platform-owned entity it names. Booking, workflow and capture modules still persist through
+  // the generic backend and keep their derived persistence handoff.
+  if (operation?.owner === "module" && PLATFORM_RECORD_MODULES.has(operation?.module)) return false;
+  if (entityPersistencePolicy(contract, operation?.entity) === "transient") return false;
+  return PERSISTENCE_OPERATION_KINDS.has(operationKind(operation));
+}
+
+export function operationRequiresDurableMutation(contract, operation) {
+  if (!operationUsesDurablePersistence(contract, operation)) return false;
+  const explicit = (operation?.responsibilities || []).filter((responsibility) => responsibility?.type === "persistence");
+  if (explicit.length) {
+    return explicit.some((responsibility) => MUTATING_PERSISTENCE_OPERATION_KINDS.has(operationKind({
+      kind: responsibility.capabilityMethod || responsibility.method || responsibility.operation || operationKind(operation),
+    })));
+  }
+  return MUTATING_PERSISTENCE_OPERATION_KINDS.has(operationKind(operation));
+}
+
+export function contractUsesDurablePersistence(contract) {
+  return (contract?.operations || []).some((operation) => operationUsesDurablePersistence(contract, operation));
+}
+
+export function functionalOutputEffect(operation, responsibility) {
+  if (responsibility?.type !== "functional" || (responsibility?.writes || []).length) return null;
+  const kind = operationKind(operation);
+  const effect = TRANSIENT_RESULT_OPERATION_KINDS.get(kind);
+  if (!effect) return null;
+  return {
+    type: "transient_result",
+    effect,
+    operationKind: kind,
+    durable: false,
+  };
+}
 
 // ── the shape ─────────────────────────────────────────────────────────────────────────────────
 //
@@ -26,7 +123,8 @@ export const STAGES = ["foundation", "data", "primary_journey", "supporting", "p
 //   routes:     [{ path, name, purpose, auth }],
 //   entities:   [{ name, fields: [{ name, type, required }], owned, relationships: [] }],
 //   auth:       { required, model, rules: [] },
-//   operations: [{ id, entity, kind, description, journey }],
+//   operations: [{ id, entity, kind, description, journey,
+//                  responsibilities: [{ type, behavior, capability, capabilityMethod, reads, writes }] }],
 //   integrations: [{ name, purpose, required }],
 //   states:     [{ surface, loading, empty, validation, error, success }],
 //   acceptance: [{ id, statement, journey, kind }],
@@ -111,6 +209,135 @@ export function isVague(text) {
  * cannot drive verification and must be regenerated; a warning means it is thin but usable. A
  * contract that fails this is worse than none, because later stages would trust it.
  */
+/** Everything a step is allowed to name: the contract's own declared vocabulary, nothing else. */
+const normaliseReference = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const VERIFICATION_VALUE_INTENT = /\b(?:correct|incorrect)(?:ly)?\b/i;
+// Keyboard focus is a real control interaction, not an observation. Without structured operands
+// the verifier has no authoritative control identity and can only guess from prose. A production
+// catalogue contract named several controls this way and passed planning, then stopped as a
+// platform-undriveable journey after generation even though the controls existed. Require the
+// planner to split mixed control types and identify each focusable field before any build spend.
+const KEYBOARD_FOCUS_INTENT = /\b(?:focus(?:es|ed|ing)?|tab(?:s|bed|bing)?(?:\s+through)?)\b/i;
+const DOMAIN_SEARCH_OPERATION_KINDS = new Set(["filter", "query", "search"]);
+const VERIFICATION_VALUE_STOP_WORDS = new Set([
+  "a", "an", "and", "answer", "control", "details", "field", "form", "input", "question", "the", "value",
+]);
+
+const referenceWords = (value) => String(value || "")
+  .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+  .toLowerCase().match(/[a-z][a-z0-9]*/g) || [];
+
+/**
+ * Domain-valid values the verifier cannot safely invent from an HTML input type.
+ *
+ * Native constraints are enough for ordinary names, email addresses, numbers and dates. They are
+ * not enough for prose such as "the correct answer": only the application knows which otherwise
+ * valid string its business rule accepts. Pick the field named most specifically around that
+ * intent and require the planner to declare a non-secret synthetic fixture for it.
+ */
+export function verificationFixtureFields(step = {}, contract = {}) {
+  const operated = (step.operates || []).map(String).filter((reference) => (
+    fieldNames(contract).has(normaliseReference(reference))
+  ));
+  if (!operated.length) return [];
+  const operatedReferences = new Set((step.operates || []).map(normaliseReference));
+  const domainSearch = (contract?.operations || []).some((operation) => (
+    operatedReferences.has(normaliseReference(operation?.id || operation?.name))
+    && DOMAIN_SEARCH_OPERATION_KINDS.has(String(operation?.kind || "").toLowerCase())
+    && entityPersistencePolicy(contract, operation?.entity) === "transient"
+    && (operation?.responsibilities || []).some((responsibility) => responsibility?.type === "functional")
+  ));
+  if (domainSearch) return operated;
+  if (!VERIFICATION_VALUE_INTENT.test(String(step.action || ""))) return [];
+  const actionWords = referenceWords(step.action);
+  const intentIndexes = actionWords.map((word, index) => (
+    /^(?:correct|incorrect)(?:ly)?$/.test(word) ? index : -1
+  )).filter((index) => index >= 0);
+  const scored = operated.map((field) => {
+    const words = referenceWords(String(field).split(".").pop())
+      .filter((word) => !VERIFICATION_VALUE_STOP_WORDS.has(word));
+    const positions = words.flatMap((word) => actionWords
+      .map((candidate, index) => candidate === word ? index : -1).filter((index) => index >= 0));
+    const matchedWords = new Set(words.filter((word) => actionWords.includes(word))).size;
+    const distance = positions.length && intentIndexes.length
+      ? Math.min(...positions.flatMap((position) => intentIndexes.map((index) => Math.abs(position - index))))
+      : Number.POSITIVE_INFINITY;
+    return { field, matchedWords, distance, score: matchedWords * 100 - distance };
+  }).filter((row) => row.matchedWords > 0);
+  if (!scored.length) return operated.length === 1 ? operated : [];
+  const best = Math.max(...scored.map((row) => row.score));
+  return scored.filter((row) => row.score === best).map((row) => row.field);
+}
+
+// PLATFORM AUTHENTICATION IS CONTRACT VOCABULARY, NOT AN ENTITY.
+//
+// Six advanced contracts on 2026-09-16 each expressed sign-in differently: an invented
+// authSession/session entity holding authEmail/authPassword, an operation "sign-in:create:authSession"
+// (bound to CRUD, so a durable row was expected for a sign-in), "sign-in:read:plan", or bare
+// credential names the validator rejected as undeclared - after which the model declared the
+// entity anyway. The session capability owns identity; the contract only needs to name the two
+// credential controls and a session operation. These names are reserved for that purpose.
+export const AUTH_CREDENTIAL_FIELDS = Object.freeze([
+  { name: "authEmail", type: "email", required: true },
+  { name: "authPassword", type: "password", required: true },
+]);
+// "auth" is the legacy kind that pre-vocabulary contracts used for a platform sign-in; it names the
+// same session operation and carries no entity records of its own.
+const SESSION_OPERATION_KIND = /^(?:auth|sign ?in|sign ?up|sign ?out|log ?in|log ?out|authenticate|register|signIn|signUp|signOut|resetPassword|confirmReset)$/i;
+/** Session methods that consume no contract input (the registry declares no required inputs). */
+export const SESSION_METHODS_WITHOUT_INPUTS = new Set(["signOut", "current", "ensure", "recover"]);
+
+export function isSessionOperation(operation) {
+  if (!operation || typeof operation !== "object") return false;
+  if (SESSION_OPERATION_KIND.test(String(operation.kind || operation.action || operation.method || "").trim())) return true;
+  return (Array.isArray(operation.responsibilities) ? operation.responsibilities : [])
+    .some((responsibility) => ["session", "auth"].includes(String(responsibility?.capability || responsibility?.capabilityId || "").toLowerCase()));
+}
+
+/** True when the contract relies on the platform session: auth.required, or a session operation. */
+export function contractUsesPlatformAuthentication(contract) {
+  if (contract?.auth?.required === true) return true;
+  return (contract?.operations || []).some(isSessionOperation);
+}
+
+export function contractReferences(contract) {
+  const references = new Set();
+  if (contractUsesPlatformAuthentication(contract)) {
+    for (const field of AUTH_CREDENTIAL_FIELDS) references.add(normaliseReference(field.name));
+  }
+  for (const entity of contract?.entities || []) {
+    if (entity?.name) references.add(normaliseReference(entity.name));
+    for (const field of entity?.fields || []) {
+      if (!field?.name) continue;
+      references.add(normaliseReference(field.name));
+      // A step may name a field on its entity ("booking.slotId") as readably as on its own.
+      if (entity?.name) references.add(normaliseReference(`${entity.name}.${field.name}`));
+    }
+  }
+  for (const operation of contract?.operations || []) {
+    for (const key of [operation?.id, operation?.name]) if (key) references.add(normaliseReference(key));
+  }
+  return references;
+}
+
+/** The contract's declared entity names, and separately its field names — two different kinds. */
+export function entityNames(contract) {
+  return new Set((contract?.entities || []).map((entity) => normaliseReference(entity?.name)).filter(Boolean));
+}
+
+export function fieldNames(contract) {
+  const names = new Set();
+  for (const entity of contract?.entities || []) {
+    for (const field of entity?.fields || []) {
+      if (!field?.name) continue;
+      names.add(normaliseReference(field.name));
+      if (entity?.name) names.add(normaliseReference(`${entity.name}.${field.name}`));
+    }
+  }
+  return names;
+}
+
 export function validateContract(contract) {
   const problems = [];
   const warnings = [];
@@ -125,17 +352,285 @@ export function validateContract(contract) {
     if (!journey?.title) problems.push(`${where} has no title`);
     if (journey?.id && journeyIds.has(journey.id)) problems.push(`duplicate journey id "${journey.id}"`);
     if (journey?.id) journeyIds.add(journey.id);
+    // dependsOn names the journey(s) whose records this journey consumes - the machine-readable
+    // producer chain. It must name declared journeys, and never the journey itself.
+    if (journey?.dependsOn !== undefined) {
+      const declaredJourneyIds = new Set((c.journeys || []).map((row) => row?.id).filter(Boolean));
+      if (!Array.isArray(journey.dependsOn)) problems.push(`${where} dependsOn must be an array of journey ids`);
+      else for (const producerId of journey.dependsOn) {
+        if (!declaredJourneyIds.has(String(producerId))) problems.push(`${where} dependsOn names an undeclared journey "${producerId}"`);
+        if (String(producerId) === journey.id) problems.push(`${where} cannot depend on itself`);
+      }
+    }
+    // A durableState producer declaration ({ entity, sourceJourney }) is the other way a contract
+    // names its producer chain; it is held to the same rule as dependsOn.
+    for (const row of Array.isArray(journey?.durableState) ? journey.durableState : []) {
+      if (!row || typeof row !== "object" || Array.isArray(row) || row.sourceJourney === undefined) continue;
+      const declaredJourneyIds = new Set((c.journeys || []).map((entry) => entry?.id).filter(Boolean));
+      if (!declaredJourneyIds.has(String(row.sourceJourney))) {
+        problems.push(`${where} durableState names an undeclared source journey "${row.sourceJourney}"`);
+      }
+      if (String(row.sourceJourney) === journey.id) problems.push(`${where} cannot source its records from itself`);
+    }
     if (!Array.isArray(journey?.steps) || journey.steps.length < 2) {
       problems.push(`${where} has fewer than two steps — a journey is a sequence, not a label`);
       continue;
     }
+    // Fields an earlier step of THIS journey entered or an operation it performed wrote: a later
+    // step may read them as its outcome. A read naming a declared operation id depends on that
+    // operation's result, which is structured too.
+    const enteredSoFar = new Set();
+    const declaredOperationIds = new Set((c.operations || []).map((operation) => normaliseReference(operation?.id || operation?.name)).filter(Boolean));
+    const operationWrites = new Map((c.operations || []).map((operation) => [
+      normaliseReference(operation?.id || operation?.name),
+      (Array.isArray(operation?.responsibilities) ? operation.responsibilities : [])
+        .flatMap((responsibility) => Array.isArray(responsibility?.writes) ? responsibility.writes : [])
+        .map((field) => normaliseReference(String(field).split(".").pop())).filter(Boolean),
+    ]));
     for (const [stepIndex, step] of journey.steps.entries()) {
+      // EVERY STEP STATES A VERIFIABLE OUTCOME. The browser verifier judges a step on structured
+      // contract evidence only: the route it opens, the controls or operation it operates, the
+      // values an earlier step entered, or the exact text the screen must show (visibleText).
+      // Prose alone ("fixture cards are visible") is CONTRACT_INCOMPLETE in the browser and can
+      // never turn a build green; the 2026-09-16 corpus carried four such steps. Named here, free,
+      // before any generation is paid for.
+      const routeNames = new Set((c.routes || []).flatMap((route) => [route?.path, route?.name])
+        .filter(Boolean).map((value) => String(value).trim().toLowerCase()));
+      const targetText = String(step?.target || "").trim().toLowerCase();
+      const opensRoute = Boolean(step?.route) || (targetText && (targetText.startsWith("/") || routeNames.has(targetText)));
+      const operatesSomething = Array.isArray(step?.operates) && step.operates.some(Boolean);
+      const declaresVisibleText = Array.isArray(step?.visibleText) && step.visibleText.some((text) => String(text || "").trim());
+      const reads = Array.isArray(step?.reads) ? step.reads.filter(Boolean) : [];
+      const readsEntered = reads.some((field) => enteredSoFar.has(normaliseReference(field)) || declaredOperationIds.has(normaliseReference(field)));
+      const reloads = /(?:^|[^a-z])(?:reload|refresh)(?:$|[^a-z])/i.test(String(step?.action || ""));
+      // A reload is the recovery of the record an earlier step committed; the browser proves it on
+      // that record's captured values and reference, so it needs no further declaration.
+      if (!opensRoute && !operatesSomething && !declaresVisibleText && !readsEntered && !reloads) {
+        problems.push(`${where} step ${stepIndex + 1} states no verifiable outcome: `
+          + (reads.length ? `it reads ${JSON.stringify(reads)} that no earlier step entered; ` : "")
+          + "name the route it opens in \"target\", the controls or operation it operates in \"operates\", "
+          + "fields an earlier step entered in \"reads\", or the exact text the screen must show in \"visibleText\"");
+      }
+      for (const field of Array.isArray(step?.operates) ? step.operates : []) {
+        if (!field) continue;
+        enteredSoFar.add(normaliseReference(field));
+        for (const written of operationWrites.get(normaliseReference(field)) || []) enteredSoFar.add(written);
+      }
+      for (const field of Object.keys(step?.verificationValues || {})) enteredSoFar.add(normaliseReference(field));
+      for (const field of Array.isArray(step?.produces) ? step.produces : []) if (field) enteredSoFar.add(normaliseReference(field));
+      // `route` is the declared route a navigation step opens. It must be a declared route path
+      // (parameterised patterns included): the platform navigates by it, never by prose.
+      if (step?.route !== undefined && step?.route !== null && step?.route !== "") {
+        const declaredPaths = new Set((c.routes || []).map((route) => String(route?.path || "").split(/[?#]/)[0]));
+        if (typeof step.route !== "string" || !step.route.startsWith("/")) {
+          problems.push(`${where} step ${stepIndex + 1} route must be a declared route path such as "/projects"`);
+        } else if (declaredPaths.size && !declaredPaths.has(step.route.split(/[?#]/)[0])) {
+          problems.push(`${where} step ${stepIndex + 1} route "${step.route}" is not a declared route`);
+        }
+      }
       // `expect` is the whole point: a step with no expectation cannot fail, so it cannot verify.
       if (!step?.expect || isVague(step.expect)) {
         problems.push(`${where} step ${stepIndex + 1} has no observable expectation ("${String(step?.expect || step?.action || "").slice(0, 60)}")`);
       }
+      // OPERANDS AND DEPENDENCIES. `operates` names the controls this step actually manipulates;
+      // `reads` names state it merely depends on. A live run failed because "select a party size
+      // that does not exceed the slot's remaining capacity" was read as operating the SLOT as well
+      // — prose cannot tell a verb's object from its subordinate clause, and it should not have to.
+      // A reference to something the contract never declared is caught here, before generation.
+      for (const [key, values] of [["operates", step?.operates], ["reads", step?.reads], ["produces", step?.produces]]) {
+        if (values === undefined || values === null) continue;
+        if (!Array.isArray(values)) {
+          problems.push(`${where} step ${stepIndex + 1} declares "${key}" that is not a list`);
+          continue;
+        }
+        for (const reference of values) {
+          if (typeof reference !== "string" || !reference.trim()) {
+            problems.push(`${where} step ${stepIndex + 1} names an empty ${key} reference`);
+            continue;
+          }
+          const references = key === "produces" ? fieldNames(c) : contractReferences(c);
+          if (!references.has(normaliseReference(reference))) {
+            problems.push(`${where} step ${stepIndex + 1} ${key} "${reference}" is not a declared `
+              + "entity field or operation — a step may only name things the contract defines");
+            continue;
+          }
+          // AN OPERAND HAS A TYPE. `reads` may name anything the contract declares — a field, an
+          // operation, a computed fact — because it is context. `operates` names what the step
+          // MANIPULATES, and the only thing a browser control can hold is a field.
+          //
+          // An operation there is meaningful and allowed: it says the step performs that operation,
+          // and derivation gives it the action control rather than inventing a text box. An ENTITY
+          // is not: "operates the booking" names no control and cannot be resolved to one, so it is
+          // refused here, before a single token of generation is spent.
+          if (key === "operates" && entityNames(c).has(normaliseReference(reference))
+            && !fieldNames(c).has(normaliseReference(reference))) {
+            problems.push(`${where} step ${stepIndex + 1} operates "${reference}", which is an entity, `
+              + "not a control — name the field(s) the step changes, or the operation it performs");
+          }
+        }
+      }
+      if (KEYBOARD_FOCUS_INTENT.test(String(step?.action || ""))) {
+        const operatedFields = (step?.operates || []).filter((reference) => (
+          fieldNames(c).has(normaliseReference(reference))
+        ));
+        if (!operatedFields.length) {
+          problems.push(`${where} step ${stepIndex + 1} focuses or tabs through controls without naming `
+            + "their operated entity field(s) - add operates, and split mixed control types into separate steps");
+        }
+        if (!["selection", "textbox"].includes(step?.primitive)) {
+          problems.push(`${where} step ${stepIndex + 1} focuses or tabs through controls without a driveable `
+            + 'primitive - use "textbox" or "selection", and split mixed control types into separate steps');
+        }
+      }
+      const verificationValues = step?.verificationValues;
+      if (verificationValues !== undefined && (verificationValues === null
+          || Array.isArray(verificationValues) || typeof verificationValues !== "object")) {
+        problems.push(`${where} step ${stepIndex + 1} verificationValues is not an object keyed by operated field`);
+      } else if (verificationValues) {
+        const operated = new Set((step.operates || []).map(normaliseReference));
+        for (const [field, value] of Object.entries(verificationValues)) {
+          if (!fieldNames(c).has(normaliseReference(field)) || !operated.has(normaliseReference(field))) {
+            problems.push(`${where} step ${stepIndex + 1} verificationValues names "${field}", which is not an operated entity field`);
+          }
+          if (!["string", "number", "boolean"].includes(typeof value)
+              || (typeof value === "string" && !value.trim())) {
+            problems.push(`${where} step ${stepIndex + 1} verificationValues.${field} must be a non-empty JSON primitive`);
+          }
+        }
+      }
+      if (Number(c.version || 1) >= 2 && step?.primitive === "selection") {
+        const operatedFields = (step?.operates || []).filter((reference) => (
+          fieldNames(c).has(normaliseReference(reference))
+        ));
+        if (operatedFields.length === 1) {
+          const field = operatedFields[0];
+          const fixture = Object.entries(verificationValues || {})
+            .find(([candidate]) => normaliseReference(candidate) === normaliseReference(field))?.[1];
+          const allOptionsSentinel = typeof fixture === "string"
+            && /^(?:all|any|every|no preference|no filter)(?:\b|[-_])/i.test(fixture.trim());
+          const previouslyChanged = journey.steps.slice(0, stepIndex).some((prior) => (
+            (prior?.operates || []).some((reference) => normaliseReference(reference) === normaliseReference(field))
+            && Object.entries(prior?.verificationValues || {}).some(([candidate, value]) => (
+              normaliseReference(candidate) === normaliseReference(field)
+              && !(typeof value === "string"
+                && /^(?:all|any|every|no preference|no filter)(?:\b|[-_])/i.test(value.trim()))
+            ))
+          ));
+          if (allOptionsSentinel && !previouslyChanged) {
+            problems.push(`${where} step ${stepIndex + 1} selects all-options value ${JSON.stringify(fixture)} `
+              + `for ${field} before that field has changed - it is normally the default and gives the browser no transition to verify; `
+              + "combine it with another filter that changes, select a non-default value, or first change this field in an earlier step");
+          }
+        }
+      }
+      if (Number(c.version || 1) >= 2) {
+        for (const field of verificationFixtureFields(step, c)) {
+          const declared = Object.entries(verificationValues || {})
+            .some(([candidate]) => normaliseReference(candidate) === normaliseReference(field));
+          if (!declared) {
+            problems.push(`${where} step ${stepIndex + 1} requires verificationValues.${String(field).split(".").pop()} `
+              + `because "${step.action}" asks for a domain-constrained value the browser cannot safely invent`);
+          }
+        }
+      }
     }
     if (journey.stage && !STAGES.includes(journey.stage)) problems.push(`${where} names unknown stage "${journey.stage}"`);
+  }
+
+  // AN OPERATION'S REFERENCES MUST POINT AT SOMETHING TOO.
+  //
+  // Steps have been reference-checked since the operand schema landed; operations never were, and
+  // they are load-bearing in two places. `journey` is how a lifecycle role is declared — an id that
+  // matches nothing silently drops the declaration and lets ownership fall back to guessing from
+  // data flow, which is the misclassification that produced case H. `entity` is what a durable
+  // outcome is proved against — an entity that does not exist puts a phantom in the manifest.
+  // Neither failure announces itself; both are one comparison to catch.
+  const declaredJourneys = new Set((c.journeys || []).map((journey) => journey?.id).filter(Boolean));
+  const declaredEntities = entityNames(c);
+  // A RECORD THAT IS ONLY EVER UPDATED HAS NO SOURCE. The 2026-09-16 advanced contract 46aab6c
+  // declared a workspacePreference entity with two update operations and no create, no sampleData
+  // and no external source; the interaction gate rejected it a paid call later. The validator is
+  // free and runs first, so the same fact is named here in the contract's own terms.
+  const seededEntity = (name) => Object.keys(c.sampleData || {}).some((key) => {
+    const k = normaliseReference(key); const e = normaliseReference(name);
+    return (k === e || k === `${e}s` || `${k}s` === e)
+      && (Array.isArray(c.sampleData[key]) ? c.sampleData[key].length > 0 : Boolean(c.sampleData[key]));
+  });
+  for (const entity of c.entities || []) {
+    if (!entity?.name || entityPersistencePolicy(c, entity.name) === "transient") continue;
+    const ops = (c.operations || []).filter((operation) => normaliseReference(operation?.entity) === normaliseReference(entity.name));
+    const kinds = new Set(ops.map((operation) => operationKind(operation)));
+    const mutatesExisting = [...kinds].some((kind) => ["update", "delete"].includes(kind));
+    if (mutatesExisting && !kinds.has("create") && !seededEntity(entity.name) && !entity.external && !entity.source) {
+      problems.push(`entity "${entity.name}" is updated or deleted by ${ops.map((operation) => operation.id || operation.name).join(", ")} `
+        + "but never created: declare the create operation in the journey that makes the record, or seed rows under sampleData");
+    }
+  }
+  for (const [index, operation] of (c.operations || []).entries()) {
+    const where = operation?.id || `operation ${index + 1}`;
+    const operationEntityFields = new Set((c.entities || [])
+      .filter((entity) => normaliseReference(entity?.name) === normaliseReference(operation?.entity))
+      .flatMap((entity) => entity.fields || [])
+      .map((field) => normaliseReference(field?.name)).filter(Boolean));
+    if (operation?.journey && !declaredJourneys.has(operation.journey)) {
+      problems.push(`operation "${where}" names journey "${operation.journey}", which this contract `
+        + "does not declare — its lifecycle role would be silently lost");
+    }
+    if (operation?.entity && !declaredEntities.has(normaliseReference(operation.entity))) {
+      problems.push(`operation "${where}" writes entity "${operation.entity}", which this contract `
+        + "does not declare — there would be no record to prove it against");
+    }
+    if (operation?.responsibilities !== undefined && !Array.isArray(operation.responsibilities)) {
+      problems.push(`operation "${where}" responsibilities is not a list`);
+      continue;
+    }
+    for (const [responsibilityIndex, responsibility] of (operation?.responsibilities || []).entries()) {
+      const label = `operation "${where}" responsibility ${responsibilityIndex + 1}`;
+      if (!["persistence", "functional"].includes(responsibility?.type)) {
+        problems.push(`${label} has unknown type "${responsibility?.type || ""}"`);
+      }
+      for (const key of ["reads", "writes"]) {
+        if (!Array.isArray(responsibility?.[key])) {
+          problems.push(`${label} ${key} is not a list`);
+          continue;
+        }
+        for (const reference of responsibility[key]) {
+          const references = key === "writes" ? fieldNames(c) : contractReferences(c);
+          if (!references.has(normaliseReference(reference))) {
+            problems.push(`${label} ${key} "${reference}" is not a declared ${key === "writes" ? "entity field" : "entity field or operation"}`);
+          } else if (key === "writes" && operation?.entity
+              && !operationEntityFields.has(normaliseReference(reference))) {
+            problems.push(`${label} writes "${reference}" outside its operation entity "${operation.entity}"; `
+              + "functional inputs may cross entity boundaries, but outputs belong to the declared operation entity");
+          }
+        }
+      }
+      if (responsibility?.type === "functional") {
+        if (!String(responsibility.behavior || operation.description || "").trim()) {
+          problems.push(`${label} does not name the functional behavior`);
+        }
+        // A session method that consumes nothing (sign-out, current, ensure, recover) has no
+        // inputs to declare; the prompt teaches exactly that shape for sign-out.
+        const inputlessSession = isSessionOperation(operation)
+          && SESSION_METHODS_WITHOUT_INPUTS.has(String(responsibility.capabilityMethod || responsibility.method || ""));
+        if (!responsibility.reads?.length && !inputlessSession) problems.push(`${label} has no declared functional inputs`);
+        // A responsibility bound to a platform-record capability (session, accounts, admin,
+        // authorization) outputs a platform value — a session, a membership, a decision — never a
+        // declared entity field; it needs no writes (WP2/WP4).
+        const platformOutput = PLATFORM_OUTPUT_CAPABILITIES.has(String(responsibility.capability || responsibility.capabilityId || "").toLowerCase());
+        if (!responsibility.writes?.length && !functionalOutputEffect(operation, responsibility)
+            && !isSessionOperation(operation) && !platformOutput) {
+          problems.push(`${label} has no declared functional outputs`);
+        }
+      }
+      if (responsibility?.type === "persistence"
+          && entityPersistencePolicy(c, operation?.entity) === "transient") {
+        problems.push(`${label} contradicts entity "${operation?.entity || "unknown"}", whose storage policy is transient`);
+      }
+      if (responsibility?.capability && !responsibility?.capabilityMethod) {
+        problems.push(`${label} names capability "${responsibility.capability}" without a capabilityMethod`);
+      }
+    }
   }
 
   // Exactly one primary journey: the thing that must work before a preview may be called complete.
@@ -194,6 +689,9 @@ export function contractBrief(contract) {
   if (primary) {
     lines.push(`PRIMARY JOURNEY (the preview cannot ship until this passes) — ${primary.title}:`);
     for (const [i, step] of (primary.steps || []).entries()) {
+      if (step.verificationValues && Object.keys(step.verificationValues).length) {
+        lines.push(`     verification inputs: ${JSON.stringify(step.verificationValues)}`);
+      }
       lines.push(`  ${i + 1}. ${step.action}${step.target ? ` (${step.target})` : ""} → ${step.expect}`);
     }
     lines.push("");

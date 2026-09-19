@@ -1,0 +1,623 @@
+// BUILD-TIME BINDING LINT — is every contracted control actually addressable?
+//
+// The browser's mechanics probe addresses controls by `data-thrallo-control`. A generated app that
+// HAND-WIRES a control carries no such attribute, so the probe cannot see it, and the defect first
+// appears as a step failure part-way through a paid qualification. Run #8 (2026-08-12) died on
+// step 2 of 8 that way: a date chooser whose options never took a selected state, invisible to the
+// probe because nothing addressed it.
+//
+// This runs after emit and before the app is served. It is DETECTION ONLY — it repairs nothing,
+// and it does not touch the verifier, the probe or the correction tier.
+//
+// THE HARD PART IS NOT FINDING UNBOUND ELEMENTS. It is not condemning bound ones. The preferred
+// binding is a SPREAD:
+//
+//     <input {...field.inputProps} />        // useSemanticField injects the attribute at runtime
+//
+// and not one of Thrallo's four passing browser fixtures contains a literal `data-thrallo-control`
+// in its JSX. A lint that looked for the attribute as text would fail every correctly-built app and
+// pass none. So a spread is resolved to its binding where it can be, and where it cannot be — a
+// wrapper component, forwarded props — the element is UNRESOLVED and is never failed. That is the
+// same rule as the PROVEN/SUSPECT split, for the same reason: unknown is not broken.
+
+import { parse } from "@babel/parser";
+
+import { identityMatches, semanticAliases, semanticKey, semanticQualifier } from "./controlIdentity.mjs";
+import { ADVANCE_ACTION_NAME, actionIdFor, controlIdFor } from "./verificationManifest.mjs";
+
+/** How an element gets its machine identity, or fails to. */
+export const BINDING = Object.freeze({
+  LITERAL: "BOUND_LITERAL",       // the attribute is written on the element
+  BINDING: "BOUND_VIA_BINDING",   // a spread that resolves to a capability binding
+  UNRESOLVED: "UNRESOLVED",       // a spread this file cannot trace — never a failure
+  UNBOUND: "UNBOUND",             // neither: the probe cannot address it
+});
+
+// The capability helpers that inject a machine identity, and the prop objects they return.
+const BINDING_FACTORIES = /\b(useSemanticField|useSemanticSelection|useSemanticAction|useFlowAdvance)\s*\(/;
+const BINDING_PROPS = /\b(inputProps|groupProps|optionProps|buttonProps|labelProps|statusProps)\b/;
+
+// Native elements that are interactive by tag alone. `a` is deliberately absent: a link navigates,
+// it is not a contracted control, and flagging links would bury the signal.
+// A native <option> is operated through its owning <select>; it is not an independently
+// addressable control. Treating both as controls makes the unbound option look like a duplicate
+// of the correctly bound select and rejects the exact native-select shape the generator is told
+// to produce. Explicit role="option" widgets remain interactive through ROLES below.
+const NATIVE = new Set(["input", "textarea", "select", "button"]);
+// ARIA roles that promise an interaction.
+const ROLES = new Set(["button", "option", "tab", "checkbox", "radio", "switch",
+  "combobox", "listbox", "menuitem", "textbox", "slider", "spinbutton"]);
+const HANDLERS = ["onClick", "onChange", "onInput", "onSubmit"];
+
+const SOURCE = /^src\/.*\.(?:jsx?|tsx?)$/;
+// Platform infrastructure: it DEFINES the bindings, so linting it is circular.
+const PLATFORM = /^src\/lib\//;
+
+const text = (node) => {
+  if (!node) return "";
+  if (node.type === "StringLiteral") return node.value;
+  if (node.type === "JSXExpressionContainer") return text(node.expression);
+  if (node.type === "TemplateLiteral") return node.quasis.map((q) => q.value.cooked).join(" ");
+  return "";
+};
+
+// A machine identity is statically proven only when the complete attribute value is literal.
+// `data-thrallo-control={machineId}` is common inside generated wrapper components, but the value
+// reaches that wrapper through props. Treating it as a literal binding with a null identity lets
+// nearby copy claim it as any contracted control and turns uncertainty into a false mismatch.
+const staticIdentity = (node) => {
+  if (!node) return "";
+  if (node.type === "StringLiteral") return node.value;
+  if (node.type !== "JSXExpressionContainer") return "";
+  if (node.expression?.type === "StringLiteral") return node.expression.value;
+  if (node.expression?.type === "TemplateLiteral" && !node.expression.expressions?.length) {
+    return node.expression.quasis.map((q) => q.value.cooked).join("");
+  }
+  return "";
+};
+
+const attrNode = (opening, name) => (opening.attributes || [])
+  .find((row) => row?.type === "JSXAttribute" && row.name?.name === name) || null;
+const attr = (opening, name) => text(attrNode(opening, name)?.value);
+const jsxName = (opening) => {
+  const node = opening.name;
+  if (node?.type === "JSXIdentifier") return node.name;
+  if (node?.type === "JSXMemberExpression") return `${node.object?.name || ""}.${node.property?.name || ""}`;
+  return "";
+};
+
+/**
+ * What makes an element interactive. Three independent claims, any one of which is enough: it is a
+ * native control, it announces a role that promises interaction, or it handles an interaction.
+ */
+function interactivity(opening) {
+  const tag = jsxName(opening);
+  const role = attr(opening, "role");
+  const handlers = HANDLERS.filter((name) => attrNode(opening, name));
+  const type = String(attr(opening, "type") || "").toLowerCase();
+  // A hidden input is not something a person or a browser driver operates.
+  if (NATIVE.has(tag.toLowerCase()) && type === "hidden") return null;
+  if (NATIVE.has(tag.toLowerCase())) return { via: "native", tag, role, handlers };
+  if (ROLES.has(String(role).toLowerCase())) return { via: "role", tag, role, handlers };
+  // A handler alone counts only with a role: a div that happens to take a click is chrome far more
+  // often than it is a contracted control, and every such div would be noise.
+  if (handlers.length && role) return { via: "handler", tag, role, handlers };
+  return null;
+}
+
+/**
+ * Resolve how (and whether) this element is bound.
+ *
+ * A spread is traced by SOURCE TEXT rather than by evaluating the program: `{...field.inputProps}`
+ * is matched to a `field` declared from a binding factory in the same file. That is deliberately
+ * conservative — anything it cannot follow becomes UNRESOLVED, which never fails a build.
+ */
+function bindingOf(opening, fileSource, raw) {
+  const literalControl = attrNode(opening, "data-thrallo-control");
+  const literalAction = attrNode(opening, "data-thrallo-action");
+  const literal = literalAction || literalControl;
+  if (literal) {
+    const attribute = literalAction ? "data-thrallo-action" : "data-thrallo-control";
+    const machineId = staticIdentity(literal.value) || null;
+    return { binding: machineId ? BINDING.LITERAL : BINDING.UNRESOLVED,
+      evidence: machineId ? "attribute" : `${attribute} runtime value`, attribute, machineId };
+  }
+
+  const spreads = (opening.attributes || []).filter((row) => row?.type === "JSXSpreadAttribute");
+  if (!spreads.length) return { binding: BINDING.UNBOUND, evidence: null };
+
+  for (const spread of spreads) {
+    const expression = raw.slice(spread.argument.start, spread.argument.end);
+    // WHICH CONTROL a spread binds is not written on the element — it is written in the factory
+    // call that produced the props. `const dates = useSemanticSelection({ name: "eventDate" })`
+    // says so exactly, and that is a far stronger link than any text on the JSX, which for a
+    // correctly bound control is usually absent altogether.
+    const root = expression.match(/^[A-Za-z_$][\w$]*/)?.[0];
+    const declaration = root
+      ? (fileSource.match(new RegExp(`\\b(?:const|let|var)\\s+${root}\\s*=\\s*[\\s\\S]{0,240}`)) || [])[0] || ""
+      : "";
+    const factory = (declaration.match(/\b(useSemanticField|useSemanticSelection|useSemanticAction|useFlowAdvance)\s*\(/)
+      || [])[1] || null;
+    // `scope` qualifies the identity exactly as the runtime helper does (scope.name), so a task
+    // form's `{ name: "status", scope: "task" }` claims task.status and nothing else.
+    const factoryName = factory ? (declaration.match(/name\s*:\s*["'`]([^"'`]+)["'`]/) || [])[1] || null : null;
+    const factoryScope = factory && factory !== "useFlowAdvance"
+      ? (declaration.match(/\bscope\s*:\s*["'`]([^"'`]+)["'`]/) || [])[1] || null : null;
+    const boundName = factory === "useFlowAdvance" ? ADVANCE_ACTION_NAME
+      : factoryName ? (factoryScope ? `${factoryScope}.${factoryName}` : factoryName)
+      : null;
+    const actionName = factory === "useSemanticSelection"
+      ? (declaration.match(/actionName\s*:\s*["'`]([^"'`]+)["'`]/) || [])[1] || null
+      : null;
+
+    if (BINDING_FACTORIES.test(declaration)) {
+      return { binding: BINDING.BINDING, evidence: expression.slice(0, 60), boundName,
+        actionName, factory };
+    }
+    if (BINDING_PROPS.test(expression)) {
+      return { binding: BINDING.UNRESOLVED, evidence: expression.slice(0, 60) };
+    }
+    // A spread this file cannot follow. It may well be bound — a wrapper component, props forwarded
+    // from a parent — and condemning it is exactly the false positive that made the old static
+    // finding unusable.
+    return { binding: BINDING.UNRESOLVED, evidence: expression.slice(0, 60) };
+  }
+  return { binding: BINDING.UNBOUND, evidence: null };
+}
+
+/** Everything about this element that could name a contracted control. */
+function identitiesOf(node, opening, raw, labels) {
+  const id = attr(opening, "id");
+  const label = labels.find((row) => (id && row.htmlFor === id)
+    || (row.start <= (node.start ?? -1) && row.end >= (node.end ?? -1)));
+  const childText = (node.children || [])
+    .map((child) => (child.type === "JSXText" ? child.value : ""))
+    .join(" ").replace(/\s+/g, " ").trim();
+  return [attr(opening, "aria-label"), label?.text, id, attr(opening, "name"),
+    attr(opening, "placeholder"), attr(opening, "title"), childText]
+    .map((value) => String(value || "").trim()).filter(Boolean);
+}
+
+function walkFile(file, source, elements) {
+  let ast;
+  try {
+    ast = parse(String(source), { sourceType: "module", plugins: ["jsx", "typescript"], errorRecovery: true });
+  } catch { return; }
+  const raw = String(source);
+  const labels = [];
+  const visit = (node, fn) => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { for (const row of node) visit(row, fn); return; }
+    if (node.type) fn(node);
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "loc" || key === "start" || key === "end") continue;
+      if (value && typeof value === "object") visit(value, fn);
+    }
+  };
+  // Labels first, so a control can be identified by the text that names it.
+  visit(ast, (node) => {
+    if (node.type !== "JSXElement" || jsxName(node.openingElement).toLowerCase() !== "label") return;
+    labels.push({
+      htmlFor: attr(node.openingElement, "htmlFor") || attr(node.openingElement, "for"),
+      text: (node.children || []).map((child) => (child.type === "JSXText" ? child.value : "")).join(" ").trim(),
+      start: node.start ?? -1, end: node.end ?? -1,
+    });
+  });
+  // A SELECTION IS TWO ELEMENTS. The group holds the identity — `<div role="group" id="eventDate">`
+  // — and the options hold the interaction. Examined separately, the group is not interactive and
+  // the options are anonymous (their text is usually `{value}`, an expression), so a per-element
+  // walk sees neither and reports the contracted control missing. That is exactly the shape run #8
+  // failed on. Identity is therefore INHERITED from the nearest naming ancestor, which is also how
+  // a screen reader resolves a grouped control.
+  const inheritedFor = new Map();
+  const descend = (node, inherited) => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { for (const row of node) descend(row, inherited); return; }
+    let next = inherited;
+    if (node.type === "JSXElement") {
+      inheritedFor.set(node, inherited);
+      const own = identitiesOf(node, node.openingElement, raw, labels);
+      // A container that names itself passes that name down; an interactive element does not
+      // (a button inside a button is not a thing, and a form should not name its fields).
+      if (own.length && !interactivity(node.openingElement)) next = [...inherited, ...own];
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "loc" || key === "start" || key === "end") continue;
+      if (value && typeof value === "object") descend(value, next);
+    }
+  };
+  descend(ast, []);
+
+  visit(ast, (node) => {
+    if (node.type !== "JSXElement") return;
+    const opening = node.openingElement;
+    const interactive = interactivity(opening);
+    if (!interactive) {
+      // A CONTAINER THAT MIGHT BE THE BINDING. `<div {...groupProps} id="eventDate">` is not itself
+      // operated, so it is never a failure — but it may be exactly where a group binding lands, and
+      // if this file cannot follow the spread it must be allowed to cover the control it names.
+      // Otherwise the hand-wired options inside it would be condemned for a binding that is
+      // probably there. Unknown is not broken, one level up.
+      const spread = (opening.attributes || []).some((row) => row?.type === "JSXSpreadAttribute");
+      // A non-interactive container can own a selectable control group. An action identity still
+      // belongs on the actionable descendant and must never make a passive container driveable.
+      const literalIdentity = attrNode(opening, "data-thrallo-control");
+      const bindableContainer = spread || Boolean(literalIdentity);
+      const identities = bindableContainer ? identitiesOf(node, opening, raw, labels) : [];
+      if (bindableContainer && (identities.length || literalIdentity)) {
+        const resolved = bindingOf(opening, raw, raw);
+        elements.push({
+          file, line: node.loc?.start?.line || null, element: `<${jsxName(opening)}>`,
+          via: "container", binding: resolved.binding, bindingEvidence: resolved.evidence,
+          boundName: resolved.boundName || null, actionName: resolved.actionName || null,
+          factory: resolved.factory || null, attribute: resolved.attribute || null,
+          machineId: resolved.machineId || null,
+          identities, inheritedIdentities: inheritedFor.get(node) || [], coversOnly: true,
+        });
+      }
+      return;
+    }
+    const { binding, evidence, boundName = null, actionName = null, factory = null,
+      attribute = null, machineId = null } = bindingOf(opening, raw, raw);
+    elements.push({
+      file, line: node.loc?.start?.line || null,
+      element: `<${jsxName(opening)}${interactive.role ? ` role="${interactive.role}"` : ""}>`,
+      via: interactive.via, binding, bindingEvidence: evidence,
+      // The handlers this element itself declares, and its native type; a literal-bound native
+      // button with neither a handler nor a submit role is pressed by the browser and does nothing.
+      handlers: interactive.handlers || [], spread: (opening.attributes || []).some((row) => row?.type === "JSXSpreadAttribute"), nativeType: String(attr(opening, "type") || "").toLowerCase(),
+      tag: jsxName(opening), role: interactive.role || null,
+      // What the BINDING says this control is — the authoritative link when one exists.
+      boundName, actionName, factory, attribute, machineId,
+      identities: identitiesOf(node, opening, raw, labels),
+      // …plus whatever names the container it sits in, so a grouped chooser is identifiable.
+      inheritedIdentities: inheritedFor.get(node) || [],
+    });
+  });
+}
+
+/**
+ * The contracted-intersection rule.
+ *
+ * An unbound interactive element is only a BUILD FAILURE when it plausibly serves a control the
+ * contract names and nothing else in the tree serves that control bound. Uncontracted chrome — a
+ * nav toggle, an accordion, a modal close — is reported and never fails: the contract does not name
+ * it, the model was never asked to bind it, and failing builds over it would block correct work.
+ *
+ * @returns {{ok: boolean, findings: Array, elements: Array, coverage: Array, residualGap: string}}
+ */
+export function lintControlBindings(tree, { interactionContract, authoritativeFiles = null } = {}) {
+  const authoritative = authoritativeFiles
+    ? new Set([...authoritativeFiles].map((file) => String(file))) : null;
+  const inAuthority = (file) => !authoritative || authoritative.has(file);
+  const elements = [];
+  for (const [file, source] of Object.entries(tree || {})) {
+    if (!SOURCE.test(file) || PLATFORM.test(file) || !inAuthority(file)) continue;
+    walkFile(file, source, elements);
+  }
+
+  // Binding factories called with something other than a string literal — a field bound inside a
+  // loop, where the name is a variable. Each one can bind a control no static reader can name.
+  const dynamicBindings = [];
+  const FACTORY_CALL = /use(?:SemanticField|SemanticSelection|SemanticAction|FlowAdvance)\s*\(\s*\{[^}]*\}/g;
+  for (const [file, source] of Object.entries(tree || {})) {
+    if (!SOURCE.test(file) || PLATFORM.test(file) || !inAuthority(file)) continue;
+    for (const call of String(source).match(FACTORY_CALL) || []) {
+      if (!/^useFlowAdvance\b/.test(call) && !/name\s*:\s*['"`]/.test(call)) {
+        dynamicBindings.push(`${file}: ${call.replace(/\s+/g, " ").slice(0, 70)}`);
+      }
+    }
+  }
+
+  const findings = [];
+  const coverage = [];
+  const claimed = new Set();
+
+  const requiredBindingFor = (flow, key) => {
+    const name = String(key || "");
+    if (["input", "selection"].includes(flow.kind)) {
+      const helper = flow.kind === "selection" ? "useSemanticSelection" : "useSemanticField";
+      return {
+        helper,
+        name,
+        // A scoped control is bound as { name, scope }: the identity is scope.name.
+        ...(flow.control?.scope ? { scope: flow.control.scope, identity: flow.control.qualifiedName } : {}),
+        attribute: "data-thrallo-control",
+        machineId: flow.control?.machineId || controlIdFor(name),
+        spread: flow.kind === "selection" ? "groupProps + optionProps(option)" : "inputProps",
+      };
+    }
+    if (flow.kind === "flow_start" && flow.control?.logicalField) {
+      const actionName = String(flow.control.accessibleName || flow.control.purpose || name);
+      return {
+        helper: "useSemanticSelection",
+        name,
+        actionName,
+        attribute: "data-thrallo-control + data-thrallo-action",
+        machineId: flow.control?.machineId || actionIdFor(actionName),
+        spread: "groupProps + optionProps(option)",
+      };
+    }
+    const helper = flow.kind === "flow_advance" ? "useFlowAdvance" : "useSemanticAction";
+    const bindingName = flow.kind === "flow_advance" ? ADVANCE_ACTION_NAME
+      : String(flow.operationId || flow.control?.accessibleName || flow.control?.purpose || name);
+    return {
+      helper,
+      name: bindingName,
+      attribute: "data-thrallo-action",
+      machineId: flow.control?.machineId || actionIdFor(bindingName),
+      spread: "buttonProps",
+    };
+  };
+
+  for (const flow of interactionContract?.flows || []) {
+    if (!flow.control) continue;
+    const key = flow.control.logicalField || flow.control.accessibleName;
+    if (!key) continue;
+    const names = flow.control.accessibleNames?.length
+      ? flow.control.accessibleNames : semanticAliases(key);
+    // THREE WAYS AN ELEMENT CAN CLAIM A CONTRACTED CONTROL, strongest first.
+    //  1. its binding factory NAMES the control  — `useSemanticField({ name: "guestName" })`
+    //  2. its literal attribute carries the control's IDENTITY — data-thrallo-control="ctl_…"
+    //  3. only for UNBOUND elements: the text on it matches the control's semantic key
+    // The first two are exact. The third is the fragile one, and it is the only one used to
+    // condemn anything — which is why the residual gap below is stated with every result.
+    const actionFlow = !["input", "selection"].includes(flow.kind);
+    const expectedAttribute = actionFlow ? "data-thrallo-action" : "data-thrallo-control";
+    const expectedActionName = String(flow.control?.accessibleName || flow.control?.purpose || key);
+    const expectedBindingName = actionFlow && flow.operationId ? String(flow.operationId) : String(key);
+    // A named ancestor can identify the options in a grouped field, but it cannot rename every
+    // independent action nested inside a form or section. Letting action buttons inherit arbitrary
+    // container copy makes an unrelated row/select button look like a duplicate of the form action.
+    // Selection-backed flow entries retain group inheritance because their options are one control.
+    const inheritsGroupedIdentity = ["input", "selection"].includes(flow.kind)
+      || (flow.kind === "flow_start" && Boolean(flow.control?.logicalField));
+    const textualIdentities = (row) => [
+      ...row.identities,
+      ...(inheritsGroupedIdentity ? (row.inheritedIdentities || []) : []),
+    ];
+    const claims = (row) => {
+      if (row.actionName && actionFlow) return semanticKey(row.actionName) === semanticKey(expectedActionName);
+      // A scoped control is claimed only by the scoped binding; an unscoped binding of the same
+      // field name is another entity's control (or an unaddressable one), never this one.
+      if (row.boundName) return (flow.control?.qualifiedName && !actionFlow ? [flow.control.qualifiedName] : [key, expectedBindingName])
+        .some((candidate) => semanticKey(row.boundName) === semanticKey(candidate));
+      if (row.machineId) return [flow.control?.machineId, controlIdFor(key), actionIdFor(key), controlIdFor(flow.control.accessibleName || key),
+        actionIdFor(flow.control.accessibleName || key)].includes(row.machineId);
+      // A resolved helper whose semantic name is unknown is not proof that THIS control is bound.
+      // In particular useFlowAdvance always emits the canonical "advance" action; visible copy on
+      // that button cannot turn it into an arbitrary contracted action identity.
+      if (row.binding === BINDING.BINDING) return false;
+      // A runtime-valued attribute proves its binding channel, but not which control uses it. An
+      // action attribute therefore cannot textually impersonate a field binding (or vice versa).
+      if (row.binding === BINDING.UNRESOLVED && row.attribute
+        && row.attribute !== expectedAttribute) return false;
+      // Static literal bindings have already been decided by their exact machine identity above.
+      // Text is evidence only for genuinely unbound or unresolved elements.
+      if (![BINDING.UNBOUND, BINDING.UNRESOLVED].includes(row.binding)) return false;
+      return textualIdentities(row).some((identity) =>
+        identityMatches([identity], names) || semanticKey(identity) === semanticKey(key));
+    };
+    const matches = elements.filter(claims);
+    for (const row of matches) claimed.add(row);
+
+    const compatibleBinding = (row) => {
+      if (row.binding === BINDING.UNBOUND) return false;
+      if (row.binding === BINDING.LITERAL) {
+        return row.attribute === expectedAttribute
+          && (!row.machineId || row.machineId === flow.control?.machineId);
+      }
+      if (flow.kind === "input") return row.factory === "useSemanticField";
+      if (flow.kind === "selection") return row.factory === "useSemanticSelection";
+      if (flow.kind === "flow_advance") return row.factory === "useFlowAdvance";
+      if (flow.kind === "flow_start" && row.factory === "useSemanticSelection") {
+        return semanticKey(row.actionName) === semanticKey(expectedActionName);
+      }
+      return row.factory === "useSemanticAction"
+        && (!flow.operationId || semanticKey(row.boundName) === semanticKey(expectedBindingName));
+    };
+    // UNRESOLVED is intentionally not a binding verdict. A child component commonly receives
+    // `selection.optionProps(...)` through a prop; this file can see the spread but cannot trace
+    // it back to the parent hook. Counting that uncertainty as a bound-but-incompatible primitive
+    // contradicted the linter's proof boundary and blocked correctly wired split components.
+    const provenBound = matches.filter((row) => [BINDING.LITERAL, BINDING.BINDING].includes(row.binding));
+    const compatibleBound = provenBound.filter(compatibleBinding);
+    // A CONTRACTED ACTION MUST DO SOMETHING WHEN PRESSED. The 2026-09-16 Lumen advanced build
+    // rendered <button data-thrallo-action="act_44e00d0b">Start authentication form</button> with
+    // no onClick and no props spread; the browser pressed it as the contracted sign-in and observed
+    // nothing. A literal machine identity on a native button (or button role) that declares no
+    // handler and is not a form submit is an exact source fact, caught here before the browser.
+    if (actionFlow && flow.kind !== "flow_advance") {
+      const isButton = (row) => String(row.tag || "").toLowerCase() === "button" || String(row.role || "").toLowerCase() === "button";
+      // A props spread may carry the handler ("{...action.buttonProps}" beside a literal identity);
+      // only an element with no spread at all is provably inert.
+      const dead = compatibleBound.filter((row) => row.binding === BINDING.LITERAL && isButton(row) && !row.spread
+        && !(row.handlers || []).length && row.nativeType !== "submit");
+      const alive = compatibleBound.filter((row) => !dead.includes(row));
+      if (dead.length && !alive.length) {
+        // An OPERATION control that does nothing is a blocking defect: the contracted act cannot happen.
+        // A flow-entry door with no handler is reported for visibility only - when its form is already
+        // on screen the browser presses it and proceeds, so forcing a correction would spend a call on
+        // nothing (the medium create-step fixture keeps that door by design).
+        const operational = Boolean(flow.operationId) || ["action", "mutation", "cancellation", "lookup"].includes(flow.kind);
+        findings.push({
+          code: operational ? "contracted_action_unwired" : "contracted_flow_entry_unwired", fails: operational,
+          journeyId: flow.journeyId, stepIndex: flow.stepIndex, interactionId: flow.id,
+          control: { machineId: flow.control?.machineId, accessibleName: expectedActionName, operationId: flow.operationId || null },
+          elements: dead.map((row) => ({ file: row.file, line: row.line, element: row.element })),
+          message: `${dead[0].element} at ${dead[0].file}:${dead[0].line} carries the contracted action identity `
+            + `${flow.control?.machineId} ("${expectedActionName}") but declares no onClick/onSubmit handler and is not a `
+            + "form submit: the browser will press a control that does nothing. Wire it to the operation "
+            + "(useSemanticAction buttonProps or an explicit handler) or make it the form's submit.",
+        });
+      }
+    }
+    const unresolvedMatches = matches.filter((row) => row.binding === BINDING.UNRESOLVED);
+    // A bound implementation on a later surface must not mask a second, hand-wired implementation
+    // of the same contracted control. This is narrower than the general textual binding lint: the
+    // unbound element must itself carry the contracted semantic identity, and another element must
+    // prove the platform binding exists elsewhere. That exact mixed state is internally
+    // inconsistent and is safe to correct before a paid browser pass.
+    // A duplicate must be the same KIND of control. An action control is a button; the fields the
+    // action submits are not hand-wired copies of it. A live sign-in step operated the email
+    // textbox inside a "sign-in form" action, so the derived action control carried
+    // logicalField "email" — and the correctly bound button plus the plain <input aria-label="email">
+    // it submits were reported as a binding conflict, which no correction could satisfy.
+    const fieldElement = (row) => /^<(?:input|select|textarea)\b/i.test(String(row.element || ""));
+    const actionElement = (row) => /^<(?:button|a)\b/i.test(String(row.element || ""))
+      || /\brole="(?:button|link|menuitem)"/i.test(String(row.element || ""));
+    // Selection options ARE buttons, so a hand-wired chooser button remains a duplicate of a
+    // selection control; only a typed input flow rules buttons and links out.
+    const sameKindOfControl = (row) => (actionFlow ? !fieldElement(row)
+      : flow.kind === "input" ? !actionElement(row) : true);
+    const shadowedUnbound = matches.filter((row) => row.binding === BINDING.UNBOUND && !row.coversOnly
+      && sameKindOfControl(row)
+      && textualIdentities(row)
+        .some((identity) => semanticKey(identity) === semanticKey(key)
+          && semanticQualifier(identity) === semanticQualifier(key)));
+    const requiredBinding = requiredBindingFor(flow, key);
+    coverage.push({ interactionId: flow.id, control: key, matched: matches.length, bound: provenBound.length,
+      compatibleBound: compatibleBound.length, unresolved: unresolvedMatches.length,
+      authoritativeSurface: Boolean(authoritative) });
+
+    const unnamedRuntimeBindings = elements.filter((row) => row.binding === BINDING.UNRESOLVED
+      && row.attribute === expectedAttribute && !claims(row));
+    if (!matches.length && (dynamicBindings.length || unnamedRuntimeBindings.length)) {
+      // A DYNAMIC BINDING BINDS A CONTROL THIS FILE CANNOT NAME.
+      //
+      //   const fields = Object.fromEntries(NAMES.map((name) => [name, useSemanticField({ name })]))
+      //
+      // is correct, common, and binds every field in the list — but the factory is called with a
+      // variable, so no name can be read out of it and the elements carry no static identity at
+      // all. Measured against `opaqueIdentityApp`, a fixture that passes in a real browser, the
+      // textual rule reported SEVEN contracted controls missing. A build must never fail for that.
+      coverage[coverage.length - 1].undetermined = true;
+      findings.push({
+        code: "contract_control_coverage_undetermined", fails: false, interactionId: flow.id,
+        control: key, inferredKey: semanticKey(key), journeyId: flow.journeyId || null,
+        requiredBinding, authoritativeSurface: Boolean(authoritative),
+        dynamicBindings: dynamicBindings.slice(0, 3),
+        elements: unnamedRuntimeBindings.slice(0, 3).map((row) => ({
+          file: row.file, line: row.line, element: row.element, attribute: row.attribute,
+          runtimeIdentity: true,
+        })),
+        message: dynamicBindings.length
+          ? `no static element names the contracted control "${key}", but this tree binds `
+            + `controls dynamically (${dynamicBindings[0]}) — coverage cannot be decided offline`
+          : `no static element names the contracted control "${key}", but ${expectedAttribute} `
+            + "is supplied through a runtime wrapper value — coverage cannot be decided offline",
+      });
+      continue;
+    }
+    if (!matches.length) {
+      // Nothing in the tree even looks like this control. The app is missing a control the
+      // contract requires, which no amount of binding would fix.
+      findings.push({
+        code: "contract_control_missing", fails: true, interactionId: flow.id,
+        control: key, inferredKey: semanticKey(key), expectedRoles: flow.control.roles || [],
+        journeyId: flow.journeyId || null, responsibleModules: flow.responsibleModules || [],
+        requiredBinding, authoritativeSurface: Boolean(authoritative),
+        message: `no element in the generated tree names the contracted control "${key}"`,
+      });
+      continue;
+    }
+    if (provenBound.length && !compatibleBound.length) {
+      findings.push({
+        code: "contract_control_wrong_binding", fails: true, interactionId: flow.id,
+        control: key, inferredKey: semanticKey(key), journeyId: flow.journeyId || null,
+        requiredBinding, authoritativeSurface: Boolean(authoritative),
+        elements: provenBound.filter((row) => !row.coversOnly).map((row) => ({
+          file: row.file, line: row.line, element: row.element, via: row.via,
+          factory: row.factory, boundName: row.boundName, actionName: row.actionName,
+          attribute: row.attribute, machineId: row.machineId,
+        })),
+        message: `the contracted ${flow.kind} control "${key}" is bound through an incompatible `
+          + `semantic primitive; apply ${requiredBinding.helper} with the declared machine identity`,
+      });
+    } else if (provenBound.length && shadowedUnbound.length) {
+      findings.push({
+        code: "contract_control_binding_conflict", fails: true, interactionId: flow.id,
+        control: key, inferredKey: semanticKey(key), journeyId: flow.journeyId || null,
+        requiredBinding, authoritativeSurface: Boolean(authoritative),
+        shadowedByBoundDuplicate: true,
+        elements: shadowedUnbound.map((row) => ({ file: row.file, line: row.line, element: row.element,
+          via: row.via, identities: row.identities.slice(0, 4) })),
+        message: `the contracted control "${key}" has a machine-bound implementation, but `
+          + `${shadowedUnbound.map((row) => `${row.file}:${row.line}`).join(", ")} also implements `
+          + "that exact control without machine identity; bind the journey-facing implementation",
+      });
+    } else if (!provenBound.length && unresolvedMatches.length) {
+      coverage[coverage.length - 1].undetermined = true;
+      findings.push({
+        code: "contract_control_coverage_undetermined", fails: false, interactionId: flow.id,
+        control: key, inferredKey: semanticKey(key), journeyId: flow.journeyId || null,
+        requiredBinding, authoritativeSurface: Boolean(authoritative),
+        elements: unresolvedMatches.slice(0, 3).map((row) => ({
+          file: row.file, line: row.line, element: row.element, via: row.via,
+          spread: row.bindingEvidence,
+        })),
+        message: `the contracted control "${key}" is rendered through a spread this file cannot `
+          + "trace to its parent binding; coverage cannot be decided offline",
+      });
+    } else if (!provenBound.length) {
+      // Present, hand-wired, and therefore invisible to the browser's mechanics probe.
+      findings.push({
+        code: "contract_control_unbound", fails: true, interactionId: flow.id,
+        control: key, inferredKey: semanticKey(key), journeyId: flow.journeyId || null,
+        requiredBinding, authoritativeSurface: Boolean(authoritative),
+        elements: matches.filter((row) => !row.coversOnly).map((row) => ({ file: row.file, line: row.line, element: row.element,
+          via: row.via, identities: row.identities.slice(0, 4) })),
+        message: `the contracted control "${key}" is hand-wired at `
+          + `${matches.map((row) => `${row.file}:${row.line}`).join(", ")} with no machine identity, `
+          + "so verification cannot address it",
+      });
+    }
+  }
+
+  // Everything else that is interactive and unaddressable: reported, never failed.
+  for (const row of elements) {
+    if (row.coversOnly || row.binding !== BINDING.UNBOUND || claimed.has(row)) continue;
+    findings.push({
+      code: "uncontracted_control_unbound", fails: false,
+      file: row.file, line: row.line, element: row.element, via: row.via,
+      inferredKey: semanticKey(row.identities[0] || "") || null,
+      identities: row.identities.slice(0, 4),
+      message: `${row.element} at ${row.file}:${row.line} carries no machine identity and matches no `
+        + "contracted control — reported for visibility, not a build failure",
+    });
+  }
+
+  // COVERAGE IS A CLAIM THIS WALKER OFTEN CANNOT MAKE.
+  //
+  // Three of the four ways a correct app binds a control — a wrapper component, a store, a factory
+  // called with a variable — are structurally outside the reach of a static reader. Where any of
+  // them is present, "no contracted control was found unbound" is not a statement about the app;
+  // it is a statement about what could be seen. The report says so at TREE level, so a consumer
+  // cannot mistake a quiet result for a proof, and so that driving the false-rejection rate to
+  // zero could never be achieved by simply ceasing to fire wherever indirection appears.
+  const unresolved = elements.filter((row) => row.binding === BINDING.UNRESOLVED);
+  const undeterminedReasons = [
+    ...(dynamicBindings.length ? [`${dynamicBindings.length} control(s) bound dynamically: ${dynamicBindings[0]}`] : []),
+    ...(unresolved.length ? [`${unresolved.length} element(s) carry a spread this walker cannot follow `
+      + `(${unresolved[0].file}:${unresolved[0].line})`] : []),
+  ];
+
+  return {
+    ok: !findings.some((row) => row.fails),
+    findings, elements, coverage,
+    authoritativeSurface: Boolean(authoritative),
+    ignoredSourceFiles: authoritative ? Object.keys(tree || {}).filter((file) => SOURCE.test(file)
+      && !PLATFORM.test(file) && !authoritative.has(file)).sort() : [],
+    // True whenever ANY binding in the tree was unreadable — not merely for the controls affected.
+    coverageUndetermined: undeterminedReasons.length > 0,
+    undeterminedReasons,
+    // STATED WITH THE RESULT, EVERY TIME. The intersection depends on a TEXTUAL match between an
+    // element's accessible name, id or label and the contracted control's semantic key. A control
+    // labelled divergently from its key — "Choose your evening" against `eventDate` — matches
+    // nothing here and is not caught. A green lint means no contracted control was found unbound;
+    // it is not a proof that every contracted control is bound.
+    residualGap: "matching is textual (accessible name / id / label vs semantic key); a control "
+      + "labelled divergently from its contracted key is not detected. A green result is not a "
+      + "proof of bound coverage.",
+  };
+}

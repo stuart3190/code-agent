@@ -14,12 +14,22 @@
 // worth driving twice; running the heavyweight path over it spends real money proving nothing.
 // A Roblox generator or a visual editor genuinely does.
 
+import { requestUsesTransientSimulation } from "../../../shared/buildProfile.mjs";
+
 export const COMPLEXITY = Object.freeze({ simple: "simple", medium: "medium", advanced: "advanced" });
 
 const ADVANCED_SIGNALS = [
   /\bide\b|code editor|monaco|codemirror/i,
-  /roblox|luau|unity|unreal|game engine/i,
+  // Engine names are words, not substrings. The production phrase "community prize
+  // competitions" previously matched `unity` inside `community` and sent a basic website down
+  // the complex-interactive path.
+  /\b(?:roblox|luau|unity|unreal|game engine)\b/i,
   /visual editor|drag[- ]and[- ]drop builder|canvas editor|node graph|flow editor/i,
+  // Interactive geometry/layout work has the same coordinated state, rendering and verification
+  // load as a named visual editor even when the brief calls it a planner. The live Downlight
+  // Planner asked for an interactive SVG canvas with drag/edit/zoom/pan but fell through to the
+  // 12-credit simple default because it never used the exact words "canvas editor".
+  /\binteractive\b[\w\s,/()-]{0,48}\b(canvas|svg|diagram|floor ?plan|layout plan)\b|\b(canvas|svg)\b[\w\s,/()-]{0,60}\b(drag|pan|zoom|edit)\b/i,
   /\bcad\b|3d model|three\.?js|webgl|blender/i,
   // "an AI writing assistant" has a word between the two. An earlier version required them
   // adjacent and classified it as simple — the most expensive kind of misclassification.
@@ -57,6 +67,30 @@ export function classifyComplexity({ prompt = "", contract = null } = {}) {
 
   for (const signal of ADVANCED_SIGNALS) {
     if (signal.test(text)) { reasons.push(`matches an advanced pattern (${signal.source.slice(0, 40)})`); return { level: COMPLEXITY.advanced, reasons }; }
+  }
+
+  const journeyDetail = (contract?.journeys || []).map((journey) => [
+    journey.id, journey.title,
+    ...(journey.steps || []).flatMap((step) => [step.action, step.expect]),
+  ].join(" ")).join(" ").toLowerCase();
+  const explicitMultiStepBooking = /\b(booking|reservation|appointment)\b/i.test(text)
+    && (/\b(multi[- ]?step|wizard)\b/i.test(text)
+      || (/(date|slot|party|quantity|details|guest)/i.test(text)
+        && /(review|confirm|confirmation|reference|refresh|reload|cancel)/i.test(text)));
+  const contractedMultiStepBooking = /booking|reservation|appointment/.test(journeyDetail)
+    && (contract?.journeys || []).some((journey) => {
+      const steps = journey.steps || [];
+      const details = steps.map((step) => `${step.action} ${step.expect}`).join(" ").toLowerCase();
+      return steps.length >= 4 && /(choose|select|date|slot|party|quantity|details|guest)/.test(details)
+        && /(review|summary|confirm|confirmation|reference)/.test(details);
+    });
+  // A multi-step simulated form with an in-browser confirmation is still a basic website when
+  // the request explicitly excludes backend durability. Treating every occurrence of
+  // "reservation + quantity + confirmation" as durable promoted the retained basic competition
+  // request to medium even after its payment signal was correctly negated.
+  if (!requestUsesTransientSimulation(prompt) && (explicitMultiStepBooking || contractedMultiStepBooking)) {
+    reasons.push("multi-step booking flow requires coordinated durable state");
+    return { level: COMPLEXITY.medium, reasons };
   }
 
   // Structural evidence: a lot of moving parts is medium regardless of what it is called.

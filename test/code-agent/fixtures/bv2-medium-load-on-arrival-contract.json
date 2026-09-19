@@ -1,0 +1,268 @@
+{
+  "summary": "Alder Studio analytics: metric cards computed from saved projects and tasks",
+  "projectType": "dashboard",
+  "version": 1,
+  "auth": {
+    "required": false
+  },
+  "routes": [
+    {
+      "path": "/analytics",
+      "name": "Analytics",
+      "auth": false,
+      "purpose": "computed analytics summary"
+    }
+  ],
+  "entities": [
+    {
+      "name": "project",
+      "owned": false,
+      "fields": [
+        {
+          "name": "projectId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "projectTitle",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "clientName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "projectDescription",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "projectOwnerId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "targetDate",
+          "type": "date",
+          "required": true
+        },
+        {
+          "name": "projectStatus",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "createdBy",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "storage": "durable",
+      "relationships": [
+        "a project has many tasks",
+        "a project owner references one member",
+        "a project creator references one authenticated user"
+      ]
+    },
+    {
+      "name": "task",
+      "owned": false,
+      "fields": [
+        {
+          "name": "taskId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "projectId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "taskTitle",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "taskDescription",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "taskOwnerId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "priority",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "dueDate",
+          "type": "date",
+          "required": true
+        },
+        {
+          "name": "taskStatus",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "createdBy",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "storage": "durable",
+      "relationships": [
+        "a task belongs to one project",
+        "a task owner references one member",
+        "a task creator references one authenticated user"
+      ]
+    },
+    {
+      "name": "analyticsSummary",
+      "owned": false,
+      "fields": [
+        {
+          "name": "totalProjects",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "totalTasks",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "completedTasks",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "blockedTasks",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "overdueTasks",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "completionRate",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "statusBreakdown",
+          "type": "object",
+          "required": true
+        }
+      ],
+      "storage": "transient",
+      "relationships": [
+        "analyticsSummary is calculated from durable project and task rows and is not persisted"
+      ]
+    }
+  ],
+  "operations": [
+    {
+      "id": "calculate-analytics-summary",
+      "kind": "read",
+      "entity": "analyticsSummary",
+      "journey": "view-analytics-summary",
+      "description": "calculate visible analytics metrics from durable project and task data",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "reads": [
+            "projectStatus",
+            "taskStatus",
+            "dueDate"
+          ],
+          "writes": [
+            "totalProjects",
+            "totalTasks",
+            "completedTasks",
+            "blockedTasks",
+            "overdueTasks",
+            "completionRate",
+            "statusBreakdown"
+          ],
+          "behavior": "count projects and tasks, count tasks by status, count overdue incomplete tasks using due dates, and calculate completion rate"
+        }
+      ]
+    }
+  ],
+  "journeys": [
+    {
+      "id": "view-analytics-summary",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the analytics page as an authenticated team member",
+          "expect": "the Analytics Summary heading and metric cards are visible",
+          "target": "/analytics"
+        },
+        {
+          "reads": [
+            "projectStatus",
+            "taskStatus",
+            "dueDate"
+          ],
+          "action": "load the current summary",
+          "expect": "metric cards show total projects, total tasks, completed tasks, blocked tasks, overdue tasks, and completion rate",
+          "target": "analytics summary panel",
+          "operates": [
+            "calculate-analytics-summary"
+          ]
+        },
+        {
+          "action": "open the status breakdown section",
+          "expect": "a visible breakdown lists counts for To Do, In Progress, Review, Blocked, and Done",
+          "target": "status breakdown"
+        }
+      ],
+      "title": "A team member views an analytics summary for current durable project and task data",
+      "priority": "secondary",
+      "acceptance": [
+        "analytics shows numeric totals for saved projects and tasks",
+        "status breakdown displays a count for each supported task status",
+        "analytics remains available after a page reload"
+      ],
+      "durableState": [
+        "view-analytics-summary.draft.projectStatus",
+        "view-analytics-summary.draft.taskStatus",
+        "view-analytics-summary.draft.dueDate"
+      ]
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "a1",
+      "kind": "functional",
+      "journey": "view-analytics-summary",
+      "statement": "metric cards show totals computed from saved projects and tasks"
+    },
+    {
+      "id": "a2",
+      "kind": "functional",
+      "journey": "view-analytics-summary",
+      "statement": "the status breakdown lists counts per status"
+    },
+    {
+      "id": "a3",
+      "kind": "functional",
+      "journey": "view-analytics-summary",
+      "statement": "the analytics page recovers the same numbers after reload"
+    }
+  ],
+  "states": [],
+  "deferred": [],
+  "imageIntents": [],
+  "integrations": []
+}

@@ -1,0 +1,940 @@
+{
+  "summary": "Alder Studio: a team work tracker where authenticated members create projects, add and progress tasks, filter a board and a list, read a computed analytics summary, and administrators manage member roles",
+  "projectType": "dashboard",
+  "version": 1,
+  "buildProfile": {
+    "version": 1,
+    "requestedBuildType": "application",
+    "resolvedBuildType": "application",
+    "applicationSubtype": "auto",
+    "requirementSignals": [
+      "saved_data",
+      "accounts",
+      "interactive_workspace"
+    ],
+    "inferenceSource": "explicit",
+    "confidence": 1
+  },
+  "auth": {
+    "required": true,
+    "model": "email + password via the backend SDK",
+    "rules": [
+      "signed-out visitors are redirected to /login when opening any dashboard route",
+      "authenticated members can read shared Alder Studio projects, tasks and member display information",
+      "authenticated members can create projects and tasks and update task status",
+      "only administrators can open /admin and update member roles",
+      "non-administrator members see Access denied on /admin and cannot see role editing controls"
+    ]
+  },
+  "routes": [
+    {
+      "path": "/login",
+      "name": "Sign in",
+      "auth": false,
+      "purpose": "authenticate with email and password"
+    },
+    {
+      "path": "/projects",
+      "name": "Projects",
+      "auth": true,
+      "purpose": "the project list and the new project form"
+    },
+    {
+      "path": "/projects/:projectId",
+      "name": "Project",
+      "auth": true,
+      "purpose": "one project, its tasks and the add task form"
+    },
+    {
+      "path": "/board",
+      "name": "Task Board",
+      "auth": true,
+      "purpose": "tasks grouped by status with filters"
+    },
+    {
+      "path": "/tasks",
+      "name": "Task List",
+      "auth": true,
+      "purpose": "every task as a searchable, filterable list"
+    },
+    {
+      "path": "/analytics",
+      "name": "Analytics",
+      "auth": true,
+      "purpose": "the computed summary of projects and tasks"
+    },
+    {
+      "path": "/admin",
+      "name": "Team Administration",
+      "auth": true,
+      "purpose": "members and their roles (administrators only)"
+    }
+  ],
+  "entities": [
+    {
+      "name": "session",
+      "storage": "external platform authentication",
+      "owned": false,
+      "fields": [
+        {
+          "name": "email",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "password",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "project",
+      "storage": "durable",
+      "owned": false,
+      "fields": [
+        {
+          "name": "projectId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "clientName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "ownerId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "createdBy",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "relationships": [
+        "a project has many tasks",
+        "a project is owned by one member"
+      ]
+    },
+    {
+      "name": "task",
+      "storage": "durable",
+      "owned": false,
+      "fields": [
+        {
+          "name": "taskId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "projectId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "ownerId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "dueDate",
+          "type": "date",
+          "required": false
+        }
+      ],
+      "relationships": [
+        "a task belongs to one project",
+        "a task is owned by one member"
+      ]
+    },
+    {
+      "name": "member",
+      "storage": "durable",
+      "owned": false,
+      "fields": [
+        {
+          "name": "memberId",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "email",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "displayName",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "role",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "relationships": [
+        "a member maps to one authenticated platform user",
+        "members own projects and tasks"
+      ]
+    },
+    {
+      "name": "analyticsSummary",
+      "storage": "computed on read from saved projects and tasks",
+      "owned": false,
+      "fields": [
+        {
+          "name": "totalProjects",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "totalTasks",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "completedTasks",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "blockedTasks",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "completionRate",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "statusBreakdown",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "taskFilter",
+      "storage": "client session",
+      "owned": false,
+      "fields": [
+        {
+          "name": "searchText",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "statusFilter",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "ownerFilter",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "clearFilters",
+          "type": "string",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "operations": [
+    {
+      "id": "sign-in",
+      "entity": "session",
+      "kind": "auth",
+      "journey": "authenticate",
+      "description": "authenticate an existing member with email and password via the backend SDK",
+      "responsibilities": [
+        {
+          "type": "persistence",
+          "capability": "auth",
+          "capabilityMethod": "signIn",
+          "reads": [
+            "email",
+            "password"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "id": "create-project",
+      "entity": "project",
+      "kind": "create",
+      "journey": "create-project",
+      "description": "persist a new project via the entity store",
+      "responsibilities": [
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "create",
+          "reads": [
+            "title",
+            "clientName",
+            "status",
+            "ownerId"
+          ],
+          "writes": [
+            "projectId",
+            "createdBy"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "create-task",
+      "entity": "task",
+      "kind": "create",
+      "journey": "create-task",
+      "description": "persist a new task for a project via the entity store",
+      "responsibilities": [
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "create",
+          "reads": [
+            "projectId",
+            "title",
+            "status",
+            "ownerId",
+            "dueDate"
+          ],
+          "writes": [
+            "taskId"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "update-task-status",
+      "entity": "task",
+      "kind": "update",
+      "journey": "update-task-status",
+      "description": "persist a changed task status via the entity store",
+      "responsibilities": [
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "update",
+          "reads": [
+            "status"
+          ],
+          "writes": [
+            "status"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "filter-tasks",
+      "entity": "taskFilter",
+      "kind": "search",
+      "journey": "filter-board",
+      "description": "match saved tasks by search text, selected status and selected owner; all-statuses and all-owners are all-options sentinels",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "behavior": "match saved tasks by search text, selected status and selected owner; all-statuses and all-owners are all-options sentinels",
+          "reads": [
+            "searchText",
+            "statusFilter",
+            "ownerFilter"
+          ],
+          "writes": []
+        }
+      ]
+    },
+    {
+      "id": "calculate-analytics",
+      "entity": "analyticsSummary",
+      "kind": "read",
+      "journey": "analytics-on-arrival",
+      "description": "compute totals, completion rate and a status breakdown from the saved projects and tasks",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "behavior": "count projects and tasks, count completed and blocked tasks, derive the completion rate and a per-status breakdown",
+          "reads": [
+            "status"
+          ],
+          "writes": [
+            "totalProjects",
+            "totalTasks",
+            "completedTasks",
+            "blockedTasks",
+            "completionRate",
+            "statusBreakdown"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "update-member-role",
+      "entity": "member",
+      "kind": "update",
+      "journey": "admin-role",
+      "description": "persist a changed member role via the entity store (administrators only)",
+      "responsibilities": [
+        {
+          "type": "persistence",
+          "capability": "crud",
+          "capabilityMethod": "update",
+          "reads": [
+            "memberId",
+            "role"
+          ],
+          "writes": [
+            "role"
+          ]
+        }
+      ]
+    }
+  ],
+  "journeys": [
+    {
+      "id": "authenticate",
+      "title": "A member signs in with email and password",
+      "priority": "secondary",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the sign-in page",
+          "target": "/login",
+          "expect": "the Alder Studio sign-in form with email and password fields is visible"
+        },
+        {
+          "action": "enter the email and password and sign in",
+          "target": "sign-in form",
+          "operates": [
+            "email",
+            "password",
+            "sign-in"
+          ],
+          "expect": "the Alder Studio Projects heading is visible"
+        }
+      ],
+      "acceptance": [
+        "a member who signs in lands on the projects page"
+      ]
+    },
+    {
+      "id": "create-project",
+      "title": "A member creates a project and opens it",
+      "priority": "primary",
+      "stage": "primary_journey",
+      "steps": [
+        {
+          "action": "open the projects page as an authenticated team member",
+          "target": "/projects",
+          "expect": "the Alder Studio Projects heading, the New Project form and the project list are visible"
+        },
+        {
+          "action": "create a new project with a title, client, active status and owner",
+          "target": "new project form",
+          "operates": [
+            "title",
+            "clientName",
+            "status",
+            "ownerId",
+            "create-project"
+          ],
+          "produces": [
+            "projectId"
+          ],
+          "verificationValues": {
+            "status": "Active",
+            "ownerId": "sample-member-ada"
+          },
+          "expect": "the created project appears in the project list with its title, client and Active status"
+        },
+        {
+          "action": "open the created project detail page",
+          "target": "created project card",
+          "reads": [
+            "projectId",
+            "title"
+          ],
+          "expect": "the project detail page shows the project title, the task section and the Add Task form"
+        }
+      ],
+      "acceptance": [
+        "a created project survives a reload and can be opened from the list"
+      ]
+    },
+    {
+      "id": "open-created-project",
+      "title": "A member opens the created project by its returned identity",
+      "priority": "secondary",
+      "stage": "supporting",
+      "dependsOn": [
+        "create-project"
+      ],
+      "steps": [
+        {
+          "action": "open the projects page as an authenticated team member",
+          "target": "/projects",
+          "expect": "the project list shows the created project card"
+        },
+        {
+          "action": "open the created project detail page",
+          "target": "created project card",
+          "reads": [
+            "projectId",
+            "title"
+          ],
+          "expect": "the project detail page shows the project title and the task section"
+        }
+      ],
+      "durableState": [
+        "open-created-project.draft.projectId",
+        "open-created-project.draft.title"
+      ]
+    },
+    {
+      "id": "create-task",
+      "title": "A member adds a task to the created project",
+      "priority": "secondary",
+      "stage": "supporting",
+      "dependsOn": [
+        "create-project"
+      ],
+      "steps": [
+        {
+          "action": "open the projects page as an authenticated team member",
+          "target": "/projects",
+          "expect": "the project list shows the created project card"
+        },
+        {
+          "action": "open the created project detail page",
+          "target": "created project card",
+          "reads": [
+            "projectId"
+          ],
+          "expect": "the project detail page shows the Add Task form"
+        },
+        {
+          "action": "add a task with a title, To Do status, owner and due date",
+          "target": "add task form",
+          "operates": [
+            "title",
+            "status",
+            "ownerId",
+            "dueDate",
+            "create-task"
+          ],
+          "reads": [
+            "projectId"
+          ],
+          "produces": [
+            "taskId"
+          ],
+          "verificationValues": {
+            "status": "To Do",
+            "ownerId": "sample-member-ada"
+          },
+          "expect": "the new task is visible in the project task list with its title, owner and a To Do status badge"
+        }
+      ],
+      "durableState": [
+        "create-task.draft.projectId"
+      ]
+    },
+    {
+      "id": "update-task-status",
+      "title": "A member moves the created task to In Progress",
+      "priority": "secondary",
+      "stage": "supporting",
+      "dependsOn": [
+        "create-task"
+      ],
+      "steps": [
+        {
+          "action": "open the projects page as an authenticated team member",
+          "target": "/projects",
+          "expect": "the project list shows the created project card"
+        },
+        {
+          "action": "open the created project detail page",
+          "target": "created project card",
+          "reads": [
+            "projectId"
+          ],
+          "expect": "the project detail page shows the task list with the created task"
+        },
+        {
+          "action": "change the task status to In Progress",
+          "target": "task status selector",
+          "operates": [
+            "status",
+            "update-task-status"
+          ],
+          "reads": [
+            "taskId"
+          ],
+          "primitive": "selection",
+          "verificationValues": {
+            "status": "In Progress"
+          },
+          "expect": "the task row shows an In Progress status badge"
+        }
+      ],
+      "durableState": [
+        "update-task-status.draft.projectId",
+        "update-task-status.draft.taskId"
+      ]
+    },
+    {
+      "id": "reload-persistence",
+      "title": "The task status survives a reload",
+      "priority": "secondary",
+      "stage": "supporting",
+      "dependsOn": [
+        "update-task-status"
+      ],
+      "steps": [
+        {
+          "action": "open the projects page as an authenticated team member",
+          "target": "/projects",
+          "expect": "the project list shows the created project card"
+        },
+        {
+          "action": "open the created project detail page",
+          "target": "created project card",
+          "reads": [
+            "projectId"
+          ],
+          "expect": "the project detail page shows the task list with the created task"
+        },
+        {
+          "action": "reload the project detail page",
+          "target": "/projects/:projectId",
+          "reads": [
+            "projectId",
+            "taskId",
+            "status"
+          ],
+          "expect": "the same project and task are still visible and the task still shows In Progress"
+        }
+      ],
+      "durableState": [
+        "reload-persistence.draft.projectId",
+        "reload-persistence.draft.taskId",
+        "reload-persistence.draft.status"
+      ]
+    },
+    {
+      "id": "filter-board",
+      "title": "A member filters the board by status and owner",
+      "priority": "secondary",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the board page as an authenticated team member",
+          "target": "/board",
+          "expect": "the Task Board shows columns for To Do, In Progress, Review, Blocked and Done"
+        },
+        {
+          "action": "filter the board by a status and an owner",
+          "target": "board filters",
+          "operates": [
+            "statusFilter",
+            "ownerFilter",
+            "filter-tasks"
+          ],
+          "verificationValues": {
+            "statusFilter": "To Do",
+            "ownerFilter": "sample-member-ada"
+          },
+          "expect": "only task cards with To Do status owned by Ada Morgan are visible and the filter summary names To Do and Ada Morgan"
+        }
+      ]
+    },
+    {
+      "id": "clear-filters",
+      "title": "A member searches the task list and clears every filter",
+      "priority": "secondary",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the task list page as an authenticated team member",
+          "target": "/tasks",
+          "expect": "the Task List shows task rows and the search and filter controls"
+        },
+        {
+          "action": "search the list for a task title while leaving status at the all-statuses sentinel",
+          "target": "task list search and filters",
+          "operates": [
+            "searchText",
+            "statusFilter",
+            "filter-tasks"
+          ],
+          "verificationValues": {
+            "searchText": "Kickoff",
+            "statusFilter": "all-statuses"
+          },
+          "expect": "the task list shows at least one row containing Kickoff and no row that omits Kickoff"
+        },
+        {
+          "action": "clear all filters",
+          "target": "clear filters button",
+          "operates": [
+            "clearFilters"
+          ],
+          "expect": "the filter summary disappears and the full task list is visible again"
+        }
+      ]
+    },
+    {
+      "id": "analytics-on-arrival",
+      "title": "The analytics summary is computed on arrival",
+      "priority": "secondary",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the analytics page as an authenticated team member",
+          "target": "/analytics",
+          "expect": "the Analytics Summary heading and metric cards for total projects, total tasks, completed tasks, blocked tasks and completion rate are visible"
+        },
+        {
+          "action": "refresh the summary",
+          "target": "refresh summary control",
+          "operates": [
+            "calculate-analytics"
+          ],
+          "expect": "the metric cards show numbers computed from the saved projects and tasks"
+        },
+        {
+          "action": "open the status breakdown section",
+          "target": "status breakdown",
+          "expect": "a status breakdown lists counts for To Do, In Progress, Review, Blocked and Done"
+        }
+      ]
+    },
+    {
+      "id": "admin-role",
+      "title": "An administrator changes a member's role",
+      "priority": "secondary",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the sign-in page",
+          "target": "/login",
+          "expect": "the Alder Studio sign-in form is visible"
+        },
+        {
+          "action": "sign in as the seeded administrator",
+          "target": "sign-in form",
+          "operates": [
+            "email",
+            "password",
+            "sign-in"
+          ],
+          "verificationValues": {
+            "email": "riley@alder.example",
+            "password": "Alder-demo-2026!"
+          },
+          "expect": "the Alder Studio Projects heading is visible"
+        },
+        {
+          "action": "open the team administration page",
+          "target": "/admin",
+          "expect": "the Team Administration heading, the members table and the role controls are visible"
+        },
+        {
+          "action": "select a member row to edit",
+          "target": "members table",
+          "operates": [
+            "memberId"
+          ],
+          "primitive": "selection",
+          "verificationValues": {
+            "memberId": "sample-member-ada"
+          },
+          "expect": "the selected member row is highlighted and its current role is displayed"
+        },
+        {
+          "action": "change the selected member's role to administrator",
+          "target": "role selector",
+          "operates": [
+            "role",
+            "update-member-role"
+          ],
+          "reads": [
+            "memberId"
+          ],
+          "primitive": "selection",
+          "verificationValues": {
+            "role": "administrator"
+          },
+          "expect": "the selected row shows an administrator role badge and a Role saved confirmation"
+        },
+        {
+          "action": "reload the team administration page",
+          "target": "/admin",
+          "reads": [
+            "memberId",
+            "role"
+          ],
+          "expect": "the same member still shows the administrator role badge after reload"
+        }
+      ]
+    },
+    {
+      "id": "member-denied",
+      "title": "A member without the administrator role is denied administration",
+      "priority": "secondary",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the team administration page as an authenticated member without the administrator role",
+          "target": "/admin",
+          "expect": "an Access denied message is visible and no role editing controls are visible"
+        },
+        {
+          "action": "open the projects page as the same member",
+          "target": "/projects",
+          "expect": "the Alder Studio Projects heading is visible and the member can see the project list"
+        }
+      ]
+    }
+  ],
+  "sampleData": {
+    "members": [
+      {
+        "memberId": "sample-admin-riley",
+        "email": "riley@alder.example",
+        "displayName": "Riley Chen",
+        "role": "administrator"
+      },
+      {
+        "memberId": "sample-member-ada",
+        "email": "ada@alder.example",
+        "displayName": "Ada Morgan",
+        "role": "member"
+      }
+    ],
+    "projects": [
+      {
+        "projectId": "sample-project-atlas",
+        "title": "Atlas launch",
+        "clientName": "Northwind",
+        "status": "Active",
+        "ownerId": "sample-admin-riley",
+        "createdBy": "sample-admin-riley"
+      }
+    ],
+    "tasks": [
+      {
+        "taskId": "sample-task-kickoff",
+        "projectId": "sample-project-atlas",
+        "title": "Kickoff planning",
+        "status": "To Do",
+        "ownerId": "sample-member-ada",
+        "dueDate": "2026-10-01"
+      },
+      {
+        "taskId": "sample-task-brief",
+        "projectId": "sample-project-atlas",
+        "title": "Creative brief",
+        "status": "Done",
+        "ownerId": "sample-admin-riley",
+        "dueDate": "2026-09-15"
+      }
+    ]
+  },
+  "states": [
+    {
+      "surface": "projects page",
+      "loading": "skeleton while projects load",
+      "empty": "No projects yet",
+      "validation": "a project needs a title and a client",
+      "error": "Saving failed, try again",
+      "success": "Project created"
+    },
+    {
+      "surface": "project detail",
+      "loading": "skeleton while tasks load",
+      "empty": "No tasks yet",
+      "validation": "a task needs a title",
+      "error": "Saving failed, try again",
+      "success": "Task saved"
+    },
+    {
+      "surface": "team administration",
+      "loading": "skeleton while members load",
+      "empty": "No members",
+      "validation": "choose a member first",
+      "error": "Saving failed, try again",
+      "success": "Role saved"
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "a1",
+      "statement": "a project created in the browser is listed after a full page reload",
+      "journey": "create-project",
+      "kind": "persistence"
+    },
+    {
+      "id": "a2",
+      "statement": "a task status changed in the browser is still shown after a full page reload",
+      "journey": "reload-persistence",
+      "kind": "persistence"
+    },
+    {
+      "id": "a3",
+      "statement": "the board and the list show only tasks matching the applied filters until the filters are cleared",
+      "journey": "clear-filters",
+      "kind": "functional"
+    },
+    {
+      "id": "a4",
+      "statement": "a member without the administrator role sees Access denied on the administration page",
+      "journey": "member-denied",
+      "kind": "authorization"
+    }
+  ],
+  "integrations": [
+    {
+      "name": "none",
+      "purpose": "",
+      "required": false
+    }
+  ],
+  "imageIntents": [],
+  "deferred": [
+    {
+      "item": "email notifications when a task changes owner",
+      "reason": "not part of the first tracker release"
+    }
+  ]
+}

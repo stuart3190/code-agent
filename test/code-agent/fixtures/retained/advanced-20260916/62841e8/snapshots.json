@@ -1,0 +1,23 @@
+[
+  {
+    "id": "ba4850a5-c5f0-484e-8d8f-dd8923fb47f6",
+    "reason": "foundation:scaffold",
+    "created_at": "2026-09-16T09:07:11.902+00:00",
+    "tree_hash": "6e64b40824072a1dbbc3ae7d786828defa8d533e9279480077e8318f4a801e8f",
+    "state": "ready"
+  },
+  {
+    "id": "97e3d0b2-3cac-46c1-9b4c-74fee29c5d22",
+    "reason": "candidate:core:1",
+    "created_at": "2026-09-16T09:08:11.398+00:00",
+    "tree_hash": "0552127dae5fdd75bf0192cfc5946f769dafdabaaca3f5dfe33dbda1028d2584",
+    "state": "ready"
+  },
+  {
+    "id": "717fb628-7d81-4dfb-a109-a98af7366635",
+    "reason": "candidate:core:1",
+    "created_at": "2026-09-16T09:08:35.833+00:00",
+    "tree_hash": "c1ee24aa1d258725b0fd66a0a5a44112fbd2ab18803af77273dff53cd6f01709",
+    "state": "ready"
+  }
+]

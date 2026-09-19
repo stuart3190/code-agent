@@ -1,0 +1,1154 @@
+[
+  {
+    "journey_id": "create-edit-save-reload-plan",
+    "verdict": {
+      "steps": [
+        {
+          "drove": true,
+          "action": "open the workspace route",
+          "detail": "contracted result visible: sign-in, session, exists",
+          "expect": "a sign-in panel is visible when no user session exists",
+          "status": "pass",
+          "advisories": [],
+          "classification": "PASS"
+        },
+        {
+          "action": "sign up or sign in with email and password",
+          "detail": "the create account entry was not offered",
+          "expect": "the workspace shell is visible with the plan list, SVG canvas, fixture library, and inspector",
+          "status": "undriveable",
+          "handled": true,
+          "observation": {
+            "text": "HomeWorkspaceLibraryReportsSettings Home Application screen ready for composition.",
+            "consoleSince": [],
+            "requestsSince": []
+          },
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "controlEvidence": {
+            "activation": {
+              "reason": "not_reliably_located",
+              "target": "create account entry",
+              "requiredAtContractedStep": true
+            }
+          }
+        },
+        {
+          "action": "create a new named plan",
+          "detail": "not reached because step 2 was undriveable",
+          "expect": "the plan name Lobby Lighting Plan appears as the active plan and the canvas is empty",
+          "status": "not_reached",
+          "blockedBy": 1
+        },
+        {
+          "action": "drag a fixture from the library onto the SVG canvas",
+          "detail": "not reached because step 2 was undriveable",
+          "expect": "a fixture appears on the SVG canvas and is selected with a visible selection outline",
+          "status": "not_reached",
+          "blockedBy": 1
+        },
+        {
+          "action": "edit the selected fixture in the inspector",
+          "detail": "not reached because step 2 was undriveable",
+          "expect": "the selected fixture visibly moves to the edited position, rotates, and shows brightness 70 in the inspector",
+          "status": "not_reached",
+          "blockedBy": 1
+        },
+        {
+          "action": "pan and zoom the canvas",
+          "detail": "not reached because step 2 was undriveable",
+          "expect": "the SVG canvas view changes and the zoom indicator displays the updated zoom level",
+          "status": "not_reached",
+          "blockedBy": 1
+        },
+        {
+          "action": "save the active plan",
+          "detail": "not reached because step 2 was undriveable",
+          "expect": "a visible saved status message is shown for Lobby Lighting Plan",
+          "status": "not_reached",
+          "blockedBy": 1
+        },
+        {
+          "action": "reload",
+          "detail": "not reached because step 2 was undriveable",
+          "expect": "Lobby Lighting Plan is still listed as the active plan with the edited fixture and saved viewport restored",
+          "status": "not_reached",
+          "blockedBy": 1
+        }
+      ],
+      "status": "undriveable",
+      "failedSteps": 0,
+      "cacheIdentity": {
+        "journeyId": "create-edit-save-reload-plan",
+        "contractHash": "c80783cb6d51fa1b9a07b80d70e69912b2a3d75807f9a61d408a163375c76cdb",
+        "runtimeFiles": [
+          {
+            "path": "src/lib/backend/index.js",
+            "contentHash": "2cf40421f9c5a61b1effca24bfc25b7d220df019bb2988ac8ed50b60ac062bde"
+          },
+          {
+            "path": "src/lib/backend/supabaseBackend.js",
+            "contentHash": "64be4069be90d6c6a487e10998c0c880f2dd86e35d48275855bb8819ec84ef87"
+          },
+          {
+            "path": "src/lib/capabilities/booking.js",
+            "contentHash": "f46e1936767afa4e56f2cfc82b8e97a153735479bc3e4e3aefb83bad459ccf7e"
+          },
+          {
+            "path": "src/lib/capabilities/composed/crud.js",
+            "contentHash": "66540efa3462d529e881e1f20b39d067feae358e6bd7fbcd3fd8d649e44d4a7d"
+          },
+          {
+            "path": "src/lib/capabilities/composed/index.js",
+            "contentHash": "8b8957a6e7415a293982c6fa0d8ef4f48c86e9aa88fbd726c84fdeadcadf51cc"
+          },
+          {
+            "path": "src/lib/capabilities/composed/interaction-primitives.js",
+            "contentHash": "12fdbf5582bdf6ce8880902dee8165301b8f079f4d1f20fcb2941745d1845399"
+          },
+          {
+            "path": "src/lib/capabilities/composed/manifest.js",
+            "contentHash": "8373ccc422cc5b8d44c99ed89d44758e60f230089d07072c6a8a545ed22cc7a4"
+          },
+          {
+            "path": "src/lib/capabilities/composed/roles.js",
+            "contentHash": "b79770b4855c3ca22e7c823c03a07a8f264d6c46a94114281ab0905fd32b2e5b"
+          },
+          {
+            "path": "src/lib/capabilities/composed/session.js",
+            "contentHash": "6bed24733467c54aa2913e4601c0f50b0e68c6e70b9a99f85a56eef00f7593f4"
+          },
+          {
+            "path": "src/lib/capabilities/crud.js",
+            "contentHash": "29b1a44b19f87d166fdc81bf95307280fb3cb26a4a40a6278a15576ea2f88ffe"
+          },
+          {
+            "path": "src/lib/capabilities/forms.js",
+            "contentHash": "ab7fc440318caf8b6d8ef86f560652b18aad58ffdced460b845a68e760c3f173"
+          },
+          {
+            "path": "src/lib/capabilities/index.js",
+            "contentHash": "2ba27fb4b08aefacf7eb0b225a474ed30e7a1470cefcc1ecc7fc7d159845aa96"
+          },
+          {
+            "path": "src/lib/capabilities/react.js",
+            "contentHash": "23a95713b35715d6242c5923cb46c357848d962ecac84050a0102a4c0f392bfb"
+          },
+          {
+            "path": "src/lib/capabilities/roles.js",
+            "contentHash": "475d542802b975675e06b230bb867ff6027ea94ce6176904e9ebdde2d2cf9d4c"
+          },
+          {
+            "path": "src/lib/capabilities/session.js",
+            "contentHash": "958879b69f94e2912358dd40ad25acaaac645da9341bb5833b50ca4576f3ebd0"
+          },
+          {
+            "path": "src/lib/capabilities/wizard.js",
+            "contentHash": "b6edb2d72717db75924bfe08e099b950ff4957c9b6f4aa4ddd5a828bb8189cc4"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/ScaffoldApp.jsx",
+            "contentHash": "44d59eed2b895a4d95e92590bf9edd14e303d8a2ad16c5cdb04b2ac683db0566"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/manifest.js",
+            "contentHash": "1948df1150c57c2887aa6ee0ca2ec13cae51d1b5b59ab8e1e47ba09941a724ee"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/primitives.jsx",
+            "contentHash": "49e06dfeb79bcd8f8edbc2541fc41b275c55f88fd965b5f7ae768b53ddf07230"
+          },
+          {
+            "path": "src/lib/visitorSession.js",
+            "contentHash": "c298160a4b044c597fc10ce7f158dc924f3ef1b3c8cafe0c3e9ecb636e19d5a1"
+          }
+        ],
+        "configVersion": "journey-verification-config/1",
+        "owningModules": [
+          {
+            "path": "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+            "contentHash": "93bc90851d780c32ad0751a893210f1e59768e6803e3294c0530c79d2f6156b9"
+          },
+          {
+            "path": "src/extensions/custom/create-edit-save-reload-plan.js",
+            "contentHash": "40625ca14cc4ebe97585d923d6d26129049e11a14be774e511377a6f0d9bd216"
+          },
+          {
+            "path": "src/screens/scaffold/WorkspaceScreen.jsx",
+            "contentHash": "75c82e14f933f3ae56576c70fdf60a7ab5a512b6634caec5b5a1e404b8435217"
+          }
+        ],
+        "backendVersion": "generated-backend/1",
+        "runtimeVersion": "react-vite-runtime/1",
+        "verifierVersion": "4e91ff54d9eed485e1882fd9cff32fa9245e47ef88121e366d7fe2f80500d3d8:f8e228166318a463f5194c413265ec6eeb11f260",
+        "capabilityVersions": [
+          {
+            "name": "crud",
+            "version": "1.0.0"
+          },
+          {
+            "name": "roles",
+            "version": "1.0.0"
+          },
+          {
+            "name": "session",
+            "version": "1.1.0"
+          }
+        ],
+        "environmentVersion": "unknown",
+        "journeyDefinitionHash": "f1d0db01cd5afb13b8a08a29d0b10094bc6d6d7d8a550e11e60e8c9d8b74c45c",
+        "transitiveDependencyClosure": [
+          {
+            "path": "src/extensions/custom/keyboard-canvas-alternatives.js",
+            "contentHash": "60fda630fffb00f30931e3da3453a2ee592df101b800f538bcae6f8d36b00dfc"
+          },
+          {
+            "path": "src/extensions/custom/settings-and-sign-out.js",
+            "contentHash": "668f946dc871e3fe0df2dc5dbc3a5c92c8d0c40d52ed78134939e248386bbea5"
+          },
+          {
+            "path": "src/lib/backend/index.js",
+            "contentHash": "2cf40421f9c5a61b1effca24bfc25b7d220df019bb2988ac8ed50b60ac062bde"
+          },
+          {
+            "path": "src/lib/backend/supabaseBackend.js",
+            "contentHash": "64be4069be90d6c6a487e10998c0c880f2dd86e35d48275855bb8819ec84ef87"
+          },
+          {
+            "path": "src/lib/capabilities/composed/crud.js",
+            "contentHash": "66540efa3462d529e881e1f20b39d067feae358e6bd7fbcd3fd8d649e44d4a7d"
+          },
+          {
+            "path": "src/lib/capabilities/composed/interaction-primitives.js",
+            "contentHash": "12fdbf5582bdf6ce8880902dee8165301b8f079f4d1f20fcb2941745d1845399"
+          },
+          {
+            "path": "src/lib/capabilities/composed/session.js",
+            "contentHash": "6bed24733467c54aa2913e4601c0f50b0e68c6e70b9a99f85a56eef00f7593f4"
+          },
+          {
+            "path": "src/lib/capabilities/crud.js",
+            "contentHash": "29b1a44b19f87d166fdc81bf95307280fb3cb26a4a40a6278a15576ea2f88ffe"
+          },
+          {
+            "path": "src/lib/capabilities/react.js",
+            "contentHash": "23a95713b35715d6242c5923cb46c357848d962ecac84050a0102a4c0f392bfb"
+          },
+          {
+            "path": "src/lib/capabilities/session.js",
+            "contentHash": "958879b69f94e2912358dd40ad25acaaac645da9341bb5833b50ca4576f3ebd0"
+          },
+          {
+            "path": "src/lib/visitorSession.js",
+            "contentHash": "c298160a4b044c597fc10ce7f158dc924f3ef1b3c8cafe0c3e9ecb636e19d5a1"
+          }
+        ]
+      },
+      "backendEvidence": {
+        "after": {
+          "hash": "5582668908f242213bb151fbe90ebbfdcbd1588e9b478fc2a1a6c36e13fdc949",
+          "appUsers": [],
+          "entities": [],
+          "entityCount": 0,
+          "appUserCount": 0
+        },
+        "before": {
+          "hash": "5582668908f242213bb151fbe90ebbfdcbd1588e9b478fc2a1a6c36e13fdc949",
+          "appUsers": [],
+          "entities": [],
+          "entityCount": 0,
+          "appUserCount": 0
+        },
+        "changed": false,
+        "required": true,
+        "entityDiff": {
+          "changed": [],
+          "created": [],
+          "deleted": []
+        }
+      }
+    },
+    "snapshot_id": null,
+    "created_at": "2026-09-16T09:58:22.92+00:00"
+  },
+  {
+    "journey_id": "keyboard-canvas-alternatives",
+    "verdict": {
+      "steps": [
+        {
+          "action": "open the workspace route",
+          "detail": "not reached: the journey's required starting state could not be established (new plan form: the durable mutation did not reach its contracted observable state)",
+          "expect": "the previously saved Lobby Lighting Plan is visible with at least one fixture on the SVG canvas",
+          "status": "undriveable",
+          "classification": "PLATFORM_INCONCLUSIVE"
+        },
+        {
+          "action": "move keyboard focus to the fixture on the canvas",
+          "detail": "not reached: the journey's required starting state could not be established (new plan form: the durable mutation did not reach its contracted observable state)",
+          "expect": "the focused fixture is selected and an accessible selection label is visible",
+          "status": "undriveable",
+          "classification": "PLATFORM_INCONCLUSIVE"
+        },
+        {
+          "action": "move the selected fixture with keyboard arrow controls",
+          "detail": "not reached: the journey's required starting state could not be established (new plan form: the durable mutation did not reach its contracted observable state)",
+          "expect": "the fixture position values in the inspector change and the fixture visibly moves on the canvas",
+          "status": "undriveable",
+          "classification": "PLATFORM_INCONCLUSIVE"
+        },
+        {
+          "action": "rotate the selected fixture with keyboard controls",
+          "detail": "not reached: the journey's required starting state could not be established (new plan form: the durable mutation did not reach its contracted observable state)",
+          "expect": "the fixture rotation value changes and the fixture visibly rotates",
+          "status": "undriveable",
+          "classification": "PLATFORM_INCONCLUSIVE"
+        },
+        {
+          "action": "adjust the selected fixture brightness with keyboard controls",
+          "detail": "not reached: the journey's required starting state could not be established (new plan form: the durable mutation did not reach its contracted observable state)",
+          "expect": "the fixture brightness value changes in the inspector",
+          "status": "undriveable",
+          "classification": "PLATFORM_INCONCLUSIVE"
+        },
+        {
+          "action": "undo the last keyboard change",
+          "detail": "not reached: the journey's required starting state could not be established (new plan form: the durable mutation did not reach its contracted observable state)",
+          "expect": "the previous fixture value is restored and the redo control becomes enabled",
+          "status": "undriveable",
+          "classification": "PLATFORM_INCONCLUSIVE"
+        },
+        {
+          "action": "redo the undone keyboard change",
+          "detail": "not reached: the journey's required starting state could not be established (new plan form: the durable mutation did not reach its contracted observable state)",
+          "expect": "the fixture value returns to the redone state and the undo control remains enabled",
+          "status": "undriveable",
+          "classification": "PLATFORM_INCONCLUSIVE"
+        }
+      ],
+      "status": "undriveable",
+      "failedSteps": 0,
+      "cacheIdentity": {
+        "journeyId": "keyboard-canvas-alternatives",
+        "contractHash": "c80783cb6d51fa1b9a07b80d70e69912b2a3d75807f9a61d408a163375c76cdb",
+        "runtimeFiles": [
+          {
+            "path": "src/lib/backend/index.js",
+            "contentHash": "2cf40421f9c5a61b1effca24bfc25b7d220df019bb2988ac8ed50b60ac062bde"
+          },
+          {
+            "path": "src/lib/backend/supabaseBackend.js",
+            "contentHash": "64be4069be90d6c6a487e10998c0c880f2dd86e35d48275855bb8819ec84ef87"
+          },
+          {
+            "path": "src/lib/capabilities/booking.js",
+            "contentHash": "f46e1936767afa4e56f2cfc82b8e97a153735479bc3e4e3aefb83bad459ccf7e"
+          },
+          {
+            "path": "src/lib/capabilities/composed/crud.js",
+            "contentHash": "66540efa3462d529e881e1f20b39d067feae358e6bd7fbcd3fd8d649e44d4a7d"
+          },
+          {
+            "path": "src/lib/capabilities/composed/index.js",
+            "contentHash": "8b8957a6e7415a293982c6fa0d8ef4f48c86e9aa88fbd726c84fdeadcadf51cc"
+          },
+          {
+            "path": "src/lib/capabilities/composed/interaction-primitives.js",
+            "contentHash": "12fdbf5582bdf6ce8880902dee8165301b8f079f4d1f20fcb2941745d1845399"
+          },
+          {
+            "path": "src/lib/capabilities/composed/manifest.js",
+            "contentHash": "8373ccc422cc5b8d44c99ed89d44758e60f230089d07072c6a8a545ed22cc7a4"
+          },
+          {
+            "path": "src/lib/capabilities/composed/roles.js",
+            "contentHash": "b79770b4855c3ca22e7c823c03a07a8f264d6c46a94114281ab0905fd32b2e5b"
+          },
+          {
+            "path": "src/lib/capabilities/composed/session.js",
+            "contentHash": "6bed24733467c54aa2913e4601c0f50b0e68c6e70b9a99f85a56eef00f7593f4"
+          },
+          {
+            "path": "src/lib/capabilities/crud.js",
+            "contentHash": "29b1a44b19f87d166fdc81bf95307280fb3cb26a4a40a6278a15576ea2f88ffe"
+          },
+          {
+            "path": "src/lib/capabilities/forms.js",
+            "contentHash": "ab7fc440318caf8b6d8ef86f560652b18aad58ffdced460b845a68e760c3f173"
+          },
+          {
+            "path": "src/lib/capabilities/index.js",
+            "contentHash": "2ba27fb4b08aefacf7eb0b225a474ed30e7a1470cefcc1ecc7fc7d159845aa96"
+          },
+          {
+            "path": "src/lib/capabilities/react.js",
+            "contentHash": "23a95713b35715d6242c5923cb46c357848d962ecac84050a0102a4c0f392bfb"
+          },
+          {
+            "path": "src/lib/capabilities/roles.js",
+            "contentHash": "475d542802b975675e06b230bb867ff6027ea94ce6176904e9ebdde2d2cf9d4c"
+          },
+          {
+            "path": "src/lib/capabilities/session.js",
+            "contentHash": "958879b69f94e2912358dd40ad25acaaac645da9341bb5833b50ca4576f3ebd0"
+          },
+          {
+            "path": "src/lib/capabilities/wizard.js",
+            "contentHash": "b6edb2d72717db75924bfe08e099b950ff4957c9b6f4aa4ddd5a828bb8189cc4"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/ScaffoldApp.jsx",
+            "contentHash": "44d59eed2b895a4d95e92590bf9edd14e303d8a2ad16c5cdb04b2ac683db0566"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/manifest.js",
+            "contentHash": "1948df1150c57c2887aa6ee0ca2ec13cae51d1b5b59ab8e1e47ba09941a724ee"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/primitives.jsx",
+            "contentHash": "49e06dfeb79bcd8f8edbc2541fc41b275c55f88fd965b5f7ae768b53ddf07230"
+          },
+          {
+            "path": "src/lib/visitorSession.js",
+            "contentHash": "c298160a4b044c597fc10ce7f158dc924f3ef1b3c8cafe0c3e9ecb636e19d5a1"
+          }
+        ],
+        "configVersion": "journey-verification-config/1",
+        "owningModules": [
+          {
+            "path": "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+            "contentHash": "93bc90851d780c32ad0751a893210f1e59768e6803e3294c0530c79d2f6156b9"
+          },
+          {
+            "path": "src/extensions/custom/keyboard-canvas-alternatives.js",
+            "contentHash": "60fda630fffb00f30931e3da3453a2ee592df101b800f538bcae6f8d36b00dfc"
+          },
+          {
+            "path": "src/screens/scaffold/WorkspaceScreen.jsx",
+            "contentHash": "75c82e14f933f3ae56576c70fdf60a7ab5a512b6634caec5b5a1e404b8435217"
+          }
+        ],
+        "backendVersion": "generated-backend/1",
+        "runtimeVersion": "react-vite-runtime/1",
+        "verifierVersion": "4e91ff54d9eed485e1882fd9cff32fa9245e47ef88121e366d7fe2f80500d3d8:f8e228166318a463f5194c413265ec6eeb11f260",
+        "capabilityVersions": [
+          {
+            "name": "crud",
+            "version": "1.0.0"
+          },
+          {
+            "name": "roles",
+            "version": "1.0.0"
+          },
+          {
+            "name": "session",
+            "version": "1.1.0"
+          }
+        ],
+        "environmentVersion": "unknown",
+        "journeyDefinitionHash": "ce989874e6f093ecc2223b62a45554aa13cdb0fde5351567d399ca3be351afe8",
+        "transitiveDependencyClosure": [
+          {
+            "path": "src/extensions/custom/create-edit-save-reload-plan.js",
+            "contentHash": "40625ca14cc4ebe97585d923d6d26129049e11a14be774e511377a6f0d9bd216"
+          },
+          {
+            "path": "src/extensions/custom/settings-and-sign-out.js",
+            "contentHash": "668f946dc871e3fe0df2dc5dbc3a5c92c8d0c40d52ed78134939e248386bbea5"
+          },
+          {
+            "path": "src/lib/backend/index.js",
+            "contentHash": "2cf40421f9c5a61b1effca24bfc25b7d220df019bb2988ac8ed50b60ac062bde"
+          },
+          {
+            "path": "src/lib/backend/supabaseBackend.js",
+            "contentHash": "64be4069be90d6c6a487e10998c0c880f2dd86e35d48275855bb8819ec84ef87"
+          },
+          {
+            "path": "src/lib/capabilities/composed/crud.js",
+            "contentHash": "66540efa3462d529e881e1f20b39d067feae358e6bd7fbcd3fd8d649e44d4a7d"
+          },
+          {
+            "path": "src/lib/capabilities/composed/interaction-primitives.js",
+            "contentHash": "12fdbf5582bdf6ce8880902dee8165301b8f079f4d1f20fcb2941745d1845399"
+          },
+          {
+            "path": "src/lib/capabilities/composed/session.js",
+            "contentHash": "6bed24733467c54aa2913e4601c0f50b0e68c6e70b9a99f85a56eef00f7593f4"
+          },
+          {
+            "path": "src/lib/capabilities/crud.js",
+            "contentHash": "29b1a44b19f87d166fdc81bf95307280fb3cb26a4a40a6278a15576ea2f88ffe"
+          },
+          {
+            "path": "src/lib/capabilities/react.js",
+            "contentHash": "23a95713b35715d6242c5923cb46c357848d962ecac84050a0102a4c0f392bfb"
+          },
+          {
+            "path": "src/lib/capabilities/session.js",
+            "contentHash": "958879b69f94e2912358dd40ad25acaaac645da9341bb5833b50ca4576f3ebd0"
+          },
+          {
+            "path": "src/lib/visitorSession.js",
+            "contentHash": "c298160a4b044c597fc10ce7f158dc924f3ef1b3c8cafe0c3e9ecb636e19d5a1"
+          }
+        ]
+      },
+      "backendEvidence": {
+        "after": {
+          "hash": "53cb265de6287c51500a066f7f481bb3aaf7032cf7d20f76ce04ecda05092075",
+          "appUsers": [
+            {
+              "id": "31114b69-2f3b-424c-9182-980869b01163",
+              "createdAt": "2026-09-16T09:57:43.774363+00:00",
+              "authUserHash": "3f6437feafc8650ccd43"
+            }
+          ],
+          "entities": [
+            {
+              "id": "f933211c-5c05-42d3-bbea-009e6cc64931",
+              "type": "plan",
+              "fields": {
+                "name": {
+                  "hash": "cb07ba0375dad75ced2b",
+                  "type": "string"
+                },
+                "fixtures": {
+                  "hash": "4f53cda18c2baa0c0354",
+                  "type": "array"
+                },
+                "redoStack": {
+                  "hash": "4f53cda18c2baa0c0354",
+                  "type": "array"
+                },
+                "undoStack": {
+                  "hash": "4f53cda18c2baa0c0354",
+                  "type": "array"
+                },
+                "updatedAt": {
+                  "hash": "beaa3e360532344d95f6",
+                  "type": "string"
+                },
+                "viewportPanX": {
+                  "hash": "5feceb66ffc86f38d952",
+                  "type": "number"
+                },
+                "viewportPanY": {
+                  "hash": "5feceb66ffc86f38d952",
+                  "type": "number"
+                },
+                "viewportZoom": {
+                  "hash": "6b86b273ff34fce19d6b",
+                  "type": "number"
+                },
+                "selectedFixtureId": {
+                  "hash": "12ae32cb1ec02d01eda3",
+                  "type": "string"
+                }
+              },
+              "createdAt": "2026-09-16T09:57:44.399334+00:00"
+            }
+          ],
+          "entityCount": 1,
+          "appUserCount": 1
+        },
+        "before": {
+          "hash": "5582668908f242213bb151fbe90ebbfdcbd1588e9b478fc2a1a6c36e13fdc949",
+          "appUsers": [],
+          "entities": [],
+          "entityCount": 0,
+          "appUserCount": 0
+        },
+        "changed": true,
+        "required": true,
+        "entityDiff": {
+          "changed": [],
+          "created": [
+            "f933211c-5c05-42d3-bbea-009e6cc64931"
+          ],
+          "deleted": []
+        }
+      }
+    },
+    "snapshot_id": null,
+    "created_at": "2026-09-16T09:58:23.066+00:00"
+  },
+  {
+    "journey_id": "switch-between-plans",
+    "verdict": {
+      "steps": [
+        {
+          "drove": true,
+          "action": "open the workspace route",
+          "detail": "the contracted action ran, but the named collection does not contain every required member",
+          "expect": "Lobby Lighting Plan is visible in the plan list",
+          "status": "fail",
+          "observation": {
+            "text": "HomeWorkspaceLibraryReportsSettings LUMEN LAYOUTS Authenticated SVG floor-planning workspace Create durable plans, place and edit fixtures, undo and redo canvas changes, switch plans, save viewport state, and reload restored work. Sign in to Lumen Layouts Use email and password to unlock durable SVG floor plans. Email Password authentication form Sign-in panel is visible when no user session exists.",
+            "consoleSince": [],
+            "requestsSince": []
+          },
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "controlEvidence": {
+            "collectionMembership": {
+              "ok": false,
+              "absent": [],
+              "checked": true,
+              "missing": [
+                "Lobby Lighting Plan"
+              ],
+              "present": [],
+              "unexpected": [],
+              "regionFound": true,
+              "structuralMemberCount": 0
+            }
+          }
+        },
+        {
+          "action": "create another named plan",
+          "detail": "not reached because step 1 was fail",
+          "expect": "Conference Room Plan appears as the active plan with an empty canvas",
+          "status": "not_reached",
+          "blockedBy": 0
+        },
+        {
+          "action": "add a fixture to the second plan",
+          "detail": "not reached because step 1 was fail",
+          "expect": "the second plan canvas shows its own selected fixture",
+          "status": "not_reached",
+          "blockedBy": 0
+        },
+        {
+          "action": "switch back to the first plan",
+          "detail": "not reached because step 1 was fail",
+          "expect": "Lobby Lighting Plan becomes active and shows its previously saved fixture",
+          "status": "not_reached",
+          "blockedBy": 0
+        },
+        {
+          "action": "switch to the second plan again",
+          "detail": "not reached because step 1 was fail",
+          "expect": "Conference Room Plan becomes active and shows the fixture added to that plan",
+          "status": "not_reached",
+          "blockedBy": 0
+        }
+      ],
+      "status": "fail",
+      "failedSteps": 1,
+      "cacheIdentity": {
+        "journeyId": "switch-between-plans",
+        "contractHash": "c80783cb6d51fa1b9a07b80d70e69912b2a3d75807f9a61d408a163375c76cdb",
+        "runtimeFiles": [
+          {
+            "path": "src/lib/backend/index.js",
+            "contentHash": "2cf40421f9c5a61b1effca24bfc25b7d220df019bb2988ac8ed50b60ac062bde"
+          },
+          {
+            "path": "src/lib/backend/supabaseBackend.js",
+            "contentHash": "64be4069be90d6c6a487e10998c0c880f2dd86e35d48275855bb8819ec84ef87"
+          },
+          {
+            "path": "src/lib/capabilities/booking.js",
+            "contentHash": "f46e1936767afa4e56f2cfc82b8e97a153735479bc3e4e3aefb83bad459ccf7e"
+          },
+          {
+            "path": "src/lib/capabilities/composed/crud.js",
+            "contentHash": "66540efa3462d529e881e1f20b39d067feae358e6bd7fbcd3fd8d649e44d4a7d"
+          },
+          {
+            "path": "src/lib/capabilities/composed/index.js",
+            "contentHash": "8b8957a6e7415a293982c6fa0d8ef4f48c86e9aa88fbd726c84fdeadcadf51cc"
+          },
+          {
+            "path": "src/lib/capabilities/composed/interaction-primitives.js",
+            "contentHash": "12fdbf5582bdf6ce8880902dee8165301b8f079f4d1f20fcb2941745d1845399"
+          },
+          {
+            "path": "src/lib/capabilities/composed/manifest.js",
+            "contentHash": "8373ccc422cc5b8d44c99ed89d44758e60f230089d07072c6a8a545ed22cc7a4"
+          },
+          {
+            "path": "src/lib/capabilities/composed/roles.js",
+            "contentHash": "b79770b4855c3ca22e7c823c03a07a8f264d6c46a94114281ab0905fd32b2e5b"
+          },
+          {
+            "path": "src/lib/capabilities/composed/session.js",
+            "contentHash": "6bed24733467c54aa2913e4601c0f50b0e68c6e70b9a99f85a56eef00f7593f4"
+          },
+          {
+            "path": "src/lib/capabilities/crud.js",
+            "contentHash": "29b1a44b19f87d166fdc81bf95307280fb3cb26a4a40a6278a15576ea2f88ffe"
+          },
+          {
+            "path": "src/lib/capabilities/forms.js",
+            "contentHash": "ab7fc440318caf8b6d8ef86f560652b18aad58ffdced460b845a68e760c3f173"
+          },
+          {
+            "path": "src/lib/capabilities/index.js",
+            "contentHash": "2ba27fb4b08aefacf7eb0b225a474ed30e7a1470cefcc1ecc7fc7d159845aa96"
+          },
+          {
+            "path": "src/lib/capabilities/react.js",
+            "contentHash": "23a95713b35715d6242c5923cb46c357848d962ecac84050a0102a4c0f392bfb"
+          },
+          {
+            "path": "src/lib/capabilities/roles.js",
+            "contentHash": "475d542802b975675e06b230bb867ff6027ea94ce6176904e9ebdde2d2cf9d4c"
+          },
+          {
+            "path": "src/lib/capabilities/session.js",
+            "contentHash": "958879b69f94e2912358dd40ad25acaaac645da9341bb5833b50ca4576f3ebd0"
+          },
+          {
+            "path": "src/lib/capabilities/wizard.js",
+            "contentHash": "b6edb2d72717db75924bfe08e099b950ff4957c9b6f4aa4ddd5a828bb8189cc4"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/ScaffoldApp.jsx",
+            "contentHash": "44d59eed2b895a4d95e92590bf9edd14e303d8a2ad16c5cdb04b2ac683db0566"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/manifest.js",
+            "contentHash": "1948df1150c57c2887aa6ee0ca2ec13cae51d1b5b59ab8e1e47ba09941a724ee"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/primitives.jsx",
+            "contentHash": "49e06dfeb79bcd8f8edbc2541fc41b275c55f88fd965b5f7ae768b53ddf07230"
+          },
+          {
+            "path": "src/lib/visitorSession.js",
+            "contentHash": "c298160a4b044c597fc10ce7f158dc924f3ef1b3c8cafe0c3e9ecb636e19d5a1"
+          }
+        ],
+        "configVersion": "journey-verification-config/1",
+        "owningModules": [
+          {
+            "path": "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+            "contentHash": "93bc90851d780c32ad0751a893210f1e59768e6803e3294c0530c79d2f6156b9"
+          },
+          {
+            "path": "src/components/ui/switch.jsx",
+            "contentHash": "d8a629293bd773380b853e853dee098f98366810d1b937412bb126fdde132c30"
+          },
+          {
+            "path": "src/extensions/custom/create-edit-save-reload-plan.js",
+            "contentHash": "40625ca14cc4ebe97585d923d6d26129049e11a14be774e511377a6f0d9bd216"
+          },
+          {
+            "path": "src/screens/scaffold/WorkspaceScreen.jsx",
+            "contentHash": "75c82e14f933f3ae56576c70fdf60a7ab5a512b6634caec5b5a1e404b8435217"
+          }
+        ],
+        "backendVersion": "generated-backend/1",
+        "runtimeVersion": "react-vite-runtime/1",
+        "verifierVersion": "4e91ff54d9eed485e1882fd9cff32fa9245e47ef88121e366d7fe2f80500d3d8:f8e228166318a463f5194c413265ec6eeb11f260",
+        "capabilityVersions": [
+          {
+            "name": "crud",
+            "version": "1.0.0"
+          },
+          {
+            "name": "roles",
+            "version": "1.0.0"
+          },
+          {
+            "name": "session",
+            "version": "1.1.0"
+          }
+        ],
+        "environmentVersion": "unknown",
+        "journeyDefinitionHash": "4bf7990e5d6af9a3e26b835646968fc6112a2a9d29053de17e0c7ccc73e85401",
+        "transitiveDependencyClosure": [
+          {
+            "path": "src/extensions/custom/keyboard-canvas-alternatives.js",
+            "contentHash": "60fda630fffb00f30931e3da3453a2ee592df101b800f538bcae6f8d36b00dfc"
+          },
+          {
+            "path": "src/extensions/custom/settings-and-sign-out.js",
+            "contentHash": "668f946dc871e3fe0df2dc5dbc3a5c92c8d0c40d52ed78134939e248386bbea5"
+          },
+          {
+            "path": "src/lib/backend/index.js",
+            "contentHash": "2cf40421f9c5a61b1effca24bfc25b7d220df019bb2988ac8ed50b60ac062bde"
+          },
+          {
+            "path": "src/lib/backend/supabaseBackend.js",
+            "contentHash": "64be4069be90d6c6a487e10998c0c880f2dd86e35d48275855bb8819ec84ef87"
+          },
+          {
+            "path": "src/lib/capabilities/composed/crud.js",
+            "contentHash": "66540efa3462d529e881e1f20b39d067feae358e6bd7fbcd3fd8d649e44d4a7d"
+          },
+          {
+            "path": "src/lib/capabilities/composed/interaction-primitives.js",
+            "contentHash": "12fdbf5582bdf6ce8880902dee8165301b8f079f4d1f20fcb2941745d1845399"
+          },
+          {
+            "path": "src/lib/capabilities/composed/session.js",
+            "contentHash": "6bed24733467c54aa2913e4601c0f50b0e68c6e70b9a99f85a56eef00f7593f4"
+          },
+          {
+            "path": "src/lib/capabilities/crud.js",
+            "contentHash": "29b1a44b19f87d166fdc81bf95307280fb3cb26a4a40a6278a15576ea2f88ffe"
+          },
+          {
+            "path": "src/lib/capabilities/react.js",
+            "contentHash": "23a95713b35715d6242c5923cb46c357848d962ecac84050a0102a4c0f392bfb"
+          },
+          {
+            "path": "src/lib/capabilities/session.js",
+            "contentHash": "958879b69f94e2912358dd40ad25acaaac645da9341bb5833b50ca4576f3ebd0"
+          },
+          {
+            "path": "src/lib/utils.js",
+            "contentHash": "34f5e8245cf28dc6cd2306c12767165171d64305973fff9875ae740c60d0896e"
+          },
+          {
+            "path": "src/lib/visitorSession.js",
+            "contentHash": "c298160a4b044c597fc10ce7f158dc924f3ef1b3c8cafe0c3e9ecb636e19d5a1"
+          }
+        ]
+      },
+      "backendEvidence": {
+        "after": {
+          "hash": "53cb265de6287c51500a066f7f481bb3aaf7032cf7d20f76ce04ecda05092075",
+          "appUsers": [
+            {
+              "id": "31114b69-2f3b-424c-9182-980869b01163",
+              "createdAt": "2026-09-16T09:57:43.774363+00:00",
+              "authUserHash": "3f6437feafc8650ccd43"
+            }
+          ],
+          "entities": [
+            {
+              "id": "f933211c-5c05-42d3-bbea-009e6cc64931",
+              "type": "plan",
+              "fields": {
+                "name": {
+                  "hash": "cb07ba0375dad75ced2b",
+                  "type": "string"
+                },
+                "fixtures": {
+                  "hash": "4f53cda18c2baa0c0354",
+                  "type": "array"
+                },
+                "redoStack": {
+                  "hash": "4f53cda18c2baa0c0354",
+                  "type": "array"
+                },
+                "undoStack": {
+                  "hash": "4f53cda18c2baa0c0354",
+                  "type": "array"
+                },
+                "updatedAt": {
+                  "hash": "beaa3e360532344d95f6",
+                  "type": "string"
+                },
+                "viewportPanX": {
+                  "hash": "5feceb66ffc86f38d952",
+                  "type": "number"
+                },
+                "viewportPanY": {
+                  "hash": "5feceb66ffc86f38d952",
+                  "type": "number"
+                },
+                "viewportZoom": {
+                  "hash": "6b86b273ff34fce19d6b",
+                  "type": "number"
+                },
+                "selectedFixtureId": {
+                  "hash": "12ae32cb1ec02d01eda3",
+                  "type": "string"
+                }
+              },
+              "createdAt": "2026-09-16T09:57:44.399334+00:00"
+            }
+          ],
+          "entityCount": 1,
+          "appUserCount": 1
+        },
+        "before": {
+          "hash": "53cb265de6287c51500a066f7f481bb3aaf7032cf7d20f76ce04ecda05092075",
+          "appUsers": [
+            {
+              "id": "31114b69-2f3b-424c-9182-980869b01163",
+              "createdAt": "2026-09-16T09:57:43.774363+00:00",
+              "authUserHash": "3f6437feafc8650ccd43"
+            }
+          ],
+          "entities": [
+            {
+              "id": "f933211c-5c05-42d3-bbea-009e6cc64931",
+              "type": "plan",
+              "fields": {
+                "name": {
+                  "hash": "cb07ba0375dad75ced2b",
+                  "type": "string"
+                },
+                "fixtures": {
+                  "hash": "4f53cda18c2baa0c0354",
+                  "type": "array"
+                },
+                "redoStack": {
+                  "hash": "4f53cda18c2baa0c0354",
+                  "type": "array"
+                },
+                "undoStack": {
+                  "hash": "4f53cda18c2baa0c0354",
+                  "type": "array"
+                },
+                "updatedAt": {
+                  "hash": "beaa3e360532344d95f6",
+                  "type": "string"
+                },
+                "viewportPanX": {
+                  "hash": "5feceb66ffc86f38d952",
+                  "type": "number"
+                },
+                "viewportPanY": {
+                  "hash": "5feceb66ffc86f38d952",
+                  "type": "number"
+                },
+                "viewportZoom": {
+                  "hash": "6b86b273ff34fce19d6b",
+                  "type": "number"
+                },
+                "selectedFixtureId": {
+                  "hash": "12ae32cb1ec02d01eda3",
+                  "type": "string"
+                }
+              },
+              "createdAt": "2026-09-16T09:57:44.399334+00:00"
+            }
+          ],
+          "entityCount": 1,
+          "appUserCount": 1
+        },
+        "changed": false,
+        "required": true,
+        "entityDiff": {
+          "changed": [],
+          "created": [],
+          "deleted": []
+        }
+      }
+    },
+    "snapshot_id": null,
+    "created_at": "2026-09-16T09:58:23.142+00:00"
+  },
+  {
+    "journey_id": "settings-and-sign-out",
+    "verdict": {
+      "steps": [
+        {
+          "drove": true,
+          "action": "open the settings route",
+          "detail": "the contracted navigation changed route",
+          "expect": "the settings page shows the signed-in user's email and a sign-out control",
+          "status": "pass",
+          "advisories": [],
+          "classification": "PASS"
+        },
+        {
+          "action": "sign out",
+          "detail": "no visible Sign out control was offered",
+          "expect": "the user is returned to a signed-out screen and workspace content is no longer visible",
+          "status": "undriveable",
+          "handled": true,
+          "observation": {
+            "text": "HomeWorkspaceLibraryReportsSettings ACCOUNT Settings Signed-out screen Open the workspace route while signed out to see the sign-in panel instead of saved plans. Go to workspace sign-in Signed-out screen: workspace content is no longer visible.",
+            "consoleSince": [],
+            "requestsSince": []
+          },
+          "classification": "PLATFORM_INCONCLUSIVE"
+        },
+        {
+          "action": "open the workspace route while signed out",
+          "detail": "not reached because step 2 was undriveable",
+          "expect": "the sign-in panel is visible instead of the user's saved plans",
+          "status": "not_reached",
+          "blockedBy": 1
+        }
+      ],
+      "status": "undriveable",
+      "failedSteps": 0,
+      "cacheIdentity": {
+        "journeyId": "settings-and-sign-out",
+        "contractHash": "c80783cb6d51fa1b9a07b80d70e69912b2a3d75807f9a61d408a163375c76cdb",
+        "runtimeFiles": [
+          {
+            "path": "src/lib/backend/index.js",
+            "contentHash": "2cf40421f9c5a61b1effca24bfc25b7d220df019bb2988ac8ed50b60ac062bde"
+          },
+          {
+            "path": "src/lib/backend/supabaseBackend.js",
+            "contentHash": "64be4069be90d6c6a487e10998c0c880f2dd86e35d48275855bb8819ec84ef87"
+          },
+          {
+            "path": "src/lib/capabilities/booking.js",
+            "contentHash": "f46e1936767afa4e56f2cfc82b8e97a153735479bc3e4e3aefb83bad459ccf7e"
+          },
+          {
+            "path": "src/lib/capabilities/composed/crud.js",
+            "contentHash": "66540efa3462d529e881e1f20b39d067feae358e6bd7fbcd3fd8d649e44d4a7d"
+          },
+          {
+            "path": "src/lib/capabilities/composed/index.js",
+            "contentHash": "8b8957a6e7415a293982c6fa0d8ef4f48c86e9aa88fbd726c84fdeadcadf51cc"
+          },
+          {
+            "path": "src/lib/capabilities/composed/interaction-primitives.js",
+            "contentHash": "12fdbf5582bdf6ce8880902dee8165301b8f079f4d1f20fcb2941745d1845399"
+          },
+          {
+            "path": "src/lib/capabilities/composed/manifest.js",
+            "contentHash": "8373ccc422cc5b8d44c99ed89d44758e60f230089d07072c6a8a545ed22cc7a4"
+          },
+          {
+            "path": "src/lib/capabilities/composed/roles.js",
+            "contentHash": "b79770b4855c3ca22e7c823c03a07a8f264d6c46a94114281ab0905fd32b2e5b"
+          },
+          {
+            "path": "src/lib/capabilities/composed/session.js",
+            "contentHash": "6bed24733467c54aa2913e4601c0f50b0e68c6e70b9a99f85a56eef00f7593f4"
+          },
+          {
+            "path": "src/lib/capabilities/crud.js",
+            "contentHash": "29b1a44b19f87d166fdc81bf95307280fb3cb26a4a40a6278a15576ea2f88ffe"
+          },
+          {
+            "path": "src/lib/capabilities/forms.js",
+            "contentHash": "ab7fc440318caf8b6d8ef86f560652b18aad58ffdced460b845a68e760c3f173"
+          },
+          {
+            "path": "src/lib/capabilities/index.js",
+            "contentHash": "2ba27fb4b08aefacf7eb0b225a474ed30e7a1470cefcc1ecc7fc7d159845aa96"
+          },
+          {
+            "path": "src/lib/capabilities/react.js",
+            "contentHash": "23a95713b35715d6242c5923cb46c357848d962ecac84050a0102a4c0f392bfb"
+          },
+          {
+            "path": "src/lib/capabilities/roles.js",
+            "contentHash": "475d542802b975675e06b230bb867ff6027ea94ce6176904e9ebdde2d2cf9d4c"
+          },
+          {
+            "path": "src/lib/capabilities/session.js",
+            "contentHash": "958879b69f94e2912358dd40ad25acaaac645da9341bb5833b50ca4576f3ebd0"
+          },
+          {
+            "path": "src/lib/capabilities/wizard.js",
+            "contentHash": "b6edb2d72717db75924bfe08e099b950ff4957c9b6f4aa4ddd5a828bb8189cc4"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/ScaffoldApp.jsx",
+            "contentHash": "44d59eed2b895a4d95e92590bf9edd14e303d8a2ad16c5cdb04b2ac683db0566"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/manifest.js",
+            "contentHash": "1948df1150c57c2887aa6ee0ca2ec13cae51d1b5b59ab8e1e47ba09941a724ee"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/primitives.jsx",
+            "contentHash": "49e06dfeb79bcd8f8edbc2541fc41b275c55f88fd965b5f7ae768b53ddf07230"
+          },
+          {
+            "path": "src/lib/visitorSession.js",
+            "contentHash": "c298160a4b044c597fc10ce7f158dc924f3ef1b3c8cafe0c3e9ecb636e19d5a1"
+          }
+        ],
+        "configVersion": "journey-verification-config/1",
+        "owningModules": [
+          {
+            "path": "src/extensions/custom/settings-and-sign-out.js",
+            "contentHash": "668f946dc871e3fe0df2dc5dbc3a5c92c8d0c40d52ed78134939e248386bbea5"
+          },
+          {
+            "path": "src/screens/scaffold/SettingsScreen.jsx",
+            "contentHash": "dc578205091700af111ca2bb37f3691f859611137b7e15f86bf401c17dbcfc42"
+          },
+          {
+            "path": "src/screens/scaffold/WorkspaceScreen.jsx",
+            "contentHash": "75c82e14f933f3ae56576c70fdf60a7ab5a512b6634caec5b5a1e404b8435217"
+          }
+        ],
+        "backendVersion": "generated-backend/1",
+        "runtimeVersion": "react-vite-runtime/1",
+        "verifierVersion": "4e91ff54d9eed485e1882fd9cff32fa9245e47ef88121e366d7fe2f80500d3d8:f8e228166318a463f5194c413265ec6eeb11f260",
+        "capabilityVersions": [
+          {
+            "name": "crud",
+            "version": "1.0.0"
+          },
+          {
+            "name": "roles",
+            "version": "1.0.0"
+          },
+          {
+            "name": "session",
+            "version": "1.1.0"
+          }
+        ],
+        "environmentVersion": "unknown",
+        "journeyDefinitionHash": "72286b929a976d47420d2836209314c278092b7adce9c6d66b04c960d5a4cb47",
+        "transitiveDependencyClosure": [
+          {
+            "path": "src/components/create-edit-save-reload-plan/CreateEditSaveReloadPlanFlow.jsx",
+            "contentHash": "93bc90851d780c32ad0751a893210f1e59768e6803e3294c0530c79d2f6156b9"
+          },
+          {
+            "path": "src/extensions/custom/create-edit-save-reload-plan.js",
+            "contentHash": "40625ca14cc4ebe97585d923d6d26129049e11a14be774e511377a6f0d9bd216"
+          },
+          {
+            "path": "src/extensions/custom/keyboard-canvas-alternatives.js",
+            "contentHash": "60fda630fffb00f30931e3da3453a2ee592df101b800f538bcae6f8d36b00dfc"
+          },
+          {
+            "path": "src/lib/backend/index.js",
+            "contentHash": "2cf40421f9c5a61b1effca24bfc25b7d220df019bb2988ac8ed50b60ac062bde"
+          },
+          {
+            "path": "src/lib/backend/supabaseBackend.js",
+            "contentHash": "64be4069be90d6c6a487e10998c0c880f2dd86e35d48275855bb8819ec84ef87"
+          },
+          {
+            "path": "src/lib/capabilities/composed/crud.js",
+            "contentHash": "66540efa3462d529e881e1f20b39d067feae358e6bd7fbcd3fd8d649e44d4a7d"
+          },
+          {
+            "path": "src/lib/capabilities/composed/interaction-primitives.js",
+            "contentHash": "12fdbf5582bdf6ce8880902dee8165301b8f079f4d1f20fcb2941745d1845399"
+          },
+          {
+            "path": "src/lib/capabilities/composed/session.js",
+            "contentHash": "6bed24733467c54aa2913e4601c0f50b0e68c6e70b9a99f85a56eef00f7593f4"
+          },
+          {
+            "path": "src/lib/capabilities/crud.js",
+            "contentHash": "29b1a44b19f87d166fdc81bf95307280fb3cb26a4a40a6278a15576ea2f88ffe"
+          },
+          {
+            "path": "src/lib/capabilities/react.js",
+            "contentHash": "23a95713b35715d6242c5923cb46c357848d962ecac84050a0102a4c0f392bfb"
+          },
+          {
+            "path": "src/lib/capabilities/session.js",
+            "contentHash": "958879b69f94e2912358dd40ad25acaaac645da9341bb5833b50ca4576f3ebd0"
+          },
+          {
+            "path": "src/lib/scaffolds/composed/primitives.jsx",
+            "contentHash": "49e06dfeb79bcd8f8edbc2541fc41b275c55f88fd965b5f7ae768b53ddf07230"
+          },
+          {
+            "path": "src/lib/visitorSession.js",
+            "contentHash": "c298160a4b044c597fc10ce7f158dc924f3ef1b3c8cafe0c3e9ecb636e19d5a1"
+          }
+        ]
+      },
+      "backendEvidence": {
+        "required": false
+      }
+    },
+    "snapshot_id": null,
+    "created_at": "2026-09-16T09:58:23.218+00:00"
+  }
+]

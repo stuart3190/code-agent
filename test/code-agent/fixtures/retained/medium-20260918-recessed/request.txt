@@ -1,0 +1,97 @@
+Build a production-quality web application for electricians to design and estimate recessed/downlight lighting projects. This is an application, not a marketing site.
+
+Users and authentication:
+- Provide email/password sign-in.
+- Include two roles: Electrician and Admin.
+- Use durable persistence in the app preview so users, role changes, projects, rooms, layouts, selected products, settings and estimates survive reload.
+- Seed at least one admin and one electrician demo account and show demo credentials on the sign-in screen.
+- Enforce role-based access: only admins can access admin navigation, manage users, roles and system settings. Electricians must not be able to see or open admin controls.
+- Data ownership boundaries: projects belong to signed-in users; admins can administer users/settings.
+
+Core navigation:
+- Dashboard
+- Projects
+- Project detail at /projects/:projectId
+- Products catalogue
+- Estimate/project summary
+- Admin area (admin only)
+
+Dashboard:
+- Show number of projects.
+- Show total rooms designed.
+- Show total fittings specified.
+- Show estimated value of active projects.
+- Clearly label all outputs as design estimates, not regulatory compliance calculations.
+
+Projects:
+- Create, rename and delete lighting projects.
+- Project fields should include customer/project name and status.
+- Search projects by customer/project name.
+- Filter projects by status.
+- Clear filters.
+- Projects must survive reload.
+- Each project links to a detail route /projects/:projectId.
+
+Rooms inside projects:
+- Add multiple rooms to each project.
+- Room fields: room name, length, width, ceiling height, room type, target lux level, preferred downlight wattage, lumens per fitting, beam angle, edge offset, spacing preference.
+- Provide realistic defaults from settings for room type lux targets.
+- Save rooms persistently.
+
+Lighting calculations:
+- Calculate room area = length x width.
+- Calculate approximate lumen requirement = room area x target lux.
+- Estimate required number of downlights = ceiling(lumen requirement / lumens per fitting).
+- Calculate suggested spacing between fittings using fitting layout columns/rows over usable length/width after edge offsets.
+- Suggest row/column layout based on room proportions and required fitting count.
+- Show edge spacing.
+- Warn if proposed spacing is unsuitable for selected beam angle and ceiling height, using a realistic beam spread check: approximate cone diameter at working plane from ceiling height minus working plane height and beam angle, compare spacing to coverage with a tolerance. Also warn for excessive spacing preference relative to ceiling height where appropriate.
+- Clearly label calculations as estimates, not compliance/regulatory calculations.
+
+Lighting layout editor:
+- Display a simple top-down room diagram/canvas for each room.
+- Show proposed downlight positions.
+- Allow the user to change the number of fittings and recalculate the layout.
+- Allow fittings to be added manually by clicking/tapping the diagram.
+- Allow fittings to be removed manually.
+- Save final layout positions to the room and persist them across reload.
+- Layout state belongs to the room.
+
+Products:
+- Maintain a small downlight catalogue with seeded realistic products.
+- Product fields: manufacturer, model, wattage, lumens, beam angle, colour temperature, fire rating, IP rating, unit cost.
+- Search and filter products.
+- Select a product for a room; selected product should update lumens, wattage, beam angle and material cost and persist.
+
+Estimate:
+- Calculate quantity of fittings across the whole project.
+- Calculate material cost from selected products/catalogue pricing.
+- Allow labour rate and estimated installation time, with defaults from settings.
+- Calculate labour cost = rate x hours.
+- Calculate subtotal and total.
+- Show room-by-room cost breakdown including fitting quantity, selected downlight, estimated wattage, material cost and labour cost.
+- Provide a downloadable/exportable estimate summary output from current project state (e.g. CSV or printable/downloadable text) so the export/download signal is represented.
+
+Project summary:
+- Show every room.
+- Fitting quantity.
+- Selected downlight.
+- Estimated wattage.
+- Estimated material cost.
+- Estimated labour cost.
+
+Admin:
+- Manage users and roles: list users, create/update roles where safe for preview.
+- Manage default lux targets by room type.
+- Manage default labour rate.
+- Persist settings and role changes.
+- Electricians cannot access admin route or controls; show an access denied guard if they manually type the URL.
+
+UX requirements:
+- Professional electrician-focused workspace, efficient and data-dense but clean.
+- Responsive desktop/tablet/mobile layouts.
+- Use clear labels, units, warnings and estimate disclaimers.
+- Prioritise functional journeys and persistence over decorative content.
+
+Verification expectations:
+- Verify sign-in, role guard, project creation, /projects/:projectId route, room creation, calculation outputs, layout editing/save, product selection, estimate totals, search/filter, reload persistence and admin settings/user role management.

@@ -1,0 +1,42 @@
+[Unit]
+Description=Thrallo durable build worker
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=thrallo-build-worker
+Group=thrallo
+SupplementaryGroups=docker
+WorkingDirectory=/home/ubuntu/code-agent
+EnvironmentFile=/etc/thrallo/build-worker.env
+Environment=THRALLO_PROCESS_ROLE=build-worker
+Environment=THRALLO_BUILD_SANDBOX=docker
+Environment=HOME=/var/lib/thrallo-build-worker-home
+# Keep the release identity unchanged for private-authority repairs while refusing to start a
+# worker that could accept Builder V2 work without its server-selected platform recovery owner.
+# The identity is read only from the private EnvironmentFile and never comes from customer input.
+ExecStartPre=/usr/bin/node -e 'if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(process.env.THRALLO_BV2_RECOVERY_OWNER_ID || "").trim())) process.exit(78)'
+ExecStart=/usr/bin/node build-worker/index.mjs
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=40
+CPUQuota=250%
+MemoryMax=3G
+MemorySwapMax=0
+TasksMax=512
+LimitNOFILE=8192
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/thrallo-build-worker
+ReadOnlyPaths=/var/lib/thrallo-build-worker-home
+ProtectProc=invisible
+ProcSubset=pid
+
+[Install]
+WantedBy=multi-user.target

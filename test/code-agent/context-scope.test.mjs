@@ -15,7 +15,6 @@ import {
   classifyTask, taskBudget, inferEntryFile, scopeForJob,
   fingerprintFailure, fingerprintPrompt, costGuard, estTokens,
 } from "../../shell/server/lib/appBuild/contextScope.mjs";
-import { planEndAction, MAX_AUTO_ROUNDS } from "../../shell/server/lib/appBuild/appBuildService.mjs";
 import { assembleInput } from "../../shell/server/lib/leadAgentService.mjs";
 import { MemoryConversationStore } from "../../shell/server/lib/conversationStore.mjs";
 
@@ -103,45 +102,17 @@ test("task classification and budgets behave and are configurable", () => {
 });
 
 test("restarting a preview makes zero AI calls (structural guarantee)", async () => {
-  const service = await readFile(fileURLToPath(new URL("../../shell/server/lib/appBuild/appBuildService.mjs", import.meta.url)), "utf8");
+  const service = await readFile(fileURLToPath(new URL("../../shell/server/lib/appBuild/appDeliveryService.mjs", import.meta.url)), "utf8");
   const showPreview = /export async function showPreview[\s\S]*?\n\}/.exec(service)?.[0] || "";
-  const recover = /async function recoverPreview[\s\S]*?\n\}/.exec(service)?.[0] || "";
-  for (const [name, src] of [["showPreview", showPreview], ["recoverPreview", recover]]) {
-    assert.ok(src.length > 100, `${name} found`);
-    assert.doesNotMatch(src, /model|provider\.turn|runAgent|createJob|createRouted/i, `${name} contains no AI or build dispatch`);
-  }
+  assert.ok(showPreview.length > 100, "showPreview found");
+  assert.doesNotMatch(showPreview, /model|provider\.turn|runAgent|createJob|createRouted/i,
+    "showPreview contains no AI or build dispatch");
   const verifier = await readFile(fileURLToPath(new URL("../../shell/server/lib/appBuild/verificationAgent.mjs", import.meta.url)), "utf8");
   assert.doesNotMatch(verifier, /modelGateway|createRouted|runAgent\(/, "verification itself is Playwright-local, no AI");
 });
 
-test("identical repair failures change the approach instead of burning rounds", () => {
-  const failed = { status: "complete", result: { buildOk: false, qualityWarnings: ["Backend runtime unavailable: app-auth 404"] } };
-  const first = planEndAction(failed, { attempt: 1 });
-  assert.equal(first.kind, "repair");
-  assert.ok(first.fingerprint, "failure fingerprinted");
-
-  // PR3: the same failure twice no longer ends the run. It ends the STRATEGY. Repeating the same
-  // approach was never the goal — but neither was stopping at attempt 2 of 3 with rounds to spare,
-  // which is what production did on four builds with fingerprint ac60a9b42a79f171.
-  const second = planEndAction(failed, {
-    attempt: 2, previousFingerprints: [first.fingerprint], strategyId: first.strategy,
-  });
-  assert.equal(second.kind, "repair");
-  assert.notEqual(second.strategy, first.strategy, "a repeated failure must change the approach");
-  assert.match(second.announcement, /changing approach/);
-  assert.ok(2 < MAX_AUTO_ROUNDS + 1, "and it did so without exhausting the rounds");
-
-  // Different failure still repairs — the fingerprint guard is specific, not a blanket stop.
-  const other = planEndAction(
-    { status: "complete", result: { buildOk: false, qualityWarnings: ["a completely different check failed"] } },
-    { attempt: 2, previousFingerprints: [first.fingerprint] },
-  );
-  assert.equal(other.kind, "repair");
-  // A crash whose cause would reproduce identically is NOT retried any more: "npm ENOENT"
-  // means a file is genuinely missing, so a second identical run wastes the user's budget.
-  const enoent = planEndAction({ status: "failed", error: "npm ENOENT" }, { attempt: 2, previousFingerprints: [] });
-  assert.equal(enoent.kind, "blocked");
-  // Fingerprints normalize ids/numbers so cosmetic differences don't defeat the stop.
+test("context fingerprints normalize incidental ids and preserve prompt intent", () => {
+  // Incidental line/build identifiers should not defeat diagnostic grouping.
   assert.equal(fingerprintFailure(["error at line 14 in build 17e00fd2"]), fingerprintFailure(["error at line 99 in build 5442ed76"]));
   assert.notEqual(fingerprintPrompt("fix A"), fingerprintPrompt("fix B"));
 });

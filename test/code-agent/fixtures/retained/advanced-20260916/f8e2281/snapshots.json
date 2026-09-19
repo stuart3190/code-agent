@@ -1,0 +1,72 @@
+[
+  {
+    "id": "1577f009-8f35-473d-b35f-1739aafd6c1b",
+    "reason": "foundation:scaffold",
+    "created_at": "2026-09-16T09:53:50.563+00:00",
+    "tree_hash": "967f51d509bf84ca8f00907424656db7a42cd420e38840f60efa75551150e906",
+    "state": "ready"
+  },
+  {
+    "id": "71fb73bb-5de5-4af4-a0db-710aa3c8c1ea",
+    "reason": "candidate:core:1",
+    "created_at": "2026-09-16T09:54:37.356+00:00",
+    "tree_hash": "da8053ae148b38928febb8fff9a63289b394fea5ae8c46f4a326b77fa1bb16ab",
+    "state": "ready"
+  },
+  {
+    "id": "df399ab3-07f3-4852-a3d3-5d525c5a76fd",
+    "reason": "candidate:core:1",
+    "created_at": "2026-09-16T09:56:38.743+00:00",
+    "tree_hash": "73344aee58c3bbbf774a29e964695b5639f9b636c8b65554027b5600fd096c07",
+    "state": "ready"
+  },
+  {
+    "id": "e58a77db-eb1a-4d74-9edd-ebae79a495c4",
+    "reason": "candidate:core:2",
+    "created_at": "2026-09-16T09:57:11.933+00:00",
+    "tree_hash": "0cf6e67b842a0876443b96f46bad3be903b66092bc8fd7b226bed87fd5f7cb1d",
+    "state": "ready"
+  },
+  {
+    "id": "e0b885f9-6a2c-4c2a-ac16-ee478ef1b8c1",
+    "reason": "candidate:repair:1",
+    "created_at": "2026-09-16T09:59:15.438+00:00",
+    "tree_hash": "4f590553041445d99ea3a7617ae970eb7aaf1fc845e1b61b9a9ef2fd5c24cb6b",
+    "state": "ready"
+  },
+  {
+    "id": "c7ae5ea1-30db-45d1-9371-1e094351bcf8",
+    "reason": "candidate:repair:1",
+    "created_at": "2026-09-16T10:01:03.686+00:00",
+    "tree_hash": "85b6a5ea7e25bb4f5cdeb81e1201983d877fde1472365facc3c0105d5290ca17",
+    "state": "ready"
+  },
+  {
+    "id": "3fe08ac2-1a45-44f8-897f-ca1ee35708c5",
+    "reason": "candidate:repair:1",
+    "created_at": "2026-09-16T10:04:11.596+00:00",
+    "tree_hash": "48cc06cc58fa2de866b0cf2b52edbc7c1c0860ef93f73e15bb6c1f36a3f6074b",
+    "state": "ready"
+  },
+  {
+    "id": "a443e6b1-2142-45e8-b224-c3246221c73c",
+    "reason": "candidate:repair:1",
+    "created_at": "2026-09-16T10:05:53.633+00:00",
+    "tree_hash": "208bcddc38a9e36844657746c6cf27daff62894f8807c770c91d51b3020a887e",
+    "state": "ready"
+  },
+  {
+    "id": "d3f975d6-8896-43ec-acb3-deb1dab26e95",
+    "reason": "candidate:repair:1",
+    "created_at": "2026-09-16T10:07:36.536+00:00",
+    "tree_hash": "bb27dec73c56bbde4ec9cc9e8e7eeb8143a27430c33a969dc1aeb24ed1ab18d2",
+    "state": "ready"
+  },
+  {
+    "id": "fbc36017-42ef-4424-b419-b41cf1b8b6e2",
+    "reason": "candidate:repair:1",
+    "created_at": "2026-09-16T10:10:55.904+00:00",
+    "tree_hash": "58020214bfe5e7e5dea4abc2da0389bbd0bc05ad7c7bdcfa250b8eacc537d4a6",
+    "state": "ready"
+  }
+]

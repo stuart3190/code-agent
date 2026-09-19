@@ -5,10 +5,11 @@ process.env.CODE_AGENT_STORE = "memory";
 process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "test-openai";
 
 const {
-  buildCompletionPrompt, cleanCompletion, completeCode, completionRateAllowed,
-  parseCompletionInput, resetCompletionRateForTests,
+  buildCompletionPrompt, cleanCompletion, completeCode, parseCompletionInput,
 } = await import("../../shell/server/lib/completions.mjs");
 const { MemoryCodeAgentStore } = await import("../../shell/server/lib/codeAgentStore.mjs");
+const { memoryDirectModelReservations } = await import("../../shell/server/lib/directModelReservations.mjs");
+const { DISPATCH_STATES, providerFailure } = await import("../../shell/server/lib/providerOutcome.mjs");
 
 const OWNER = "66666666-6666-4666-8666-666666666666";
 
@@ -38,7 +39,6 @@ test("completion cleaning strips fences, trailing space, and runaway length", ()
 });
 
 test("a completion call meters standalone usage and injects index context", async () => {
-  resetCompletionRateForTests();
   const store = new MemoryCodeAgentStore();
   const repository = await store.createRepository(OWNER, {
     provider: "github", full_name: "o/r", clone_url: "https://github.com/o/r.git",
@@ -68,22 +68,24 @@ test("a completion call meters standalone usage and injects index context", asyn
   assert.equal(usage[0].metadata.kind, "completion");
 });
 
-test("managed completions are blocked when the token budget is spent; BYOK is not", async () => {
-  resetCompletionRateForTests();
+test("managed completions fail before dispatch when included and purchased credits are spent; BYOK is not", async () => {
   const store = new MemoryCodeAgentStore();
-  await store.upsertSubscription(OWNER, { managed_token_limit_override: 10 });
-  await store.recordStandaloneUsage(OWNER, {
-    billing_source: "managed", input_tokens: 8, output_tokens: 8, compute_seconds: 0,
+  const reservations = memoryDirectModelReservations({
+    balanceResolver: async () => ({ included: 0, purchased: 0 }),
+    runStore: store,
   });
   const input = parseCompletionInput({ prefix: "const x = " });
+  let managedProviderCalled = false;
   await assert.rejects(
     completeCode(OWNER, input, {
       store,
       credentialResolver: async () => ({ provider: "managed", secret: null }),
-      providerFactory: fakeProvider("1;"),
+      reservationStoreFactory: () => reservations,
+      providerFactory: () => ({ async turn() { managedProviderCalled = true; return { text: "1;" }; } }),
     }),
     (error) => error.code === "budget_exceeded" && error.status === 402,
   );
+  assert.equal(managedProviderCalled, false);
   const byok = await completeCode(OWNER, input, {
     store,
     credentialResolver: async () => ({ provider: "openai", secret: "sk-user" }),
@@ -93,12 +95,73 @@ test("managed completions are blocked when the token budget is spent; BYOK is no
   assert.equal([...store.usageRecords.values()].at(-1).billing_source, "byok");
 });
 
+test("managed completions dispatch against purchased credits after included allowance is exhausted", async () => {
+  const store = new MemoryCodeAgentStore();
+  const reservations = memoryDirectModelReservations({
+    balanceResolver: async () => ({ included: 0, purchased: 100 }),
+    runStore: store,
+  });
+  let providerCalls = 0;
+  const result = await completeCode(OWNER, parseCompletionInput({ prefix: "const topup = " }), {
+    store,
+    credentialResolver: async () => ({ provider: "managed", secret: null }),
+    reservationStoreFactory: () => reservations,
+    providerFactory: (candidate) => ({
+      id: candidate.provider,
+      model: candidate.model,
+      async turn() {
+        providerCalls += 1;
+        return { id: "req_topup", text: "true;", output: [], usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 } };
+      },
+    }),
+  });
+  assert.equal(result.completion, "true;");
+  assert.equal(providerCalls, 1);
+  const [reservation] = reservations.rows();
+  assert.equal(reservation.state, "settled");
+  assert.ok(reservation.purchasedReservedCredits > 0);
+  assert.equal(reservation.includedReservedCredits, 0);
+  assert.equal([...store.usageRecords.values()].length, 0,
+    "purchased settlement must not also insert aggregate managed usage");
+});
+
+test("an ambiguous managed completion retains its hold and cannot be post-hoc metered", async () => {
+  const store = new MemoryCodeAgentStore();
+  const reservations = memoryDirectModelReservations({ runStore: store });
+  let providerCalls = 0;
+  await assert.rejects(
+    completeCode(OWNER, parseCompletionInput({ prefix: "const answer = " }), {
+      store,
+      credentialResolver: async () => ({ provider: "managed", secret: null }),
+      reservationStoreFactory: () => reservations,
+      providerFactory: (candidate) => ({
+        id: candidate.provider,
+        model: candidate.model,
+        async turn() {
+          providerCalls += 1;
+          assert.equal(reservations.rows()[0].state, "held", "reservation exists before provider dispatch");
+          throw providerFailure(new Error("connection lost"), {
+            state: DISPATCH_STATES.ambiguous,
+            providerRequestId: "req_completion_ambiguous",
+          });
+        },
+      }),
+    }),
+    (error) => error.code === "provider_replay_unsafe",
+  );
+  assert.equal(providerCalls, 1);
+  const [hold] = reservations.rows();
+  assert.equal(hold.state, "held");
+  assert.equal(hold.reconciliationState, "pending");
+  assert.deepEqual(hold.providerRequestIds, ["req_completion_ambiguous"]);
+  assert.equal([...store.usageRecords.values()].length, 0);
+});
+
 test("codex credentials do NOT fall back to managed models for completions", async () => {
   // This test used to assert the silent codex→managed rewrite — the same lane substitution that
   // ran four managed lead-agent turns during a Codex-only build. The policy forbids it: a
   // Codex-selected account is never quietly rebilled to managed, so inline completion is
   // unavailable rather than mis-billed.
-  resetCompletionRateForTests();
   const store = new MemoryCodeAgentStore();
   let providerCalled = false;
   await assert.rejects(
@@ -110,19 +173,6 @@ test("codex credentials do NOT fall back to managed models for completions", asy
     (error) => error.code === "completion_unavailable",
   );
   assert.equal(providerCalled, false, "no model is dispatched on any lane");
-});
-
-test("the per-owner completion limiter rolls over a one-minute window", () => {
-  resetCompletionRateForTests();
-  process.env.CODE_AGENT_COMPLETIONS_PER_MINUTE = "2";
-  const t0 = 1_000_000;
-  assert.equal(completionRateAllowed("o1", t0), true);
-  assert.equal(completionRateAllowed("o1", t0 + 1), true);
-  assert.equal(completionRateAllowed("o1", t0 + 2), false);
-  assert.equal(completionRateAllowed("o2", t0 + 3), true);
-  assert.equal(completionRateAllowed("o1", t0 + 61_000), true);
-  delete process.env.CODE_AGENT_COMPLETIONS_PER_MINUTE;
-  resetCompletionRateForTests();
 });
 
 test("prompt building survives missing repository context", () => {

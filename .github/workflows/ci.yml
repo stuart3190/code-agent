@@ -13,12 +13,68 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      # The remediation baseline test (PR-01) asserts real git facts: origin/main is the audited
+      # commit, HEAD descends from the known-green V2 baseline, and validation runs on a NAMED
+      # branch. A depth-1 detached checkout can prove none of that, so verify checks out the
+      # branch itself with full history.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          ref: ${{ github.head_ref || github.ref_name }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: npm --prefix shell/web ci
+      - name: Static syntax checks
+        run: find shell/server build-worker ops -name '*.mjs' -print0 | xargs -0 -n1 node --check
+      - name: Secret scan
+        run: npm run security:secrets
+      - name: Production dependency scan
+        run: |
+          npm audit --omit=dev --audit-level=high
+          npm --prefix shell/web audit --omit=dev --audit-level=high
       - run: npx playwright install --with-deps chromium
       - run: npm run verify
+      - name: Builder V2 zero-credit qualification matrix
+        run: npm run test:bv2:qualification
+
+  migration-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Verify authoritative history and backup coverage
+        run: |
+          npm run supabase:history:verify
+          node --test test/code-agent/backup-coverage.test.mjs
+      - name: Start disposable Supabase and reset from zero
+        run: |
+          npm exec -- supabase start
+          npm run supabase:reset
+          npm exec -- supabase migration list --local
+      - name: Lint and prove no schema diff
+        run: |
+          npm run supabase:lint
+          npm exec -- supabase db diff --local --schema public > schema-diff.sql
+          test ! -s schema-diff.sql
+      - name: Prove atomic graph transactions and tenant isolation
+        run: |
+          set -a
+          eval "$(npm exec -- supabase status -o env)"
+          set +a
+          BV2_GRAPH_PROOF=1 npm run supabase:graph:proof
+          BV2_RUNTIME_PROOF=1 npm run supabase:runtime:proof
+          npm exec -- supabase db diff --local --schema public > post-proof-diff.sql
+          test ! -s post-proof-diff.sql
+      - name: Type-check Edge Function dependencies
+        run: npm run supabase:edge:check
+      - name: Stop disposable Supabase
+        if: always()
+        run: npm exec -- supabase stop --no-backup

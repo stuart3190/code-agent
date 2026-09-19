@@ -5,6 +5,15 @@
 // the gate is structural: the completion message is only produced after sign-off.
 
 import { createRequire } from "node:module";
+import {
+  appAuthRateLimitDefect,
+  seedVerificationVisitorStorage,
+  verificationCredentials,
+} from "./verificationIdentity.mjs";
+import {
+  LEGACY_RICH_VERIFIER_POLICY,
+  isMinimalContractVerifier,
+} from "./verifierPolicy.mjs";
 
 const requireCjs = createRequire(import.meta.url);
 
@@ -34,26 +43,46 @@ async function fillField(page, kind, value) {
   return false;
 }
 
-export async function verifyApp({ previewUrl, usesBackend = true, timeoutMs = 180_000 }) {
+export async function verifyApp({
+  previewUrl, usesBackend = true, timeoutMs = 180_000, browser: sharedBrowser = null,
+  verificationIdentity = null,
+  verifierPolicy = LEGACY_RICH_VERIFIER_POLICY,
+}) {
   const checks = [];
   const check = makeCheck(checks);
   const consoleErrors = [];
   const failedRequests = [];
-  const email = `verify+${Date.now()}@thrallo.dev`;
-  const password = `Vf-${Math.random().toString(36).slice(2, 10)}!9`;
+  const stableCredentials = verificationCredentials(verificationIdentity, "smoke");
+  const email = stableCredentials?.email || `verify+${Date.now()}@thrallo.dev`;
+  const password = stableCredentials?.password || `Vf-${Math.random().toString(36).slice(2, 10)}!9`;
   const marker = `verified-${Date.now()}`;
+  const verifierDefects = [];
+  const minimal = isMinimalContractVerifier(verifierPolicy);
 
-  let browser = null;
+  let browser = sharedBrowser;
+  let context = null;
+  const ownsBrowser = !sharedBrowser;
   const deadline = Date.now() + timeoutMs;
   try {
     const { chromium } = requireCjs("playwright");
-    browser = await chromium.launch({ args: ["--no-sandbox"] });
-    const page = await browser.newPage();
+    // The generic smoke runs immediately before contracted journey verification inside the
+    // browser sandbox. A Three/WebGL preview can exhaust Docker's small shared-memory mount in
+    // this first browser and leave the following browser unable to load ordinary JS modules
+    // (ERR_INSUFFICIENT_RESOURCES). Use Chromium's disk-backed shared-memory path at BOTH seams.
+    if (!browser) browser = await chromium.launch({ args: ["--disable-dev-shm-usage", "--no-sandbox"] });
+    context = await browser.newContext();
+    // Smoke deliberately clicks generic Start/Get started controls. It must never share the
+    // journey visitor: a durable wizard would restore the smoke click in the real customer drive,
+    // hiding the contracted entry control before that journey had a chance to activate it.
+    await seedVerificationVisitorStorage(context, verificationIdentity, "smoke");
+    const page = await context.newPage();
     page.on("pageerror", (e) => consoleErrors.push(e.message.slice(0, 200)));
     page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text().slice(0, 200)); });
     page.on("response", (r) => {
       const s = r.status();
       if (s >= 400 && !r.url().includes("favicon")) failedRequests.push(`${s} ${r.request().method()} ${r.url().slice(0, 140)}`);
+      const defect = appAuthRateLimitDefect(r);
+      if (defect && !minimal) verifierDefects.push(defect);
     });
     page.on("requestfailed", (r) => {
       const reason = r.failure()?.errorText || "failed";
@@ -61,11 +90,16 @@ export async function verifyApp({ previewUrl, usesBackend = true, timeoutMs = 18
     });
 
     // App loads at all
-    const nav = await page.goto(previewUrl, { waitUntil: "networkidle", timeout: 60_000 }).catch((e) => ({ error: e.message }));
+    const nav = await page.goto(previewUrl, {
+      waitUntil: minimal ? "domcontentloaded" : "networkidle", timeout: 60_000,
+    }).catch((e) => ({ error: e.message }));
     check("load", "App loads", nav?.error ? "fail" : "pass", nav?.error || previewUrl);
     if (nav?.error) throw new Error("unreachable");
 
-    if (usesBackend) {
+    // minimal_contract_v1 never invents a generic signup or CRUD journey. Contract-specific
+    // capability preflight and the contracted browser journeys own those checks. Keeping this
+    // smoke to loadability prevents an unrelated guessed form shape from rejecting a usable app.
+    if (usesBackend && !minimal) {
       // Signup → signed-in view
       await clickThroughLanding(page);
       const hasEmail = await fillField(page, "email", email);
@@ -135,21 +169,33 @@ export async function verifyApp({ previewUrl, usesBackend = true, timeoutMs = 18
       }
     }
 
-    // Console + network hygiene (collected across the whole run)
-    check("console", "Console clean", consoleErrors.length ? "fail" : "pass", consoleErrors.slice(0, 3).join(" | "));
+    // Console and network hygiene remain useful evidence. In minimal_contract_v1 they are
+    // advisory: the journey layer blocks only when a concrete error prevents a required action.
+    check("console", "Console clean", consoleErrors.length && !minimal ? "fail" : "pass",
+      consoleErrors.slice(0, 3).join(" | "));
     const hardFailures = failedRequests.filter((r) => /^(404|500|502|503)|CORS|ERR_FAILED/.test(r));
-    check("network", "Network clean (no 404/500/CORS)", hardFailures.length ? "fail" : "pass", hardFailures.slice(0, 3).join(" | "));
+    check("network", "Network clean (no 404/500/CORS)", hardFailures.length && !minimal ? "fail" : "pass",
+      hardFailures.slice(0, 3).join(" | "));
   } catch (error) {
     if (!checks.some((c) => c.id === "load")) check("load", "App loads", "fail", error.message);
   } finally {
-    await browser?.close().catch(() => {});
+    await context?.close().catch(() => {});
+    if (ownsBrowser) await browser?.close().catch(() => {});
   }
   void deadline;
 
   const failed = checks.filter((c) => c.status === "fail");
   return {
     pass: failed.length === 0 && checks.some((c) => c.status === "pass"),
+    verifierPolicy,
     checks,
+    verifierDefects: [...new Map(verifierDefects.map((row) => [row.code, row])).values()],
+    consoleErrors: [...new Set(consoleErrors)].slice(0, 10),
+    failedRequests: [...new Set(failedRequests)].slice(0, 10),
+    advisories: minimal ? [
+      ...[...new Set(consoleErrors)].map((detail) => ({ code: "non_blocking_console", detail })),
+      ...[...new Set(failedRequests)].map((detail) => ({ code: "non_blocking_network", detail })),
+    ].slice(0, 20) : [],
     failures: failed.map((c) => `${c.label}: ${c.detail || "failed"}`),
     summary: checks
       .filter((c) => c.status !== "skip")

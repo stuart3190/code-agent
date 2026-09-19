@@ -1,0 +1,953 @@
+{
+  "retainedBuildId": "6956e591-cdc6-40aa-93a8-bd9de236a33e",
+  "source": "production bv2_contracts.contract source fields",
+  "contract": {
+    "version": 1,
+    "summary": "Downlight Pro Planner is a premium responsive recessed lighting layout planner that creates, calculates, interactively edits, saves, reopens, prints and exports professional downlight plans with estimated lux results, warnings, task zones, exclusions and switching groups.",
+    "projectType": "tool",
+    "journeys": [
+      {
+        "id": "create-auto-layout-project",
+        "stage": "primary_journey",
+        "steps": [
+          {
+            "action": "open the app",
+            "expect": "the Downlight Pro Planner landing screen is visible with a sign in control and a create account control",
+            "target": "/"
+          },
+          {
+            "action": "create an account or sign in with email and password",
+            "expect": "the planner workspace is visible with a left controls panel, central plan canvas and right results panel",
+            "target": "authentication form"
+          },
+          {
+            "action": "create a new project",
+            "expect": "a blank project form is visible and the project name field is editable",
+            "target": "new project control"
+          },
+          {
+            "action": "enter project name, room name, unit system, room shape, room dimensions, ceiling height, working-plane height and use type",
+            "expect": "the central plan canvas updates to show the room outline and dimension labels in the selected unit system",
+            "target": "project and room controls",
+            "operates": [
+              "projectName",
+              "roomName",
+              "unitSystem",
+              "roomShape",
+              "lengthM",
+              "widthM",
+              "ceilingHeightM",
+              "workingPlaneHeightM",
+              "useType"
+            ]
+          },
+          {
+            "action": "choose a room preset and edit the target illuminance",
+            "expect": "the right results panel shows the selected use type, editable target lux and planning-estimate disclaimer",
+            "target": "lighting target controls",
+            "operates": [
+              "useType",
+              "targetLux"
+            ]
+          },
+          {
+            "action": "enter fitting lumens, wattage, beam angle, colour temperature, fitting diameter, cut-out size and dimmable status",
+            "expect": "the fitting properties section shows the entered lumens, wattage, beam angle, colour temperature, size and dimmable value",
+            "target": "fitting specification controls",
+            "operates": [
+              "fittingSpec"
+            ]
+          },
+          {
+            "reads": [
+              "projectName",
+              "roomName",
+              "unitSystem",
+              "roomShape",
+              "lengthM",
+              "widthM",
+              "ceilingHeightM",
+              "workingPlaneHeightM",
+              "useType",
+              "targetLux",
+              "fittingSpec",
+              "taskZones",
+              "exclusionZones"
+            ],
+            "action": "press AUTO LAYOUT",
+            "expect": "a balanced arrangement of numbered downlights appears on the plan canvas with row spacing, column spacing and wall offset dimension labels",
+            "target": "AUTO LAYOUT button"
+          },
+          {
+            "reads": [
+              "calculationResults",
+              "layoutExplanation"
+            ],
+            "action": "review the calculated results",
+            "expect": "the panel displays room area, target lux, total lumen requirement, estimated number of fittings, installed lumens, estimated average illuminance, watts, watts per square metre, row spacing, column spacing, wall offsets and a plain-language explanation of the selected layout",
+            "target": "right calculations panel"
+          },
+          {
+            "reads": [
+              "create-project",
+              "update-project"
+            ],
+            "action": "save the project",
+            "expect": "a saved status is visible with the current project name",
+            "target": "save project control"
+          },
+          {
+            "reads": [
+              "load-project"
+            ],
+            "action": "reload the page and reopen the saved project",
+            "expect": "the reopened project shows the same room dimensions, fitting specification, downlight count, plan positions and calculated results after the reload",
+            "target": "project list"
+          }
+        ],
+        "title": "A signed-in user creates a project and generates an automatic downlight layout",
+        "priority": "primary",
+        "acceptance": [
+          "AUTO LAYOUT produces visible numbered fittings inside the room outline",
+          "the right panel shows calculation results labelled as planning/design estimates",
+          "a saved project can be reopened after a full browser reload with its fitting positions still visible"
+        ]
+      },
+      {
+        "id": "manually-edit-plan",
+        "stage": "supporting",
+        "steps": [
+          {
+            "reads": [
+              "load-project"
+            ],
+            "action": "open an existing saved project",
+            "expect": "the plan canvas displays the saved room outline and downlight positions",
+            "target": "project list"
+          },
+          {
+            "action": "toggle grid, snap and dimensions",
+            "expect": "the plan view visibly shows or hides the grid and dimension labels according to the toggles",
+            "target": "plan toolbar",
+            "operates": [
+              "showGrid",
+              "snapToGrid",
+              "showDimensions"
+            ]
+          },
+          {
+            "reads": [
+              "fittings"
+            ],
+            "action": "select a fitting on the plan",
+            "expect": "the selected fitting is highlighted and the right panel shows editable X and Y coordinate inputs in the selected unit system",
+            "target": "numbered downlight marker"
+          },
+          {
+            "action": "drag the selected fitting to a new location",
+            "expect": "the selected fitting moves to the new visible position and the spacing and calculation results update live",
+            "target": "plan canvas",
+            "operates": [
+              "fittings"
+            ]
+          },
+          {
+            "action": "edit the selected fitting coordinate inputs",
+            "expect": "the selected fitting moves to the typed coordinates and the displayed X and Y values match the new position",
+            "target": "selected fitting coordinate controls",
+            "operates": [
+              "fittings"
+            ]
+          },
+          {
+            "action": "add, duplicate and delete fittings",
+            "expect": "the visible fitting count and numbered markers update after each add, duplicate and delete action",
+            "target": "fitting edit toolbar",
+            "operates": [
+              "fittings"
+            ]
+          },
+          {
+            "action": "choose a quick layout option",
+            "expect": "the plan updates to the selected starting arrangement and the calculations panel refreshes",
+            "target": "layout quick options",
+            "operates": [
+              "layoutMode",
+              "fittings"
+            ]
+          },
+          {
+            "reads": [
+              "auto-layout-project"
+            ],
+            "action": "reset the layout",
+            "expect": "the fittings return to an automatically balanced arrangement with an updated layout explanation",
+            "target": "reset auto layout control"
+          }
+        ],
+        "title": "A user adjusts fittings directly on the interactive plan",
+        "priority": "secondary",
+        "acceptance": [
+          "dragging a fitting visibly changes its position on the plan",
+          "editing selected fitting coordinates visibly moves that fitting",
+          "adding or deleting fittings changes the visible fitting count and recalculated estimated lux"
+        ]
+      },
+      {
+        "id": "task-and-exclusion-zones",
+        "stage": "supporting",
+        "steps": [
+          {
+            "reads": [
+              "load-project"
+            ],
+            "action": "open an existing project",
+            "expect": "the saved plan is visible with the central plan canvas active",
+            "target": "project list"
+          },
+          {
+            "action": "add a rectangular task zone with a label and target lux",
+            "expect": "a labelled task zone rectangle is visible on the plan and the zone target lux is shown in the side panel",
+            "target": "task zone controls",
+            "operates": [
+              "taskZones"
+            ]
+          },
+          {
+            "action": "add a rectangular exclusion zone with a label",
+            "expect": "a labelled no-light rectangle is visible on the plan",
+            "target": "exclusion zone controls",
+            "operates": [
+              "exclusionZones"
+            ]
+          },
+          {
+            "reads": [
+              "taskZones",
+              "exclusionZones",
+              "auto-layout-project"
+            ],
+            "action": "run AUTO LAYOUT with the task and exclusion zones present",
+            "expect": "new fitting positions avoid the exclusion zone and the layout explanation mentions task lighting and exclusion-zone avoidance",
+            "target": "AUTO LAYOUT button"
+          },
+          {
+            "reads": [
+              "exclusionZones"
+            ],
+            "action": "move a fitting into the exclusion zone",
+            "expect": "a warning appears stating that a fitting is inside an exclusion or no-light zone",
+            "target": "plan canvas",
+            "operates": [
+              "fittings"
+            ]
+          },
+          {
+            "action": "remove the task zone and exclusion zone",
+            "expect": "the task and exclusion rectangles disappear from the plan and the zone list is empty",
+            "target": "zone list controls",
+            "operates": [
+              "taskZones",
+              "exclusionZones"
+            ]
+          }
+        ],
+        "title": "A user adds task lighting zones and no-light exclusion zones",
+        "priority": "secondary",
+        "acceptance": [
+          "task zones are drawn as labelled rectangles on the plan",
+          "exclusion zones are drawn as labelled no-light rectangles on the plan",
+          "a fitting placed inside an exclusion zone produces a visible warning without blocking editing"
+        ]
+      },
+      {
+        "id": "switching-groups-and-heatmap",
+        "stage": "supporting",
+        "steps": [
+          {
+            "reads": [
+              "load-project"
+            ],
+            "action": "open a project with fittings",
+            "expect": "multiple numbered fittings are visible on the plan",
+            "target": "project list"
+          },
+          {
+            "action": "apply centre and perimeter group assignment",
+            "expect": "fittings display distinct group colours or labels for centre and perimeter groups",
+            "target": "quick group assignment controls",
+            "operates": [
+              "switchingGroups",
+              "fittings"
+            ]
+          },
+          {
+            "action": "select one fitting and assign it to a different group",
+            "expect": "the selected fitting changes to the chosen group colour or label",
+            "target": "selected fitting group control",
+            "operates": [
+              "fittings"
+            ]
+          },
+          {
+            "reads": [
+              "fittings",
+              "fittingSpec",
+              "ceilingHeightM",
+              "workingPlaneHeightM"
+            ],
+            "action": "switch from PLAN VIEW to HEAT MAP VIEW",
+            "expect": "the plan changes to a coloured estimated lux coverage heat map with a visible disclaimer that it is not certified photometric modelling",
+            "target": "view mode control",
+            "operates": [
+              "viewMode"
+            ]
+          },
+          {
+            "action": "switch back to PLAN VIEW",
+            "expect": "the standard top-down plan view returns with numbered fittings, dimensions and group labels visible",
+            "target": "view mode control",
+            "operates": [
+              "viewMode"
+            ]
+          }
+        ],
+        "title": "A user assigns switching groups and reviews estimated heat map coverage",
+        "priority": "secondary",
+        "acceptance": [
+          "switching groups are visible as colours or labels on fitting markers",
+          "the heat map view displays estimated coverage colours",
+          "the heat map view includes a visible non-certified planning visualisation disclaimer"
+        ]
+      },
+      {
+        "id": "manage-projects-and-presets",
+        "stage": "data",
+        "steps": [
+          {
+            "action": "open the authenticated workspace",
+            "expect": "the project list and new project control are visible",
+            "target": "/"
+          },
+          {
+            "action": "rename the current project",
+            "expect": "the project header and project list show the new project name after saving",
+            "target": "project name control",
+            "operates": [
+              "projectName"
+            ]
+          },
+          {
+            "reads": [
+              "duplicate-project"
+            ],
+            "action": "duplicate the current project",
+            "expect": "a second project appears in the project list with matching room dimensions and fitting count",
+            "target": "duplicate project control"
+          },
+          {
+            "action": "create a fitting preset",
+            "expect": "the new preset name appears in the saved fitting presets list",
+            "target": "fitting preset form",
+            "operates": [
+              "presetName",
+              "lumens",
+              "wattage",
+              "beamAngle",
+              "colorTemperature",
+              "fittingDiameterM",
+              "cutOutSizeM",
+              "dimmable"
+            ]
+          },
+          {
+            "action": "select the saved fitting preset for the project",
+            "expect": "the project fitting specification controls are populated with the preset values",
+            "target": "fitting preset selector",
+            "operates": [
+              "selectedFittingPresetName",
+              "fittingSpec"
+            ]
+          },
+          {
+            "reads": [
+              "delete-fitting-preset"
+            ],
+            "action": "delete the saved fitting preset",
+            "expect": "the deleted preset name is no longer visible in the preset list",
+            "target": "delete fitting preset control"
+          },
+          {
+            "reads": [
+              "delete-project"
+            ],
+            "action": "delete a duplicated project",
+            "expect": "the deleted project is removed from the project list and cannot be opened",
+            "target": "delete project control"
+          },
+          {
+            "action": "sign out",
+            "expect": "the sign in screen is visible and saved project names are not shown",
+            "target": "sign out control"
+          }
+        ],
+        "title": "A user manages saved projects and fitting presets",
+        "priority": "secondary",
+        "acceptance": [
+          "renaming a project updates the visible project header and list entry",
+          "duplicating a project creates a separate visible project with matching room data",
+          "deleting a fitting preset removes it from the preset selector"
+        ]
+      },
+      {
+        "id": "print-and-export-plan",
+        "stage": "polish",
+        "steps": [
+          {
+            "reads": [
+              "load-project"
+            ],
+            "action": "open a saved project with a completed layout",
+            "expect": "the finished plan, calculations and fitting schedule are visible",
+            "target": "project list"
+          },
+          {
+            "reads": [
+              "generate-print-view"
+            ],
+            "action": "open the print view",
+            "expect": "a printable plan view is visible with project name, room dimensions, scale or diagram, fitting positions, dimension lines, fitting specification, number of fittings, target lux, estimated lux, notes and switching groups",
+            "target": "print control"
+          },
+          {
+            "reads": [
+              "export-svg"
+            ],
+            "action": "export the plan as SVG",
+            "expect": "a downloadable SVG export is offered and the export status message says SVG plan ready",
+            "target": "export SVG control"
+          },
+          {
+            "reads": [
+              "export-png"
+            ],
+            "action": "export the plan as PNG",
+            "expect": "a downloadable PNG export is offered and the export status message says PNG plan ready",
+            "target": "export PNG control"
+          },
+          {
+            "reads": [
+              "export-json"
+            ],
+            "action": "export the project as JSON",
+            "expect": "a downloadable JSON project file is offered and the export status message says JSON project ready",
+            "target": "export JSON control"
+          },
+          {
+            "reads": [
+              "export-csv"
+            ],
+            "action": "export the fitting schedule as CSV",
+            "expect": "a downloadable CSV fitting schedule is offered and the schedule table shows quantity, wattage, lumens, colour temperature, cut-out size, diameter, dimmable status and switching group counts",
+            "target": "export CSV control"
+          }
+        ],
+        "title": "A user prints and exports a finished lighting plan",
+        "priority": "secondary",
+        "acceptance": [
+          "the print view displays the project name, plan diagram and calculation summary",
+          "the CSV schedule visibly includes fitting quantity and switching group counts",
+          "each export control shows a ready status message for its file type"
+        ]
+      },
+      {
+        "id": "responsive-workspace",
+        "stage": "polish",
+        "steps": [
+          {
+            "action": "open the planner at desktop width",
+            "expect": "the interface shows a left controls panel, central plan canvas and right results panel on one row",
+            "target": "/"
+          },
+          {
+            "action": "resize to tablet width",
+            "expect": "the plan canvas remains full width and the controls and results panels are available as collapsible sections",
+            "target": "browser viewport"
+          },
+          {
+            "action": "resize to mobile width",
+            "expect": "there is no horizontal page overflow and the plan view, controls and results are accessible by scrolling or collapsible panels",
+            "target": "browser viewport"
+          }
+        ],
+        "title": "A user can operate the planner on tablet and mobile without horizontal overflow",
+        "priority": "secondary",
+        "acceptance": [
+          "desktop layout visibly uses three main workspace columns",
+          "tablet layout uses collapsible panels with a full-width plan view",
+          "mobile layout has no horizontal overflow"
+        ]
+      }
+    ],
+    "routes": [
+      {
+        "auth": true,
+        "name": "Planner",
+        "path": "/",
+        "purpose": "Authenticated landing and main Downlight Pro Planner workspace with project controls, plan canvas, calculations, warnings, schedules and export controls."
+      },
+      {
+        "auth": true,
+        "name": "Print View",
+        "path": "/print",
+        "purpose": "Printable PDF-style plan view for the currently selected saved project."
+      }
+    ],
+    "entities": [
+      {
+        "name": "project",
+        "owned": true,
+        "fields": [
+          {
+            "name": "projectName",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "roomName",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "unitSystem",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "roomShape",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lengthM",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "widthM",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "ceilingHeightM",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "workingPlaneHeightM",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "useType",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "targetLux",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "fittingSpec",
+            "type": "object",
+            "required": true
+          },
+          {
+            "name": "selectedFittingPresetName",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "layoutMode",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "fittings",
+            "type": "array",
+            "required": true
+          },
+          {
+            "name": "taskZones",
+            "type": "array",
+            "required": true
+          },
+          {
+            "name": "exclusionZones",
+            "type": "array",
+            "required": true
+          },
+          {
+            "name": "doorsWindows",
+            "type": "array",
+            "required": false
+          },
+          {
+            "name": "switchingGroups",
+            "type": "array",
+            "required": true
+          },
+          {
+            "name": "showGrid",
+            "type": "boolean",
+            "required": true
+          },
+          {
+            "name": "snapToGrid",
+            "type": "boolean",
+            "required": true
+          },
+          {
+            "name": "showDimensions",
+            "type": "boolean",
+            "required": true
+          },
+          {
+            "name": "viewMode",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "notes",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "calculationResults",
+            "type": "object",
+            "required": true
+          },
+          {
+            "name": "layoutExplanation",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "updatedAt",
+            "type": "string",
+            "required": true
+          }
+        ],
+        "relationships": [
+          "a project may use one saved fitting preset by selectedFittingPresetName",
+          "a project contains many fitting positions in fittings",
+          "a project contains many task zones in taskZones",
+          "a project contains many exclusion zones in exclusionZones",
+          "a project contains many switching groups in switchingGroups"
+        ]
+      },
+      {
+        "name": "fittingPreset",
+        "owned": true,
+        "fields": [
+          {
+            "name": "presetName",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lumens",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "wattage",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "beamAngle",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "colorTemperature",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "fittingDiameterM",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "cutOutSizeM",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "dimmable",
+            "type": "boolean",
+            "required": true
+          }
+        ],
+        "relationships": [
+          "a fitting preset can be selected by a project and copied into the project's fittingSpec"
+        ]
+      }
+    ],
+    "auth": {
+      "model": "email + password via the backend SDK",
+      "rules": [
+        "a signed-out visitor sees the authentication screen instead of the project list",
+        "a signed-in user only sees projects and fitting presets they own",
+        "after sign out, saved project names and fitting preset names are not visible"
+      ],
+      "required": true
+    },
+    "operations": [
+      {
+        "id": "create-project",
+        "kind": "create",
+        "entity": "project",
+        "journey": "create-auto-layout-project",
+        "description": "persist a new lighting project via db.entity('project').create with room data, fitting specification, empty or generated layout data and calculation settings"
+      },
+      {
+        "id": "update-project",
+        "kind": "update",
+        "entity": "project",
+        "journey": "create-auto-layout-project",
+        "description": "persist project edits via db.entity('project').update including layout, dimensions, fitting positions, zones, groups, warnings and calculation settings"
+      },
+      {
+        "id": "load-project",
+        "kind": "read",
+        "entity": "project",
+        "journey": "create-auto-layout-project",
+        "description": "read owned saved projects via db.entity('project') and display the selected project in the planner"
+      },
+      {
+        "id": "delete-project",
+        "kind": "delete",
+        "entity": "project",
+        "journey": "manage-projects-and-presets",
+        "description": "delete an owned saved project via db.entity('project').delete and remove it from the visible project list"
+      },
+      {
+        "id": "duplicate-project",
+        "kind": "create",
+        "entity": "project",
+        "journey": "manage-projects-and-presets",
+        "description": "create a separate owned project record by copying the current project's room, specification, positions, zones, groups and settings"
+      },
+      {
+        "id": "auto-layout-project",
+        "kind": "update",
+        "entity": "project",
+        "journey": "create-auto-layout-project",
+        "description": "calculate and save a balanced arrangement in the project's fittings, calculationResults and layoutExplanation fields"
+      },
+      {
+        "id": "create-fitting-preset",
+        "kind": "create",
+        "entity": "fittingPreset",
+        "journey": "manage-projects-and-presets",
+        "description": "persist a reusable fitting preset via db.entity('fittingPreset').create"
+      },
+      {
+        "id": "delete-fitting-preset",
+        "kind": "delete",
+        "entity": "fittingPreset",
+        "journey": "manage-projects-and-presets",
+        "description": "delete an owned fitting preset via db.entity('fittingPreset').delete and remove it from the selector"
+      },
+      {
+        "id": "generate-print-view",
+        "kind": "read",
+        "entity": "project",
+        "journey": "print-and-export-plan",
+        "description": "render a printable plan view from the selected saved project data"
+      },
+      {
+        "id": "export-svg",
+        "kind": "read",
+        "entity": "project",
+        "journey": "print-and-export-plan",
+        "description": "generate a client-side SVG plan drawing from the selected project"
+      },
+      {
+        "id": "export-png",
+        "kind": "read",
+        "entity": "project",
+        "journey": "print-and-export-plan",
+        "description": "generate a client-side PNG plan drawing from the selected project canvas or SVG"
+      },
+      {
+        "id": "export-json",
+        "kind": "read",
+        "entity": "project",
+        "journey": "print-and-export-plan",
+        "description": "generate a downloadable JSON project file from the selected project record"
+      },
+      {
+        "id": "export-csv",
+        "kind": "read",
+        "entity": "project",
+        "journey": "print-and-export-plan",
+        "description": "generate a downloadable CSV fitting schedule from the selected project record"
+      }
+    ],
+    "integrations": [
+      {
+        "name": "backend SDK auth",
+        "purpose": "authenticate users with auth.signUp, auth.signIn, auth.signOut and auth.currentUser",
+        "required": true
+      },
+      {
+        "name": "backend SDK database",
+        "purpose": "persist projects and fitting presets with db.entity('project') and db.entity('fittingPreset')",
+        "required": true
+      }
+    ],
+    "states": [
+      {
+        "empty": "no account session message with sign in and create account controls",
+        "error": "authentication failed message is visible",
+        "loading": "signing in message while authentication is pending",
+        "success": "planner workspace is visible",
+        "surface": "authentication screen",
+        "validation": "email and password are required"
+      },
+      {
+        "empty": "no projects yet message with a new project button",
+        "error": "could not load projects message is visible",
+        "loading": "loading projects skeleton is visible",
+        "success": "saved project names are visible in the list",
+        "surface": "project list",
+        "validation": "project name is required before saving"
+      },
+      {
+        "empty": "blank new project form is visible",
+        "error": "layout could not be calculated message is visible",
+        "loading": "calculating layout message while auto layout runs",
+        "success": "room outline and generated fittings are visible on the plan",
+        "surface": "room input panel",
+        "validation": "length, width, ceiling height, working-plane height, target lux and lumens must be positive numbers"
+      },
+      {
+        "empty": "empty room outline with no fittings is visible before layout generation",
+        "error": "invalid fitting position warning is visible",
+        "loading": "plan loading placeholder is visible while project data is read",
+        "success": "numbered fittings, dimensions, zones and group labels are visible",
+        "surface": "plan canvas",
+        "validation": "selected fitting coordinate must stay within the editable plan bounds"
+      },
+      {
+        "empty": "no calculation yet message is visible before required inputs are complete",
+        "error": "calculation failed message is visible",
+        "loading": "recalculating message is visible after layout changes",
+        "success": "area, lumens, fitting count, estimated lux, wattage and spacing results are visible",
+        "surface": "calculations panel",
+        "validation": "estimated under target lux and high lux warnings appear when thresholds are exceeded"
+      },
+      {
+        "empty": "no warnings message is visible when no issues are detected",
+        "error": "warning calculation unavailable message is visible",
+        "loading": "checking layout message is visible while warnings update",
+        "success": "warnings are visible but editing controls remain enabled",
+        "surface": "warnings panel",
+        "validation": "warnings appear for large spacing, close fittings, poor wall offset, under target lux, high estimated lux, fitting in exclusion zone, asymmetry and beam coverage gaps"
+      },
+      {
+        "empty": "no saved fitting presets message is visible",
+        "error": "could not save fitting preset message is visible",
+        "loading": "loading presets message is visible",
+        "success": "saved preset appears in the preset list",
+        "surface": "fitting preset panel",
+        "validation": "preset name, lumens, wattage, beam angle, colour temperature, diameter and cut-out size are required"
+      },
+      {
+        "empty": "complete a layout before exporting message is visible",
+        "error": "export failed message is visible",
+        "loading": "preparing export message is visible",
+        "success": "ready status message is visible for the selected export type",
+        "surface": "export panel",
+        "validation": "export controls are disabled until the project has at least one fitting"
+      }
+    ],
+    "acceptance": [
+      {
+        "id": "a1",
+        "kind": "calculation",
+        "journey": "create-auto-layout-project",
+        "statement": "after AUTO LAYOUT, the plan canvas displays numbered downlight markers inside the room outline"
+      },
+      {
+        "id": "a2",
+        "kind": "calculation",
+        "journey": "create-auto-layout-project",
+        "statement": "the calculations panel displays room area, target lux, total lumen requirement, installed lumens, estimated average illuminance, watts per square metre and spacing values"
+      },
+      {
+        "id": "a3",
+        "kind": "persistence",
+        "journey": "create-auto-layout-project",
+        "statement": "a project saved in the browser is visible with the same project name, dimensions and fitting positions after a full page reload"
+      },
+      {
+        "id": "a4",
+        "kind": "interaction",
+        "journey": "manually-edit-plan",
+        "statement": "dragging or coordinate-editing a selected fitting visibly changes its position and updates the estimated lux result"
+      },
+      {
+        "id": "a5",
+        "kind": "validation",
+        "journey": "task-and-exclusion-zones",
+        "statement": "placing a fitting inside an exclusion zone shows a visible warning and does not disable plan editing"
+      },
+      {
+        "id": "a6",
+        "kind": "visualisation",
+        "journey": "switching-groups-and-heatmap",
+        "statement": "heat map view shows coloured estimated coverage and a visible statement that it is not certified photometric modelling"
+      },
+      {
+        "id": "a7",
+        "kind": "export",
+        "journey": "print-and-export-plan",
+        "statement": "the print view visibly includes project name, room dimensions, diagram, fitting positions, dimensions, fitting specification, target lux, estimated lux, notes and switching groups"
+      },
+      {
+        "id": "a8",
+        "kind": "responsive",
+        "journey": "responsive-workspace",
+        "statement": "on a mobile-width viewport the page has no horizontal overflow and the plan view remains usable with collapsible controls"
+      }
+    ],
+    "deferred": [
+      {
+        "item": "certified photometric modelling",
+        "reason": "the app provides estimated planning visualisation only and does not import manufacturer photometric files or perform standards-certified lighting simulation"
+      },
+      {
+        "item": "electrical cable sizing and protective-device design",
+        "reason": "the requested scope explicitly excludes electrical circuit design beyond visual switching group assignment"
+      },
+      {
+        "item": "raw HTTP integrations or third-party export services",
+        "reason": "the fixed scaffold only permits the provided backend SDK and client-side browser exports"
+      },
+      {
+        "item": "server-generated PDF files",
+        "reason": "the export requirement is satisfied by a printable PDF-style browser print view without adding server-side PDF tooling"
+      },
+      {
+        "item": "full CAD import/export",
+        "reason": "the planner exports practical SVG, PNG, JSON and CSV files but does not implement DWG, DXF or BIM exchange"
+      }
+    ]
+  }
+}

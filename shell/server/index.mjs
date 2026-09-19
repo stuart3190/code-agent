@@ -4,8 +4,6 @@
 //
 //   GET  /api/health                      liveness + which capabilities are env-configured
 //   GET  /api/config                      public pricing/config, sourced from costModel (no hardcoding)
-//   POST /api/generate      (auth, SSE)   the gated engine call + live ledger debit
-//   POST /api/preview       (auth)        (re)start a live preview for a saved tree (no Codex spend)
 //   POST /api/export        (auth)        download a ready-to-run project ZIP
 //   POST /api/billing/checkout (auth)     Stripe Checkout (subscription tier | top-up)
 //   GET  /api/billing/balance  (auth)     server-side balance read (convenience; UI reads via RLS too)
@@ -18,18 +16,15 @@ import { loadEnv, optionalEnv, SHELL_DIR } from "./lib/env.mjs";
 import { resolveStaticPath } from "./lib/staticPath.mjs";
 import {
   BODY_LIMITS, HttpInputError, allowedOrigins, applyCors, applySecurityHeaders,
-  createRateLimiter, parseJson, readBody, staticCacheControl,
+  createMemoryRateLimitClient, createSharedRateLimiter, parseJson, readBody, resolveClientNetwork,
+  sharedRatePolicy, staticCacheControl,
 } from "./lib/httpSecurity.mjs";
 import { ownerFromToken, bearer, haveSupabaseEnv, serviceClient } from "./lib/supabase.mjs";
-import {
-  interruptLiveJobs, startStaleJobSweeper, stopStaleJobSweeper, sweepInterrupted, sweepStaleJobs,
-} from "./lib/buildJobs.mjs";
 import { handlePreviewDomainCheck } from "./routes/previewDomainCheck.mjs";
 import { handleBuildEvents, handleActiveBuild, handleBuildCancel } from "./routes/builds.mjs";
 import { handleExport } from "./routes/export.mjs";
 import { handleQaStart, handleQaGet, handleQaList, handleQaArtifact } from "./routes/qa.mjs";
 import { sweepQaRuns } from "./lib/qaRuns.mjs";
-import { startActionWorker, stopActionWorker } from "./lib/appIntegrations.mjs";
 import {
   handleAgents, handleAgentUpdate, handleCodeAgentCapabilities, handleLatestRunGet,
   handleRepositories, handleRunCancel,
@@ -45,7 +40,6 @@ import { startCodeAgentWorker, stopCodeAgentWorker } from "./lib/codeAgentServic
 import { startGithubWebhookWorker, stopGithubWebhookWorker } from "./lib/githubWebhookService.mjs";
 import { startRepositoryIndexWorker, stopRepositoryIndexWorker } from "./lib/repositoryIndexService.mjs";
 import { startRetentionSweeper, stopRetentionSweeper } from "./lib/retentionService.mjs";
-import { startCheckpointSweeper, stopCheckpointSweeper, recoverInterruptedLifecycles } from "./lib/appBuild/checkpointRecovery.mjs";
 import { startDeletedProjectSweeper, stopDeletedProjectSweeper } from "./lib/deletedProjectSweeper.mjs";
 import { handleReleaseDownload, handleReleaseManifest } from "./lib/releaseDownloads.mjs";
 import {
@@ -57,6 +51,8 @@ import {
 import { startDiagnosticsSweeper, stopDiagnosticsSweeper } from "./lib/appBuild/buildDiagnostics.mjs";
 import { usageInsights, buildCostSummary, adminAnalytics } from "./lib/usageInsights.mjs";
 import { isAdmin } from "./lib/admin.mjs";
+import { readDeploymentIdentity } from "./lib/deploymentIdentity.mjs";
+import { buildAccountErasureManifest, eraseAccountPermanently } from "./lib/erasureService.mjs";
 import { stopCodexLoginSessions } from "./lib/codexLogin.mjs";
 import {
   handleGithubAppCallback, handleGithubAppStart, handleGithubInstallationRepositories, handleGithubWebhook,
@@ -70,7 +66,7 @@ import {
 import { byokConfigured } from "./lib/byokStore.mjs";
 import {
   handleBillingOverview, handleBillingPortal, handleBillingWebhook, handleBudgetUpdate,
-  handleOpsTelemetry, handlePlanSelect,
+  handleOpsTelemetry, handlePlanSelect, handleTopupCheckout,
 } from "./routes/subscription.mjs";
 import { thralloStripeConfigured, thralloWebhookConfigured } from "./lib/subscriptionBilling.mjs";
 import { handlePublishState, handleProjectUnpublish } from "./routes/publishState.mjs";
@@ -78,6 +74,7 @@ import {
   handleDomainAdd, handleCustomDomainRemove, handleDomainRetry, handleDomainVerify, handleDomainsList,
 } from "./routes/customDomains.mjs";
 import { startDomainVerifier, stopDomainVerifier } from "./lib/domainVerifier.mjs";
+import { startPublishReconciler, stopPublishReconciler } from "./lib/publishing/atomicPublisher.mjs";
 import {
   handleAnalyticsCollect, handleAnalyticsPreflight, handleAnalyticsOverview,
   handleAnalyticsLive, handleAnalyticsExport,
@@ -108,6 +105,15 @@ import {
   notificationChannels, vapidPublicKey, saveSubscription, removeSubscription,
 } from "./lib/notifications/notificationService.mjs";
 import { startLeadAgentRecovery, stopLeadAgentRecovery } from "./lib/leadAgentService.mjs";
+import {
+  handleBuildBudgetApprovalGet, handleBuildBudgetApprovalResolve,
+} from "./routes/buildBudgetApprovals.mjs";
+import {
+  startModelReservationReconciler, stopModelReservationReconciler,
+} from "./lib/modelReservationReconciler.mjs";
+import {
+  startBuildBudgetApprovalReconciler, stopBuildBudgetApprovalReconciler,
+} from "./lib/builderV2/buildBudgetApprovals.mjs";
 import { startAutomationSweeper, stopAutomationSweeper } from "./lib/automationService.mjs";
 import { TIERS, TOPUP_GBP_PER_CREDIT, WELCOME_CREDITS, effectiveGbpPerCredit, trueCostPerCredit } from "../../src/billing/costModel.mjs";
 import { TOKENS_PER_CREDIT } from "../../src/cost.mjs";
@@ -123,7 +129,16 @@ const WEB_DIST = path.join(SHELL_DIR, "web", "dist");
 const CORS_ORIGINS = allowedOrigins(optionalEnv("APP_URL", "http://localhost:5173"));
 CORS_ORIGINS.add(`http://127.0.0.1:${PORT}`);
 CORS_ORIGINS.add(`http://localhost:${PORT}`);
-const consumeRate = createRateLimiter();
+const CODE_AGENT_STORE = optionalEnv("CODE_AGENT_STORE", "memory").toLowerCase();
+// Local standalone mode must be usable and testable without production credentials. Its limiter
+// remains bounded but is deliberately process-local; durable Supabase mode retains the shared,
+// restart-safe limiter used in production.
+const rateLimitClientFactory = CODE_AGENT_STANDALONE && CODE_AGENT_STORE === "memory"
+  ? (() => createMemoryRateLimitClient())()
+  : null;
+const consumeRate = createSharedRateLimiter({
+  clientFactory: rateLimitClientFactory ? () => rateLimitClientFactory : serviceClient,
+});
 
 function applyRuntimeCors(res, origin) {
   try {
@@ -138,22 +153,6 @@ function applyRuntimeCors(res, origin) {
 }
 
 const readJson = async (req, limit = BODY_LIMITS.standard) => parseJson(await readBody(req, limit));
-
-function clientIp(req) {
-  const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
-  return forwarded || req.socket?.remoteAddress || "unknown";
-}
-
-function ratePolicy(pathname, method) {
-  if (pathname === "/api/domain-check") return { limit: 120, windowMs: 60_000 };
-  if (pathname === "/api/generate") return { limit: 40, windowMs: 10 * 60_000 };
-  if (pathname === "/api/preview") return { limit: 60, windowMs: 5 * 60_000 };
-  if (["/api/publish", "/api/unpublish", "/api/android"].includes(pathname)) {
-    return { limit: 15, windowMs: 10 * 60_000 };
-  }
-  if (method === "POST" || method === "DELETE") return { limit: 120, windowMs: 60_000 };
-  return null;
-}
 
 function sendJson(res, code, obj) {
   res.writeHead(code, { "Content-Type": "application/json" });
@@ -186,9 +185,8 @@ async function deepHealth() {
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs)),
   ]);
-  const store = optionalEnv("CODE_AGENT_STORE", "memory").toLowerCase();
   const table = CODE_AGENT_STANDALONE ? "ca_runs" : "projects";
-  const supabase = CODE_AGENT_STANDALONE && store === "memory"
+  const supabase = CODE_AGENT_STANDALONE && CODE_AGENT_STORE === "memory"
     ? true
     : await bounded(serviceClient().from(table).select("id").limit(1))
       .then(({ error }) => !error).catch(() => false);
@@ -278,6 +276,35 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
   const p = url.pathname;
   const method = req.method || "GET";
+
+  // Public analytics is intentionally cross-origin. Route it before the workspace CORS policy,
+  // but keep the exemption narrow: HTTPS Origin, POST/OPTIONS only, a 32 KiB text/plain body,
+  // registered site identity and the shared network limiter.
+  if (p === "/api/analytics/collect") {
+    const policy = sharedRatePolicy(p, method);
+    try {
+      if (policy) {
+        const rate = await consumeRate(req, policy);
+        res.setHeader("X-RateLimit-Remaining", String(rate.remaining));
+        if (!rate.allowed) {
+          res.setHeader("Retry-After", String(rate.retryAfter));
+          return sendJson(res, 429, { error: "Too many requests. Please wait and try again." });
+        }
+      }
+    } catch (error) {
+      console.error(`[rate-limit] public_analytics: ${error?.message || error}`);
+      return sendJson(res, 503, { error: "Request admission is temporarily unavailable." });
+    }
+    if (method === "OPTIONS") return await handleAnalyticsPreflight(req, res, origin);
+    if (method !== "POST") return sendJson(res, 405, { error: "method not allowed" });
+    try {
+      const raw = await readBody(req, 32 * 1024);
+      return await handleAnalyticsCollect(req, res, raw, resolveClientNetwork(req), origin);
+    } catch (error) {
+      if (error instanceof HttpInputError) return sendJson(res, error.status, { error: error.message, code: error.code });
+      throw error;
+    }
+  }
   const runtimeCors = ["/api/runtime/checkout", "/api/runtime/connectors"].includes(p);
   const corsOk = runtimeCors ? applyRuntimeCors(res, origin) : applyCors(res, origin, CORS_ORIGINS);
 
@@ -287,13 +314,18 @@ const server = http.createServer(async (req, res) => {
   }
   if (!corsOk) return sendJson(res, 403, { error: "origin not allowed" });
 
-  const policy = ratePolicy(p, method);
+  const policy = sharedRatePolicy(p, method);
   if (policy) {
-    const rate = consumeRate(`${clientIp(req)}:${method}:${p}`, policy.limit, policy.windowMs);
-    res.setHeader("X-RateLimit-Remaining", String(rate.remaining));
-    if (!rate.allowed) {
-      res.setHeader("Retry-After", String(rate.retryAfter));
-      return sendJson(res, 429, { error: "Too many requests. Please wait and try again." });
+    try {
+      const rate = await consumeRate(req, policy);
+      res.setHeader("X-RateLimit-Remaining", String(rate.remaining));
+      if (!rate.allowed) {
+        res.setHeader("Retry-After", String(rate.retryAfter));
+        return sendJson(res, 429, { error: "Too many requests. Please wait and try again." });
+      }
+    } catch (error) {
+      console.error(`[rate-limit] ${policy.routeClass}: ${error?.message || error}`);
+      if (policy.failClosed) return sendJson(res, 503, { error: "Request admission is temporarily unavailable." });
     }
   }
 
@@ -723,6 +755,37 @@ const server = http.createServer(async (req, res) => {
       if (!isAdmin(owner)) return sendJson(res, 403, { error: "Administrator access required", code: "admin_only" });
       return sendJson(res, 200, await adminAnalytics());
     }
+    if (p === "/api/v1/admin/deployment" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      if (!isAdmin(owner)) return sendJson(res, 403, { error: "Administrator access required", code: "admin_only" });
+      try { return sendJson(res, 200, await readDeploymentIdentity()); }
+      catch (error) {
+        console.error(`[deployment-identity] ${error?.message || error}`);
+        return sendJson(res, 503, { error: "Deployment identity is unavailable.", code: "deployment_identity_invalid" });
+      }
+    }
+    if (p === "/api/v1/account/erasure-manifest" && method === "GET") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const manifest = await buildAccountErasureManifest(owner.id);
+      return sendJson(res, 200, {
+        manifestSha256: manifest.manifestSha256,
+        projectCount: manifest.projectIds.length,
+        directCounts: Object.fromEntries(Object.entries(manifest.direct).map(([table, value]) => [table, value.count])),
+        storageObjectCount: manifest.storageObjectPaths.length,
+      });
+    }
+    if (p === "/api/v1/account" && method === "DELETE") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      const body = await readJson(req, BODY_LIMITS.standard);
+      if (body?.confirm !== true || !/^[0-9a-f]{64}$/.test(body?.manifestSha256 || "")) {
+        return sendJson(res, 400, { error: "A current erasure manifest and explicit confirmation are required.", code: "erasure_confirmation_required" });
+      }
+      const result = await eraseAccountPermanently(owner.id, {
+        approvedManifestSha256: body.manifestSha256,
+        provisiond: provisiondCall(),
+      });
+      return sendJson(res, 200, { deleted: true, jobId: result.jobId, manifestSha256: result.manifestSha256 });
+    }
     // Advanced Diagnostics: the private technical detail behind a support reference.
     // Owner-scoped by query; admins additionally pass isAdmin for cross-account support.
     if (p === "/api/v1/diagnostics/incidents" && method === "GET") {
@@ -811,15 +874,7 @@ const server = http.createServer(async (req, res) => {
       return await handleTokenRename(req, res, owner, tokenMatch[1], await readJson(req));
     }
     // The analytics beacon: public by necessity — it is called by every visitor to every published
-    // site, on hostnames Thrallo does not control. The project is resolved from the app id
-    // server-side, so a forged body cannot write into someone else's project.
-    if (p === "/api/analytics/collect") {
-      if (method === "OPTIONS") return await handleAnalyticsPreflight(req, res);
-      if (method === "POST") {
-        const raw = await readBody(req, BODY_LIMITS.standard);
-        return await handleAnalyticsCollect(req, res, raw, clientIp(req));
-      }
-    }
+    // Owner-scoped analytics dashboard reads. Public collection was handled before workspace CORS.
     const analyticsMatch = p.match(/^\/api\/v1\/projects\/([0-9a-f-]{36})\/analytics(\/live|\/export)?$/i);
     if (analyticsMatch && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
@@ -882,6 +937,18 @@ const server = http.createServer(async (req, res) => {
       const owner = await requireOwner(req, res); if (!owner) return;
       return await handlePublishState(req, res, owner);
     }
+    const budgetApprovalMatch = p.match(/^\/api\/v1\/build-budget-approvals\/([0-9a-f-]{36})(?:\/(approve|decline))?$/i);
+    if (budgetApprovalMatch) {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      if (method === "GET" && !budgetApprovalMatch[2]) {
+        return await handleBuildBudgetApprovalGet(req, res, { owner, approvalId: budgetApprovalMatch[1] });
+      }
+      if (method === "POST" && budgetApprovalMatch[2]) {
+        return await handleBuildBudgetApprovalResolve(req, res, {
+          owner, approvalId: budgetApprovalMatch[1], action: budgetApprovalMatch[2] === "approve" ? "approve" : "decline",
+        });
+      }
+    }
     if (p === "/api/v1/billing" && method === "GET") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return await handleBillingOverview(req, res, owner);
@@ -897,6 +964,10 @@ const server = http.createServer(async (req, res) => {
     if (p === "/api/v1/billing/portal" && method === "POST") {
       const owner = await requireOwner(req, res); if (!owner) return;
       return await handleBillingPortal(req, res, owner);
+    }
+    if (p === "/api/v1/billing/topup" && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleTopupCheckout(req, res, owner);
     }
     // Cancel at period end, or undo a scheduled cancellation. Not a portal re-implementation:
     // portal cancellation is an account-wide Stripe setting and this account is shared with
@@ -1006,41 +1077,18 @@ server.listen(PORT, HOST, () => {
   console.log(`[shell] server on http://${HOST || "localhost"}:${PORT}`);
   const cfg = publicConfig();
   console.log(`[shell] preview mode: ${cfg.previewMode} · supabase env: ${haveSupabaseEnv()} · thrallo stripe: ${thralloStripeConfigured()} · webhook: ${thralloWebhookConfigured()}`);
-  /**
-   * Any job rows THIS server left non-terminal are dead — their loop died with the process — so
-   * mark them interrupted rather than leaving a build showing "building" forever. Scoped by
-   * server_id, so a second server's live jobs are never touched.
-   *
-   * These ran only when CODE_AGENT_STANDALONE was OFF, and production runs with it ON. Thrallo's
-   * own app_build path calls createJob() and writes build_jobs regardless of that flag, so the one
-   * sweep whose entire purpose is "no build shows building forever" never ran in production: five
-   * jobs were found stuck in queued/running for eleven and thirteen hours, from restarts that
-   * happened days earlier. The flag says whether the legacy Buildr101 surface is mounted; it was
-   * never a statement about whether Thrallo builds exist.
-   */
-  // Every one of these needs the database. Without it there are no job rows to sweep, and calling
-  // them anyway only produces noise — or, before the guard inside startCheckpointSweeper, a
-  // synchronous throw out of this handler that killed the server at boot.
+  // QA has its own database lifecycle. Builder V2 recovery belongs to the durable worker lease
+  // protocol, so the shell deliberately owns no in-process build recovery loop.
   if (haveSupabaseEnv()) {
-    sweepInterrupted().catch((e) => console.log(`[jobs] sweep failed: ${e.message}`));
-    sweepStaleJobs().catch((e) => console.log(`[jobs] stale sweep failed: ${e.message}`));
     sweepQaRuns().catch((e) => console.log(`[qa] stale sweep failed: ${e.message}`));
   }
-  // Repair checkpoints that outlived their retention window, plus the last-known-good restore for
-  // lifecycles this server killed mid-build (see recoverInterruptedLifecycles).
-  if (haveSupabaseEnv()) startCheckpointSweeper();
-  // And keep sweeping: a build that wedges while the server stays up was never caught before.
-  if (haveSupabaseEnv()) startStaleJobSweeper();
-  if (haveSupabaseEnv()) recoverInterruptedLifecycles().catch((e) => console.log(`[checkpoints] recovery failed: ${e.message}`));
-  // The action worker drives integrations for the apps CUSTOMERS build, which is a Buildr101-era
-  // surface Thrallo does not mount — it stays behind the flag, unlike the job sweeps above.
-  if (!CODE_AGENT_STANDALONE && haveSupabaseEnv()) startActionWorker();
   startCodeAgentWorker();
   startGithubWebhookWorker();
   startRepositoryIndexWorker();
   startRetentionSweeper();
   // DNS propagates on its own schedule; without this a user would have to sit pressing Retry.
-  startDomainVerifier();
+  if (haveSupabaseEnv()) startDomainVerifier();
+  startPublishReconciler();
   // Rolls raw events into daily aggregates and then deletes them, along with the salts that made
   // their hashes — the step that makes the cookieless scheme honest rather than merely cookieless.
   startAnalyticsRollup();
@@ -1053,6 +1101,8 @@ server.listen(PORT, HOST, () => {
   startDiagnosticsSweeper();
   startAutomationSweeper();
   startLeadAgentRecovery();
+  startModelReservationReconciler();
+  startBuildBudgetApprovalReconciler();
   // Last, so it reports the state AFTER every subsystem has had its chance to load: which optional
   // capabilities are on, which are off, and what each one costs when off. A missing PEXELS_API_KEY
   // used to be visible only inside individual builds, so production shipped photo-less apps for an
@@ -1066,25 +1116,22 @@ async function shutdown(signal) {
   shuttingDown = true;
   console.log(`[shell] ${signal} - marking active builds interrupted`);
   server.close();
-  stopActionWorker();
   stopCodeAgentWorker();
   stopGithubWebhookWorker();
   stopRepositoryIndexWorker();
   stopRetentionSweeper();
   stopDomainVerifier();
+  stopPublishReconciler();
   stopAnalyticsRollup();
   stopGeoipUpdater();
   stopHealthMonitor();
-  stopCheckpointSweeper();
   stopDeletedProjectSweeper();
   stopDiagnosticsSweeper();
   stopAutomationSweeper();
   stopLeadAgentRecovery();
-  stopStaleJobSweeper();
+  stopModelReservationReconciler();
+  stopBuildBudgetApprovalReconciler();
   await stopCodexLoginSessions();
-  if (!CODE_AGENT_STANDALONE) {
-    await interruptLiveJobs().catch((e) => console.log(`[jobs] shutdown sweep failed: ${e.message}`));
-  }
   process.exit(0);
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));

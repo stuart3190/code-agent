@@ -18,7 +18,7 @@ test("balanced routing promotes complex production work to quality models", () =
   assert.equal(candidates[0].provider, "openai");
 });
 
-test("router falls back on retryable failures and records both attempts", async () => {
+test("managed router never widens its billing lane after a retry-safe provider rejection", async () => {
   const store = new MemoryAiRoutingStore();
   const model = await createRoutedCodingModel({
     owner: "owner",
@@ -35,6 +35,8 @@ test("router falls back on retryable failures and records both attempts", async 
           const error = new Error("rate limited");
           error.status = 429;
           error.code = "rate_limit_exceeded";
+          error.dispatchState = "provider_rejected";
+          error.retrySafe = true;
           throw error;
         }
         return {
@@ -46,13 +48,11 @@ test("router falls back on retryable failures and records both attempts", async 
     }),
   });
 
-  const result = await model.turn({ instructions: "test", input: [], tools: [] });
-  assert.equal(result.provider, "gemini");
-  assert.equal(result.routing.fallbackFrom.provider, "openai");
+  await assert.rejects(model.turn({ instructions: "test", input: [], tools: [] }), /rate limited/);
   const attempts = await store.listRecentAttempts("owner");
-  assert.equal(attempts.length, 2);
-  assert.equal(attempts[0].status, "success");
-  assert.equal(attempts[1].retryable, true);
+  assert.equal(attempts.length, 1);
+  assert.equal(attempts[0].status, "error");
+  assert.equal(attempts[0].retryable, true);
 });
 
 test("router does not mask authentication failures", async () => {
@@ -74,4 +74,52 @@ test("router does not mask authentication failures", async () => {
   });
   await assert.rejects(model.turn({ instructions: "test", input: [], tools: [] }), /invalid key/);
   assert.equal((await store.listRecentAttempts("owner")).length, 1);
+});
+
+test("successful provider settlement is not reversed when attempt telemetry fails", async () => {
+  let settled = 0;
+  let failed = 0;
+  const model = await createRoutedCodingModel({
+    owner: "owner", credential: { provider: "managed" }, requested: "auto",
+    policy: { routingMode: "balanced", allowFallback: true },
+    store: { listRecentAttempts: async () => [], recordAttempt: async () => { throw new Error("telemetry down"); } },
+    providerFactory: (candidate) => ({
+      id: candidate.provider, model: candidate.model,
+      turn: async () => ({ text: "Done", output: [], usage: { totalTokens: 1 } }),
+    }),
+  });
+  const response = await model.turn({
+    instructions: "test", input: [], tools: [],
+    beforeDispatch: async () => ({ id: "hold" }),
+    afterDispatch: async () => { settled += 1; },
+    dispatchFailed: async () => { failed += 1; },
+  });
+  assert.equal(response.text, "Done");
+  assert.equal(settled, 1);
+  assert.equal(failed, 0);
+});
+
+test("a completed provider call with uncertain settlement fails closed without fallback", async () => {
+  let providerCalls = 0;
+  let failureTransitions = 0;
+  const model = await createRoutedCodingModel({
+    owner: "owner", credential: { provider: "managed" }, requested: "auto",
+    policy: { routingMode: "balanced", allowFallback: true },
+    store: new MemoryAiRoutingStore(),
+    providerFactory: (candidate) => ({
+      id: candidate.provider, model: candidate.model,
+      turn: async () => {
+        providerCalls += 1;
+        return { text: "Done", output: [], usage: { totalTokens: 1 } };
+      },
+    }),
+  });
+  await assert.rejects(model.turn({
+    instructions: "test", input: [], tools: [],
+    beforeDispatch: async () => ({ id: "hold" }),
+    afterDispatch: async () => { throw new Error("settlement acknowledgement lost"); },
+    dispatchFailed: async () => { failureTransitions += 1; },
+  }), (error) => error.code === "billing_settlement_failed");
+  assert.equal(providerCalls, 1);
+  assert.equal(failureTransitions, 0);
 });
