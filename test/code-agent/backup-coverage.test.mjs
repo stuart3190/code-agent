@@ -315,19 +315,21 @@ test("authoritative migration identity is line-ending independent without changi
   assert.equal(canonicalSqlHash(lf), canonicalSqlHash(crlf));
 });
 
-test("backup migration evidence overlays the authoritative base through production ledger row 83", async () => {
+test("backup migration evidence overlays the authoritative base through production ledger row 84", async () => {
   const ledger = await loadMigrationLedgerEvidence();
-  assert.equal(ledger.migrations.length, 83);
+  // Row 84 is bv2_terminal_platform_failure_pool, applied under 20260916123552 (see versionDrift
+  // below) and confirmed applied in production on 2026-09-19.
+  assert.equal(ledger.migrations.length, 84);
   assert.deepEqual(ledger.migrations.slice(-2).map((migration) => migration.version), [
-    "20260823101752",
     "20260825105631",
+    "20260916120000",
   ]);
-  assert.equal(ledger.migrations.at(-1).appliedOrder, 83);
+  assert.equal(ledger.migrations.at(-1).appliedOrder, 84);
   assert.ok(ledger.migrations.slice(-2).every((migration) => migration.localCanonicalSqlSha256));
   // appliedOrder must stay a gapless sequence, or the overlay has lost or double-counted a push.
   assert.deepEqual(
     ledger.migrations.map((migration) => migration.appliedOrder),
-    Array.from({ length: 83 }, (_, index) => index + 1),
+    Array.from({ length: 84 }, (_, index) => index + 1),
   );
 });
 
@@ -336,21 +338,30 @@ test("migration history validation reports the effective applied ledger, not the
     fileURLToPath(new URL("../../ops/validate-migration-history.mjs", import.meta.url)),
   ], { encoding: "utf8" }));
   assert.equal(result.authoritativeBase, 60);
-  assert.equal(result.appliedOverlay, 23);
-  assert.equal(result.effectiveApplied, 83);
-  assert.equal(result.active, 83);
+  assert.equal(result.appliedOverlay, 24);
+  assert.equal(result.effectiveApplied, 84);
+  assert.equal(result.active, 87);
   // The overlay used to stop at 74 while production had gone on to 83, so this test asserted a
   // pending list that its own comment admitted was already applied. Every entry was verified
   // against supabase_migrations.schema_migrations on 2026-09-04 and recorded in the 2026-09-04
-  // overlay, so nothing is pending: the local history and the production ledger agree.
-  assert.deepEqual(result.pending, []);
-  // Four were pushed under an apply-time version that differs from the authored filename. Their SQL
+  // overlay; row 84 was confirmed applied on 2026-09-19.
+  //
+  // The three pending rows are the WP4/WP8/WP12 migrations: additive, idempotent, and deliberately
+  // NOT applied. They are pending because nobody has applied them, which is the honest state — and
+  // the reason their tables sit in PENDING_MIGRATION_TABLES rather than the live catalog.
+  assert.deepEqual(result.pending, [
+    { version: "20260918120000", name: "app_accounts_memberships" },
+    { version: "20260918140000", name: "app_settings_audit" },
+    { version: "20260919120000", name: "app_subscriptions" },
+  ]);
+  // Five were pushed under an apply-time version that differs from the authored filename. Their SQL
   // is identical to the ledger; only the version differs, and it is reported rather than hidden.
   assert.deepEqual(result.versionDrift, [
     { version: "20260822160000", appliedVersion: "20260822234502", name: "bv2_contract_envelopes_recovery_settlement" },
     { version: "20260822223523", appliedVersion: "20260822234552", name: "fix_bv2_pipeline_retry_durable_payload" },
     { version: "20260823101752", appliedVersion: "20260823110830", name: "bv2_owner_connected_recovery_transport" },
     { version: "20260825105631", appliedVersion: "20260825120326", name: "add_bv2_minimal_verifier_policy" },
+    { version: "20260916120000", appliedVersion: "20260916123552", name: "bv2_terminal_platform_failure_pool" },
   ]);
 });
 
