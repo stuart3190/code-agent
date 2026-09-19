@@ -16,9 +16,15 @@ const KNOWN_GREEN_V2_BASELINE = "4785cb53dde39bf09d0dc2e5d12d98e62a0b0b81";
 
 test("PR-01 — the implementation branch descends from the known-green V2 baseline", () => {
   const state = collectGitBaseline(ROOT);
-  assert.equal(state.originMain, AUDITED_MAIN_COMMIT);
-  assert.equal(state.matchesAuditedCommit, true);
-  assert.ok(state.branch, "validation must run on a named integration branch");
+  assert.ok(state.branch, "validation must run on a named branch");
+  // The audited pin says which main an INTEGRATION BRANCH was validated against. On main itself
+  // origin/main is the thing under test, so asserting it equals a constant written inside that
+  // same commit is a tautology that can never hold — and would force a stale pin on every push.
+  // The ancestry check below is the claim that still means something everywhere.
+  if (!state.matchesOriginMain) {
+    assert.equal(state.originMain, AUDITED_MAIN_COMMIT);
+    assert.equal(state.matchesAuditedCommit, true);
+  }
   execFileSync("git", ["merge-base", "--is-ancestor", KNOWN_GREEN_V2_BASELINE, "HEAD"], {
     cwd: ROOT, stdio: "ignore",
   });

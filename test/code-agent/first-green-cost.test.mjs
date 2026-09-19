@@ -177,8 +177,13 @@ test("R3 — Builder V2 keeps its shared system prefix separate from stage-varyi
   const source = readFileSync("shell/server/lib/builderV2/modelLanes.mjs", "utf8");
   assert.match(source, /const PATCH_SYSTEM_PROMPT = `/,
     "the immutable implementation rules have one shared definition");
-  assert.match(source, /const fullSystemPrompt = `\$\{PATCH_SYSTEM_PROMPT\}[\s\S]*\$\{capabilityBrief\(\)\}`/,
-    "each patch turn reuses the shared rules and canonical capability catalogue");
+  // The shared prefix lives in coreSystemPrompt(), which is what every patch turn starts from.
+  // Pinning the old inline template made moving it into a named function look like a violation,
+  // which is the opposite of the rule: one definition, reused everywhere.
+  assert.match(source, /export function coreSystemPrompt\(\)[\s\S]*\$\{PATCH_SYSTEM_PROMPT\}[\s\S]*\$\{capabilityBrief\(\)\}/,
+    "the shared rules and canonical capability catalogue have one definition");
+  assert.match(source, /const fullSystemPrompt = coreSystemPrompt\(\);/,
+    "each patch turn reuses it rather than assembling its own");
   assert.match(source, /let systemPrompt = fullSystemPrompt;/,
     "a turn starts from the canonical prefix");
   // The point is not how many prefixes there are - a compile correction has since earned its
