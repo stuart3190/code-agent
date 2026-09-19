@@ -11,7 +11,7 @@ import {
   ACTION_INTENT, actionIntents, commencesSomething, phraseIntentMatches, progressesSomething,
 } from "./actionIntent.mjs";
 import { aggregateCapabilityFacts, FACTORY_METHODS } from "./capabilityLint.mjs";
-import { CAPABILITIES } from "./capabilityRegistry.mjs";
+import { CAPABILITIES, canonicalCapabilityId } from "./capabilityRegistry.mjs";
 import { bindCapabilities, deriveModulePlan } from "./contractTiering.mjs";
 import {
   IDENTITY_STOP_WORDS, identityMatches, semanticAliases, semanticKey, semanticQualifier,
@@ -64,7 +64,7 @@ export function draftStateOwner(bindings = []) {
 }
 
 const SOURCE = /^src\/.*\.(?:jsx?|tsx?)$/;
-const PLATFORM = /^src\/lib\/(?:capabilities\/|backend\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
+const PLATFORM = /^src\/lib\/(?:capabilities\/|backend\/|modules\/|app\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
 const AST_SKIP = new Set(["loc", "start", "end", "extra", "errors", "comments", "tokens"]);
 const STOP = IDENTITY_STOP_WORDS;
 
@@ -2213,10 +2213,17 @@ export function validateInteractionContract(plan, { capabilityGraph = null, oper
         ...(!flow.persistenceHandoff && !flow.persistenceSource && types.has("persistence")
           ? ["persistenceRelationship"] : []),
       );
+      // A registered capability method that declares no required inputs (session signOut, a
+      // parameterless lookup) is complete without reads: the registry, not the prose, says what it
+      // consumes. Before WP2 typed sign-out as a session operation, retained contracts satisfied
+      // this rule only by reading a fake session field.
+      const methodNeedsInputs = (flow.capabilityId && flow.capabilityMethod)
+        ? (CAPABILITIES[canonicalCapabilityId(flow.capabilityId) || flow.capabilityId]?.requiredInputs?.operations?.[flow.capabilityMethod] || []).length > 0
+        : true;
       if (types.has("capability_functional")) missingFields.push(
         ...(!flow.capabilityId ? ["capabilityId"] : []),
         ...(!flow.capabilityMethod ? ["capabilityMethod"] : []),
-        ...(!(flow.reads || []).length ? ["reads"] : []),
+        ...(!(flow.reads || []).length && methodNeedsInputs ? ["reads"] : []),
         ...(!(flow.writes || []).length ? ["writes"] : []),
       );
       if (types.size === 1 && types.has("persistence")) missingFields.push(

@@ -9,7 +9,7 @@ import path from "node:path";
 import { parse } from "@babel/parser";
 
 const GENERATED_FILE = /^src\/.*\.(?:jsx?|tsx?)$/;
-const PLATFORM_PATH = /^src\/lib\/(?:capabilities\/|backend\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
+const PLATFORM_PATH = /^src\/lib\/(?:capabilities\/|backend\/|modules\/|app\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
 const AST_KEYS_TO_SKIP = new Set(["loc", "start", "end", "extra", "errors", "comments", "tokens"]);
 
 function walk(node, visit, parent = null) {

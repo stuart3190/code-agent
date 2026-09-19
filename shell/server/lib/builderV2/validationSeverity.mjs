@@ -41,6 +41,10 @@ export const BLOCKING_CODES = Object.freeze({
   scaffold_composition_invalid: "the protected scaffold graph, router, or mounted screen contract is broken",
   journey_surface_unreachable: "contracted implementation exists but cannot be reached from the mounted application",
   custom_extension_invalid: "a bounded custom extension is missing, unexported, disconnected, or called without its declared semantic inputs",
+  // WP3: the public ABI is the boundary the module lock certifies. A locked tree whose generated
+  // code reaches past it (backend SDK, visitor session, module internals) is not the application
+  // the lock describes.
+  private_platform_import: "generated code on a locked tree imports a private platform path instead of the public application facade",
 
   // ── honesty: the app would appear to work while losing customer data ──
   forbidden_persistence: "browser/process-local storage is holding contracted durable business state",
@@ -83,6 +87,20 @@ export const ADVISORY_CODES = Object.freeze({
   // blocking rejected 7 of 7. The binding inference is not accurate enough to gate a build: a
   // correct app may bind through a wrapper, a store, a loop, or a component this walker cannot
   // follow. Reported, therefore, and not enforced — until that suite scores zero.
+  // WP3: on a tree that predates the module lock, a private platform import is reported, not
+  // enforced — retained candidates and legacy snapshots keep judging exactly as they did.
+  private_platform_import_legacy: "a legacy (unlocked) tree imports a private platform path; reported so the migration can measure it",
+  // WP5: the entities module owns identity and record shape. A generated wrapper that re-derives
+  // them from raw rows still runs, so the browser decides; it is reported so repair can replace
+  // the wrapper with the module's record instead of patching it.
+  generated_record_shape_wrapper: "generated code re-derives record shape from raw backend rows where the entities module owns it",
+  // WP6: a literal ":param" destination navigates to the pattern rather than a record. Reported,
+  // not enforced: the browser journey proves whether the link opens the right record.
+  route_parameter_literal: "a generated destination carries an unbound route parameter instead of a built href",
+  // WP7: the query module refuses an undeclared field at runtime, which is the real boundary.
+  // Reported here so the gap is named before the browser shows an empty list.
+  query_field_not_declared: "a generated collection filters on a field the entity schema does not declare",
+  generated_session_orchestration: "generated code drives the session directly where the identity module owns it; the browser decides whether the surface still works",
   contract_control_unbound: "a contracted control appears hand-wired; verification may not be able to address it",
   contract_control_missing: "no element in the tree names this contracted control",
   contract_control_coverage_undetermined: "the tree binds controls dynamically, so coverage cannot be decided offline",

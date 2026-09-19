@@ -29,6 +29,11 @@ import { createAssetService } from "./assets/assetService.mjs";
 import { createOptimiser } from "./assets/optimiser.mjs";
 import { pexelsProvider } from "./assets/pexelsProvider.mjs";
 import { persistContract, tierContract } from "./contractTiering.mjs";
+import {
+  accountPolicyFromContract, persistAppAccountPolicy, persistAppAuditConfig,
+} from "../appAccounts/accountPolicyStore.mjs";
+import { deriveSettingsPlan } from "./platformModules/settingsPlan.mjs";
+import { availabilityFromEnv } from "./platformModules/availability.mjs";
 import { contractWorkflowRecoveryAuthority } from "./contractStageBudget.mjs";
 import { compareGraphIndexes, manifestOf } from "./graphParity.mjs";
 import { indexTree, INDEXER_VERSION } from "./indexer.mjs";
@@ -676,6 +681,23 @@ export function createBuilderV2Runtime({
           const stored = await persistContract(eventOwner, eventProject, {
             buildId, contract, tiers, bindings, intents,
           }, { client });
+          // WP4: the account policy the app-accounts service enforces for this application is the
+          // typed contract's — declared roles and profile fields — recorded beside the contract.
+          // The table is optional on a deployment; an absent one is reported once, never fatal.
+          // WP8: the same record carries the settings keys the service may accept a write for,
+          // and the audit configuration decides whether history is captured at all. Neither is
+          // inferred at request time: a key the build never declared cannot be written.
+          const settingsPlan = deriveSettingsPlan(contract);
+          const requirements = contract?.ownership?.platformRequirements || [];
+          if (requirements.some((row) => ["accounts", "settings"].includes(row?.type))) {
+            await persistAppAccountPolicy(eventProject, accountPolicyFromContract(contract, { settingsPlan }), { client })
+              .catch((error) => log(`account policy persist skipped: ${error.message}`));
+          }
+          if (settingsPlan.audit.enabled || requirements.some((row) => row?.type === "audit")) {
+            await persistAppAuditConfig(eventProject, {
+              enabled: true, sensitiveFields: settingsPlan.audit.sensitiveFields,
+            }, { client }).catch((error) => log(`audit config persist skipped: ${error.message}`));
+          }
           await recordFacts(eventOwner, eventProject, [
             {
               kind: "contract_ref", key: "current", sourceBuild: buildId,
@@ -898,6 +920,10 @@ export function createBuilderV2Runtime({
         }));
       const orchestrator = createOrchestrator({
         ...lanes, assetService, snapshotStore, buildStore: supabaseBuildStore(client),
+        // WP1/WP4: a live build resolves modules against what THIS deployment declares (env),
+        // never against what the source happens to ship. An undeclared service blocks before
+        // generation with a configuration-required result.
+        moduleAvailability: availabilityFromEnv(process.env),
         verificationCache: supabaseVerificationCache(client),
         verificationContext: {
           // Cache PASS evidence against both the exact verifier bytes the sandbox proved it is

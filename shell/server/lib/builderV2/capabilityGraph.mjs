@@ -308,6 +308,10 @@ function deriveOperationResponsibilities(operation, journey, flows, contract) {
   return {
     operationId: operationIdentity(operation), journeyId: journey.id, entity: operation.entity || null,
     stepIndex, responsibilities,
+    // WP2: typed ownership travels with the responsibility row so the execution specification,
+    // the static gates and repair attribution all read the same owner and platform value type.
+    owner: operation.owner || null, module: operation.module || null,
+    moduleOperation: operation.moduleOperation || null, output: operation.output || null,
   };
 }
 const factoryCapability = new Map(Object.entries(CAPABILITIES).flatMap(([id, capability]) =>

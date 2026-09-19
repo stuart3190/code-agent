@@ -16,6 +16,9 @@ export const PROTECTED_PATHS = Object.freeze([
   /^src\/lib\/visitorSession\.js$/,
   /^src\/lib\/capabilities\//,
   /^src\/lib\/scaffolds\/composed\//,
+  // WP3+: platform module runtime and the composed public application facade.
+  /^src\/lib\/modules\//,
+  /^src\/lib\/app\//,
 ]);
 
 // The strict tool schema the orchestrator will register (strict tools proven since P18:

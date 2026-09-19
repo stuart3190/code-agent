@@ -46,6 +46,10 @@ export function sourceContractDigest(contract) {
     journeys: sourceJourneys(contract),
     interactions: sourceInteractions(contract),
     scaffoldGraph: contract?.scaffoldGraph,
+    // WP1: a contract compiled against a module lock is a different specification from the same
+    // contract compiled against another lock — evidence must not survive a module upgrade. Legacy
+    // contracts carry no lock and keep their historical digests unchanged.
+    ...(contract?.moduleLock ? { moduleLock: contract.moduleLock } : {}),
   });
 }
 

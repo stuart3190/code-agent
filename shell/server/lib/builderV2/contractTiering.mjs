@@ -22,6 +22,7 @@ export const FORBIDDEN_DURABLE_PERSISTENCE = Object.freeze([
 ]);
 
 const normalized = (value) => String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+const unique = (values) => [...new Set((values || []).filter(Boolean))];
 const featureText = (contract) => [
   ...(contract?.journeys || []).map((journey) => `${journey.id} ${journey.title}`),
   ...(contract?.routes || []).map((route) => `${route.path} ${route.name}`),
@@ -161,6 +162,24 @@ export function bindCapabilities(contract) {
     bindings.push(capabilityBinding("contact", { entity }, ["submitContact"]));
   }
   if (contract?.auth?.required) bindings.push(capabilityBinding("roles"));
+
+  // WP4: platform requirements the typed contract resolved to the accounts, authorization and
+  // admin modules become bindings, with the module operations the contract's operations name.
+  const requirements = (contract?.ownership?.platformRequirements || [])
+    .filter((row) => row?.status === "resolved" && row?.module);
+  const moduleMethods = (moduleId) => unique((contract?.operations || []).flatMap((operation) => [
+    ...(operation?.module === moduleId && operation?.moduleOperation ? [operation.moduleOperation] : []),
+    ...(operation?.moduleBindings || []).filter((binding) => binding.module === moduleId).map((binding) => binding.operation),
+  ]).filter(Boolean));
+  if (requirements.some((row) => row.type === "accounts")) {
+    bindings.push(capabilityBinding("accounts", null, unique(["getMe", ...moduleMethods("thrallo.accounts")])));
+  }
+  if (requirements.some((row) => row.type === "authorization" || row.type === "admin")) {
+    bindings.push(capabilityBinding("authorization", null, ["can"]));
+  }
+  if (requirements.some((row) => row.type === "admin")) {
+    bindings.push(capabilityBinding("admin", null, unique(["listMembers", ...moduleMethods("thrallo.admin")])));
+  }
 
   const check = validateBindings(bindings);
   if (!check.ok) throw new Error(`capability binding failed: ${check.problems.join("; ")}`);

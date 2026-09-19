@@ -43,7 +43,7 @@ const FACTORY_PROPERTIES = Object.freeze({
 const GENERATED_FILE = /^src\/.*\.(jsx?|tsx?)$/;
 // Only immutable scaffold/runtime modules are exempt. Generated helper modules commonly live in
 // src/lib and must still be inspected; exempting the whole directory created a trivial bypass.
-const PLATFORM_PATH = /^src\/lib\/(?:capabilities\/|backend\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
+const PLATFORM_PATH = /^src\/lib\/(?:capabilities\/|backend\/|modules\/|app\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
 
 // The monolith tax (WP-10 variance): a whole-app-in-one-file page makes every future edit
 // carry the whole app as context (~8k tokens/round measured live). Generous cap — real

@@ -83,7 +83,12 @@ function screensFor(contract) {
   });
 }
 
-function selectedFamilies(contract, capabilityGraph) {
+/**
+ * Which scaffold families this contract selects. Exported since WP9: the platform-module
+ * selection needs the SAME answer the scaffold graph will reach, and deriving it twice from the
+ * same inputs is exactly the drift buildSpec exists to end.
+ */
+export function selectedFamilies(contract, capabilityGraph) {
   const capabilities = requiredCapabilityIds(capabilityGraph);
   const availableCapabilities = capabilityIds(capabilityGraph);
   const methods = operationMethods(capabilityGraph);

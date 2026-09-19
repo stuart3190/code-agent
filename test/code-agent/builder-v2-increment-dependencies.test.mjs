@@ -49,7 +49,10 @@ test("increment schema scope includes cross-entity reads and transitive relation
   assert.deepEqual(entitiesForOperations(contract, contract.operations).map((entity) => entity.name), expected);
   const scoped = scopeBuildSpec(deriveBuildSpec(contract), contract.journeys);
   assert.deepEqual(scoped.entities.map((entity) => entity.name), expected);
-  assert.deepEqual(scoped.operations, contract.operations, "schema dependencies must not expand feature ownership");
+  // The typed spec adds owner/output to every operation (WP2); the SET of operations is the claim.
+  assert.deepEqual(scoped.operations.map((operation) => operation.id), contract.operations.map((operation) => operation.id),
+    "schema dependencies must not expand feature ownership");
+  for (const operation of scoped.operations) assert.ok(operation.owner && operation.output?.type, `${operation.id} is typed`);
 });
 
 test("qualified reads disambiguate shared fields and relationship cycles terminate", () => {
