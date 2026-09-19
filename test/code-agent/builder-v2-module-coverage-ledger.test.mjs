@@ -35,6 +35,8 @@ import { PLATFORM_STATE_SERVICE_VERSION } from "../../supabase/functions/app-acc
 import { BEHAVIOUR_PLAN_VERSION } from "../../shell/server/lib/builderV2/platformModules/behaviourPlan.mjs";
 import { DELIVERY_PLAN_VERSION } from "../../shell/server/lib/builderV2/platformModules/deliveryPlan.mjs";
 import { INSIGHT_PLAN_VERSION } from "../../shell/server/lib/builderV2/platformModules/insightPlan.mjs";
+import { BILLING_PLAN_VERSION } from "../../shell/server/lib/builderV2/platformModules/billingPlan.mjs";
+import { BILLING_SERVICE_VERSION } from "../../supabase/functions/app-accounts/billingService.mjs";
 import { CAPABILITIES } from "../../shell/server/lib/builderV2/capabilityRegistry.mjs";
 import { SCAFFOLDS, SCAFFOLD_REGISTRY_VERSION } from "../../shell/server/lib/builderV2/scaffoldRegistry.mjs";
 import { RUNTIME_CAPABILITY_OPERATIONS } from "../../shell/server/lib/capabilityRuntime.mjs";
@@ -125,6 +127,8 @@ test("WP0 — the baseline formats stay frozen and every live format equals the 
     behaviourPlan: BEHAVIOUR_PLAN_VERSION,
     deliveryPlan: DELIVERY_PLAN_VERSION,
     insightPlan: INSIGHT_PLAN_VERSION,
+    billingPlan: BILLING_PLAN_VERSION,
+    billingService: BILLING_SERVICE_VERSION,
   }, CURRENT_FORMAT_VERSIONS);
 });
 

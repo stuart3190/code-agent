@@ -227,3 +227,24 @@ export function useExportState(controller, id, { filters = {}, format = null } =
     },
   }), [state, controller, id, JSON.stringify(filters), format]);
 }
+
+/**
+ * WP12 — billing and entitlements. Every declared feature is decided once from the server's
+ * subscription state, so a screen never re-derives gating per element, and a denial carries the
+ * reason and the plans that would allow it rather than an unexplained disabled control.
+ */
+export function useBillingState(controller, { reloadOnMount = true } = {}) {
+  const state = useCapabilityState(controller);
+  useEffect(() => { if (reloadOnMount) void controller.load(); }, [controller, reloadOnMount]);
+  return useMemo(() => ({
+    status: state?.status || "idle", error: state?.error || null,
+    subscription: state?.subscription || null, plan: state?.plan || null,
+    entitlements: state?.entitlements || {},
+    catalogue: controller.catalogue,
+    can: (feature) => controller.can(feature),
+    remaining: (limit) => controller.remaining(limit),
+    checkout: (planId, options) => controller.checkout(planId, options),
+    portal: (options) => controller.portal(options),
+    reload: () => controller.load(),
+  }), [state, controller]);
+}

@@ -505,6 +505,9 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     async settings({ scope = "app", target = null } = {}) { return (await accountsPost("settings", { scope, target })).values; },
     async setSetting({ key, value, target = null } = {}) { return accountsPost("setSetting", { key, value, target }); },
     async history(query = {}) { return accountsPost("history", query); },
+    // WP12 — the subscription state the server derived from the provider events it applied. An
+    // application reads it; it can never write it, which is what makes an entitlement worth anything.
+    async subscription({ subject = null } = {}) { return accountsPost("subscription", { subject }); },
   };
   const knowledge = { async search(actionKey, query, options = {}) {
     const job = await actions.invoke(actionKey, { query, ...options }); return actions.wait(job.id);

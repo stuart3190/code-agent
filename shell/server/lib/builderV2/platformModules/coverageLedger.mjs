@@ -65,6 +65,8 @@ export const CURRENT_FORMAT_VERSIONS = Object.freeze({
   behaviourPlan: 1,      // WP9: new — declared workflow graphs, workspace roots and editor surfaces
   deliveryPlan: 1,       // WP10: new — declared file policy, notification events and realtime topics
   insightPlan: 1,        // WP11: new — declared telemetry events, domain metrics and exports
+  billingPlan: 1,        // WP12: new — declared plan catalogue and entitlements
+  billingService: 1,     // WP12: new — app_subscriptions/app_billing_events lifecycle
 });
 
 /** The immutable snapshot row as written by snapshotStore.createSnapshot(). */

@@ -29,13 +29,14 @@ const kindOf = (operation) => String(operation?.kind || operation?.type || opera
  * @param {object} [options.settingsPlan] derived settings/audit plan (WP8)
  * @param {object} [options.deliveryPlan] derived files/notifications/realtime plan (WP10)
  * @param {object} [options.insightPlan] derived telemetry/metrics/exports plan (WP11)
+ * @param {object} [options.billingPlan] derived plan catalogue and entitlements (WP12)
  * @param {object} [options.capabilityGraph] the derived capability graph, for scaffold-family
  *   selection (WP9). The families are asked for here rather than re-derived, so the modules a
  *   build locks and the families it composes can never disagree.
  * @param {object} [options.registry]
  * @returns {Array<{id: string, range: string, reason: string}>}
  */
-export function platformModuleRequests(contract, { entitySchema = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null, capabilityGraph = null, registry = MODULE_REGISTRY } = {}) {
+export function platformModuleRequests(contract, { entitySchema = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null, billingPlan = null, capabilityGraph = null, registry = MODULE_REGISTRY } = {}) {
   const operations = contract?.operations || [];
   const durableEntities = entitySchema?.entities || [];
   const requests = [];
@@ -91,6 +92,12 @@ export function platformModuleRequests(contract, { entitySchema = null, settings
   if ((insightPlan?.telemetry?.events || []).length) request("thrallo.analyticsEvents", "the contract asks to measure product usage");
   if ((insightPlan?.metrics || []).length) request("thrallo.analyticsQueries", "the contract asks for totals over durable records");
   if ((insightPlan?.exports || []).length) request("thrallo.exports", "an operation produces a downloadable artifact");
+  // WP12 — billing is requested only where the contract declares a plan catalogue. Guessing
+  // here would decide what a customer's customers are charged.
+  if ((billingPlan?.plans || []).length || billingPlan?.catalogueEntity) {
+    request("thrallo.billing", billingPlan.source === "contract.billing.plans"
+      ? "the contract declares a plan catalogue" : `the contract declares ${billingPlan.source}`);
+  }
   void behaviourPlan;
 
   return requests;

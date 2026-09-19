@@ -866,12 +866,45 @@ const EXPORTS_MODULE = platformModule({
   proof: "test/code-agent/builder-v2-analytics-exports.test.mjs",
 });
 
+// WP12 — billing and entitlements. The module reads; it never decides what someone paid. The
+// subscription state comes from the server, which applied the provider's events idempotently and
+// in the provider's own order, so a client-held plan field can no longer grant anything.
+const BILLING_MODULE = platformModule({
+  id: "thrallo.billing", version: "1.0.0", title: "Billing/entitlements",
+  clientAbi: "billing@1", services: ["backend_sdk", "app_auth", "payments", "accounts"],
+  requires: [{ id: "thrallo.identity", range: "^1.2.0" }, { id: "thrallo.authorization", range: "^1.1.0" }],
+  operations: [
+    clientOperation({ id: "entitlement", stateOwner: "entitlements", errors: ["billing_feature_unknown"], hooks: ["a denial names the reason and the plans that would allow it"] }),
+    clientOperation({ id: "limit", stateOwner: "entitlements", errors: ["billing_limit_reached"], hooks: ["a limit counts what is stored, not what a button shows"] }),
+    clientOperation({ id: "checkout", effect: "external", stateOwner: "subscription", errors: ["billing_plan_unknown", "billing_unavailable"], hooks: ["an undeclared plan cannot be bought"] }),
+    clientOperation({ id: "subscriptionStatus", stateOwner: "subscription", errors: ["billing_unavailable"], hooks: ["the lifecycle is a status, never a boolean"] }),
+  ],
+  entrypoints: [
+    { module: "src/lib/modules/billing.js", exports: ["compilePlans", "createBilling", "evaluateEntitlement", "evaluateLimit", "SUBSCRIPTION_STATUS", "BillingError"] },
+    { module: "src/lib/modules/uiReact.js", exports: ["useBillingState"] },
+    { module: "src/lib/capabilities/composed/billing.js", exports: ["billing", "planCatalogue"], composed: true },
+    { module: "src/lib/app/billing.js", exports: ["useBilling", "planCatalogue"], composed: true },
+  ],
+  artifacts: [
+    { path: "src/lib/modules/billing.js", kind: "runtime" },
+    { path: "src/lib/capabilities/composed/billing.js", kind: "composed" },
+    { path: "src/lib/app/billing.js", kind: "composed" },
+  ],
+  surfaceBindings: [
+    { state: "loading", required: true }, { state: "ready", required: true },
+    { state: "denied", required: true }, { state: "error", required: true },
+  ],
+  deterministicTests: ["idempotent webhook", "out-of-order event ignored", "lifecycle statuses", "limit enforced at the mutation", "unknown plan and feature refused"],
+  browserEvidence: ["a paid feature is unavailable on the free plan and says which plan has it", "a cancelled subscription keeps access until the period it paid for ends"],
+  proof: "test/code-agent/builder-v2-billing-entitlements.test.mjs",
+});
+
 const MODULES = [
   CORE_MODULE, ...LEGACY_WRAPPED.map(legacyCapabilityModule), IDENTITY_1_2, ACCOUNTS_MODULE, AUTHORIZATION_1_1,
   ADMIN_MODULE, ENTITIES_1_1, ROUTING_MODULE, QUERY_MODULE, FORMS_1_1, ASYNC_MODULE, SETTINGS_MODULE, AUDIT_MODULE,
   WORKFLOW_1_1, BOOKING_1_1, WORKSPACE_MODULE, EDITOR_MODULE,
   FILES_MODULE, NOTIFICATIONS_MODULE, REALTIME_MODULE,
-  ANALYTICS_EVENTS_MODULE, ANALYTICS_QUERIES_MODULE, EXPORTS_MODULE,
+  ANALYTICS_EVENTS_MODULE, ANALYTICS_QUERIES_MODULE, EXPORTS_MODULE, BILLING_MODULE,
 ];
 
 /** id → every registered version of that module, highest last. */

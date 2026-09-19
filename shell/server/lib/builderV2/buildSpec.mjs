@@ -47,6 +47,7 @@ import { deriveSettingsPlan } from "./platformModules/settingsPlan.mjs";
 import { deriveBehaviourPlan } from "./platformModules/behaviourPlan.mjs";
 import { deriveDeliveryPlan } from "./platformModules/deliveryPlan.mjs";
 import { deriveInsightPlan } from "./platformModules/insightPlan.mjs";
+import { deriveBillingPlan } from "./platformModules/billingPlan.mjs";
 import { platformModuleRequests } from "./platformModules/selection.mjs";
 import {
   normalizeContractOwnership, ownershipProblems, ownershipWarnings,
@@ -134,7 +135,9 @@ export function deriveBuildSpec(rawContract, { userCritical = [], journeys = nul
   const deliveryPlan = deriveDeliveryPlan(plannedContract, { entitySchema });
   // WP11: the telemetry events, domain metrics and exports this contract declares.
   const insightPlan = deriveInsightPlan(plannedContract, { entitySchema });
-  const requestedModules = platformModuleRequests(plannedContract, { entitySchema, settingsPlan, behaviourPlan, deliveryPlan, insightPlan, capabilityGraph });
+  // WP12: the plan catalogue and entitlements this contract declares, if any.
+  const billingPlan = deriveBillingPlan(plannedContract, { entitySchema });
+  const requestedModules = platformModuleRequests(plannedContract, { entitySchema, settingsPlan, behaviourPlan, deliveryPlan, insightPlan, billingPlan, capabilityGraph });
   const moduleResolution = resolveModules({
     bindings: moduleBindings, requestedModules, availability: availability || baselineDeploymentAvailability(),
   });
@@ -153,7 +156,7 @@ export function deriveBuildSpec(rawContract, { userCritical = [], journeys = nul
   // a composition plan from the graph alone renders the same files (the static gate, the module
   // conformance validator and the execution specification all do exactly that).
   scaffoldGraph.routePlan = routePlan;
-  const compositionPlan = capabilityCompositionPlan(capabilityGraph, { moduleLock, identityPlan, entitySchema, routePlan, settingsPlan, behaviourPlan, deliveryPlan, insightPlan });
+  const compositionPlan = capabilityCompositionPlan(capabilityGraph, { moduleLock, identityPlan, entitySchema, routePlan, settingsPlan, behaviourPlan, deliveryPlan, insightPlan, billingPlan });
   const finalModulePlan = scaffoldModulePlan(scaffoldGraph, modulePlan);
   const finalInteractionContract = bindInteractionModulePlan(interactionContract, finalModulePlan);
   const scaffoldPlan = scaffoldCompositionPlan(scaffoldGraph);
@@ -199,6 +202,7 @@ export function deriveBuildSpec(rawContract, { userCritical = [], journeys = nul
     behaviourPlan,
     deliveryPlan,
     insightPlan,
+    billingPlan,
     dependencyPlan,
     modulePlan: finalModulePlan,
     interactionContract: finalInteractionContract,
@@ -292,7 +296,7 @@ export function scopeBuildSpec(spec, journeys = []) {
     modulePlan,
     interactionContract,
     capabilityGraph,
-    compositionPlan: capabilityCompositionPlan(capabilityGraph, { moduleLock: spec.moduleLock || null, identityPlan: spec.identityPlan || null, entitySchema: spec.entitySchema || null, routePlan: spec.routePlan || null, settingsPlan: spec.settingsPlan || null, behaviourPlan: spec.behaviourPlan || null, deliveryPlan: spec.deliveryPlan || null, insightPlan: spec.insightPlan || null }),
+    compositionPlan: capabilityCompositionPlan(capabilityGraph, { moduleLock: spec.moduleLock || null, identityPlan: spec.identityPlan || null, entitySchema: spec.entitySchema || null, routePlan: spec.routePlan || null, settingsPlan: spec.settingsPlan || null, behaviourPlan: spec.behaviourPlan || null, deliveryPlan: spec.deliveryPlan || null, insightPlan: spec.insightPlan || null, billingPlan: spec.billingPlan || null }),
     scaffoldGraph,
     scaffoldCompositionPlan: scaffoldCompositionPlan(scaffoldGraph),
     moduleContracts: buildModuleGenerationContracts({

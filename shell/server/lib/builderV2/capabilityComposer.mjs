@@ -668,6 +668,48 @@ export function useExport(id, options = {}) { return useExportState(exportContro
   return { files, interfaces, facades };
 }
 
+// WP12: the declared plan catalogue and its entitlements.
+export const BILLING_COMPOSED_PATH = `${COMPOSED_ROOT}/billing.js`;
+export const APP_FACADE_BILLING_PATH = `${APP_FACADE_ROOT}/billing.js`;
+
+function billingFiles(billingPlan) {
+  const files = {};
+  const interfaces = [];
+  const facades = [];
+  const plans = billingPlan?.plans || [];
+  if (!plans.length) return { files, interfaces, facades };
+
+  files[BILLING_COMPOSED_PATH] = `${banner("billing")}import { accounts, payments } from "../../backend/index.js";
+import { compilePlans, createBilling } from "../../modules/billing.js";
+
+/** The declared plan catalogue. A plan nobody declared cannot be bought or granted. */
+export const planCatalogue = compilePlans(${jsObject(plans)});
+
+/**
+ * Entitlements are read from the SERVER's subscription state. A plan field an application could
+ * write would be a plan anybody could write, so nothing here consults one.
+ */
+export const billing = createBilling({
+  catalogue: planCatalogue,
+  transport: {
+    status: () => accounts.subscription(),
+    checkout: (options) => payments.checkout(options),
+  },
+});
+`;
+  interfaces.push({ module: BILLING_COMPOSED_PATH, exports: ["billing", "planCatalogue"],
+    owns: ["entitlements", "subscription"], operations: ["entitlement", "limit", "checkout", "subscriptionStatus"] });
+  files[APP_FACADE_BILLING_PATH] = `${banner("public billing ABI")}import { billing, planCatalogue } from "../capabilities/composed/billing.js";
+import { useBillingState } from "../modules/uiReact.js";
+
+export { billing, planCatalogue };
+/** { plan, status, entitlements, can, checkout } — every denial carries its reason. */
+export function useBilling(options = {}) { return useBillingState(billing, options); }
+`;
+  facades.push("billing");
+  return { files, interfaces, facades };
+}
+
 function facadeIndexSource(moduleLock, facadeModules) {
   return `${banner("public application ABI")}// The one import surface for generated application code. Everything here is deterministic and
 // protected; layout, styling, copy and domain logic remain entirely the application's.
@@ -681,7 +723,7 @@ export const THRALLO_APP_ABI = Object.freeze(${jsObject({
 `;
 }
 
-function capabilityFiles(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null } = {}) {
+function capabilityFiles(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null, billingPlan = null } = {}) {
   const nodes = new Map((graph?.nodes || []).map((node) => [node.id, node]));
   const files = {};
   const interfaces = [];
@@ -834,6 +876,12 @@ export const newsletterCapability = makeNewsletter({ entity: ${quote(entity)} })
       interfaces.push(...insight.interfaces);
       facades.push(...insight.facades);
     }
+    const billing = billingFiles(billingPlan);
+    if (Object.keys(billing.files).length) {
+      Object.assign(files, billing.files);
+      interfaces.push(...billing.interfaces);
+      facades.push(...billing.facades);
+    }
     files[APP_FACADE_INDEX_PATH] = facadeIndexSource(moduleLock, facades);
   }
   if (moduleLock) files[MODULE_LOCK_PATH] = lockFileSource(moduleLock);
@@ -857,8 +905,8 @@ export { CAPABILITY_COMPOSITION } from "./manifest.js";
   return { files, interfaces };
 }
 
-export function capabilityCompositionPlan(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null } = {}) {
-  const rendered = capabilityFiles(graph, { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan, deliveryPlan, insightPlan });
+export function capabilityCompositionPlan(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null, billingPlan = null } = {}) {
+  const rendered = capabilityFiles(graph, { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan, deliveryPlan, insightPlan, billingPlan });
   const extensionPoints = (graph?.nodes || []).filter((node) => node.type === "custom_behavior")
     .map((node) => ({ id: node.id, ...node.extension, inputs: node.requiredInputs, outputs: node.outputs,
       stateOwnership: node.stateOwnership, persistenceSemantics: node.persistenceSemantics }));
@@ -877,7 +925,7 @@ export function capabilityCompositionPlan(graph, { moduleLock = null, identityPl
 }
 
 /** Apply or refresh the foundation. Existing model-owned extension configuration is preserved. */
-export function composeCapabilityFoundation(tree, graph, { moduleLock = null, identityPlan = null, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null } = {}) {
+export function composeCapabilityFoundation(tree, graph, { moduleLock = null, identityPlan = null, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null, billingPlan = null } = {}) {
   // Production Builder V2 starts from the full React/Vite scaffold. Some retained unit/legacy
   // baselines intentionally predate the capability runtime; do not emit adapters with dangling
   // imports into those trees. They remain on the migration-compatible path until refreshed from
@@ -896,7 +944,7 @@ export function composeCapabilityFoundation(tree, graph, { moduleLock = null, id
   // A base tree without the module runtime (a legacy snapshot, a retained fixture) composes the
   // capability adapters exactly as before and simply does not receive the identity controller.
   const identityRuntime = typeof tree?.[IDENTITY_RUNTIME_PATH] === "string";
-  const options = { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan, deliveryPlan, insightPlan };
+  const options = { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan, deliveryPlan, insightPlan, billingPlan };
   const rendered = capabilityFiles(graph, options);
   const next = { ...(tree || {}), ...rendered.files };
   if (typeof next[CAPABILITY_CONFIGURATION_PATH] !== "string") {
