@@ -38,6 +38,8 @@ const CAPABILITY_MODULE_IDS = Object.freeze({
   // WP8
   settings: "thrallo.settings",
   audit: "thrallo.audit",
+  // WP15
+  query: "thrallo.query",
 });
 
 const REQUIRED_SERVICES = Object.freeze({
@@ -437,7 +439,7 @@ const ROUTING_MODULE = platformModule({
 // WP7 — the query, form and async-state runtimes. Each replaces a category of repeated generated
 // controller work (audit §5) and is selected from the contract's structure, not from a capability.
 const QUERY_MODULE = platformModule({
-  id: "thrallo.query", version: "1.0.0", title: "Query/collections",
+  id: "thrallo.query", version: "1.0.0", title: "Query/collections", capabilities: ["query"],
   clientAbi: "query@1",
   requires: [{ id: "thrallo.entities", range: "^1.1.0" }],
   operations: [
@@ -899,12 +901,134 @@ const BILLING_MODULE = platformModule({
   proof: "test/code-agent/builder-v2-billing-entitlements.test.mjs",
 });
 
+// WP13 — jobs, scheduling and integrations.
+const JOBS_MODULE = platformModule({
+  id: "thrallo.jobs", version: "1.0.0", title: "Jobs/usage",
+  clientAbi: "jobs@1", services: ["backend_sdk", "app_auth", "runtime_actions"],
+  requires: [{ id: "thrallo.identity", range: "^1.2.0" }],
+  operations: [
+    clientOperation({ id: "invokeAction", effect: "mutation", stateOwner: "jobs", errors: ["job_action_unknown", "job_input_invalid", "job_quota_exceeded", "jobs_unavailable"], hooks: ["the same action with the same input is one job"] }),
+    clientOperation({ id: "jobStatus", stateOwner: "jobs", errors: ["jobs_unavailable"], hooks: ["waiting prefers the live subscription and backs off"] }),
+    clientOperation({ id: "cancelJob", effect: "mutation", stateOwner: "jobs", errors: ["job_not_cancellable"], hooks: ["a finished job says it cannot be cancelled"] }),
+    clientOperation({ id: "balance", stateOwner: "usage", errors: ["jobs_unavailable"], hooks: ["the quota is checked before dispatch, not at settlement"] }),
+  ],
+  entrypoints: [
+    { module: "src/lib/modules/jobs.js", exports: ["compileActions", "createJobs", "idempotencyKeyFor", "validateActionInput", "JOB_STATUS", "JobError"] },
+    { module: "src/lib/modules/uiReact.js", exports: ["useJobState"] },
+    { module: "src/lib/capabilities/composed/jobs.js", exports: ["jobs", "actionCatalogue"], composed: true },
+    { module: "src/lib/app/jobs.js", exports: ["useJob", "actionCatalogue"], composed: true },
+  ],
+  artifacts: [
+    { path: "src/lib/modules/jobs.js", kind: "runtime" },
+    { path: "src/lib/capabilities/composed/jobs.js", kind: "composed" },
+    { path: "src/lib/app/jobs.js", kind: "composed" },
+  ],
+  surfaceBindings: [
+    { state: "queued", required: true }, { state: "running", required: true },
+    { state: "succeeded", required: true }, { state: "failed", required: true }, { state: "cancelled", required: false },
+  ],
+  deterministicTests: ["deterministic idempotency key", "quota refused before dispatch", "cancel lifecycle", "wait backs off and gives up"],
+  browserEvidence: ["a double-clicked action starts one job", "a running job reports progress without a fixed poll"],
+  proof: "test/code-agent/builder-v2-jobs-schedules-connectors.test.mjs",
+});
+
+const SCHEDULES_MODULE = platformModule({
+  id: "thrallo.schedules", version: "1.0.0", title: "Scheduled actions",
+  clientAbi: "schedules@1", services: ["backend_sdk", "app_auth", "runtime_actions"],
+  requires: [{ id: "thrallo.jobs", range: "^1.0.0" }],
+  operations: [
+    clientOperation({ id: "listSchedules", stateOwner: "schedules", errors: ["schedule_unknown"], hooks: ["a schedule reports when it last ran"] }),
+    clientOperation({ id: "pauseSchedule", effect: "mutation", stateOwner: "schedules", errors: ["schedule_unknown"], hooks: ["a paused schedule does not run"] }),
+    clientOperation({ id: "runDue", effect: "mutation", stateOwner: "schedules", errors: ["schedules_unavailable"], hooks: ["one occurrence runs once however many workers see it"] }),
+  ],
+  entrypoints: [
+    { module: "src/lib/modules/jobs.js", exports: ["createSchedules", "occurrenceKey", "isDue", "CADENCES"] },
+    { module: "src/lib/capabilities/composed/schedules.js", exports: ["schedules"], composed: true },
+    { module: "src/lib/app/schedules.js", exports: ["useSchedules", "schedules"], composed: true },
+  ],
+  artifacts: [
+    { path: "src/lib/modules/jobs.js", kind: "runtime" },
+    { path: "src/lib/capabilities/composed/schedules.js", kind: "composed" },
+    { path: "src/lib/app/schedules.js", kind: "composed" },
+  ],
+  deterministicTests: ["occurrence deduplication", "time-zone offset", "pause and resume", "missed slot does not double-fire"],
+  browserEvidence: ["a paused schedule stops running", "a daily schedule runs once a day"],
+  proof: "test/code-agent/builder-v2-jobs-schedules-connectors.test.mjs",
+});
+
+const CONNECTORS_MODULE = platformModule({
+  id: "thrallo.httpConnectors", version: "1.0.0", title: "HTTP connectors",
+  clientAbi: "connectors@1", services: ["backend_sdk", "runtime_actions"],
+  requires: [{ id: "thrallo.jobs", range: "^1.0.0" }],
+  operations: [
+    clientOperation({ id: "invokeConnector", effect: "external", stateOwner: "integrations", errors: ["connector_unknown", "connector_target_denied", "connector_secret_missing", "connector_input_invalid", "connector_response_invalid", "connector_upstream_error", "connector_timeout"], hooks: ["a host the connector did not declare is refused"] }),
+  ],
+  entrypoints: [
+    { module: "src/lib/modules/connectors.js", exports: ["compileConnectors", "createConnectors", "buildUrl", "validateResponse", "redactSecrets", "ConnectorError"] },
+    { module: "src/lib/capabilities/composed/connectors.js", exports: ["connectors", "connectorCatalogue"], composed: true },
+    { module: "src/lib/app/connectors.js", exports: ["connectors", "connectorCatalogue"], composed: true },
+  ],
+  artifacts: [
+    { path: "src/lib/modules/connectors.js", kind: "runtime" },
+    { path: "src/lib/capabilities/composed/connectors.js", kind: "composed" },
+    { path: "src/lib/app/connectors.js", kind: "composed" },
+  ],
+  deterministicTests: ["declared egress only", "https only", "secret reference never in an error", "response shape validated", "only idempotent methods retry"],
+  browserEvidence: ["a connector failure is a named error, not a stack trace"],
+  proof: "test/code-agent/builder-v2-jobs-schedules-connectors.test.mjs",
+});
+
+/**
+ * WP13 — the provider-backed operation families. Each already runs deterministically inside the
+ * capability runtime; what a module adds is the MANIFEST and the availability gate, which is the
+ * audit's "unavailable services remain unavailable". None of them is a new implementation, and
+ * none is selected unless a contract declares an action that uses it.
+ */
+const providerFamily = ({ id, title, abi, service, operations }) => platformModule({
+  id, version: "1.0.0", title,
+  clientAbi: abi, services: ["backend_sdk", "runtime_actions", service],
+  requires: [{ id: "thrallo.jobs", range: "^1.0.0" }],
+  operations: operations.map((operation) => clientOperation({
+    id: operation, effect: "external", stateOwner: "jobs",
+    errors: ["job_action_unknown", "jobs_unavailable"],
+    hooks: [`the ${id.split(".").pop()} family refuses to install where the provider is not configured`],
+  })),
+  entrypoints: [{ module: "src/lib/modules/jobs.js", exports: ["createJobs"] }],
+  artifacts: [{ path: "src/lib/modules/jobs.js", kind: "runtime" }],
+  deterministicTests: ["provider-disabled contract blocks before generation", "operation catalogue matches the runtime"],
+  browserEvidence: [],
+  proof: "test/code-agent/builder-v2-jobs-schedules-connectors.test.mjs",
+});
+
+const AI_ACTIONS_MODULE = providerFamily({
+  id: "thrallo.aiActions", title: "AI/provider actions", abi: "aiActions@1", service: "knowledge",
+  operations: ["text", "structured", "image", "embeddings", "prediction"],
+});
+const MEDIA_MODULE = providerFamily({
+  id: "thrallo.media", title: "Media processing", abi: "media@1", service: "runtime_actions",
+  operations: ["compose", "image_convert"],
+});
+const DOCUMENTS_MODULE = providerFamily({
+  id: "thrallo.documents", title: "Document processing", abi: "documents@1", service: "runtime_actions",
+  operations: ["pdf_extract", "pdf_merge", "archive"],
+});
+const KNOWLEDGE_MODULE = providerFamily({
+  id: "thrallo.knowledge", title: "Knowledge", abi: "knowledge@1", service: "knowledge",
+  operations: ["ingest", "search"],
+});
+const META_CONNECTOR_MODULE = providerFamily({
+  id: "thrallo.metaConnector", title: "Meta connector", abi: "metaConnector@1", service: "meta_connector",
+  operations: ["accounts", "page_post", "create_ad"],
+});
+
 const MODULES = [
   CORE_MODULE, ...LEGACY_WRAPPED.map(legacyCapabilityModule), IDENTITY_1_2, ACCOUNTS_MODULE, AUTHORIZATION_1_1,
   ADMIN_MODULE, ENTITIES_1_1, ROUTING_MODULE, QUERY_MODULE, FORMS_1_1, ASYNC_MODULE, SETTINGS_MODULE, AUDIT_MODULE,
   WORKFLOW_1_1, BOOKING_1_1, WORKSPACE_MODULE, EDITOR_MODULE,
   FILES_MODULE, NOTIFICATIONS_MODULE, REALTIME_MODULE,
   ANALYTICS_EVENTS_MODULE, ANALYTICS_QUERIES_MODULE, EXPORTS_MODULE, BILLING_MODULE,
+  JOBS_MODULE, SCHEDULES_MODULE, CONNECTORS_MODULE,
+  AI_ACTIONS_MODULE, MEDIA_MODULE, DOCUMENTS_MODULE, KNOWLEDGE_MODULE, META_CONNECTOR_MODULE,
 ];
 
 /** id → every registered version of that module, highest last. */

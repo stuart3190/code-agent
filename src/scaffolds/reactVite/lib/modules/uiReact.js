@@ -248,3 +248,31 @@ export function useBillingState(controller, { reloadOnMount = true } = {}) {
     reload: () => controller.load(),
   }), [state, controller]);
 }
+
+/**
+ * WP13 — one long-running action. Waiting prefers the live subscription, so a screen is not a
+ * polling loop, and the subscription is released when the screen leaves.
+ */
+export function useJobState(controller, { action = null } = {}) {
+  const state = useCapabilityState(controller);
+  const [current, setCurrent] = useState(null);
+  const invoke = useCallback(async (input, options) => {
+    const result = await controller.invoke(action || options?.action, input, options);
+    if (result.ok) setCurrent(result.job);
+    return result;
+  }, [controller, action]);
+  useEffect(() => {
+    if (!current?.id) return undefined;
+    let released = false;
+    void controller.wait(current.id).then((done) => { if (!released && done.job) setCurrent(done.job); });
+    return () => { released = true; };
+  }, [controller, current?.id]);
+  return useMemo(() => ({
+    status: current?.status || "idle", job: current, error: state?.error || null, balance: state?.balance ?? null,
+    jobs: state?.jobs || {},
+    invoke,
+    cancel: () => (current?.id ? controller.cancel(current.id) : Promise.resolve({ ok: false, reason: "no_job" })),
+    refresh: () => (current?.id ? controller.get(current.id).then(setCurrent) : Promise.resolve(null)),
+    balanceOf: () => controller.balance(),
+  }), [state, controller, current, invoke]);
+}

@@ -441,7 +441,7 @@ export function createOrchestrator({
     }
     return composeScaffoldFoundation(
       composeCapabilityFoundation(refreshPlatformRuntime(tree), spec.capabilityGraph, {
-        moduleLock: spec.moduleLock || null, identityPlan: spec.identityPlan || null, entitySchema: spec.entitySchema || null, routePlan: spec.routePlan || null, settingsPlan: spec.settingsPlan || null, behaviourPlan: spec.behaviourPlan || null, deliveryPlan: spec.deliveryPlan || null, insightPlan: spec.insightPlan || null, billingPlan: spec.billingPlan || null,
+        moduleLock: spec.moduleLock || null, identityPlan: spec.identityPlan || null, entitySchema: spec.entitySchema || null, routePlan: spec.routePlan || null, settingsPlan: spec.settingsPlan || null, behaviourPlan: spec.behaviourPlan || null, deliveryPlan: spec.deliveryPlan || null, insightPlan: spec.insightPlan || null, billingPlan: spec.billingPlan || null, automationPlan: spec.automationPlan || null,
       }).tree,
       spec.scaffoldGraph,
     ).tree;
@@ -1383,7 +1383,7 @@ export function createOrchestrator({
         await setState("compose_scaffold");
         const compositionStartedAt = Date.now();
         const capabilityFoundation = composeCapabilityFoundation(baseTree(), spec.capabilityGraph, {
-          moduleLock: spec.moduleLock || null, identityPlan: spec.identityPlan || null, entitySchema: spec.entitySchema || null, routePlan: spec.routePlan || null, settingsPlan: spec.settingsPlan || null, behaviourPlan: spec.behaviourPlan || null, deliveryPlan: spec.deliveryPlan || null, insightPlan: spec.insightPlan || null, billingPlan: spec.billingPlan || null,
+          moduleLock: spec.moduleLock || null, identityPlan: spec.identityPlan || null, entitySchema: spec.entitySchema || null, routePlan: spec.routePlan || null, settingsPlan: spec.settingsPlan || null, behaviourPlan: spec.behaviourPlan || null, deliveryPlan: spec.deliveryPlan || null, insightPlan: spec.insightPlan || null, billingPlan: spec.billingPlan || null, automationPlan: spec.automationPlan || null,
         });
         const scaffoldFoundation = composeScaffoldFoundation(capabilityFoundation.tree, spec.scaffoldGraph);
         let tree = scaffoldFoundation.tree;

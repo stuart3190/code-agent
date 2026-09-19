@@ -57,6 +57,7 @@ const CAPABILITY_MODULES = Object.freeze({
   accounts: "thrallo.accounts", authorization: "thrallo.authorization", admin: "thrallo.admin",
   settings: "thrallo.settings", audit: "thrallo.audit",
   exports: "thrallo.exports", metrics: "thrallo.analyticsQueries", analytics: "thrallo.analyticsEvents",
+  query: "thrallo.query",
 });
 // Fields of an account-shaped entity that are platform membership facts, never profile data.
 const PLATFORM_ACCOUNT_FIELD = /^(?:id|user[-_ ]?id|auth[-_ ]?user[-_ ]?id|email|user[-_ ]?email|role|roles|status|account[-_ ]?status|created[-_ ]?at|updated[-_ ]?at|last[-_ ]?login|invited(?:[-_ ]?at)?)$/i;
@@ -93,6 +94,12 @@ const TRANSIENT_STORAGE = /\b(?:client(?:-only| side| session)?|browser(?:-only|
  * (audit §11: never replace requested infrastructure with generated code); `warn` records the gap
  * while the owning work package is still to land. Each later package flips its own row.
  */
+// WP15: a read whose only work is selecting which durable records to show. The query module
+// compiles and executes that server-side; generating it produces a predicate over whatever page
+// the browser loaded, which is a wrong answer that looks right until the second page.
+const QUERY_KINDS = new Set(["search", "query", "filter", "list", "read", "get", "find", "view", "fetch"]);
+const READ_RESULT_EFFECT = /^(?:transient_result|read_result|collection)$/i;
+
 export const PLATFORM_REQUIREMENT_ENFORCEMENT = Object.freeze({
   identity: "block",      // WP3 — module exists (thrallo.identity)
   accounts: "block",      // WP4 — module exists (thrallo.accounts); availability decides
@@ -345,6 +352,24 @@ export function normalizeContractOwnership(contract, { buildProfile = null } = {
           to: { kind: next.kind, entity: next.entity || null, module: CAPABILITY_MODULES[retarget.capability], operation: retarget.method },
           ...(fabricated.length ? { droppedResponsibilities: fabricated } : {}) });
       }
+    } else if (durableQueryOperation(operation, { entities, transientNames })) {
+      // The last generic fallthrough in the retained corpus: "filter visible projects by customer
+      // name and status" written as generated client-side filtering. It is a compiled query.
+      const original = JSON.parse(JSON.stringify(operation));
+      // The module's own vocabulary: a selection is a query, a total is a count. Naming an
+      // operation the module does not provide is the failure this retarget exists to avoid.
+      const method = kindOf(operation) === "count" ? "count" : "query";
+      const previous = responsibilities[0] || {};
+      responsibilities = [{
+        type: "functional", capability: "query", capabilityMethod: method,
+        behavior: previous?.behavior || operation.description || `${method} the matching records`,
+        reads: [...new Set(listOf(operation.responsibilities).flatMap((row) => listOf(row?.reads)).map(String))],
+        writes: [],
+        ...(previous?.outputEffect ? { outputEffect: previous.outputEffect } : {}),
+      }];
+      next = { ...next, responsibilities };
+      retargetedOperations.push({ id: idOf(operation), reason: "platform_query", from: original,
+        to: { kind: next.kind, entity: next.entity || null, module: "thrallo.query", operation: method } });
     } else if (settingsNames.has(lower(operation?.entity))
       && !listOf(operation.responsibilities).some((row) => ["settings", "audit"].includes(lower(row?.capability || row?.capabilityId)))) {
       // WP8: generic CRUD on the settings singleton becomes the settings command it means. A read
@@ -517,6 +542,32 @@ export function normalizeContractOwnership(contract, { buildProfile = null } = {
     warnings,
   };
   return { contract: { ...contract, ...(auth !== contract.auth ? { auth } : {}), entities, operations, ownership }, report: ownership, changed: true };
+}
+
+/**
+ * Is this operation a read whose only work is choosing which durable records to show? Every
+ * responsibility must be a functional read with no writes and no registered capability of its own:
+ * a read that also calculates something keeps its calculation, and stays generated.
+ */
+function durableQueryOperation(operation, { entities = [], transientNames = new Set() } = {}) {
+  const entity = lower(operation?.entity);
+  if (!entity || transientNames.has(entity)) return false;
+  if (!listOf(entities).some((row) => lower(row?.name) === entity && !row?.platform)) return false;
+  const kind = kindOf(operation);
+  if (!QUERY_KINDS.has(kind)) return false;
+  const responsibilities = listOf(operation?.responsibilities);
+  if (!responsibilities.length) return false;
+  // A COLLECTION kind is a selection by definition. A singular read is only a query when it says
+  // its output is a read result: a read that calculates something keeps its calculation, and
+  // claiming it would delete the one part of the operation no module can do.
+  const collection = ["search", "query", "filter", "list"].includes(kind);
+  const declaresReadResult = responsibilities.some((row) => row?.outputEffect
+    && READ_RESULT_EFFECT.test(String(row.outputEffect?.type || row.outputEffect)));
+  if (!collection && !declaresReadResult) return false;
+  return responsibilities.every((row) => row?.type === "functional"
+    && !row?.capability && !row?.capabilityId
+    && listOf(row?.writes).length === 0
+    && (!row?.outputEffect || READ_RESULT_EFFECT.test(String(row.outputEffect?.type || row.outputEffect))));
 }
 
 /** Problems a typed contract raises before generation: blocked requirements and malformed types. */

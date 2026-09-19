@@ -96,6 +96,14 @@ const LEGACY_CAPABILITIES = Object.freeze({
     interface: ["compileSettings", "createSettingsController"], entities: [],
     uiContract: ["idle", "loading", "ready", "error", "denied"], upgradePolicy: "replace-on-iterate",
   },
+  // WP15. A filtered read over durable records is a compiled query the backend executes, not a
+  // predicate over a page the browser happened to load. Registering it is what lets the contract
+  // say so, and what stops the last generic fallthrough in the retained corpus.
+  query: {
+    name: "query", version: "1.0.0", package: "src/lib/modules/query.js",
+    interface: ["compileQuery", "runQuery", "matchesQuery"], entities: [],
+    uiContract: ["idle", "loading", "ready", "empty", "error"], upgradePolicy: "replace-on-iterate",
+  },
   audit: {
     name: "audit", version: "1.0.0", package: "src/lib/modules/audit.js",
     interface: ["createHistoryController"], entities: [],
@@ -221,6 +229,17 @@ const metadata = Object.freeze({
     verificationSemantics: { actions: ["read", "change", "reset"], stateChange: "setting values", durableMutation: true, observe: ["declared default before any write", "changed value after reload", "member denied an application value"] },
     testContract: ["declared default", "typed coercion", "scope isolation", "administration required", "reload"],
   },
+  query: {
+    supportedOperations: ["query", "count", "page"],
+    requiredInputs: { factory: ["entity"], operations: { query: ["filters"], page: ["cursor"] } },
+    operationOutputs: { query: ["records"], count: ["total"], page: ["records"] },
+    outputs: { records: "the records matching a compiled query, across pages", total: "how many records match" },
+    stateOwnership: { owns: "the active query and its results", scope: "one entity collection for the signed-in actor" },
+    persistenceSemantics: { durable: true, owner: "entities backend through a compiled query", browserStorage: false },
+    dependencies: ["crud"], compatibleUiInteractionPrimitives: ["field", "selection", "action", "status"],
+    verificationSemantics: { actions: ["filter", "search", "sort", "clear", "page"], stateChange: "visible records", durableMutation: false, observe: ["filtered results across pages", "a cleared filter restores the full set"] },
+    testContract: ["allow-listed fields", "stable pagination", "filtering across pages", "cleared filters"],
+  },
   audit: {
     supportedOperations: ["list", "redact"],
     requiredInputs: { factory: [], operations: { list: [] } },
@@ -297,6 +316,10 @@ const RESPONSIBILITY_SEMANTICS = Object.freeze({
   // There is deliberately no append: an application that could write its own history could write
   // a false one, so the platform appends and the application only reads.
   audit: Object.freeze({ persistence: Object.freeze([]), functional: Object.freeze(["list", "redact"]) }),
+  query: Object.freeze({
+    persistence: Object.freeze(["query", "count", "page"]),
+    functional: Object.freeze(["query", "count", "page"]),
+  }),
 });
 
 /** The one machine-readable inventory of reusable behavior that actually ships. */

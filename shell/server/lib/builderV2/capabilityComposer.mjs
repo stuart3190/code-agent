@@ -710,6 +710,87 @@ export function useBilling(options = {}) { return useBillingState(billing, optio
   return { files, interfaces, facades };
 }
 
+// WP13: declared actions, schedules and third-party connectors.
+export const JOBS_COMPOSED_PATH = `${COMPOSED_ROOT}/jobs.js`;
+export const SCHEDULES_COMPOSED_PATH = `${COMPOSED_ROOT}/schedules.js`;
+export const CONNECTORS_COMPOSED_PATH = `${COMPOSED_ROOT}/connectors.js`;
+export const APP_FACADE_JOBS_PATH = `${APP_FACADE_ROOT}/jobs.js`;
+export const APP_FACADE_CONNECTORS_PATH = `${APP_FACADE_ROOT}/connectors.js`;
+
+function automationFiles(automationPlan) {
+  const files = {};
+  const interfaces = [];
+  const facades = [];
+  const actions = automationPlan?.actions || [];
+  const schedules = automationPlan?.schedules || [];
+  const connectors = automationPlan?.connectors || [];
+
+  if (actions.length) {
+    files[JOBS_COMPOSED_PATH] = `${banner("jobs")}import { actions as transport, usage } from "../../backend/index.js";
+import { compileActions, createJobs } from "../../modules/jobs.js";
+
+/** Every long-running action this application declared. One it never declared cannot run. */
+export const actionCatalogue = compileActions(${jsObject(actions.map((action) => ({ id: action.id, actionKey: action.actionKey, inputs: action.inputs, required: action.required, cost: action.cost, grant: action.grant })))});
+
+export const jobs = createJobs({ actions: actionCatalogue, transport, usage });
+`;
+    interfaces.push({ module: JOBS_COMPOSED_PATH, exports: ["jobs", "actionCatalogue"],
+      owns: ["jobs", "usage"], operations: ["invokeAction", "jobStatus", "cancelJob", "balance"] });
+    files[APP_FACADE_JOBS_PATH] = `${banner("public jobs ABI")}import { actionCatalogue, jobs } from "../capabilities/composed/jobs.js";
+import { useJobState } from "../modules/uiReact.js";
+
+export { jobs, actionCatalogue };
+/** { job, status, invoke, cancel, wait } — one job per action and input, not per click. */
+export function useJob(options = {}) { return useJobState(jobs, options); }
+`;
+    facades.push("jobs");
+  }
+
+  if (schedules.length) {
+    files[SCHEDULES_COMPOSED_PATH] = `${banner("scheduled actions")}import { createSchedules } from "../../modules/jobs.js";
+import { jobs } from "./jobs.js";
+import { repository } from "./entities.js";
+
+/** The declared schedules. An occurrence runs once, however many workers see it due. */
+export const scheduleDefinitions = Object.freeze(${jsObject(schedules)});
+
+export const schedules = createSchedules({
+  schedules: scheduleDefinitions,
+  jobs,
+  storage: {
+    list: async () => (await repository("scheduleState").list({ limit: 200 })).map((row) => ({ id: row.id, ...row.values })),
+    put: async (row) => repository("scheduleState").create(row),
+  },
+});
+`;
+    interfaces.push({ module: SCHEDULES_COMPOSED_PATH, exports: ["schedules", "scheduleDefinitions"],
+      owns: ["schedules"], operations: ["listSchedules", "pauseSchedule", "runDue"] });
+  }
+
+  if (connectors.length) {
+    files[CONNECTORS_COMPOSED_PATH] = `${banner("http connectors")}import { compileConnectors, createConnectors } from "../../modules/connectors.js";
+
+/**
+ * Declared third-party endpoints. Each names the one host it may reach and the secret it needs;
+ * the secret VALUE is supplied by the deployment and never appears here, in a prompt or in an error.
+ */
+export const connectorCatalogue = compileConnectors(${jsObject(connectors.map((row) => ({ id: row.id, method: row.method, url: row.url, secret: row.secret, inputs: row.inputs, required: row.required, responseShape: row.responseShape, timeoutMs: row.timeoutMs, retries: row.retries })))});
+
+export const connectors = createConnectors({
+  schema: connectorCatalogue,
+  secrets: async (name) => import.meta.env?.["VITE_" + name] ?? null,
+});
+`;
+    interfaces.push({ module: CONNECTORS_COMPOSED_PATH, exports: ["connectors", "connectorCatalogue"],
+      owns: ["integrations"], operations: ["invokeConnector"] });
+    files[APP_FACADE_CONNECTORS_PATH] = `${banner("public connectors ABI")}export { connectors, connectorCatalogue } from "../capabilities/composed/connectors.js";
+`;
+    facades.push("connectors");
+  }
+
+  return { files, interfaces, facades };
+}
+
 function facadeIndexSource(moduleLock, facadeModules) {
   return `${banner("public application ABI")}// The one import surface for generated application code. Everything here is deterministic and
 // protected; layout, styling, copy and domain logic remain entirely the application's.
@@ -723,7 +804,7 @@ export const THRALLO_APP_ABI = Object.freeze(${jsObject({
 `;
 }
 
-function capabilityFiles(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null, billingPlan = null } = {}) {
+function capabilityFiles(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null, billingPlan = null, automationPlan = null } = {}) {
   const nodes = new Map((graph?.nodes || []).map((node) => [node.id, node]));
   const files = {};
   const interfaces = [];
@@ -882,6 +963,12 @@ export const newsletterCapability = makeNewsletter({ entity: ${quote(entity)} })
       interfaces.push(...billing.interfaces);
       facades.push(...billing.facades);
     }
+    const automation = automationFiles(automationPlan);
+    if (Object.keys(automation.files).length) {
+      Object.assign(files, automation.files);
+      interfaces.push(...automation.interfaces);
+      facades.push(...automation.facades);
+    }
     files[APP_FACADE_INDEX_PATH] = facadeIndexSource(moduleLock, facades);
   }
   if (moduleLock) files[MODULE_LOCK_PATH] = lockFileSource(moduleLock);
@@ -905,8 +992,32 @@ export { CAPABILITY_COMPOSITION } from "./manifest.js";
   return { files, interfaces };
 }
 
-export function capabilityCompositionPlan(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null, billingPlan = null } = {}) {
-  const rendered = capabilityFiles(graph, { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan, deliveryPlan, insightPlan, billingPlan });
+/** The exports of each composed public facade, read from the source the composer just wrote. */
+function publicFacadesOf(files = {}) {
+  const facades = [];
+  for (const [path, source] of Object.entries(files)) {
+    if (!path.startsWith(APP_FACADE_ROOT) || path.endsWith("/index.js")) continue;
+    const names = new Set();
+    for (const match of String(source).matchAll(/export\s+(?:async\s+)?(?:function|const|let|var)\s+([A-Za-z0-9_$]+)/g)) {
+      names.add(match[1]);
+    }
+    for (const match of String(source).matchAll(/export\s*\{([^}]+)\}/g)) {
+      for (const part of match[1].split(",")) {
+        const name = part.split(/\s+as\s+/).pop().trim();
+        if (name && name !== "default") names.add(name);
+      }
+    }
+    facades.push({
+      facade: path.slice(APP_FACADE_ROOT.length + 1).replace(/\.js$/, ""),
+      module: path,
+      exports: [...names].sort(),
+    });
+  }
+  return facades.sort((a, b) => a.facade.localeCompare(b.facade));
+}
+
+export function capabilityCompositionPlan(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null, billingPlan = null, automationPlan = null } = {}) {
+  const rendered = capabilityFiles(graph, { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan, deliveryPlan, insightPlan, billingPlan, automationPlan });
   const extensionPoints = (graph?.nodes || []).filter((node) => node.type === "custom_behavior")
     .map((node) => ({ id: node.id, ...node.extension, inputs: node.requiredInputs, outputs: node.outputs,
       stateOwnership: node.stateOwnership, persistenceSemantics: node.persistenceSemantics }));
@@ -917,6 +1028,9 @@ export function capabilityCompositionPlan(graph, { moduleLock = null, identityPl
     protectedRoot: COMPOSED_ROOT,
     protectedFiles: Object.keys(rendered.files).sort(),
     interfaces: rendered.interfaces,
+    // WP14: what src/lib/app actually exports, read from the composed bytes rather than declared
+    // twice. This is the surface generated code may import, and the only one it is briefed with.
+    publicFacades: publicFacadesOf(rendered.files),
     configurationModule: CAPABILITY_CONFIGURATION_PATH,
     extensionPoints,
     ...(moduleLock ? { moduleLockPath: MODULE_LOCK_PATH } : {}),
@@ -925,7 +1039,7 @@ export function capabilityCompositionPlan(graph, { moduleLock = null, identityPl
 }
 
 /** Apply or refresh the foundation. Existing model-owned extension configuration is preserved. */
-export function composeCapabilityFoundation(tree, graph, { moduleLock = null, identityPlan = null, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null, billingPlan = null } = {}) {
+export function composeCapabilityFoundation(tree, graph, { moduleLock = null, identityPlan = null, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null, billingPlan = null, automationPlan = null } = {}) {
   // Production Builder V2 starts from the full React/Vite scaffold. Some retained unit/legacy
   // baselines intentionally predate the capability runtime; do not emit adapters with dangling
   // imports into those trees. They remain on the migration-compatible path until refreshed from
@@ -944,7 +1058,7 @@ export function composeCapabilityFoundation(tree, graph, { moduleLock = null, id
   // A base tree without the module runtime (a legacy snapshot, a retained fixture) composes the
   // capability adapters exactly as before and simply does not receive the identity controller.
   const identityRuntime = typeof tree?.[IDENTITY_RUNTIME_PATH] === "string";
-  const options = { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan, deliveryPlan, insightPlan, billingPlan };
+  const options = { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan, deliveryPlan, insightPlan, billingPlan, automationPlan };
   const rendered = capabilityFiles(graph, options);
   const next = { ...(tree || {}), ...rendered.files };
   if (typeof next[CAPABILITY_CONFIGURATION_PATH] !== "string") {

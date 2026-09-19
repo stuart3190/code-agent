@@ -22,6 +22,8 @@ export const PLATFORM_RECORD_MODULES = new Set(["thrallo.identity", "thrallo.acc
 // read's is the event list — platform values, not declared entity fields.
 export const PLATFORM_OUTPUT_CAPABILITIES = new Set([
   "session", "auth", "accounts", "admin", "authorization", "settings", "audit",
+  // WP15: a query's output is the records it matched, never a field it wrote.
+  "query",
 ]);
 
 // The five stages PR5 generates in. Named here because the contract is what assigns work to them.

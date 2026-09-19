@@ -67,6 +67,7 @@ export const CURRENT_FORMAT_VERSIONS = Object.freeze({
   insightPlan: 1,        // WP11: new — declared telemetry events, domain metrics and exports
   billingPlan: 1,        // WP12: new — declared plan catalogue and entitlements
   billingService: 1,     // WP12: new — app_subscriptions/app_billing_events lifecycle
+  automationPlan: 1,     // WP13: new — declared actions, schedules and connectors
 });
 
 /** The immutable snapshot row as written by snapshotStore.createSnapshot(). */
@@ -208,6 +209,11 @@ export const COVERAGE_LEDGER = Object.freeze([
   row("capability", "admin", { status: "D/S", targetModule: "thrallo.admin", workPackage: 4,
     retains: "src/lib/modules/accounts.js createAdmin; app-accounts commands invite/provision/setRole/setStatus",
     disposition: "authorized admin commands; replaces fake user CRUD and generated authority checks" }),
+  // WP15 — query (added; the last generic fallthrough: a filtered read written as generated
+  // client-side filtering over whatever page happened to be loaded)
+  row("capability", "query", { status: "D/S", targetModule: "thrallo.query", workPackage: 15,
+    retains: "src/lib/modules/query.js compileQuery/createCollection; src/lib/modules/collections.js",
+    disposition: "a compiled query the backend executes across pages; replaces generated client-side filtering" }),
   // WP8 — settings and audit (added; the audit's "settings singleton inferred from prose")
   row("capability", "settings", { status: "D/S", targetModule: "thrallo.settings", workPackage: 8,
     retains: "src/lib/modules/settings.js compileSettings/createSettingsController; app-accounts settings commands",

@@ -63,10 +63,11 @@ const INTERACTIVE = base("interactive calculation workspace", [{ name: "project"
 
 test("the authoritative registry is total only for capabilities that actually ship", () => {
   // WP4 added accounts, authorization and admin (real accounts behind the app-accounts service);
-  // WP8 added settings and audit (typed keys and platform-appended history, same service).
+  // WP8 added settings and audit (typed keys and platform-appended history, same service);
+  // WP15 added query (a compiled selection the backend executes, closing the last fallthrough).
   assert.deepEqual(Object.keys(CAPABILITIES).sort(), [
     "accounts", "admin", "audit", "authorization", "booking", "contact", "crud", "interaction-primitives",
-    "newsletter", "roles", "session", "settings", "wizard",
+    "newsletter", "query", "roles", "session", "settings", "wizard",
   ]);
   for (const capability of Object.values(CAPABILITIES)) {
     for (const key of [

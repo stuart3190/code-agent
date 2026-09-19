@@ -689,7 +689,13 @@ export function validateModuleConformance(tree, {
 }
 
 export function moduleCorrectionScope(report, moduleContracts) {
-  const allowedFiles = unique(report?.correction?.modules).sort();
+  // WP14/15: a correction boundary may never name a platform file. The model cannot write those
+  // paths, so offering one produces either a refused write reported as an application failure, or
+  // a rewrite of working module code. A finding that lands on platform code is a MODULE FAULT
+  // (repairGovernance), not something to hand to a correction.
+  const allowedFiles = unique(report?.correction?.modules)
+    .filter((path) => !PLATFORM_SOURCE.test(String(path || "")))
+    .sort();
   const selected = (moduleContracts?.specifications || []).filter((spec) => allowedFiles.includes(spec.path));
   const blocking = report?.blocking || report?.findings || [];
   const factories = unique([

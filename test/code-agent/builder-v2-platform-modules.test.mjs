@@ -115,12 +115,15 @@ test("manifest — the schema rejects every malformed shape the audit forbids", 
 test("registry — every legacy capability is wrapped by a validated module; public imports are unchanged", () => {
   assert.deepEqual(validateModuleRegistry(), { ok: true, problems: [] });
   assert.deepEqual(registeredModuleIds(), [
-    "thrallo.accounts", "thrallo.admin", "thrallo.analyticsEvents", "thrallo.analyticsQueries", "thrallo.async",
-    "thrallo.audit", "thrallo.authorization", "thrallo.billing", "thrallo.booking", "thrallo.contact", "thrallo.core",
-    "thrallo.editor",
-    "thrallo.entities", "thrallo.exports", "thrallo.files", "thrallo.forms", "thrallo.identity",
-    "thrallo.newsletter", "thrallo.notifications", "thrallo.query", "thrallo.realtime", "thrallo.routing",
-    "thrallo.settings", "thrallo.workflow", "thrallo.workspace",
+    "thrallo.accounts", "thrallo.admin", "thrallo.aiActions", "thrallo.analyticsEvents",
+    "thrallo.analyticsQueries", "thrallo.async", "thrallo.audit", "thrallo.authorization",
+    "thrallo.billing", "thrallo.booking", "thrallo.contact", "thrallo.core",
+    "thrallo.documents", "thrallo.editor", "thrallo.entities", "thrallo.exports",
+    "thrallo.files", "thrallo.forms", "thrallo.httpConnectors", "thrallo.identity",
+    "thrallo.jobs", "thrallo.knowledge", "thrallo.media", "thrallo.metaConnector",
+    "thrallo.newsletter", "thrallo.notifications", "thrallo.query", "thrallo.realtime",
+    "thrallo.routing", "thrallo.schedules", "thrallo.settings", "thrallo.workflow",
+    "thrallo.workspace",
   ]);
   for (const [capabilityId, capability] of Object.entries(CAPABILITIES)) {
     const manifest = moduleForCapability(capabilityId);

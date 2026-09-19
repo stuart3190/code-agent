@@ -185,7 +185,9 @@ test("WP4 — contract typing: an account-shaped entity is platform-owned and it
   assert.deepEqual([byId["update-user-role"].module, byId["update-user-role"].moduleOperation], ["thrallo.admin", "setMemberRole"]);
   assert.deepEqual(byId["update-user-role"].responsibilities, [{ type: "functional", capability: "admin", capabilityMethod: "setMemberRole",
     behavior: "update an app user's role in the admin area", reads: ["email", "role"], writes: [] }]);
-  assert.deepEqual(report.retargetedOperations.map((row) => [row.id, row.reason]),
+  // WP15 also retargets this fixture's filtered reads to the query module, so the list now
+  // records every platform claim the normaliser makes over this contract.
+  assert.deepEqual(report.retargetedOperations.map((row) => [row.id, row.reason]).filter((row) => row[1] !== "platform_query"),
     [["sign-in", "platform_session"], ["create-app-user", "platform_accounts"], ["update-user-role", "platform_accounts"],
       // WP8: this fixture's settings entity is the singleton it describes, so both of its updates
       // become settings commands rather than CRUD on a fabricated record.
