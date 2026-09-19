@@ -207,13 +207,40 @@ export function canonicalRowsForRestoreComparison(table, rows) {
   return prepareRowsForBackup(table, rows);
 }
 
-export function findCatalogCoverageGaps(liveTables, backedUpTables, ignoredTables = []) {
+/**
+ * Compare the live catalog against the backup manifest.
+ *
+ * `pendingTables` are tables whose creating migration exists in the repository but has not been
+ * applied to this database yet. Those are correctly ABSENT from the live catalog and correctly
+ * PRESENT in the manifest: a table must be listed for backup before it is created, or the first
+ * snapshot taken after the migration lands silently omits it. They are reported separately rather
+ * than counted as a gap, so "the manifest names a table production does not have" keeps meaning
+ * what it says.
+ */
+/**
+ * Tables whose creating migration is present in this repository but NOT yet applied to production.
+ * They belong in the backup manifest already — a table added to the manifest after its migration
+ * lands is a table the first snapshot silently omits — and they are correctly absent from the live
+ * catalog until the migration is applied. Empty this list as each migration is applied.
+ */
+export const PENDING_MIGRATION_TABLES = Object.freeze([
+  // supabase/migrations/20260918120000_app_accounts_memberships.sql
+  "app_profiles", "app_memberships", "app_membership_events", "app_account_policies",
+  // supabase/migrations/20260918140000_app_settings_audit.sql
+  "app_settings", "app_audit_config", "app_audit_events",
+  // supabase/migrations/20260919120000_app_subscriptions.sql
+  "app_subscriptions", "app_billing_events",
+]);
+
+export function findCatalogCoverageGaps(liveTables, backedUpTables, ignoredTables = [], pendingTables = []) {
   const live = new Set(liveTables);
   const backed = new Set(backedUpTables);
   const ignored = new Set(ignoredTables);
+  const pending = new Set(pendingTables);
   return {
     missingFromBackup: [...live].filter((table) => !backed.has(table) && !ignored.has(table)).sort(),
-    missingFromCatalog: [...backed].filter((table) => !live.has(table)).sort(),
+    missingFromCatalog: [...backed].filter((table) => !live.has(table) && !pending.has(table)).sort(),
+    pendingMigration: [...backed].filter((table) => !live.has(table) && pending.has(table)).sort(),
   };
 }
 

@@ -28,6 +28,7 @@ import {
   backupTablesToVerify,
   canonicalRowsForRestoreComparison,
   collectDeferredRestorePatches,
+  PENDING_MIGRATION_TABLES,
   findCatalogCoverageGaps,
   prepareRowsForBackup,
   runtimeCatalogEvidence,
@@ -397,9 +398,18 @@ test("the current runtime catalog and backup manifest are exactly aligned", () =
   assert.equal(PRODUCTION_PUBLIC_TABLES_98.length, 98);
   assert.ok(PRODUCTION_PUBLIC_TABLES_98.includes("ca_direct_model_reservations"));
   assert.ok(PRODUCTION_PUBLIC_TABLES_98.includes("bv2_build_settlements"));
-  assert.deepEqual(findCatalogCoverageGaps(PRODUCTION_PUBLIC_TABLES_98, CA_TABLES, EPHEMERAL_RUNTIME_TABLES), {
+  // Tables whose migration has not been applied are reported as pending, not as a manifest that
+  // names something production lacks: they must be in the manifest BEFORE the migration lands, or
+  // the first snapshot after it silently omits them.
+  const coverage = findCatalogCoverageGaps(PRODUCTION_PUBLIC_TABLES_98, CA_TABLES, EPHEMERAL_RUNTIME_TABLES, PENDING_MIGRATION_TABLES);
+  assert.deepEqual({ missingFromBackup: coverage.missingFromBackup, missingFromCatalog: coverage.missingFromCatalog }, {
     missingFromBackup: [], missingFromCatalog: [],
   });
+  assert.deepEqual(coverage.pendingMigration, [...PENDING_MIGRATION_TABLES].sort(),
+    "every pending table is in the manifest and absent from production, which is exactly right until its migration is applied");
+  // A table nobody migrated and nobody backed up is still a gap, pending list or not.
+  assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_98, "ghost_table"], CA_TABLES, EPHEMERAL_RUNTIME_TABLES, PENDING_MIGRATION_TABLES).missingFromBackup,
+    ["ghost_table"]);
   assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_98, "forgotten_runtime_table"], CA_TABLES, EPHEMERAL_RUNTIME_TABLES).missingFromBackup,
     ["forgotten_runtime_table"]);
 });
