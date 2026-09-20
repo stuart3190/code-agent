@@ -16,7 +16,10 @@
 // Old snapshots are unaffected. A build with no lock gets the legacy projection, because a tree
 // composed before the facade existed cannot import from it.
 
-export const ABI_PROJECTION_VERSION = 1;
+// 2 since 2026-09-20: the brief now names capabilities that have no facade, and hides the composed
+// modules the facades cover. Stamped into the projection so a stored build record says which of the
+// two briefs generation was actually given.
+export const ABI_PROJECTION_VERSION = 2;
 
 const listOf = (value) => (Array.isArray(value) ? value : []);
 const APP_FACADE = /^src\/lib\/app\//;
@@ -46,22 +49,51 @@ export function projectPublicAbi({ moduleLock = null, compositionPlan = null, sc
   const states = listOf(compositionPlan?.surfaceBindings || scaffoldPlan?.surfaceBindings)
     .filter((row) => row?.required !== false).map((row) => String(row.state));
 
+  // Not every installed capability has a facade. The legacy eight are composed into
+  // lib/capabilities/composed/* and several never gained an app/* wrapper, so for those the
+  // composed module IS the import surface. Naming only the facades made the brief claim to be the
+  // whole surface while omitting them, and told the model never to import from lib/capabilities —
+  // an instruction it could not follow for a contact form. It then guessed makeContactForm, which
+  // the composed module does not export, tried to patch the protected file to make its guess true,
+  // was refused by the write guard, and the build blocked having spent 2.77 credits (live
+  // qualification, 2026-09-20). A brief that hides half the surface is worse than no brief.
+  //
+  // The converse matters just as much: a row the composer tagged with a facade this build actually
+  // has is private, because the facade is the supported way to reach it. Naming it here would
+  // re-expose on one line exactly what the closing lines call private. Coverage is a fact the
+  // composer records when it assembles a facade, never a guess from a path.
+  const facadeNames = new Set(byModule.keys());
+  const composedOnly = listOf(compositionPlan?.interfaces)
+    .filter((row) => !APP_FACADE.test(String(row?.module || "")))
+    .filter((row) => !listOf(row.facades).some((name) => facadeNames.has(String(name))))
+    .filter((row) => listOf(row.exports).length);
+
   const lines = [
-    "PUBLIC ABI (import from \"./lib/app\" — this is the whole platform surface this application has):",
+    "PUBLIC ABI — the whole platform surface this application has. Import it; never reimplement it.",
+    ...(byModule.size ? ['From "./lib/app":'] : []),
     ...[...byModule.values()].map((entry) => {
       const owns = entry.owns.length ? ` — owns ${entry.owns.join(", ")}` : "";
       return `  ${entry.facade}: ${entry.exports.join(", ")}${owns}`;
     }),
+    ...(composedOnly.length ? ["These have no facade yet; import them from the exact path shown:"] : []),
+    ...composedOnly.map((row) => {
+      const owns = listOf(row.owns).length ? ` — owns ${listOf(row.owns).join(", ")}` : "";
+      return `  ${row.module}: ${listOf(row.exports).join(", ")}${owns}`;
+    }),
     ...(states.length ? [`  every surface bound to a module renders: ${[...new Set(states)].join(", ")}`] : []),
-    "Never import from lib/modules, lib/capabilities or lib/backend directly, and never reimplement",
-    "anything above: it is already built, tested and protected.",
+    "Import ONLY the names listed above, from the paths shown. Anything else in lib/modules,",
+    "lib/capabilities or lib/backend is private, and none of it may be edited or reimplemented.",
   ];
   const text = lines.join("\n");
   return {
     version: ABI_PROJECTION_VERSION,
     modules,
     facades: [...byModule.keys()],
-    imports: [...byModule.values()].flatMap((entry) => entry.exports),
+    imports: [
+      ...[...byModule.values()].flatMap((entry) => entry.exports),
+      ...composedOnly.flatMap((row) => listOf(row.exports).map(String)),
+    ],
+    composedModules: composedOnly.map((row) => row.module),
     lines,
     text,
     characters: text.length,
@@ -98,7 +130,8 @@ export function abiProjectionParity(projection, compositionPlan) {
     .filter((row) => !APP_FACADE.test(String(row?.module || "")))
     .flatMap((row) => listOf(row.exports).map(String));
   // A private export is a leak only when the brief names it as something to import. A name that
-  // also happens to be a facade label ("identity") is the heading, not a private symbol.
+  // also happens to be a facade label ("identity") is the heading, not a private symbol, and a
+  // composed export the brief offers on purpose, with the path it comes from, is not a leak either.
   const exported = new Set(projection?.imports || []);
   const leaked = privateNames.filter((name) => !exported.has(name) && !named.has(name)
     && (projection?.lines || []).some((line) => line.startsWith("  ") && new RegExp(`\\b${name}\\b`).test(line)));
