@@ -24,6 +24,7 @@ import {
   PRODUCTION_PUBLIC_TABLES_70,
   PRODUCTION_PUBLIC_TABLES_75,
   PRODUCTION_PUBLIC_TABLES_98,
+  PRODUCTION_PUBLIC_TABLES_107,
   PRODUCTION_PUBLIC_FK_PAIRS_99,
   backupTablesToVerify,
   canonicalRowsForRestoreComparison,
@@ -315,21 +316,21 @@ test("authoritative migration identity is line-ending independent without changi
   assert.equal(canonicalSqlHash(lf), canonicalSqlHash(crlf));
 });
 
-test("backup migration evidence overlays the authoritative base through production ledger row 84", async () => {
+test("backup migration evidence overlays the authoritative base through production ledger row 87", async () => {
   const ledger = await loadMigrationLedgerEvidence();
-  // Row 84 is bv2_terminal_platform_failure_pool, applied under 20260916123552 (see versionDrift
-  // below) and confirmed applied in production on 2026-09-19.
-  assert.equal(ledger.migrations.length, 84);
+  // Rows 85-87 are the WP4, WP8 and WP12 migrations, applied to production on 2026-09-20. Each
+  // went in under its own authored version, so none of them adds to the versionDrift list below.
+  assert.equal(ledger.migrations.length, 87);
   assert.deepEqual(ledger.migrations.slice(-2).map((migration) => migration.version), [
-    "20260825105631",
-    "20260916120000",
+    "20260918140000",
+    "20260919120000",
   ]);
-  assert.equal(ledger.migrations.at(-1).appliedOrder, 84);
+  assert.equal(ledger.migrations.at(-1).appliedOrder, 87);
   assert.ok(ledger.migrations.slice(-2).every((migration) => migration.localCanonicalSqlSha256));
   // appliedOrder must stay a gapless sequence, or the overlay has lost or double-counted a push.
   assert.deepEqual(
     ledger.migrations.map((migration) => migration.appliedOrder),
-    Array.from({ length: 84 }, (_, index) => index + 1),
+    Array.from({ length: 87 }, (_, index) => index + 1),
   );
 });
 
@@ -338,22 +339,17 @@ test("migration history validation reports the effective applied ledger, not the
     fileURLToPath(new URL("../../ops/validate-migration-history.mjs", import.meta.url)),
   ], { encoding: "utf8" }));
   assert.equal(result.authoritativeBase, 60);
-  assert.equal(result.appliedOverlay, 24);
-  assert.equal(result.effectiveApplied, 84);
+  assert.equal(result.appliedOverlay, 27);
+  assert.equal(result.effectiveApplied, 87);
   assert.equal(result.active, 87);
   // The overlay used to stop at 74 while production had gone on to 83, so this test asserted a
   // pending list that its own comment admitted was already applied. Every entry was verified
   // against supabase_migrations.schema_migrations on 2026-09-04 and recorded in the 2026-09-04
   // overlay; row 84 was confirmed applied on 2026-09-19.
   //
-  // The three pending rows are the WP4/WP8/WP12 migrations: additive, idempotent, and deliberately
-  // NOT applied. They are pending because nobody has applied them, which is the honest state — and
-  // the reason their tables sit in PENDING_MIGRATION_TABLES rather than the live catalog.
-  assert.deepEqual(result.pending, [
-    { version: "20260918120000", name: "app_accounts_memberships" },
-    { version: "20260918140000", name: "app_settings_audit" },
-    { version: "20260919120000", name: "app_subscriptions" },
-  ]);
+  // Nothing is pending again: the WP4/WP8/WP12 migrations were applied on 2026-09-20 and their
+  // tables moved from PENDING_MIGRATION_TABLES into the live catalog.
+  assert.deepEqual(result.pending, []);
   // Five were pushed under an apply-time version that differs from the authored filename. Their SQL
   // is identical to the ledger; only the version differs, and it is reported rather than hidden.
   assert.deepEqual(result.versionDrift, [
@@ -412,14 +408,16 @@ test("the current runtime catalog and backup manifest are exactly aligned", () =
   // Tables whose migration has not been applied are reported as pending, not as a manifest that
   // names something production lacks: they must be in the manifest BEFORE the migration lands, or
   // the first snapshot after it silently omits them.
-  const coverage = findCatalogCoverageGaps(PRODUCTION_PUBLIC_TABLES_98, CA_TABLES, EPHEMERAL_RUNTIME_TABLES, PENDING_MIGRATION_TABLES);
+  const coverage = findCatalogCoverageGaps(PRODUCTION_PUBLIC_TABLES_107, CA_TABLES, EPHEMERAL_RUNTIME_TABLES, PENDING_MIGRATION_TABLES);
   assert.deepEqual({ missingFromBackup: coverage.missingFromBackup, missingFromCatalog: coverage.missingFromCatalog }, {
     missingFromBackup: [], missingFromCatalog: [],
   });
-  assert.deepEqual(coverage.pendingMigration, [...PENDING_MIGRATION_TABLES].sort(),
-    "every pending table is in the manifest and absent from production, which is exactly right until its migration is applied");
+  // Nothing is pending now that the WP4/WP8/WP12 tables are live, so the manifest and the catalog
+  // agree outright rather than agreeing once a pending set is set aside.
+  assert.deepEqual(coverage.pendingMigration, []);
+  assert.deepEqual(PENDING_MIGRATION_TABLES, []);
   // A table nobody migrated and nobody backed up is still a gap, pending list or not.
-  assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_98, "ghost_table"], CA_TABLES, EPHEMERAL_RUNTIME_TABLES, PENDING_MIGRATION_TABLES).missingFromBackup,
+  assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_107, "ghost_table"], CA_TABLES, EPHEMERAL_RUNTIME_TABLES, PENDING_MIGRATION_TABLES).missingFromBackup,
     ["ghost_table"]);
   assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_98, "forgotten_runtime_table"], CA_TABLES, EPHEMERAL_RUNTIME_TABLES).missingFromBackup,
     ["forgotten_runtime_table"]);

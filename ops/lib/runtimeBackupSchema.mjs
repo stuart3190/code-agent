@@ -57,6 +57,15 @@ export const PRODUCTION_PUBLIC_TABLES_98 = Object.freeze([...PRODUCTION_PUBLIC_T
   "bv2_build_envelopes", "bv2_build_progress", "bv2_build_settlements",
   "bv2_duration_extensions", "bv2_recovery_approvals", "bv2_repair_strategies", "bv2_verification_defects",
 ].sort());
+// The catalog after the WP4/WP8/WP12 migrations were applied on 2026-09-20, read back from
+// information_schema: 101 public tables before, nine added, 110 after. The 98-table constant stays
+// exactly as it was, because a historical backup must keep validating against the catalog it was
+// actually taken from.
+export const PRODUCTION_PUBLIC_TABLES_107 = Object.freeze([...PRODUCTION_PUBLIC_TABLES_98,
+  "app_account_policies", "app_audit_config", "app_audit_events", "app_billing_events",
+  "app_membership_events", "app_memberships", "app_profiles", "app_settings", "app_subscriptions",
+].sort());
+
 export const PRODUCTION_PUBLIC_TABLES_98_SHA256 =
   "7e055d0b204b6254d11c66da0f6dbf5e0b4bc99ea17faac4b1bda5c55ed70417";
 
@@ -223,14 +232,10 @@ export function canonicalRowsForRestoreComparison(table, rows) {
  * lands is a table the first snapshot silently omits — and they are correctly absent from the live
  * catalog until the migration is applied. Empty this list as each migration is applied.
  */
-export const PENDING_MIGRATION_TABLES = Object.freeze([
-  // supabase/migrations/20260918120000_app_accounts_memberships.sql
-  "app_profiles", "app_memberships", "app_membership_events", "app_account_policies",
-  // supabase/migrations/20260918140000_app_settings_audit.sql
-  "app_settings", "app_audit_config", "app_audit_events",
-  // supabase/migrations/20260919120000_app_subscriptions.sql
-  "app_subscriptions", "app_billing_events",
-]);
+// Empty since 2026-09-20: the WP4, WP8 and WP12 migrations were applied to production, so their
+// nine tables moved from here into PRODUCTION_PUBLIC_TABLES_107 below. Add to this list only for
+// the window between a migration landing in the repository and being applied.
+export const PENDING_MIGRATION_TABLES = Object.freeze([]);
 
 export function findCatalogCoverageGaps(liveTables, backedUpTables, ignoredTables = [], pendingTables = []) {
   const live = new Set(liveTables);

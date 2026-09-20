@@ -1,0 +1,42 @@
+{
+  "source": "Supabase Management API database/query on zczgvcsokfafuyognvwx, applied 2026-09-20 by Claude at Stuart's instruction; ledger read back via schema_migrations",
+  "capturedAt": "2026-09-20T13:58:29.900Z",
+  "baseVersion": "20260916120000",
+  "ledgerCount": 87,
+  "note": "WP4 accounts/memberships, WP8 settings/audit and WP12 subscriptions. Applied file by file rather than through db push: five historical migrations carry version drift, and the CLI's only route past that check is to mark them reverted, which would re-run migrations that are already applied. Each file was executed directly and then recorded here, so the drift evidence is preserved exactly as it was. Every statement is additive and idempotent; the entities audit trigger was verified inert for an application that has not opted in.",
+  "migrations": [
+    {
+      "appliedOrder": 85,
+      "version": "20260918120000",
+      "name": "app_accounts_memberships",
+      "filename": "20260918120000_app_accounts_memberships.sql",
+      "statementCount": 1,
+      "sqlSha256": "1fc2125e26c15b5b8835507830ddcb013a711a7db996ab0f51336935f785784e",
+      "canonicalSqlSha256": "1fc2125e26c15b5b8835507830ddcb013a711a7db996ab0f51336935f785784e",
+      "localCanonicalSqlSha256": "1fc2125e26c15b5b8835507830ddcb013a711a7db996ab0f51336935f785784e",
+      "appliedVersion": "20260918120000"
+    },
+    {
+      "appliedOrder": 86,
+      "version": "20260918140000",
+      "name": "app_settings_audit",
+      "filename": "20260918140000_app_settings_audit.sql",
+      "statementCount": 1,
+      "sqlSha256": "ded0afc98ebdb1060be047d909d2f939dad36e2b822ac49dc7d947aefd7bb592",
+      "canonicalSqlSha256": "ded0afc98ebdb1060be047d909d2f939dad36e2b822ac49dc7d947aefd7bb592",
+      "localCanonicalSqlSha256": "ded0afc98ebdb1060be047d909d2f939dad36e2b822ac49dc7d947aefd7bb592",
+      "appliedVersion": "20260918140000"
+    },
+    {
+      "appliedOrder": 87,
+      "version": "20260919120000",
+      "name": "app_subscriptions",
+      "filename": "20260919120000_app_subscriptions.sql",
+      "statementCount": 1,
+      "sqlSha256": "60465ec278a1ef3836e9fd68a7d3286c7c1e6d1df2ccb63b57c67b9b88f0b814",
+      "canonicalSqlSha256": "60465ec278a1ef3836e9fd68a7d3286c7c1e6d1df2ccb63b57c67b9b88f0b814",
+      "localCanonicalSqlSha256": "60465ec278a1ef3836e9fd68a7d3286c7c1e6d1df2ccb63b57c67b9b88f0b814",
+      "appliedVersion": "20260919120000"
+    }
+  ]
+}
