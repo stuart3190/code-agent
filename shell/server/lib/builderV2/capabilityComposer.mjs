@@ -913,61 +913,66 @@ export const newsletterCapability = makeNewsletter({ entity: ${quote(entity)} })
   if (composeIdentity && nodes.has("capability:session")) {
     Object.assign(files, identityFiles(moduleLock, identityPlan));
     interfaces.push({ module: IDENTITY_COMPOSED_PATH, exports: ["identity", "identityPlan"], owns: ["session"],
-      operations: identityPlan.methods });
+      operations: identityPlan.methods, facades: ["identity"] });
     const facades = ["identity"];
     const account = accountFiles(nodes, identityPlan);
     if (Object.keys(account.files).length) {
       Object.assign(files, account.files);
-      interfaces.push(...account.interfaces);
+      interfaces.push(...under(account.interfaces, "accounts"));
       facades.push("accounts");
     }
     const entity = entityFiles(nodes, entitySchema);
     if (Object.keys(entity.files).length) {
       Object.assign(files, entity.files);
-      interfaces.push(...entity.interfaces);
+      interfaces.push(...under(entity.interfaces, "entities"));
       facades.push("entities");
     }
     const route = routeFiles(nodes, routePlan, { entitySchema });
     if (Object.keys(route.files).length) {
       Object.assign(files, route.files);
-      interfaces.push(...route.interfaces);
+      interfaces.push(...under(route.interfaces, "routing"));
       facades.push("routing");
     }
     const settings = settingsFiles(settingsPlan);
     if (Object.keys(settings.files).length) {
       Object.assign(files, settings.files);
-      interfaces.push(...settings.interfaces);
+      interfaces.push(...under(settings.interfaces, "settings"));
       facades.push("settings");
     }
     const behaviour = behaviourFiles(behaviourPlan, { entitySchema });
     if (Object.keys(behaviour.files).length) {
       Object.assign(files, behaviour.files);
-      interfaces.push(...behaviour.interfaces);
+      interfaces.push(...under(behaviour.interfaces, ...behaviour.facades));
       facades.push(...behaviour.facades);
     }
     const delivery = deliveryFiles(deliveryPlan, { entitySchema });
     if (Object.keys(delivery.files).length) {
       Object.assign(files, delivery.files);
-      interfaces.push(...delivery.interfaces);
+      interfaces.push(...under(delivery.interfaces, ...delivery.facades));
       facades.push(...delivery.facades);
     }
     const insight = insightFiles(insightPlan);
     if (Object.keys(insight.files).length) {
       Object.assign(files, insight.files);
-      interfaces.push(...insight.interfaces);
+      interfaces.push(...under(insight.interfaces, ...insight.facades));
       facades.push(...insight.facades);
     }
     const billing = billingFiles(billingPlan);
     if (Object.keys(billing.files).length) {
       Object.assign(files, billing.files);
-      interfaces.push(...billing.interfaces);
+      interfaces.push(...under(billing.interfaces, ...billing.facades));
       facades.push(...billing.facades);
     }
     const automation = automationFiles(automationPlan);
     if (Object.keys(automation.files).length) {
       Object.assign(files, automation.files);
-      interfaces.push(...automation.interfaces);
+      interfaces.push(...under(automation.interfaces, ...automation.facades));
       facades.push(...automation.facades);
+    }
+    for (const row of interfaces) {
+      const base = row.module.split("/").pop().replace(/[.]js$/, "");
+      const covering = FACADE_SUPERSEDES[base];
+      if (covering && facades.includes(covering)) row.facades = [covering];
     }
     files[APP_FACADE_INDEX_PATH] = facadeIndexSource(moduleLock, facades);
   }
@@ -991,6 +996,16 @@ export { CAPABILITY_COMPOSITION } from "./manifest.js";
 `;
   return { files, interfaces };
 }
+
+// WP14: a composed module covered by an app/* facade is private — the facade exists to hide it.
+// One with no facade is the import surface itself. The public-ABI brief has to tell those apart,
+// and it cannot do it from filenames: composed/crud.js sits behind the entities facade under a
+// different name, while composed/contact.js has no facade at all. Recorded here, where the facade
+// and the modules behind it are assembled in the same breath.
+const under = (rows, ...names) => rows.map((row) => ({ ...row, facades: names }));
+
+// Legacy composed modules that a later facade absorbed without taking its name.
+const FACADE_SUPERSEDES = Object.freeze({ crud: "entities", session: "identity", roles: "accounts" });
 
 /** The exports of each composed public facade, read from the source the composer just wrote. */
 function publicFacadesOf(files = {}) {

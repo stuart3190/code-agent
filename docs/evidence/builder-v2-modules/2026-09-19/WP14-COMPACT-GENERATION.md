@@ -33,3 +33,42 @@ build keeping the legacy brief; a locked prompt carrying the public ABI and stil
 facade exports; platform-only defects classified as module faults across runtime, composed, facade
 and backend paths; mixed and application-only defects keeping the application repair; and the
 ownership vocabulary.
+
+## Defect found by live qualification, 2026-09-20
+
+The first live build (`51da3b63-3dfd-41c1-b48a-274bb170efbc`, landing + contact) blocked after
+2.77 credits with the candidate correction patch still invalid. The proximate error:
+
+    src/screens/scaffold/HomeScreen.jsx (4:9): "makeContactForm" is not exported by
+    "src/lib/capabilities/composed/contact.js"
+
+The root cause was in this projection, not in the model. The brief listed only `src/lib/app`
+facades while announcing itself as "the whole platform surface this application has", and closed
+by telling the model never to import from `lib/capabilities`. The contact capability has no
+facade: it exists only at `composed/contact.js`. So for a contact form the brief was not merely
+incomplete, it was unfollowable — the one path to the capability was the one path it forbade. The
+model guessed the registry's factory name `makeContactForm`, which the composed module does not
+export (it exports the pre-wired `contactCapability`), then tried to patch the protected composed
+file to make the guess true, was refused by the write guard, and the build ended blocked.
+
+**Fix, in two halves.** The brief now names composed modules that have no facade, with the exact
+path and real exports, and its closing line permits precisely the paths it has just listed.
+
+The first attempt at that got the second half wrong: it decided "has no facade" by comparing
+filenames, which promoted `composed/crud.js`, `composed/session.js` and `composed/roles.js` into
+the brief. Those are not facade-less at all — the `entities`, `identity` and `accounts` facades
+absorbed them under different names. The brief would have offered private plumbing on one line and
+called it private on the next, and it grew 40% doing so. Coverage is now a fact the composer
+records when it assembles a facade (`under(...)` in `capabilityFiles`, plus `FACADE_SUPERSEDES`
+for the three legacy modules a later facade absorbed), never a guess from a path.
+
+Net effect on the representative locked build: 1411 → 1006 characters, ratio against the legacy
+brief 0.645 (it was 0.454 while the brief was incomplete, and 0.904 while it named the privates).
+Completeness was never really in tension with compactness here; naming private plumbing was waste.
+
+**Why no deterministic test caught it.** Every WP14 test asserted over a contract whose
+capabilities all have facades, so the facade-less path was never exercised. Two tests now cover
+both halves: a contact-shaped contract proving the capability is named with an importable path and
+that `makeContactForm` appears nowhere, and a facade-covered contract proving `crud`, `session`,
+`roles`, `authorization` and `admin` modules stay unnamed while their exports remain reachable
+through the facades.
