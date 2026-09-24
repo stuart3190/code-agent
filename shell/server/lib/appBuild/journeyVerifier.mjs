@@ -100,9 +100,17 @@ export function expectationKeywords(expect) {
 // Keep this deliberately structural and narrow. Ordinary actions still need their contracted
 // visible outcome; only explicit reset language may be answered by a real non-default -> default
 // transition in a native form control.
+//
+// A control NAMED "Reset" or "Clear" is not a request that anything reset. On 2026-09-24 the Simple
+// Counter build (69f47bf4) opened with "the Increase (+1), Decrease (-1), and Reset buttons visible":
+// that noun matched here, the opening step then had to prove a non-default -> default transition
+// nothing had asked for, and a working counter stayed red through three repair rounds. Named
+// controls are removed before the text is read for reset language.
+const NAMED_RESET_CONTROL = /\b(?:clear|reset)\s+(?:button|control|link|icon|action|option|key|toggle|switch)s?\b/gi;
 export function expectationRequestsControlReset(expect) {
+  const text = String(expect || "").replace(NAMED_RESET_CONTROL, " ");
   return /\b(?:is|becomes?|remains?)\s+blank\b|\bclear(?:s|ed|ing)?\b|\breset(?:s|ted|ting)?\b|\breturn(?:s|ed|ing)?\s+to\b/i
-    .test(String(expect || ""));
+    .test(text);
 }
 
 export function controlResetTransition(before = [], after = []) {
@@ -2998,7 +3006,9 @@ async function runStep(page, step, {
   // that the step did anything: "a booking reference is shown" was passing on a page whose only
   // match was the word "booking" in the button the step had just clicked.
   const textBefore = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-  const resetExpected = expectationRequestsControlReset(`${action} ${expect}`);
+  // An observation drives nothing, so no control can transition under it: reset language on an
+  // opening step ("the form is blank on arrival") is a visible-state claim, not a reset to prove.
+  const resetExpected = !observationOnly && expectationRequestsControlReset(`${action} ${expect}`);
   const controlsBefore = resetExpected ? await visibleControlState(page) : [];
   const removalSpec = selectedRemovalExpectationSpec(
     removalExpectationSpec({ action, expect }), selections, selectionValues,
@@ -3982,7 +3992,7 @@ async function runStep(page, step, {
       // verdict is inconclusive, never an application failure.
       memberStructured: Boolean(collectionMembershipSpec),
       collectionRegionFound: !collectionMembershipEvidence.checked || collectionMembershipEvidence.regionFound !== false,
-      resetExpected, resetOk: resetEvidence.ok,
+      resetExpected, resetOk: resetEvidence.ok, resetChecked: resetEvidence.checked,
       mutationDeclared: Boolean(mutationFlow),
       actionDeclared: interactionFlows.some((flow) => ["action", "lookup", "cancellation"].includes(flow.kind)),
       flowStartDeclared: Boolean(flowStartFlow),
@@ -4438,8 +4448,21 @@ export function structuredStepVerdict({
         : "the contracted removal action ran, but the collection member did not leave its required state" });
   }
   if (facts.resetExpected) {
-    checks.push({ kind: "reset", ok: Boolean(facts.resetOk),
-      detail: facts.resetOk ? "the contracted control returned to its default" : "the contracted control did not return to its default" });
+    // A reset is proven by a native control's non-default -> default transition. A page with no
+    // native control to measure (a counter in a div, a badge, a list) offers no such evidence
+    // either way, so the contract's other declared outcome - its visible text, values or member
+    // state - or the surface change the action produced decides instead. A measurable control that
+    // stayed put with nothing else declared is still a red reset.
+    const priorDeclared = checks.filter((check) => ["values", "visible_text", "collection", "removal"].includes(check.kind));
+    const priorSatisfied = priorDeclared.length > 0 && priorDeclared.every((check) => check.ok);
+    const measurable = facts.resetChecked !== false;
+    const ok = Boolean(facts.resetOk) || priorSatisfied || (!measurable && changed);
+    checks.push({ kind: "reset", ok,
+      detail: facts.resetOk ? "the contracted control returned to its default"
+        : priorSatisfied ? "the contracted outcome after the reset is present"
+        : ok ? "the contracted reset changed the surface (no native control carries the value)"
+        : measurable ? "the contracted control did not return to its default"
+        : "the contracted reset produced no observable change and no native control carries the value" });
   }
   // The contract's declared outcome (route, values, visible text, member, removal, reset, next
   // control) is the stronger evidence: when every declared outcome is present, an action that

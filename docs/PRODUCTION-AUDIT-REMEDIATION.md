@@ -14,7 +14,7 @@ silently treated as complete.
 
 ## Safety baseline
 
-- Audited/current `origin/main`: `92e4c9fe5c864799eee228f304849064bacb0190`.
+- Audited/current `origin/main`: `5d83498e70384dc2f448d8f9ac650832408dbd43` (re-pinned 2026-09-24; previously `92e4c9fe5c864799eee228f304849064bacb0190`).
 - Implementation branch: `remediation/builder-v2-production`.
 - Customer Builder V2 rollout remains paused. Builder V1 remains the customer default.
 - `THRALLO_MANAGED_SETTLEMENT_PAUSED=1` is a mandatory release invariant.

@@ -61,9 +61,15 @@ test("every module the sandbox entrypoint can import is copied into the sandbox 
   assert.deepEqual(missing, [], `these imports do not resolve to a file:\n${missing.join("\n")}`);
 });
 
-test("the walk sees the shared contract vocabulary the verifier depends on", async () => {
+test("the walk sees the smoke verifier, and the contracted verifier still pins shell/shared", async () => {
   const files = await importClosure(ENTRYPOINT);
-  assert.ok(files.includes("shell/server/lib/appBuild/journeyVerifier.mjs"), "verifier is reachable");
-  assert.ok(files.includes("shell/shared/implementationContract.mjs"),
-    "the shared contract module is part of the closure, so the image must copy shell/shared");
+  assert.ok(files.includes("shell/server/lib/appBuild/smokeVerifier.mjs"), "the smoke gate is reachable from the entrypoint");
+  // journeyVerifier is no longer imported by the entrypoint but remains a sandbox identity
+  // entrypoint (sandboxProvenance.mjs), so its closure must still be inside the COPY set.
+  const verifier = await importClosure("shell/server/lib/appBuild/journeyVerifier.mjs");
+  assert.ok(verifier.includes("shell/shared/implementationContract.mjs"),
+    "the shared contract module is part of the identity closure, so the image must copy shell/shared");
+  const roots = await copiedRoots();
+  const outside = verifier.filter((file) => !roots.some((root) => file === root || file.startsWith(`${root}/`)));
+  assert.deepEqual(outside, []);
 });

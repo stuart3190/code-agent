@@ -45,45 +45,29 @@ async function compileTree(payload) {
 }
 
 async function browserVerify(payload) {
-  const { verifyApp } = await import("../shell/server/lib/appBuild/verificationAgent.mjs");
-  const { verifyJourneys } = await import("../shell/server/lib/appBuild/journeyVerifier.mjs");
+  // The mandatory preview gate is the minimal smoke test (shell/server/lib/appBuild/smokeVerifier.mjs):
+  // the preview opens, something renders without a fatal error, and visible controls can be
+  // activated without crashing the app. The contracted journey verifier no longer grades a build.
+  const { smokeVerifyJourneys } = await import("../shell/server/lib/appBuild/smokeVerifier.mjs");
   const { chromium } = await import("@playwright/test");
-  // One sandbox job owns one Chromium process. Smoke and contracted journeys use independent
-  // contexts, so authentication/data never leak between them, while a WebGL app cannot strand
-  // resources by tearing one browser down and immediately launching another in the same container.
   const browser = await chromium.launch({ headless: true, args: ["--disable-dev-shm-usage", "--no-sandbox"] });
   try {
-    const app = await verifyApp({
-      previewUrl: payload.previewUrl, usesBackend: payload.usesBackend !== false,
-      timeoutMs: Number(payload.appTimeoutMs || payload.timeoutMs) || 180_000, browser,
-      verificationIdentity: payload.verificationIdentity || null,
-      verifierPolicy: payload.verifierPolicy,
+    const journeys = await smokeVerifyJourneys({
+      previewUrl: payload.previewUrl, contract: payload.contract || {},
+      timeoutMs: Number(payload.journeyTimeoutMs || payload.timeoutMs) || 120_000, browser,
+      log: (line) => console.log(line),
     });
-    let journeys = null;
-    if (app.verifierDefects?.length) {
-      // The generic smoke has already proved the verification platform is unavailable. Opening a
-      // second context can only add pressure to the same cap; return the typed platform failure so
-      // the orchestrator retains the candidate without spending a repair.
-      journeys = {
-        pass: null, journeys: [], verifierDefects: app.verifierDefects,
-        consoleErrors: app.consoleErrors || [], failedRequests: app.failedRequests || [],
-      };
-    } else if (payload.contract?.journeys?.length) {
-      journeys = await verifyJourneys({ previewUrl: payload.previewUrl, contract: payload.contract,
-        timeoutMs: Number(payload.journeyTimeoutMs || payload.timeoutMs) || 180_000, browser,
-        verificationIdentity: payload.verificationIdentity || null,
-        verifierPolicy: payload.verifierPolicy });
-    }
-    if (journeys && app.verifierDefects?.length) {
-      journeys = {
-        ...journeys,
-        verifierDefects: [...new Map([
-          ...(journeys.verifierDefects || []), ...app.verifierDefects,
-        ].map((row) => [row.code, row])).values()],
-      };
-    }
-    return { ok: app.pass !== false && (!journeys || journeys.pass !== false), app, journeys,
-      exitCode: 0, stdout: "", stderr: "" };
+    // `app` keeps the shape older evidence readers expect: one load check from the same run.
+    const app = {
+      pass: journeys.unavailable ? false : journeys.pass !== false,
+      verifierPolicy: journeys.verifierPolicy,
+      checks: [{ id: "load", label: "App loads", status: journeys.smoke?.load?.ok ? "pass" : "fail",
+        detail: String(journeys.smoke?.load?.detail || "").slice(0, 300) }],
+      verifierDefects: [], consoleErrors: journeys.consoleErrors, failedRequests: journeys.failedRequests,
+      advisories: journeys.advisories, failures: journeys.fatalErrors,
+      summary: journeys.smoke?.load?.ok ? "✓ App loads" : "✗ App loads",
+    };
+    return { ok: journeys.pass === true, app, journeys, exitCode: 0, stdout: "", stderr: "" };
   } finally {
     await browser.close().catch(() => {});
   }
@@ -100,7 +84,7 @@ async function browserVerify(payload) {
 const JOB_MODULES = {
   compile: ["../src/engine/fileTree.mjs", "./processTree.mjs"],
   publish_package: ["../shell/server/lib/pwa.mjs", "@playwright/test"],
-  browser_verify: ["../shell/server/lib/appBuild/verificationAgent.mjs", "../shell/server/lib/appBuild/journeyVerifier.mjs", "@playwright/test"],
+  browser_verify: ["../shell/server/lib/appBuild/smokeVerifier.mjs", "@playwright/test"],
   qa_browser: ["../shell/server/lib/qaRunner.mjs"],
   sandbox_provenance: ["../shell/server/lib/builderV2/sandboxProvenance.mjs"],
 };

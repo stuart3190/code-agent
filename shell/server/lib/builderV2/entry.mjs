@@ -156,15 +156,21 @@ function relay(ctx, job) {
       }
       if (name !== "end") return;
       if (lastAgent) await ctx.emit("agent_done", { agent: lastAgent, ok: data.status === "complete" });
+      // The worker reports how the preview was gated; a bypassed build is never called verified.
+      const verified = data.result?.verification?.verified !== false;
       if (data.status === "complete" && data.result?.previewUrl) {
         await ctx.emit("preview_ready", {
-          url: data.result.previewUrl, projectId: data.projectId,
-          message: "Builder V2 verified the app. Preview ready.",
+          url: data.result.previewUrl, projectId: data.projectId, verified,
+          verification: data.result.verification || null,
+          message: verified
+            ? "Builder V2 smoke-tested the app. Preview ready."
+            : "Builder V2 built the app with the verifier bypassed. Preview ready - not verified.",
         });
       }
       const text = data.status === "complete"
-        ? "Builder V2 finished the verified build."
-        : (data.error || "Builder V2 stopped without producing an unverified preview.");
+        ? (verified ? "Builder V2 finished the build; the browser smoke test passed."
+          : "Builder V2 finished the build with the verifier bypassed. This preview is not verified.")
+        : (data.error || "Builder V2 stopped without producing a preview.");
       await ctx.conversations.appendTurn(ctx.conversation, {
         role: "lead", content: text,
         payload: {
@@ -338,7 +344,8 @@ export async function startAppBuildV2(ctx, input, options = {}) {
     const result = await dispatch(ctx, {
       project, mode: "build", prompt: String(input.description), kind: "app_build_v2",
       deps: options.deps, preflight,
-      v2Input: { buildProfile },
+      // The build form's "Use verifier" checkbox (default on) selects the worker's execution path.
+      v2Input: { buildProfile, useVerifier: ctx.useVerifier !== false },
       budgetApprovalId: consumedApproval?.approvalId || null,
     });
     if (consumedApproval) {

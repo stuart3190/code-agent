@@ -18,8 +18,7 @@ import { createBudgetLedger } from "../appBuild/budgetLedger.mjs";
 import { resolveBuildContext, resolveConnectedRecoveryContext } from "../appBuild/buildContext.mjs";
 import { managedSettlementPaused, usesManagedCredits } from "../appBuild/providerPolicy.mjs";
 import { createDiagSession } from "../appBuild/buildDiagnostics.mjs";
-import { createVerificationIdentity } from "../appBuild/verificationIdentity.mjs";
-import { MINIMAL_CONTRACT_VERIFIER_POLICY } from "../appBuild/verifierPolicy.mjs";
+import { createBypassJourneysFn, nullVerificationCache, resolveVerificationMode } from "./verificationMode.mjs";
 import { proveGeneratedRuntimeBackend, proveGeneratedRuntimeConfig, withRuntimeEnv } from "../runtimeEnv.mjs";
 import { projectExecutionJourneys } from "./executionProvenance.mjs";
 import { previewProvider } from "../../preview/index.mjs";
@@ -251,54 +250,6 @@ export function verificationVisitorScopeForJourney(roundScope, journey, contract
     : `${roundScope}:independent:${journey?.id || "unknown"}`;
 }
 
-async function backendFingerprint(client, projectId) {
-  const appUsers = await client.from("app_users").select("id,auth_user_id,created_at")
-    .eq("app_id", String(projectId)).order("id");
-  if (appUsers.error) throw new Error(`backend app-user proof: ${appUsers.error.message}`);
-  const userIds = (appUsers.data || []).map((row) => row.auth_user_id);
-  let entityRows = [];
-  if (userIds.length) {
-    const entities = await client.from("entities").select("id,type,data,created_at")
-      .eq("app_id", String(projectId)).in("owner", userIds).order("id");
-    if (entities.error) throw new Error(`backend entity proof: ${entities.error.message}`);
-    entityRows = entities.data || [];
-  }
-  const rows = { entities: entityRows, appUsers: appUsers.data || [] };
-  const valueShape = (value) => ({
-    type: value === null ? "null" : Array.isArray(value) ? "array" : typeof value,
-    hash: crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex").slice(0, 20),
-  });
-  const redactedEntities = rows.entities.map((row) => ({
-    id: row.id, type: row.type, createdAt: row.created_at,
-    fields: Object.fromEntries(Object.entries(row.data || {}).sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, value]) => [key, valueShape(value)])),
-  }));
-  const redactedUsers = rows.appUsers.map((row) => ({ id: row.id, createdAt: row.created_at,
-    authUserHash: valueShape(row.auth_user_id).hash }));
-  return {
-    hash: crypto.createHash("sha256").update(JSON.stringify(rows)).digest("hex"),
-    entityCount: rows.entities.length, appUserCount: rows.appUsers.length,
-    entities: redactedEntities, appUsers: redactedUsers,
-  };
-}
-
-function backendDifference(before, after) {
-  const prior = new Map((before?.entities || []).map((row) => [row.id, row]));
-  const next = new Map((after?.entities || []).map((row) => [row.id, row]));
-  return {
-    created: [...next.keys()].filter((id) => !prior.has(id)),
-    deleted: [...prior.keys()].filter((id) => !next.has(id)),
-    changed: [...next.keys()].filter((id) => prior.has(id)
-      && JSON.stringify(prior.get(id)) !== JSON.stringify(next.get(id))).map((id) => ({
-      id,
-      fields: [...new Set([
-        ...Object.keys(prior.get(id)?.fields || {}), ...Object.keys(next.get(id)?.fields || {}),
-      ])].filter((field) => JSON.stringify(prior.get(id)?.fields?.[field])
-        !== JSON.stringify(next.get(id)?.fields?.[field])),
-    })),
-  };
-}
-
 async function resumeDiagnostics(client, workJob, request) {
   if (!workJob.payload?.diagSessionId) {
     throw Object.assign(new Error("Builder V2 execution requires a durable diagnostic trace root."), {
@@ -496,6 +447,9 @@ export function createBuilderV2Runtime({
       const input = workJob.payload.input || {};
       const mode = workJob.payload.mode || "build";
       const request = String(input.prompt || workJob.payload.request || "");
+      // The build form's "Use verifier" choice rides on the queued input and selects the actual
+      // execution path below (smoke gate vs. compiled-and-reachable preview). Default: verify.
+      const verification = resolveVerificationMode(input);
       const emit = (kind, value) => onEvent?.(kind, typeof value === "string" ? value : JSON.stringify(value));
       const diag = await resumeDiagnostics(client, workJob, request);
       let previewResult = null;
@@ -610,6 +564,9 @@ export function createBuilderV2Runtime({
             owner: eventOwner, projectId: eventProject, buildId, envelope,
           });
           activeEnvelope = stored.envelope || envelope;
+          await events.telemetry({ owner: eventOwner, projectId: eventProject, buildId, kind: "verification_mode",
+            details: { mode: verification.mode, verifierPolicy: verification.verifierPolicy,
+              useVerifier: verification.useVerifier, verified: verification.verified } });
           const status = customerBuildStatus({ internalState: "building" });
           const { error } = await client.from("bv2_builds").update({
             envelope_version: envelope.version, customer_state: status.state,
@@ -800,131 +757,95 @@ export function createBuilderV2Runtime({
         signal: execution.signal || signal,
         onStdout: (chunk) => emit("stdout", chunk), onStderr: (chunk) => emit("stderr", chunk),
       });
-      const journeysFn = async ({ tree, journeys, contract: journeyContract, signal: journeySignal }) => {
+      // THE MANDATORY PREVIEW GATE IS THE SMOKE TEST (2026-09-24). One sandbox browser job per
+      // verification pass drives the compiled preview: it opens, renders without a fatal error, and
+      // its visible controls activate without crashing it. It reads no text, compares no numbers and
+      // expects nothing of a click, so a red verdict is only ever a crash or an unreachable preview.
+      // Persistence fingerprints and backend-row probes are gone from the gate: whether a click
+      // produced a particular record is not a preview requirement.
+      const smokeJourneysFn = async ({ tree, journeys, contract: journeyContract, signal: journeySignal }) => {
         previewResult = await preview.start(projectId, withRuntimeEnv(tree, projectId));
         if (!previewResult?.url) throw new Error("verification preview returned no URL");
-        const results = [];
-        const consoleErrors = [];
-        const failedRequests = [];
-        const fatalErrors = [];
-        const advisories = [];
-        const verifierDefects = [];
-        let unavailable = false;
-        let verifierError = null;
-        let mechanics = null;
-        // Identity is stable within each producer/consumer lifecycle and isolated for each
-        // independent scenario. A later repair round gets a new root scope and cannot inherit a
-        // half-completed wizard or terminal state from the prior candidate.
-        const verificationVisitorScope = uuid();
-        for (const journey of journeys) {
-          const runtimeRequirements = activeEnvelope?.runtimeRequirements
-            || contractRuntimeRequirements(journeyContract);
-          const usesBackend = browserVerificationUsesBackend(runtimeRequirements);
-          const browserBudget = browserVerificationBudget({
-            journey, contract: journeyContract, usesBackend,
-          });
-          // Use a server-only authority to seal stable verifier credentials. Only the derived,
-          // purpose-scoped tokens enter the ephemeral sandbox payload; the service credential
-          // itself never leaves the durable worker process.
-          const verificationIdentity = createVerificationIdentity({
-            appId: projectId,
-            scope: journey.id,
-            visitorScope: verificationVisitorScopeForJourney(
-              verificationVisitorScope, journey, journeyContract,
-            ),
-            secret: process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE,
-          });
-          const before = journeyRequiresPersistentMutation(journey, journeyContract)
-            ? await backendFingerprint(client, projectId) : null;
-          const outcome = await isolated({
-            id: `${workJob.id}-journey-${uuid()}`, durable_job_id: workJob.id,
+        const runtimeRequirements = activeEnvelope?.runtimeRequirements
+          || contractRuntimeRequirements(journeyContract);
+        const usesBackend = browserVerificationUsesBackend(runtimeRequirements);
+        // Budget the single run from the largest contracted journey; the smoke is bounded by
+        // controls on the page, not by contracted steps, so this is generous rather than tight.
+        const budgets = journeys.map((journey) => browserVerificationBudget({
+          journey, contract: journeyContract, usesBackend,
+        }));
+        const journeyTimeoutMs = Math.max(120_000, ...budgets.map((row) => row.journeyTimeoutMs));
+        const wallSeconds = Math.max(240, ...budgets.map((row) => row.wallSeconds));
+        const executionContract = projectExecutionJourneys(journeyContract, journeys);
+        // Retry ONLY a transport failure (preview never answered / sandbox produced no evidence):
+        // a crash verdict is final and is never re-driven in the hope of a different answer.
+        const MAX_TRANSIENT_ATTEMPTS = 2;
+        let outcome = null;
+        let lastTransient = null;
+        for (let attempt = 1; attempt <= MAX_TRANSIENT_ATTEMPTS; attempt += 1) {
+          outcome = await isolated({
+            id: `${workJob.id}-smoke-${uuid()}`, durable_job_id: workJob.id,
             job_type: "browser_verify", attempts: workJob.attempts || 1,
-            payload: { previewUrl: previewResult.url,
-              usesBackend,
-              // ONE projection operation (executionProvenance.projectExecutionJourneys) turns the
-              // bound pass into this job: the journey, its exact bound flows, scenario and coverage,
-              // the full prerequisite authority, and the binding itself. The verifier judges the
-              // result for completeness against that binding before it opens a browser.
-              contract: projectExecutionJourneys(journeyContract, [journey]),
-              // Stable only within this project/journey. The sandbox restores deterministic test
-              // credentials, then the app still obtains a real app-auth/RLS session normally.
-              verificationIdentity,
-              verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
-              appTimeoutMs: browserBudget.appTimeoutMs,
-              journeyTimeoutMs: browserBudget.journeyTimeoutMs },
-            resource_limits: runtimeLimits(workJob, "browser_verify", {
-              wallSeconds: browserBudget.wallSeconds,
-            }),
+            payload: { previewUrl: previewResult.url, usesBackend, contract: executionContract,
+              verifierPolicy: verification.verifierPolicy, journeyTimeoutMs },
+            resource_limits: runtimeLimits(workJob, "browser_verify", { wallSeconds }),
           }, {
             signal: journeySignal || signal,
             onStdout: (chunk) => emit("stdout", chunk), onStderr: (chunk) => emit("stderr", chunk),
           });
-          if (!outcome.journeys) throw new Error(`browser verification produced no journey evidence (${outcome.classification || outcome.stderr || "unknown"})`);
-          consoleErrors.push(...(outcome.journeys.consoleErrors || []));
-          failedRequests.push(...(outcome.journeys.failedRequests || []));
-          fatalErrors.push(...(outcome.journeys.fatalErrors || []));
-          advisories.push(...(outcome.journeys.advisories || []));
-          const failureRefs = outcome.journeys.failureRefs || [];
-          verifierDefects.push(...(outcome.journeys.verifierDefects || []));
-          unavailable = unavailable || outcome.journeys.unavailable === true;
-          verifierError ||= outcome.journeys.error || null;
-          if (outcome.journeys.mechanics) {
-            const current = outcome.journeys.mechanics;
-            mechanics = {
-              probed: (mechanics?.probed || 0) + (current.probed || 0),
-              failures: [...(mechanics?.failures || []), ...(current.failures || [])],
-              skipped: [...(mechanics?.skipped || []), ...(current.skipped || [])],
-              outcomes: [...(mechanics?.outcomes || []), ...(current.outcomes || [])],
-            };
-          }
-          const after = before ? await backendFingerprint(client, projectId) : null;
-          const entityDiff = before ? backendDifference(before, after) : null;
-          for (const verdict of outcome.journeys.journeys || []) {
-            results.push({
-              ...verdict,
-              failureRefs: [...new Set([...(verdict.failureRefs || []), ...failureRefs])],
-              backendEvidence: before ? {
-                required: true, changed: before.hash !== after.hash,
-                before, after, entityDiff,
-              } : { required: false },
-            });
-          }
-          // A platform-owned verifier failure cannot be repaired by changing generated source.
-          // Stop opening more browsers and let the orchestrator retain the candidate immediately.
-          if (unavailable || verifierDefects.length) break;
+          const transient = !outcome.journeys
+            ? `browser smoke produced no evidence (${outcome.classification || outcome.stderr || "unknown"})`
+            : outcome.journeys.unavailable === true ? (outcome.journeys.error || "preview unavailable") : null;
+          if (!transient) break;
+          lastTransient = transient;
+          emit("stdout", `[bv2] smoke attempt ${attempt}/${MAX_TRANSIENT_ATTEMPTS} hit a transient infrastructure failure: ${transient}`);
+          if (attempt < MAX_TRANSIENT_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, 3_000));
         }
+        if (!outcome?.journeys) {
+          // Still no evidence after the retry: the orchestrator retains the candidate as a
+          // platform failure instead of spending a repair.
+          return { pass: null, unavailable: true, error: lastTransient, verifierPolicy: verification.verifierPolicy,
+            journeys: [], consoleErrors: [], failedRequests: [], fatalErrors: [], advisories: [],
+            verifierDefects: [], mechanics: null, failureRefs: [] };
+        }
+        const smoke = outcome.journeys;
         const journeyResult = {
-          pass: !unavailable && !verifierDefects.length
-            && results.every((row) => row.status === "pass"),
-          verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
-          journeys: results,
-          consoleErrors: [...new Set(consoleErrors)], failedRequests: [...new Set(failedRequests)],
-          fatalErrors: [...new Set(fatalErrors)],
-          advisories,
-          verifierDefects: [...new Map(verifierDefects.map((row) => [row.code, row])).values()],
-          unavailable,
-          error: verifierError,
-          mechanics,
-          failureRefs: [...new Set(results.flatMap((row) => row.failureRefs || []))],
+          pass: smoke.pass === true,
+          verifierPolicy: smoke.verifierPolicy || verification.verifierPolicy,
+          journeys: (smoke.journeys || []).map((verdict) => ({ ...verdict, backendEvidence: { required: false } })),
+          consoleErrors: [...new Set(smoke.consoleErrors || [])], failedRequests: [...new Set(smoke.failedRequests || [])],
+          fatalErrors: [...new Set(smoke.fatalErrors || [])],
+          advisories: smoke.advisories || [],
+          verifierDefects: smoke.verifierDefects || [],
+          unavailable: smoke.unavailable === true,
+          error: smoke.error || null,
+          mechanics: null,
+          failureRefs: [],
+          smoke: smoke.smoke || null,
         };
-        diag.step?.({ agent: "Verifier", kind: "browser", label: "Builder V2 journeys",
+        diag.step?.({ agent: "Verifier", kind: "browser", label: "Builder V2 smoke test",
           status: journeyResult.pass ? "ok" : "failed", output: JSON.stringify(journeyResult, null, 2) });
         await diag.flush?.();
         return journeyResult;
       };
-      const backendProbeFn = async ({ journeyResults }) => (journeyResults || [])
-        .filter((journey) => journey.backendEvidence?.required && journey.backendEvidence.changed !== true)
-        .map((journey) => ({
-          journeyId: journey.id,
-          detail: "the browser journey passed without a corresponding app-scoped database mutation",
-        }));
+      // "Use verifier" unticked: no browser, no repair loop. The preview is shown once the app has
+      // compiled (stage gate, unchanged) and the started preview answers HTTP.
+      const bypassJourneysFn = createBypassJourneysFn({
+        startPreview: async (tree) => {
+          previewResult = await preview.start(projectId, withRuntimeEnv(tree, projectId));
+          return previewResult;
+        },
+        log: (line) => emit("stdout", line),
+      });
+      const journeysFn = verification.useVerifier ? smokeJourneysFn : bypassJourneysFn;
       const orchestrator = createOrchestrator({
         ...lanes, assetService, snapshotStore, buildStore: supabaseBuildStore(client),
         // WP1/WP4: a live build resolves modules against what THIS deployment declares (env),
         // never against what the source happens to ship. An undeclared service blocks before
         // generation with a configuration-required result.
         moduleAvailability: availabilityFromEnv(process.env),
-        verificationCache: supabaseVerificationCache(client),
+        // A bypassed build never records a pass that a later verified build could reuse.
+        verificationCache: verification.useVerifier ? supabaseVerificationCache(client) : nullVerificationCache(),
         verificationContext: {
           // Cache PASS evidence against both the exact verifier bytes the sandbox proved it is
           // running and the deployed orchestration revision that assembled its contract. A
@@ -934,12 +855,12 @@ export function createBuilderV2Runtime({
             sandboxCompatibility.sandboxVerifier || "in-process",
             sandboxCompatibility.hostCommit || VERIFICATION_CACHE_VERSION,
           ].join(":"),
-          verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+          verifierPolicy: verification.verifierPolicy,
           backendRuntimeVersion: process.env.THRALLO_RUNTIME_VERSION || "unknown",
           environmentVersion: process.env.THRALLO_ENV_VERSION || "unknown", capabilityVersions: "registry-current",
           indexerVersion: INDEXER_VERSION,
         },
-        journeysFn, backendProbeFn, compile, baseTree: () => clone(fromScaffold(REACT_VITE)), events,
+        journeysFn, compile, baseTree: () => clone(fromScaffold(REACT_VITE)), events,
         classifyContract: ({ contract: generatedContract, profile }) => (
           classifyComplexity({ prompt: request, contract: generatedContract }).level || profile
         ),
@@ -1053,13 +974,17 @@ export function createBuilderV2Runtime({
       return {
         status: "complete", stopReason: null,
         result: {
-          finalText: mode === "build"
-            ? "Builder V2 created and verified the application."
-            : mode === "resume_repair"
-              ? "Builder V2 resumed the failed build and verified the targeted repair."
-              : mode === "resume_verify"
-                ? "Builder V2 re-verified the retained application against the current platform runtime."
-              : "Builder V2 applied and verified the change.",
+          finalText: !verification.useVerifier
+            ? "Builder V2 created the application. The verifier was bypassed, so this preview is not verified."
+            : mode === "build"
+              ? "Builder V2 created the application and its browser smoke test passed."
+              : mode === "resume_repair"
+                ? "Builder V2 resumed the failed build; the browser smoke test passed."
+                : mode === "resume_verify"
+                  ? "Builder V2 re-ran the browser smoke test on the retained application."
+                  : "Builder V2 applied the change; the browser smoke test passed.",
+          verification: { mode: verification.mode, verifierPolicy: verification.verifierPolicy,
+            verified: verification.verified, useVerifier: verification.useVerifier },
           buildOk: true, previewUrl: previewResult.url, snapshotId: result.snapshotId,
           pipelineVersion: "v2", qualityWarnings: result.pendingIncrements || [],
           customerStatus, creditsProtected: true,

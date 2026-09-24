@@ -53,7 +53,7 @@ test("static runtime skips auth and CRUD smoke while contracted backend runtime 
   assert.equal(browserVerificationUsesBackend({ accounts: false, durableMutation: true }), true);
 });
 
-test("production wiring sends separate phase budgets and skips backend smoke for static contracts", async () => {
+test("production wiring sends one smoke budget per verification pass and never runs the contracted verifier", async () => {
   const runtime = await readFile(new URL(
     "../../shell/server/lib/builderV2/runtimeComposition.mjs", import.meta.url,
   ), "utf8");
@@ -62,8 +62,11 @@ test("production wiring sends separate phase budgets and skips backend smoke for
   assert.doesNotMatch(runtime, /kind === "browser_verify" \? 240/);
   assert.match(runtime, /activeEnvelope\?\.runtimeRequirements[\s\S]*?contractRuntimeRequirements\(journeyContract\)/);
   assert.match(runtime, /usesBackend = browserVerificationUsesBackend\(runtimeRequirements\)/);
-  assert.match(runtime, /payload: \{ previewUrl: previewResult\.url,[\s\S]*?usesBackend,[\s\S]*?appTimeoutMs:[\s\S]*?journeyTimeoutMs:/);
-  assert.match(runtime, /wallSeconds: browserBudget\.wallSeconds/);
-  assert.match(sandbox, /payload\.appTimeoutMs \|\| payload\.timeoutMs/);
+  // One browser job per verification pass, budgeted from the largest contracted journey.
+  assert.match(runtime, /payload: \{ previewUrl: previewResult\.url, usesBackend, contract: executionContract,[\s\S]*?journeyTimeoutMs \}/);
+  assert.match(runtime, /journeyTimeoutMs = Math\.max\(120_000, \.\.\.budgets\.map/);
+  assert.match(runtime, /runtimeLimits\(workJob, "browser_verify", \{ wallSeconds \}\)/);
   assert.match(sandbox, /payload\.journeyTimeoutMs \|\| payload\.timeoutMs/);
+  assert.match(sandbox, /smokeVerifyJourneys\(/, "the sandbox gate is the smoke test");
+  assert.doesNotMatch(sandbox, /verifyApp\(|verifyJourneys\(/, "the contracted verifier no longer grades a build");
 });

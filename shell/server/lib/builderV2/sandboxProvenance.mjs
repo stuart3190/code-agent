@@ -22,6 +22,9 @@ import path from "node:path";
  */
 export const SANDBOX_IDENTITY_FILES = Object.freeze([
   "build-worker/sandbox.mjs",
+  // The smoke test is the mandatory preview gate since 2026-09-24; the contracted verifier and
+  // the legacy smoke agent stay listed because host-side stage gates still import from them.
+  "shell/server/lib/appBuild/smokeVerifier.mjs",
   "shell/server/lib/appBuild/journeyVerifier.mjs",
   "shell/server/lib/appBuild/verificationAgent.mjs",
   // Stable, server-sealed verifier accounts and platform app-auth failure classification are
@@ -88,6 +91,7 @@ const hash = (text) => createHash("sha256").update(String(text).replace(/\r\n/g,
 // with ERR_MODULE_NOT_FOUND - and no hash in the list above had moved.
 export const SANDBOX_IDENTITY_ENTRYPOINTS = Object.freeze([
   "build-worker/sandbox.mjs",
+  "shell/server/lib/appBuild/smokeVerifier.mjs",
   "shell/server/lib/appBuild/journeyVerifier.mjs",
   "shell/server/lib/appBuild/verificationAgent.mjs",
   "shell/server/lib/qaRunner.mjs",

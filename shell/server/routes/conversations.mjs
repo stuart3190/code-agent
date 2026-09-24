@@ -226,6 +226,7 @@ export async function handleConversations(req, res, { owner, method, body, url =
       text: body?.text, workspaceContext: body?.workspaceContext || null,
       modelPref: body?.modelPref || null,
       buildProfile: body?.buildProfile ?? null,
+      useVerifier: typeof body?.useVerifier === "boolean" ? body.useVerifier : null,
     });
     sendJson(res, 201, { conversation: publicConversation(conversation) });
   });

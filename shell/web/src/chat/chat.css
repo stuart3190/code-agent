@@ -123,6 +123,11 @@
 .ct-build-interpretation { display: flex; align-items: baseline; gap: 5px; min-width: 0; color: var(--ink-3); font-size: 11.5px; line-height: 1.35; }
 .ct-build-interpretation span { flex-shrink: 0; }
 .ct-build-interpretation strong { min-width: 0; color: var(--ink-2); font-weight: 650; overflow-wrap: anywhere; }
+.ct-use-verifier { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; color: var(--ink-2); font-size: 11.5px; line-height: 1.35; cursor: pointer; }
+.ct-use-verifier input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.ct-use-verifier span { font-weight: 650; }
+.ct-use-verifier em { font-style: normal; color: var(--ink-3); overflow-wrap: anywhere; }
+.ct-unverified { flex-shrink: 0; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); font-size: 11px; font-weight: 700; letter-spacing: 0.02em; white-space: nowrap; }
 
 /* ── workspace home + live state (UX polish pass) ── */
 button.ct-wordmark { cursor: pointer; border-radius: 12px; padding: 6px 10px; margin-left: -10px; transition: background var(--dur-1); }

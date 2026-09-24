@@ -64,24 +64,25 @@ test("historical contracts group only journeys with the same durable lifecycle",
   assert.notEqual(scope("browse"), scope("create"));
 });
 
-test("V2 runtime requires app-scoped row evidence and persists it with cached verdicts", async () => {
+test("V2 runtime gates the preview with one smoke run per pass, selected by the form's verifier toggle", async () => {
   const [runtime, verification] = await Promise.all([
     readFile(new URL("../../shell/server/lib/builderV2/runtimeComposition.mjs", import.meta.url), "utf8"),
     readFile(new URL("../../shell/server/lib/builderV2/verification.mjs", import.meta.url), "utf8"),
   ]);
-  assert.match(runtime, /\.eq\("app_id", String\(projectId\)\)/);
-  assert.match(runtime, /\.in\("owner", userIds\)/);
-  assert.match(runtime, /browser journey passed without a corresponding app-scoped database mutation/);
+  // The 2026-09-24 gate: no database-mutation proof, no sealed verifier identity, no per-journey
+  // browser job. Whether a click produced a record is not a preview requirement.
+  assert.doesNotMatch(runtime, /browser journey passed without a corresponding app-scoped database mutation/);
+  assert.doesNotMatch(runtime, /createVerificationIdentity\(\{|backendFingerprint\(/);
   assert.match(runtime, /preview\.mode !== "vps"/);
-  assert.match(runtime, /contract: projectExecutionJourneys\(journeyContract, \[journey\]\)/,
-    "the browser worker receives the ONE per-journey projection of the bound execution contract");
-  assert.doesNotMatch(runtime, /contract: \{ \.\.\.journeyContract, journeys: \[journey\]/,
-    "no hand-assembled per-journey contract may compete with the shared projection");
-  assert.match(runtime, /createVerificationIdentity\(\{/,
-    "every repeat verification recovers a server-sealed project/journey test identity");
-  assert.match(runtime, /secret: process\.env\.SUPABASE_SERVICE_ROLE_KEY \|\| process\.env\.SUPABASE_SERVICE_ROLE/);
-  assert.match(runtime, /verifierDefects\.push/,
-    "sandbox verifier defects must reach the orchestrator instead of being dropped at composition");
+  assert.match(runtime, /const verification = resolveVerificationMode\(input\)/,
+    "the build form's choice on the queued input selects the execution path");
+  assert.match(runtime, /journeysFn = verification\.useVerifier \? smokeJourneysFn : bypassJourneysFn/);
+  assert.match(runtime, /verification\.useVerifier \? supabaseVerificationCache\(client\) : nullVerificationCache\(\)/,
+    "a bypassed build never records a reusable verified verdict");
+  assert.match(runtime, /executionContract = projectExecutionJourneys\(journeyContract, journeys\)/,
+    "the single smoke job receives the shared projection of every driven journey");
+  assert.match(runtime, /MAX_TRANSIENT_ATTEMPTS = 2/, "only a transport failure is retried, once");
+  assert.match(runtime, /kind: "verification_mode"/, "the chosen mode is recorded on the build trace");
   assert.match(runtime, /sandboxCompatibility\.sandboxVerifier \|\| "in-process"/);
   assert.match(runtime, /sandboxCompatibility\.hostCommit \|\| VERIFICATION_CACHE_VERSION/,
     "passing evidence is keyed by the proven sandbox verifier and deployed orchestration revision");

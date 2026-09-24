@@ -7,6 +7,13 @@
  */
 export const LEGACY_RICH_VERIFIER_POLICY = "legacy_rich_v1";
 export const MINIMAL_CONTRACT_VERIFIER_POLICY = "minimal_contract_v1";
+// The mandatory preview gate since 2026-09-24: the app compiles, the preview opens without a fatal
+// error, and visible controls can be activated without crashing it. No text, number, label or
+// expected-outcome checks; those never block a preview and never brief a repair.
+export const SMOKE_VERIFIER_POLICY = "smoke_v1";
+// The customer unticked "Use verifier": no browser ran, the preview is shown once the app
+// compiles, starts and answers HTTP, and it is labelled "Not verified".
+export const BYPASSED_VERIFIER_POLICY = "bypassed_v1";
 
 export const VERIFICATION_RESULT_CLASS = Object.freeze({
   PASS: "PASS",
