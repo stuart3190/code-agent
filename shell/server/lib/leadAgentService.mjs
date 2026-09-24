@@ -25,6 +25,7 @@ import { createBudgetLedger } from "./appBuild/budgetLedger.mjs";
 import {
   buildProfileBrief, latestBuildProfile, resolveBuildProfile,
 } from "../../shared/buildProfile.mjs";
+import { latestUseVerifier } from "./builderV2/verificationMode.mjs";
 
 const MAX_TURNS = 12;
 const HISTORY_TURNS = 30;
@@ -83,6 +84,7 @@ function describeWorkspaceContext(context) {
 
 export async function postUserMessage(owner, {
   conversationId = null, text, workspaceContext = null, modelPref = null, buildProfile = null,
+  useVerifier = null,
 }, {
   store = conversationStore(),
   processOptions = {},
@@ -122,6 +124,9 @@ export async function postUserMessage(owner, {
   const turnPayload = {
     ...(context ? { workspace_context: context } : {}),
     ...(productProfile ? { build_profile: productProfile } : {}),
+    // The build form's "Use verifier" choice is a durable fact of the request, read back when the
+    // lead dispatches the build (latestUseVerifier); anything but an explicit boolean means "on".
+    ...(typeof useVerifier === "boolean" ? { use_verifier: useVerifier } : {}),
   };
   await store.appendTurn(conversation, {
     role: "user", content: trimmed,
@@ -131,6 +136,7 @@ export async function postUserMessage(owner, {
     role: "user", text: trimmed,
     ...(context ? { workspaceContext: { file: context.file || null, hasSelection: !!context.selection, diagnostics: context.diagnostics?.length || 0 } } : {}),
     ...(productProfile ? { buildProfile: productProfile } : {}),
+    ...(typeof useVerifier === "boolean" ? { useVerifier } : {}),
   });
   const claimed = await store.claimConversationThinking(conversation);
   if (!claimed) throw inputError("The team is still working on the previous message.", 409, "conversation_busy");
@@ -237,6 +243,7 @@ export async function processConversation(conversation, {
   try {
     const turns = await store.listTurns(conversation.owner, conversation.id, { limit: HISTORY_TURNS }) || [];
     const productProfile = latestBuildProfile(turns);
+    const useVerifier = latestUseVerifier(turns);
     const retryTarget = preservedBuildRetryTarget(turns);
     if (retryTarget) {
       const retryCtx = {
@@ -244,6 +251,7 @@ export async function processConversation(conversation, {
         conversation,
         conversations: store,
         buildProfile: productProfile,
+        useVerifier,
         emit,
         relayRun: (runId) => relayRunEvents({ store, runStore, conversation, runId }),
       };
@@ -340,6 +348,7 @@ export async function processConversation(conversation, {
       conversation,
       conversations: store,
       buildProfile: productProfile,
+      useVerifier,
       emit,
       relayRun: (runId) => relayRunEvents({ store, runStore, conversation, runId }),
     };

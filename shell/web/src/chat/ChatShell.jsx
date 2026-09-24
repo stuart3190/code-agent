@@ -417,14 +417,14 @@ function Workspace({ user }) {
 
   // Returns false on failure so the composer can restore the draft instead of losing it.
   const sendingRef = useRef(false);
-  const send = useCallback(async (text, buildProfile = null) => {
+  const send = useCallback(async (text, buildProfile = null, options = {}) => {
     const trimmed = text.trim();
     if (!trimmed || sendingRef.current) return true;
     const context = wsContextOn && wsContext ? wsContext : null;
     sendingRef.current = true;
     try {
       if (!active) {
-        const r = await startConversation(trimmed, context, modelPref, buildProfile);
+        const r = await startConversation(trimmed, context, modelPref, buildProfile, options.useVerifier !== false);
         setConversations((list) => [r.conversation, ...list]);
         openConversation(r.conversation);
       } else {
@@ -874,7 +874,7 @@ function Workspace({ user }) {
               </div>
               <CancelBuild build={view.activeBuild} working={displayRoster.some((r) => r.state === "working")} />
             </div>
-            {rail === "preview" && <PreviewPane url={view.previewUrl} onPublish={() => send("Publish this, please.")} />}
+            {rail === "preview" && <PreviewPane url={view.previewUrl} verified={view.previewVerified} onPublish={() => send("Publish this, please.")} />}
           </aside>
         </div>
       )}
@@ -882,7 +882,7 @@ function Workspace({ user }) {
       {view.previewUrl && (
         <div className={`ct-mobile-sheet ${mobilePreview ? "show" : ""}`}>
           <button className="ct-grab-hit" aria-label="Close preview" onClick={() => setMobilePreview(false)}><span className="ct-grab" /></button>
-          <PreviewPane url={view.previewUrl} bare onPublish={() => { setMobilePreview(false); send("Publish this, please."); }} />
+          <PreviewPane url={view.previewUrl} verified={view.previewVerified} bare onPublish={() => { setMobilePreview(false); send("Publish this, please."); }} />
         </div>
       )}
 
@@ -1705,7 +1705,10 @@ function ThreadItem({
     return (
       <div className="ct-msg lead">
         <div className="ct-card" style={{ padding: 14 }}>
-          <div className="ct-kicker"><span className="ct-kdot" style={{ background: "var(--good)" }} />Preview ready</div>
+          <div className="ct-kicker">
+            <span className="ct-kdot" style={{ background: item.verified === false ? "var(--warn)" : "var(--good)" }} />
+            {item.verified === false ? "Preview ready ¬∑ Not verified" : "Preview ready"}
+          </div>
           <div className="ct-preview-thumb" onClick={onOpenPreview}>
             <iframe src={item.url} title="Preview" loading="lazy" sandbox="allow-scripts allow-same-origin" tabIndex={-1} />
           </div>
@@ -1929,13 +1932,16 @@ function AgentRow({ row, compact, progress = "Building‚Ä¶" }) {
   );
 }
 
-function PreviewPane({ url, onPublish, bare = false }) {
+function PreviewPane({ url, onPublish, bare = false, verified = true }) {
   return (
     <div className="ct-pane" style={bare ? { border: 0, borderRadius: 0, boxShadow: "none", background: "transparent" } : undefined}>
       <div className="ct-pane-top">
         <a className="ct-urlpill" href={url} title={url} target="_blank" rel="noreferrer noopener">
           <span className="ct-lock">‚óè</span><span>{String(url).replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
         </a>
+        {verified === false && (
+          <span className="ct-unverified" title="The verifier was bypassed for this build. The app compiled and started, but no browser check ran.">Not verified</span>
+        )}
         <button className="ct-btn" onClick={onPublish}>Publish</button>
       </div>
       <div className="ct-pane-frame">
@@ -1980,6 +1986,7 @@ function Composer({ onSend, autoFocus = false, placeholder = "Message your team‚
   const [requestedBuildType, setRequestedBuildType] = useState("auto");
   const [applicationSubtype, setApplicationSubtype] = useState("auto");
   const [adjustedSignals, setAdjustedSignals] = useState(null);
+  const [useVerifier, setUseVerifier] = useState(true);
   const ref = useRef(null);
   const buildProfile = useMemo(() => buildProfileEnabled ? resolveBuildProfile({
     prompt: text,
@@ -2023,7 +2030,7 @@ function Composer({ onSend, autoFocus = false, placeholder = "Message your team‚
         ...(adjustedSignals ? { requirementSignals: adjustedSignals, inferenceSource: "adjusted" } : {}),
       },
     }) : null;
-    const ok = await onSend(draft, submittedProfile);
+    const ok = await onSend(draft, submittedProfile, { useVerifier });
     if (ok === false) {
       setText((current) => current || draft);
       ref.current?.focus();
@@ -2048,6 +2055,8 @@ function Composer({ onSend, autoFocus = false, placeholder = "Message your team‚
             if (next.has(signal)) next.delete(signal); else next.add(signal);
             return [...next];
           })}
+          useVerifier={useVerifier}
+          onUseVerifierChange={setUseVerifier}
         />
       )}
       {context && (

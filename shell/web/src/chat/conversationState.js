@@ -25,6 +25,7 @@ export function emptyConversationView() {
     items: [],          // ordered thread items: {kind, seq, ...}
     roster: [],         // [{agent, status, state: working|done|failed}] in spawn order
     previewUrl: null,
+    previewVerified: true, // false when the build form bypassed the verifier
     thinking: false,    // Lead Agent mid-turn
     waiting: false,     // paused on a business question
     recovery: null,     // {state: recovering|repairing|verifying|continuing, message}
@@ -110,12 +111,13 @@ export function applyEvent(view, event) {
       break;
     case "preview_ready":
       next.previewUrl = payload.url || next.previewUrl;
+      next.previewVerified = payload.verified !== false;
       next.buildActivity = ACTIVITY_STATE.ready;
       next.activeBuild = null;
       next.roster = next.roster.map((agent) => (
         agent.state === "working" && agent.agent !== "Lead Agent" ? { ...agent, state: "done" } : agent
       ));
-      push({ kind: "preview", url: payload.url, projectId: payload.projectId || null });
+      push({ kind: "preview", url: payload.url, projectId: payload.projectId || null, verified: payload.verified !== false });
       break;
     case "published":
       push({

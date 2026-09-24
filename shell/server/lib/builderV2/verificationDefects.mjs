@@ -38,6 +38,7 @@ import { journeySurfaceContext } from "./surfaceIntegration.mjs";
 import { routeScaffoldDefect, SCAFFOLD_REPAIR_CLASS } from "./scaffoldRepairRouting.mjs";
 import {
   MINIMAL_CONTRACT_VERIFIER_POLICY,
+  SMOKE_VERIFIER_POLICY,
   VERIFICATION_RESULT_CLASS,
   isAppRepairableVerificationClass,
 } from "../appBuild/verifierPolicy.mjs";
@@ -474,9 +475,26 @@ export function verificationDefects({
   // That is still a defect and still has to be briefed — what it is NOT is a defect anyone can
   // name, so its class and its owner both stay unknown rather than being invented.
   const journeysWithSteps = new Set(diagnostics.map((row) => row.journeyId));
+  const smoke = verdicts.verifierPolicy === SMOKE_VERIFIER_POLICY;
   for (const journey of verdicts.journeys || []) {
     if (["pass", "reused"].includes(journey.status) || journeysWithSteps.has(journey.id)) continue;
     if (journey.setup?.ok === false) continue; // already reported as a prerequisite defect
+    if (smoke) {
+      // The smoke gate drives no contracted steps, so a red smoke verdict is exactly one thing: the
+      // application crashed (or rendered nothing) in a real browser. It is the application's fault
+      // and it blocks the preview - but it carries no expectation to repair against, so it is not
+      // a repair-tier defect. The compiled candidate is retained for a deliberate repair request.
+      defects.push({
+        code: "fatal_runtime_crash",
+        defectClass: DEFECT_CLASS.BEHAVIOUR, owner: DEFECT_OWNER.APP, tier: REPAIR_TIER.NONE,
+        journeyId: journey.id, stepIndex: null, action: null, control: null,
+        modules: unique([...(journey.owners || []), ...(journey.fallbackRefs || [])].filter(generatedSource)),
+        failureRefs: unique([...(journey.owners || []), ...(journey.fallbackRefs || [])]),
+        evidence: { observed: journey.detail
+          || "the application crashed or rendered nothing in the browser smoke test" },
+      });
+      continue;
+    }
     defects.push({
       code: "journey_failed_without_step_evidence",
       defectClass: minimal ? DEFECT_CLASS.PLATFORM : DEFECT_CLASS.UNKNOWN,

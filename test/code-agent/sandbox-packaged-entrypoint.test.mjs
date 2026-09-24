@@ -116,8 +116,16 @@ test("a packaged copy missing a module the verifier imports is reported, not bel
       "a truncated copy never reports the host's identity: shell/shared is in the verifier's import closure, so its absence moves the hash");
     assert.ok(Object.entries(result.provenance?.files || {}).some(([file, digest]) => file.startsWith("shell/shared/") && digest === "absent"),
       "the missing shared modules are reported as absent by name");
-    const failed = Object.entries(result.provenance?.entrypoints || {}).filter(([, row]) => row.ok !== true).map(([name]) => name);
-    assert.ok(failed.includes("browser_verify"), `the verifier's closure reaches shell/shared, so browser_verify must fail to load: ${JSON.stringify(result.provenance?.entrypoints)}`);
+    const entrypoints = result.provenance?.entrypoints || {};
+    assert.ok(Object.keys(entrypoints).length >= 4, "every job type reports whether its modules load");
+    for (const [name, row] of Object.entries(entrypoints)) {
+      assert.equal(typeof row.ok, "boolean", `${name} reports a load verdict`);
+      if (row.ok !== true) assert.ok(row.failures?.length, `${name} names the module that failed to load`);
+    }
+    // Since 2026-09-24 browser_verify loads the smoke verifier, whose closure stays inside
+    // shell/server, so the missing shell/shared no longer takes the browser gate down; the
+    // identity hash above is what reports the truncation.
+    assert.equal(entrypoints.browser_verify?.ok, true, JSON.stringify(entrypoints));
     assert.equal(run.code === 0 || run.code === 1, true);
   } finally {
     await rm(root, { recursive: true, force: true }).catch(() => {});

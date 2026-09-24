@@ -13,6 +13,8 @@ export default function BuildProfileControls({
   applicationSubtype,
   onApplicationSubtypeChange,
   onToggleRequirement,
+  useVerifier = true,
+  onUseVerifierChange = null,
 }) {
   const applicationContext = requestedBuildType === "application"
     || profile?.resolvedBuildType === "application";
@@ -55,6 +57,14 @@ export default function BuildProfileControls({
         <span>Thrallo understands this as:</span>
         <strong>{interpretation.join(" · ")}</strong>
       </div>
+      {onUseVerifierChange && (
+        <label className="ct-use-verifier" title="On: the built app is smoke-tested in a browser before the preview is shown. Off: the preview appears as soon as the app compiles and starts, labelled Not verified.">
+          <input type="checkbox" checked={useVerifier !== false}
+            onChange={(event) => onUseVerifierChange(event.target.checked)} />
+          <span>Use verifier</span>
+          <em>{useVerifier === false ? "Preview shown as soon as it compiles and starts - labelled Not verified" : "Browser smoke test before the preview"}</em>
+        </label>
+      )}
     </div>
   );
 }
