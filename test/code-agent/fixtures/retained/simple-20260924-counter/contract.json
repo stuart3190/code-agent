@@ -1,0 +1,2684 @@
+{
+ "auth": {
+  "model": "none",
+  "rules": [
+   "no sign-in, sign-up, account, or protected route is present"
+  ],
+  "required": false
+ },
+ "tiers": {
+  "essential": {
+   "entities": [
+    "counterState"
+   ],
+   "journeys": [
+    "increase-counter"
+   ],
+   "operations": [
+    "increase-counter"
+   ]
+  },
+  "secondary": {
+   "entities": [],
+   "journeys": [
+    "decrease-counter",
+    "reset-counter"
+   ],
+   "operations": [
+    "decrease-counter",
+    "reset-counter"
+   ]
+  }
+ },
+ "routes": [
+  {
+   "auth": false,
+   "name": "Home",
+   "path": "/",
+   "purpose": "single centered counter screen with the current value and three counter action buttons"
+  }
+ ],
+ "states": [
+  {
+   "empty": "not applicable because the counter always displays a numeric value",
+   "error": "not applicable because there are no APIs or persistence operations",
+   "loading": "no loading state is shown because no data is fetched",
+   "success": "the displayed number changes immediately after Increase (+1), Decrease (-1), or Reset is clicked",
+   "surface": "counter page",
+   "validation": "not applicable because there are no text inputs"
+  },
+  {
+   "empty": "not applicable",
+   "error": "not applicable",
+   "loading": "buttons remain available because actions are immediate local state updates",
+   "success": "keyboard focus on each button is visually clear",
+   "surface": "counter buttons",
+   "validation": "buttons have accessible labels matching their visible text: Increase (+1), Decrease (-1), and Reset"
+  }
+ ],
+ "summary": "Simple Counter is a single-page responsive React application with a locally owned counter that can be increased, decreased into negative values, and reset to zero.",
+ "version": 2,
+ "deferred": [
+  {
+   "item": "login and user accounts",
+   "reason": "the requested application explicitly has no login"
+  },
+  {
+   "item": "database persistence",
+   "reason": "the requested counter state is owned locally in the page/application state"
+  },
+  {
+   "item": "external APIs",
+   "reason": "the requested application explicitly has no APIs"
+  },
+  {
+   "item": "additional pages",
+   "reason": "the requested application is a single-page app"
+  }
+ ],
+ "entities": [
+  {
+   "name": "counterState",
+   "owned": false,
+   "fields": [
+    {
+     "name": "value",
+     "type": "number",
+     "required": true
+    }
+   ],
+   "storage": "client-only transient state for the simulated journey; not persisted to backend",
+   "initialState": {
+    "value": 0
+   },
+   "relationships": []
+  }
+ ],
+ "journeys": [
+  {
+   "id": "increase-counter",
+   "stage": "primary_journey",
+   "steps": [
+    {
+     "action": "open the counter page",
+     "expect": "the centered Simple Counter screen is visible with the counter starting at 0 and the Increase (+1), Decrease (-1), and Reset buttons visible",
+     "target": "/",
+     "visibleText": [
+      "Simple Counter",
+      "0",
+      "Increase (+1)",
+      "Decrease (-1)",
+      "Reset"
+     ]
+    },
+    {
+     "reads": [
+      "value"
+     ],
+     "action": "click the Increase (+1) button",
+     "expect": "the displayed counter value immediately changes from 0 to 1",
+     "target": "Increase (+1) button",
+     "operates": [
+      "increase-counter"
+     ],
+     "visibleText": [
+      "1"
+     ]
+    }
+   ],
+   "title": "A visitor increases the counter by one",
+   "priority": "primary",
+   "acceptance": []
+  },
+  {
+   "id": "decrease-counter",
+   "stage": "supporting",
+   "steps": [
+    {
+     "action": "open the counter page",
+     "expect": "the Simple Counter screen is visible with the counter starting at 0",
+     "target": "/",
+     "visibleText": [
+      "Simple Counter",
+      "0",
+      "Decrease (-1)"
+     ]
+    },
+    {
+     "reads": [
+      "value"
+     ],
+     "action": "click the Decrease (-1) button",
+     "expect": "the displayed counter value immediately changes from 0 to -1, proving negative numbers are allowed",
+     "target": "Decrease (-1) button",
+     "operates": [
+      "decrease-counter"
+     ],
+     "visibleText": [
+      "-1"
+     ]
+    }
+   ],
+   "title": "A visitor decreases the counter and can go below zero",
+   "priority": "secondary",
+   "acceptance": [
+    "clicking Decrease (-1) once from 0 visibly displays -1"
+   ]
+  },
+  {
+   "id": "reset-counter",
+   "stage": "supporting",
+   "steps": [
+    {
+     "action": "open the counter page",
+     "expect": "the Simple Counter screen is visible with the counter starting at 0 and the Increase (+1) and Reset buttons visible",
+     "target": "/",
+     "visibleText": [
+      "Simple Counter",
+      "0",
+      "Increase (+1)",
+      "Reset"
+     ]
+    },
+    {
+     "reads": [
+      "value"
+     ],
+     "action": "click the Increase (+1) button",
+     "expect": "the displayed counter value immediately changes to 1",
+     "target": "Increase (+1) button",
+     "operates": [
+      "increase-counter"
+     ],
+     "visibleText": [
+      "1"
+     ]
+    },
+    {
+     "reads": [
+      "value"
+     ],
+     "action": "click the Reset button",
+     "expect": "the displayed counter value immediately returns to 0",
+     "target": "Reset button",
+     "operates": [
+      "reset-counter"
+     ],
+     "visibleText": [
+      "0"
+     ]
+    }
+   ],
+   "title": "A visitor resets the counter to zero",
+   "priority": "secondary",
+   "acceptance": [
+    "clicking Reset after changing the counter visibly displays 0"
+   ]
+  }
+ ],
+ "acceptance": [
+  {
+   "id": "a1",
+   "kind": "ui",
+   "journey": "increase-counter",
+   "statement": "the home route displays the exact title Simple Counter, the starting value 0, and the three visible buttons Increase (+1), Decrease (-1), and Reset"
+  },
+  {
+   "id": "a2",
+   "kind": "functional",
+   "journey": "increase-counter",
+   "statement": "clicking Increase (+1) once from the initial state immediately displays the value 1"
+  },
+  {
+   "id": "a3",
+   "kind": "functional",
+   "journey": "decrease-counter",
+   "statement": "clicking Decrease (-1) once from the initial state immediately displays the value -1"
+  },
+  {
+   "id": "a4",
+   "kind": "functional",
+   "journey": "reset-counter",
+   "statement": "after the counter has changed, clicking Reset immediately displays the value 0"
+  },
+  {
+   "id": "a5",
+   "kind": "accessibility",
+   "journey": "increase-counter",
+   "statement": "the Increase (+1), Decrease (-1), and Reset buttons each expose accessible labels matching their visible text and show a visible focus state when focused by keyboard navigation"
+  },
+  {
+   "id": "a6",
+   "kind": "responsive",
+   "journey": "increase-counter",
+   "statement": "the counter page remains centered and usable at both mobile-width and desktop-width browser sizes"
+  }
+ ],
+ "operations": [
+  {
+   "id": "increase-counter",
+   "kind": "update",
+   "entity": "counterState",
+   "journey": "increase-counter",
+   "description": "increase the locally owned counter value by exactly 1",
+   "responsibilities": [
+    {
+     "type": "functional",
+     "reads": [
+      "value"
+     ],
+     "writes": [
+      "value"
+     ],
+     "behavior": "add 1 to the current counter value"
+    }
+   ]
+  },
+  {
+   "id": "decrease-counter",
+   "kind": "update",
+   "entity": "counterState",
+   "journey": "decrease-counter",
+   "description": "decrease the locally owned counter value by exactly 1, including below zero",
+   "responsibilities": [
+    {
+     "type": "functional",
+     "reads": [
+      "value"
+     ],
+     "writes": [
+      "value"
+     ],
+     "behavior": "subtract 1 from the current counter value without enforcing a lower bound"
+    }
+   ]
+  },
+  {
+   "id": "reset-counter",
+   "kind": "update",
+   "entity": "counterState",
+   "journey": "reset-counter",
+   "description": "set the locally owned counter value back to 0",
+   "responsibilities": [
+    {
+     "type": "functional",
+     "reads": [
+      "value"
+     ],
+     "writes": [
+      "value"
+     ],
+     "behavior": "replace the current counter value with 0"
+    }
+   ]
+  }
+ ],
+ "projectType": "tool",
+ "buildProfile": {
+  "version": 1,
+  "confidence": 0.75,
+  "inferenceSource": "auto",
+  "resolvedBuildType": "application",
+  "applicationSubtype": "auto",
+  "requestedBuildType": "auto",
+  "requirementSignals": []
+ },
+ "imageIntents": [
+  {
+   "slot": "hero",
+   "intent": "Simple Counter is a single-page responsive React application with a locally owne",
+   "orientation": "landscape"
+  }
+ ],
+ "integrations": [
+  {
+   "name": "none",
+   "purpose": "the counter uses only local application state",
+   "required": false
+  }
+ ],
+ "scaffoldGraph": {
+  "edges": [
+   {
+    "to": "screen:home-screen",
+    "from": "scaffold:app_shell",
+    "type": "mounts"
+   },
+   {
+    "to": "scaffold:app_shell",
+    "from": "journey:increase-counter",
+    "type": "uses"
+   },
+   {
+    "to": "scaffold:app_shell",
+    "from": "journey:decrease-counter",
+    "type": "uses"
+   },
+   {
+    "to": "scaffold:app_shell",
+    "from": "journey:reset-counter",
+    "type": "uses"
+   },
+   {
+    "to": "screen:home-screen",
+    "from": "journey:increase-counter",
+    "type": "renders_on"
+   },
+   {
+    "to": "capability:interaction-primitives",
+    "from": "screen:home-screen",
+    "type": "adapts"
+   },
+   {
+    "to": "custom_behavior:increase-counter",
+    "from": "screen:home-screen",
+    "type": "adapts"
+   },
+   {
+    "to": "custom_behavior:increase-counter",
+    "from": "screen:home-screen",
+    "type": "extends"
+   },
+   {
+    "to": "screen:home-screen",
+    "from": "journey:decrease-counter",
+    "type": "renders_on"
+   },
+   {
+    "to": "capability:interaction-primitives",
+    "from": "screen:home-screen",
+    "type": "adapts"
+   },
+   {
+    "to": "custom_behavior:decrease-counter",
+    "from": "screen:home-screen",
+    "type": "adapts"
+   },
+   {
+    "to": "custom_behavior:decrease-counter",
+    "from": "screen:home-screen",
+    "type": "extends"
+   },
+   {
+    "to": "screen:home-screen",
+    "from": "journey:reset-counter",
+    "type": "renders_on"
+   },
+   {
+    "to": "capability:interaction-primitives",
+    "from": "screen:home-screen",
+    "type": "adapts"
+   },
+   {
+    "to": "custom_behavior:reset-counter",
+    "from": "screen:home-screen",
+    "type": "adapts"
+   },
+   {
+    "to": "custom_behavior:reset-counter",
+    "from": "screen:home-screen",
+    "type": "extends"
+   }
+  ],
+  "routes": [
+   {
+    "module": "src/screens/scaffold/HomeScreen.jsx",
+    "screenId": "home-screen",
+    "mountedBy": "scaffold:app_shell",
+    "routeName": "Home",
+    "routePath": "/",
+    "exportName": "default",
+    "journeyIds": [
+     "increase-counter",
+     "decrease-counter",
+     "reset-counter"
+    ]
+   }
+  ],
+  "screens": [
+   {
+    "owner": "screen:home-screen",
+    "module": "src/screens/scaffold/HomeScreen.jsx",
+    "screenId": "home-screen",
+    "mountedBy": "scaffold:app_shell",
+    "routeName": "Home",
+    "routePath": "/",
+    "exportName": "default"
+   }
+  ],
+  "version": 3,
+  "families": [
+   {
+    "id": "scaffold:app_shell",
+    "status": "proven",
+    "purpose": "Mount the application, resolve routes, and contain render/loading failures.",
+    "version": "1.0.0",
+    "scaffoldId": "app_shell",
+    "extensionPoints": [
+     "mounted_screen",
+     "navigation_chrome"
+    ],
+    "optionalCapabilities": [],
+    "requiredCapabilities": [],
+    "verificationContract": {
+     "screenMounted": true,
+     "errorContained": true,
+     "routeReachable": true
+    }
+   }
+  ],
+  "extensions": [
+   {
+    "reads": [
+     "increase-counter.input.value"
+    ],
+    "inputs": [
+     "increase-counter.input.value"
+    ],
+    "module": "src/extensions/custom/increase-counter.js",
+    "source": "capability_graph",
+    "writes": [
+     "increase-counter.custom.value"
+    ],
+    "outputs": [
+     "increase-counter.custom.value"
+    ],
+    "extensionId": "custom_behavior:increase-counter",
+    "allowedFiles": [
+     "src/extensions/custom/increase-counter.js"
+    ],
+    "owningJourneys": [
+     "increase-counter"
+    ],
+    "stateOwnership": {
+     "owns": [
+      "increase-counter.custom.value"
+     ],
+     "journey": "increase-counter"
+    },
+    "requiredExports": [
+     "runIncreaseCounterCustomBehavior"
+    ],
+    "integrationPoints": [
+     "mounted_screen"
+    ],
+    "operationContracts": [
+     {
+      "inputs": [
+       "increase-counter.input.value"
+      ],
+      "outputs": [
+       "increase-counter.custom.value"
+      ],
+      "inputKeys": [
+       "value"
+      ],
+      "selectors": [
+       "increase-counter",
+       "update",
+       "increase-counter:functional-1"
+      ],
+      "operationId": "increase-counter",
+      "responsibilityId": "increase-counter:functional-1"
+     }
+    ],
+    "verificationSemantics": {
+     "actions": [
+      "add 1 to the current counter value",
+      "action"
+     ],
+     "observe": [
+      "the displayed counter value immediately changes from 0 to 1"
+     ],
+     "stateChange": [
+      "increase-counter.custom.value"
+     ],
+     "durableMutation": false,
+     "persistenceHandoff": []
+    }
+   },
+   {
+    "reads": [
+     "decrease-counter.input.value"
+    ],
+    "inputs": [
+     "decrease-counter.input.value"
+    ],
+    "module": "src/extensions/custom/decrease-counter.js",
+    "source": "capability_graph",
+    "writes": [
+     "decrease-counter.custom.value"
+    ],
+    "outputs": [
+     "decrease-counter.custom.value"
+    ],
+    "extensionId": "custom_behavior:decrease-counter",
+    "allowedFiles": [
+     "src/extensions/custom/decrease-counter.js"
+    ],
+    "owningJourneys": [
+     "decrease-counter"
+    ],
+    "stateOwnership": {
+     "owns": [
+      "decrease-counter.custom.value"
+     ],
+     "journey": "decrease-counter"
+    },
+    "requiredExports": [
+     "runDecreaseCounterCustomBehavior"
+    ],
+    "integrationPoints": [
+     "mounted_screen"
+    ],
+    "operationContracts": [
+     {
+      "inputs": [
+       "decrease-counter.input.value"
+      ],
+      "outputs": [
+       "decrease-counter.custom.value"
+      ],
+      "inputKeys": [
+       "value"
+      ],
+      "selectors": [
+       "decrease-counter",
+       "update",
+       "decrease-counter:functional-1"
+      ],
+      "operationId": "decrease-counter",
+      "responsibilityId": "decrease-counter:functional-1"
+     }
+    ],
+    "verificationSemantics": {
+     "actions": [
+      "subtract 1 from the current counter value without enforcing a lower bound",
+      "action"
+     ],
+     "observe": [
+      "the displayed counter value immediately changes from 0 to -1, proving negative numbers are allowed"
+     ],
+     "stateChange": [
+      "decrease-counter.custom.value"
+     ],
+     "durableMutation": false,
+     "persistenceHandoff": []
+    }
+   },
+   {
+    "reads": [
+     "reset-counter.input.value",
+     "reset-counter.custom.value"
+    ],
+    "inputs": [
+     "reset-counter.input.value",
+     "reset-counter.custom.value"
+    ],
+    "module": "src/extensions/custom/reset-counter.js",
+    "source": "capability_graph",
+    "writes": [
+     "reset-counter.custom.value"
+    ],
+    "outputs": [
+     "reset-counter.custom.value"
+    ],
+    "extensionId": "custom_behavior:reset-counter",
+    "allowedFiles": [
+     "src/extensions/custom/reset-counter.js"
+    ],
+    "owningJourneys": [
+     "reset-counter"
+    ],
+    "stateOwnership": {
+     "owns": [
+      "reset-counter.custom.value"
+     ],
+     "journey": "reset-counter"
+    },
+    "requiredExports": [
+     "runResetCounterCustomBehavior"
+    ],
+    "integrationPoints": [
+     "mounted_screen"
+    ],
+    "operationContracts": [
+     {
+      "inputs": [
+       "reset-counter.input.value"
+      ],
+      "outputs": [
+       "reset-counter.custom.value"
+      ],
+      "inputKeys": [
+       "value"
+      ],
+      "selectors": [
+       "increase-counter",
+       "update",
+       "increase-counter:functional-1"
+      ],
+      "operationId": "increase-counter",
+      "responsibilityId": "increase-counter:functional-1"
+     },
+     {
+      "inputs": [
+       "reset-counter.input.value"
+      ],
+      "outputs": [
+       "reset-counter.custom.value"
+      ],
+      "inputKeys": [
+       "value"
+      ],
+      "selectors": [
+       "reset-counter",
+       "update",
+       "reset-counter:functional-1"
+      ],
+      "operationId": "reset-counter",
+      "responsibilityId": "reset-counter:functional-1"
+     }
+    ],
+    "verificationSemantics": {
+     "actions": [
+      "add 1 to the current counter value",
+      "replace the current counter value with 0",
+      "action"
+     ],
+     "observe": [
+      "the displayed counter value immediately changes to 1",
+      "the displayed counter value immediately returns to 0",
+      "reset-counter:3:action"
+     ],
+     "stateChange": [
+      "reset-counter.custom.value"
+     ],
+     "durableMutation": false,
+     "persistenceHandoff": []
+    }
+   }
+  ],
+  "protectedFiles": [
+   "src/lib/scaffolds/composed/ScaffoldApp.jsx"
+  ],
+  "stateOwnership": [
+   {
+    "ownership": {
+     "owns": [
+      "active route"
+     ],
+     "excludes": [
+      "domain state",
+      "durable records"
+     ]
+    },
+    "scaffoldNodeId": "scaffold:app_shell"
+   }
+  ],
+  "dependencyOrder": [
+   "scaffold:app_shell"
+  ],
+  "registryVersion": 1,
+  "routeResolution": {
+   "issues": [],
+   "version": 1,
+   "journeys": {
+    "reset-counter": {
+     "unresolved": [],
+     "transitions": [
+      {
+       "basis": "target_path",
+       "routePath": "/",
+       "stepIndex": 0
+      }
+     ],
+     "initialBasis": "target_path",
+     "initialRoute": "/"
+    },
+    "decrease-counter": {
+     "unresolved": [],
+     "transitions": [
+      {
+       "basis": "target_path",
+       "routePath": "/",
+       "stepIndex": 0
+      }
+     ],
+     "initialBasis": "target_path",
+     "initialRoute": "/"
+    },
+    "increase-counter": {
+     "unresolved": [],
+     "transitions": [
+      {
+       "basis": "target_path",
+       "routePath": "/",
+       "stepIndex": 0
+      }
+     ],
+     "initialBasis": "target_path",
+     "initialRoute": "/"
+    }
+   }
+  },
+  "journeyOwnership": [
+   {
+    "screenId": "home-screen",
+    "journeyId": "increase-counter",
+    "routePath": "/",
+    "extensionIds": [
+     "custom_behavior:increase-counter"
+    ],
+    "mountedModule": "src/screens/scaffold/HomeScreen.jsx",
+    "scaffoldNodeIds": [
+     "scaffold:app_shell"
+    ],
+    "capabilityNodeIds": [
+     "capability:interaction-primitives",
+     "custom_behavior:increase-counter"
+    ]
+   },
+   {
+    "screenId": "home-screen",
+    "journeyId": "decrease-counter",
+    "routePath": "/",
+    "extensionIds": [
+     "custom_behavior:decrease-counter"
+    ],
+    "mountedModule": "src/screens/scaffold/HomeScreen.jsx",
+    "scaffoldNodeIds": [
+     "scaffold:app_shell"
+    ],
+    "capabilityNodeIds": [
+     "capability:interaction-primitives",
+     "custom_behavior:decrease-counter"
+    ]
+   },
+   {
+    "screenId": "home-screen",
+    "journeyId": "reset-counter",
+    "routePath": "/",
+    "extensionIds": [
+     "custom_behavior:reset-counter"
+    ],
+    "mountedModule": "src/screens/scaffold/HomeScreen.jsx",
+    "scaffoldNodeIds": [
+     "scaffold:app_shell"
+    ],
+    "capabilityNodeIds": [
+     "capability:interaction-primitives",
+     "custom_behavior:reset-counter"
+    ]
+   }
+  ],
+  "persistenceOwnership": [
+   {
+    "ownership": {
+     "owns": [],
+     "delegatesToCapabilities": true
+    },
+    "scaffoldNodeId": "scaffold:app_shell"
+   }
+  ],
+  "expectedModuleSurface": {
+   "routes": 1,
+   "entities": 1,
+   "softMaximum": 19,
+   "extremeMaximum": 34,
+   "customExtensions": 3,
+   "scaffoldFamilies": 1,
+   "deterministicFiles": 4,
+   "expectedGeneratedModules": 7
+  },
+  "journeyRouteOwnership": [
+   {
+    "screenId": "home-screen",
+    "journeyId": "increase-counter",
+    "routePath": "/",
+    "stepIndex": 0,
+    "extensionIds": [
+     "custom_behavior:increase-counter"
+    ],
+    "mountedModule": "src/screens/scaffold/HomeScreen.jsx",
+    "scaffoldNodeIds": [
+     "scaffold:app_shell"
+    ],
+    "capabilityNodeIds": [
+     "capability:interaction-primitives",
+     "custom_behavior:increase-counter"
+    ]
+   },
+   {
+    "screenId": "home-screen",
+    "journeyId": "decrease-counter",
+    "routePath": "/",
+    "stepIndex": 0,
+    "extensionIds": [
+     "custom_behavior:decrease-counter"
+    ],
+    "mountedModule": "src/screens/scaffold/HomeScreen.jsx",
+    "scaffoldNodeIds": [
+     "scaffold:app_shell"
+    ],
+    "capabilityNodeIds": [
+     "capability:interaction-primitives",
+     "custom_behavior:decrease-counter"
+    ]
+   },
+   {
+    "screenId": "home-screen",
+    "journeyId": "reset-counter",
+    "routePath": "/",
+    "stepIndex": 0,
+    "extensionIds": [
+     "custom_behavior:reset-counter"
+    ],
+    "mountedModule": "src/screens/scaffold/HomeScreen.jsx",
+    "scaffoldNodeIds": [
+     "scaffold:app_shell"
+    ],
+    "capabilityNodeIds": [
+     "capability:interaction-primitives",
+     "custom_behavior:reset-counter"
+    ]
+   }
+  ],
+  "crossScaffoldInterfaces": []
+ },
+ "dependencyPlan": {
+  "version": 1,
+  "installMode": "sandbox_baked",
+  "requirements": [],
+  "networkDuringCompile": false
+ },
+ "capabilityGraph": {
+  "edges": [
+   {
+    "to": "reset-counter:3:action",
+    "from": "reset-counter:2:action",
+    "type": "data_flow",
+    "state": [
+     "reset-counter.custom.value"
+    ]
+   },
+   {
+    "to": "reset-counter:3:action",
+    "from": "reset-counter:3:action",
+    "type": "data_flow",
+    "state": [
+     "reset-counter.custom.value"
+    ]
+   },
+   {
+    "to": "reset-counter:3:action",
+    "from": "reset-counter:2:action",
+    "type": "semantic_data_flow",
+    "state": [
+     "reset-counter.custom.value"
+    ]
+   },
+   {
+    "to": "capability:session",
+    "from": "capability:crud",
+    "type": "depends_on",
+    "state": []
+   }
+  ],
+  "nodes": [
+   {
+    "id": "capability:crud",
+    "type": "deterministic_capability",
+    "proven": true,
+    "outputs": {
+     "records": "flat entity records",
+     "mutations": "persisted entity record or void"
+    },
+    "version": "1.0.0",
+    "entities": [],
+    "journeys": [],
+    "protected": true,
+    "provenance": "platform_registry",
+    "capabilityId": "crud",
+    "dependencies": [
+     "session"
+    ],
+    "interactions": [],
+    "testContract": [
+     "create",
+     "read",
+     "update",
+     "delete"
+    ],
+    "configuration": null,
+    "requiredInputs": {
+     "factory": [
+      "entityType"
+     ],
+     "operations": {
+      "get": [
+       "id"
+      ],
+      "create": [
+       "values"
+      ],
+      "remove": [
+       "id"
+      ],
+      "update": [
+       "id",
+       "partialValues"
+      ]
+     }
+    },
+    "stateOwnership": {
+     "owns": "entity records",
+     "scope": "application and authenticated or visitor owner"
+    },
+    "compositionModule": "src/lib/capabilities/composed/crud.js",
+    "requiredOperations": [],
+    "supportedOperations": [
+     "list",
+     "get",
+     "create",
+     "update",
+     "remove",
+     "count",
+     "subscribe"
+    ],
+    "persistenceSemantics": {
+     "owner": "generated backend entity API",
+     "durable": true,
+     "mergeUpdates": true,
+     "browserStorage": false
+    },
+    "verificationSemantics": {
+     "actions": [
+      "create",
+      "read",
+      "update",
+      "delete"
+     ],
+     "observe": [
+      "returned record",
+      "reload or reopen read"
+     ],
+     "stateChange": "entity record mutation",
+     "durableMutation": true
+    },
+    "compatibleUiInteractionPrimitives": [
+     "field",
+     "selection",
+     "action",
+     "status"
+    ]
+   },
+   {
+    "id": "capability:session",
+    "type": "deterministic_capability",
+    "proven": true,
+    "outputs": {
+     "current": "user or null",
+     "session": "authenticated user or app-scoped visitor",
+     "signedOut": "signed-out session state",
+     "resetRequested": "password reset request accepted"
+    },
+    "version": "1.1.0",
+    "entities": [],
+    "journeys": [],
+    "protected": true,
+    "provenance": "platform_registry",
+    "capabilityId": "session",
+    "dependencies": [],
+    "interactions": [],
+    "testContract": [
+     "current",
+     "ensure",
+     "recover",
+     "signUp",
+     "signIn",
+     "signOut",
+     "resetPassword",
+     "confirmReset"
+    ],
+    "configuration": null,
+    "requiredInputs": {
+     "factory": [],
+     "operations": {
+      "signIn": [
+       "email",
+       "password"
+      ],
+      "signUp": [
+       "email",
+       "password"
+      ],
+      "confirmReset": [
+       "email",
+       "code",
+       "newPassword"
+      ],
+      "resetPassword": [
+       "email"
+      ]
+     }
+    },
+    "stateOwnership": {
+     "owns": "authentication and session identity",
+     "scope": "browser and generated backend"
+    },
+    "compositionModule": "src/lib/capabilities/composed/session.js",
+    "requiredOperations": [],
+    "supportedOperations": [
+     "ensure",
+     "recover",
+     "current",
+     "signUp",
+     "signIn",
+     "signOut",
+     "resetPassword",
+     "confirmReset"
+    ],
+    "persistenceSemantics": {
+     "owner": "generated auth runtime",
+     "durable": true,
+     "browserStorage": "runtime-owned only"
+    },
+    "verificationSemantics": {
+     "actions": [
+      "establish",
+      "recover",
+      "signUp",
+      "signIn",
+      "signOut",
+      "resetPassword",
+      "confirmReset"
+     ],
+     "observe": [
+      "authorized operation succeeds",
+      "current user",
+      "signed-out state"
+     ],
+     "stateChange": "session identity",
+     "durableMutation": false
+    },
+    "compatibleUiInteractionPrimitives": [
+     "field",
+     "action",
+     "status"
+    ]
+   },
+   {
+    "id": "capability:interaction-primitives",
+    "type": "deterministic_capability",
+    "proven": true,
+    "outputs": {
+     "state": "reactive capability snapshot or action state",
+     "bindings": "accessible props with stable machine identity"
+    },
+    "version": "1.0.0",
+    "entities": [],
+    "journeys": [
+     "increase-counter",
+     "decrease-counter",
+     "reset-counter"
+    ],
+    "protected": true,
+    "provenance": "platform_registry",
+    "capabilityId": "interaction-primitives",
+    "dependencies": [],
+    "interactions": [
+     "increase-counter:1:navigation",
+     "increase-counter:2:action",
+     "decrease-counter:1:navigation",
+     "decrease-counter:2:action",
+     "reset-counter:1:navigation",
+     "reset-counter:2:action",
+     "reset-counter:3:action"
+    ],
+    "testContract": [
+     "field accepts value",
+     "selection becomes observable",
+     "action changes state",
+     "status announced"
+    ],
+    "configuration": null,
+    "requiredInputs": {
+     "factory": [],
+     "operations": {
+      "field": [
+       "name",
+       "value",
+       "onChange"
+      ],
+      "action": [
+       "name",
+       "onActivate"
+      ],
+      "selection": [
+       "name",
+       "value",
+       "onSelect"
+      ]
+     }
+    },
+    "stateOwnership": {
+     "owns": "ephemeral React action status only",
+     "scope": "rendered component"
+    },
+    "compositionModule": "src/lib/capabilities/composed/interaction-primitives.js",
+    "requiredOperations": [],
+    "supportedOperations": [
+     "subscribe_state",
+     "run_action",
+     "field",
+     "selection",
+     "action",
+     "flow_advance",
+     "status"
+    ],
+    "persistenceSemantics": {
+     "owner": "none",
+     "durable": false,
+     "browserStorage": false
+    },
+    "verificationSemantics": {
+     "actions": [
+      "fill",
+      "select",
+      "activate",
+      "advance",
+      "observe"
+     ],
+     "observe": [
+      "opaque control identity",
+      "accessible name",
+      "selected, value, or status transition"
+     ],
+     "stateChange": "control value, selection, or action result",
+     "durableMutation": false
+    },
+    "compatibleUiInteractionPrimitives": [
+     "field",
+     "selection",
+     "action",
+     "flow_advance",
+     "status"
+    ]
+   },
+   {
+    "id": "custom_behavior:increase-counter",
+    "type": "custom_behavior",
+    "proven": false,
+    "outputs": [
+     "increase-counter.custom.value"
+    ],
+    "version": "1.0.0",
+    "journeys": [
+     "increase-counter"
+    ],
+    "extension": {
+     "module": "src/extensions/custom/increase-counter.js",
+     "interface": "runIncreaseCounterCustomBehavior(inputs, context) -> declared outputs",
+     "requiredExports": [
+      "runIncreaseCounterCustomBehavior"
+     ]
+    },
+    "protected": false,
+    "provenance": "generated_extension",
+    "capabilityId": null,
+    "dependencies": [],
+    "interactions": [
+     "increase-counter:2:action"
+    ],
+    "testContract": [
+     {
+      "inputs": [
+       "increase-counter.input.value"
+      ],
+      "outputs": [
+       "increase-counter.custom.value"
+      ],
+      "behavior": "add 1 to the current counter value",
+      "operationId": "increase-counter",
+      "responsibilityId": "increase-counter:functional-1",
+      "persistenceSource": null,
+      "persistenceHandoff": null
+     },
+     {
+      "reads": [
+       "increase-counter.input.value"
+      ],
+      "writes": [
+       "increase-counter.custom.value"
+      ],
+      "observe": "the displayed counter value immediately changes from 0 to 1",
+      "interactionId": "increase-counter:2:action"
+     }
+    ],
+    "requiredInputs": [
+     "increase-counter.input.value"
+    ],
+    "stateOwnership": {
+     "owns": [
+      "increase-counter.custom.value"
+     ],
+     "journey": "increase-counter"
+    },
+    "supportedOperations": [
+     "update",
+     "action"
+    ],
+    "persistenceSemantics": {
+     "owner": "bounded custom transformation; durable state is read from or handed off to composed capabilities",
+     "durable": false,
+     "sources": [],
+     "handoffs": [],
+     "browserStorage": false
+    },
+    "verificationSemantics": {
+     "actions": [
+      "add 1 to the current counter value",
+      "action"
+     ],
+     "observe": [
+      "the displayed counter value immediately changes from 0 to 1"
+     ],
+     "stateChange": [
+      "increase-counter.custom.value"
+     ],
+     "durableMutation": false,
+     "persistenceHandoff": []
+    },
+    "operationResponsibilities": [
+     {
+      "id": "increase-counter:functional-1",
+      "type": "custom_functional",
+      "owner": "custom_behavior:increase-counter",
+      "reads": [
+       "increase-counter.input.value"
+      ],
+      "entity": "counterState",
+      "writes": [
+       "increase-counter.custom.value"
+      ],
+      "behavior": "add 1 to the current counter value",
+      "operationId": "increase-counter",
+      "capabilityId": null,
+      "outputEffect": null,
+      "declaredReads": [
+       "value"
+      ],
+      "customBehavior": "custom_behavior:increase-counter",
+      "declaredWrites": [
+       "value"
+      ],
+      "interactionIds": [
+       "increase-counter:2:action"
+      ],
+      "capabilityMethod": null,
+      "persistenceSource": null,
+      "semanticOperation": "update",
+      "persistenceHandoff": null,
+      "requestedCapability": null,
+      "downstreamDependencies": [],
+      "requiresTransformation": true,
+      "requestedCapabilityMethod": null
+     }
+    ],
+    "compatibleUiInteractionPrimitives": [
+     "action"
+    ]
+   },
+   {
+    "id": "custom_behavior:decrease-counter",
+    "type": "custom_behavior",
+    "proven": false,
+    "outputs": [
+     "decrease-counter.custom.value"
+    ],
+    "version": "1.0.0",
+    "journeys": [
+     "decrease-counter"
+    ],
+    "extension": {
+     "module": "src/extensions/custom/decrease-counter.js",
+     "interface": "runDecreaseCounterCustomBehavior(inputs, context) -> declared outputs",
+     "requiredExports": [
+      "runDecreaseCounterCustomBehavior"
+     ]
+    },
+    "protected": false,
+    "provenance": "generated_extension",
+    "capabilityId": null,
+    "dependencies": [],
+    "interactions": [
+     "decrease-counter:2:action"
+    ],
+    "testContract": [
+     {
+      "inputs": [
+       "decrease-counter.input.value"
+      ],
+      "outputs": [
+       "decrease-counter.custom.value"
+      ],
+      "behavior": "subtract 1 from the current counter value without enforcing a lower bound",
+      "operationId": "decrease-counter",
+      "responsibilityId": "decrease-counter:functional-1",
+      "persistenceSource": null,
+      "persistenceHandoff": null
+     },
+     {
+      "reads": [
+       "decrease-counter.input.value"
+      ],
+      "writes": [
+       "decrease-counter.custom.value"
+      ],
+      "observe": "the displayed counter value immediately changes from 0 to -1, proving negative numbers are allowed",
+      "interactionId": "decrease-counter:2:action"
+     }
+    ],
+    "requiredInputs": [
+     "decrease-counter.input.value"
+    ],
+    "stateOwnership": {
+     "owns": [
+      "decrease-counter.custom.value"
+     ],
+     "journey": "decrease-counter"
+    },
+    "supportedOperations": [
+     "update",
+     "action"
+    ],
+    "persistenceSemantics": {
+     "owner": "bounded custom transformation; durable state is read from or handed off to composed capabilities",
+     "durable": false,
+     "sources": [],
+     "handoffs": [],
+     "browserStorage": false
+    },
+    "verificationSemantics": {
+     "actions": [
+      "subtract 1 from the current counter value without enforcing a lower bound",
+      "action"
+     ],
+     "observe": [
+      "the displayed counter value immediately changes from 0 to -1, proving negative numbers are allowed"
+     ],
+     "stateChange": [
+      "decrease-counter.custom.value"
+     ],
+     "durableMutation": false,
+     "persistenceHandoff": []
+    },
+    "operationResponsibilities": [
+     {
+      "id": "decrease-counter:functional-1",
+      "type": "custom_functional",
+      "owner": "custom_behavior:decrease-counter",
+      "reads": [
+       "decrease-counter.input.value"
+      ],
+      "entity": "counterState",
+      "writes": [
+       "decrease-counter.custom.value"
+      ],
+      "behavior": "subtract 1 from the current counter value without enforcing a lower bound",
+      "operationId": "decrease-counter",
+      "capabilityId": null,
+      "outputEffect": null,
+      "declaredReads": [
+       "value"
+      ],
+      "customBehavior": "custom_behavior:decrease-counter",
+      "declaredWrites": [
+       "value"
+      ],
+      "interactionIds": [
+       "decrease-counter:2:action"
+      ],
+      "capabilityMethod": null,
+      "persistenceSource": null,
+      "semanticOperation": "update",
+      "persistenceHandoff": null,
+      "requestedCapability": null,
+      "downstreamDependencies": [],
+      "requiresTransformation": true,
+      "requestedCapabilityMethod": null
+     }
+    ],
+    "compatibleUiInteractionPrimitives": [
+     "action"
+    ]
+   },
+   {
+    "id": "custom_behavior:reset-counter",
+    "type": "custom_behavior",
+    "proven": false,
+    "outputs": [
+     "reset-counter.custom.value"
+    ],
+    "version": "1.0.0",
+    "journeys": [
+     "reset-counter"
+    ],
+    "extension": {
+     "module": "src/extensions/custom/reset-counter.js",
+     "interface": "runResetCounterCustomBehavior(inputs, context) -> declared outputs",
+     "requiredExports": [
+      "runResetCounterCustomBehavior"
+     ]
+    },
+    "protected": false,
+    "provenance": "generated_extension",
+    "capabilityId": null,
+    "dependencies": [],
+    "interactions": [
+     "reset-counter:2:action",
+     "reset-counter:3:action"
+    ],
+    "testContract": [
+     {
+      "inputs": [
+       "reset-counter.input.value"
+      ],
+      "outputs": [
+       "reset-counter.custom.value"
+      ],
+      "behavior": "add 1 to the current counter value",
+      "operationId": "increase-counter",
+      "responsibilityId": "increase-counter:functional-1",
+      "persistenceSource": null,
+      "persistenceHandoff": null
+     },
+     {
+      "inputs": [
+       "reset-counter.input.value"
+      ],
+      "outputs": [
+       "reset-counter.custom.value"
+      ],
+      "behavior": "replace the current counter value with 0",
+      "operationId": "reset-counter",
+      "responsibilityId": "reset-counter:functional-1",
+      "persistenceSource": null,
+      "persistenceHandoff": null
+     },
+     {
+      "reads": [
+       "reset-counter.input.value"
+      ],
+      "writes": [
+       "reset-counter.custom.value"
+      ],
+      "observe": "the displayed counter value immediately changes to 1",
+      "interactionId": "reset-counter:2:action"
+     },
+     {
+      "reads": [
+       "reset-counter.custom.value",
+       "reset-counter.input.value"
+      ],
+      "writes": [
+       "reset-counter.custom.value"
+      ],
+      "observe": "the displayed counter value immediately returns to 0",
+      "interactionId": "reset-counter:3:action"
+     }
+    ],
+    "requiredInputs": [
+     "reset-counter.input.value",
+     "reset-counter.custom.value"
+    ],
+    "stateOwnership": {
+     "owns": [
+      "reset-counter.custom.value"
+     ],
+     "journey": "reset-counter"
+    },
+    "supportedOperations": [
+     "update",
+     "action"
+    ],
+    "persistenceSemantics": {
+     "owner": "bounded custom transformation; durable state is read from or handed off to composed capabilities",
+     "durable": false,
+     "sources": [],
+     "handoffs": [],
+     "browserStorage": false
+    },
+    "verificationSemantics": {
+     "actions": [
+      "add 1 to the current counter value",
+      "replace the current counter value with 0",
+      "action"
+     ],
+     "observe": [
+      "the displayed counter value immediately changes to 1",
+      "the displayed counter value immediately returns to 0",
+      "reset-counter:3:action"
+     ],
+     "stateChange": [
+      "reset-counter.custom.value"
+     ],
+     "durableMutation": false,
+     "persistenceHandoff": []
+    },
+    "operationResponsibilities": [
+     {
+      "id": "increase-counter:functional-1",
+      "type": "custom_functional",
+      "owner": "custom_behavior:reset-counter",
+      "reads": [
+       "reset-counter.input.value"
+      ],
+      "entity": "counterState",
+      "writes": [
+       "reset-counter.custom.value"
+      ],
+      "behavior": "add 1 to the current counter value",
+      "operationId": "increase-counter",
+      "capabilityId": null,
+      "outputEffect": null,
+      "declaredReads": [
+       "value"
+      ],
+      "customBehavior": "custom_behavior:reset-counter",
+      "declaredWrites": [
+       "value"
+      ],
+      "interactionIds": [
+       "reset-counter:2:action"
+      ],
+      "capabilityMethod": null,
+      "persistenceSource": null,
+      "semanticOperation": "update",
+      "persistenceHandoff": null,
+      "requestedCapability": null,
+      "downstreamDependencies": [
+       "reset-counter:3:action"
+      ],
+      "requiresTransformation": true,
+      "requestedCapabilityMethod": null
+     },
+     {
+      "id": "reset-counter:functional-1",
+      "type": "custom_functional",
+      "owner": "custom_behavior:reset-counter",
+      "reads": [
+       "reset-counter.input.value"
+      ],
+      "entity": "counterState",
+      "writes": [
+       "reset-counter.custom.value"
+      ],
+      "behavior": "replace the current counter value with 0",
+      "operationId": "reset-counter",
+      "capabilityId": null,
+      "outputEffect": null,
+      "declaredReads": [
+       "value"
+      ],
+      "customBehavior": "custom_behavior:reset-counter",
+      "declaredWrites": [
+       "value"
+      ],
+      "interactionIds": [
+       "reset-counter:3:action"
+      ],
+      "capabilityMethod": null,
+      "persistenceSource": null,
+      "semanticOperation": "update",
+      "persistenceHandoff": null,
+      "requestedCapability": null,
+      "downstreamDependencies": [],
+      "requiresTransformation": true,
+      "requestedCapabilityMethod": null
+     }
+    ],
+    "compatibleUiInteractionPrimitives": [
+     "action"
+    ]
+   }
+  ],
+  "version": 2,
+  "journeys": [
+   {
+    "state": [
+     "increase-counter.input.value",
+     "increase-counter.custom.value"
+    ],
+    "entities": [
+     "counterState"
+    ],
+    "dataFlows": [
+     {
+      "reads": [],
+      "writes": [],
+      "interactionId": "increase-counter:1:navigation",
+      "semanticOwner": null,
+      "customBehavior": null,
+      "capabilityMethod": null,
+      "responsibilities": [],
+      "downstreamDependencies": []
+     },
+     {
+      "reads": [
+       "increase-counter.input.value"
+      ],
+      "writes": [
+       "increase-counter.custom.value"
+      ],
+      "interactionId": "increase-counter:2:action",
+      "semanticOwner": "custom_behavior:increase-counter",
+      "customBehavior": "custom_behavior:increase-counter",
+      "capabilityMethod": null,
+      "responsibilities": [
+       "increase-counter:functional-1"
+      ],
+      "downstreamDependencies": []
+     }
+    ],
+    "journeyId": "increase-counter",
+    "customBehavior": "custom_behavior:increase-counter",
+    "requiredNodeIds": [
+     "capability:interaction-primitives",
+     "custom_behavior:increase-counter"
+    ],
+    "durableStateOwner": null,
+    "operationResponsibilities": [
+     {
+      "entity": "counterState",
+      "journeyId": "increase-counter",
+      "stepIndex": 1,
+      "operationId": "increase-counter",
+      "responsibilities": [
+       {
+        "id": "increase-counter:functional-1",
+        "type": "custom_functional",
+        "owner": "custom_behavior:increase-counter",
+        "reads": [
+         "increase-counter.input.value"
+        ],
+        "entity": "counterState",
+        "writes": [
+         "increase-counter.custom.value"
+        ],
+        "behavior": "add 1 to the current counter value",
+        "operationId": "increase-counter",
+        "capabilityId": null,
+        "outputEffect": null,
+        "declaredReads": [
+         "value"
+        ],
+        "customBehavior": "custom_behavior:increase-counter",
+        "declaredWrites": [
+         "value"
+        ],
+        "interactionIds": [
+         "increase-counter:2:action"
+        ],
+        "capabilityMethod": null,
+        "persistenceSource": null,
+        "semanticOperation": "update",
+        "persistenceHandoff": null,
+        "requestedCapability": null,
+        "downstreamDependencies": [],
+        "requiresTransformation": true,
+        "requestedCapabilityMethod": null
+       }
+      ]
+     }
+    ],
+    "uiInteractionRequirements": [
+     {
+      "kind": "action",
+      "machineId": "act_e90434c4",
+      "primitive": "button",
+      "interactionId": "increase-counter:2:action"
+     }
+    ]
+   },
+   {
+    "state": [
+     "decrease-counter.input.value",
+     "decrease-counter.custom.value"
+    ],
+    "entities": [
+     "counterState"
+    ],
+    "dataFlows": [
+     {
+      "reads": [],
+      "writes": [],
+      "interactionId": "decrease-counter:1:navigation",
+      "semanticOwner": null,
+      "customBehavior": null,
+      "capabilityMethod": null,
+      "responsibilities": [],
+      "downstreamDependencies": []
+     },
+     {
+      "reads": [
+       "decrease-counter.input.value"
+      ],
+      "writes": [
+       "decrease-counter.custom.value"
+      ],
+      "interactionId": "decrease-counter:2:action",
+      "semanticOwner": "custom_behavior:decrease-counter",
+      "customBehavior": "custom_behavior:decrease-counter",
+      "capabilityMethod": null,
+      "responsibilities": [
+       "decrease-counter:functional-1"
+      ],
+      "downstreamDependencies": []
+     }
+    ],
+    "journeyId": "decrease-counter",
+    "customBehavior": "custom_behavior:decrease-counter",
+    "requiredNodeIds": [
+     "capability:interaction-primitives",
+     "custom_behavior:decrease-counter"
+    ],
+    "durableStateOwner": null,
+    "operationResponsibilities": [
+     {
+      "entity": "counterState",
+      "journeyId": "decrease-counter",
+      "stepIndex": 1,
+      "operationId": "decrease-counter",
+      "responsibilities": [
+       {
+        "id": "decrease-counter:functional-1",
+        "type": "custom_functional",
+        "owner": "custom_behavior:decrease-counter",
+        "reads": [
+         "decrease-counter.input.value"
+        ],
+        "entity": "counterState",
+        "writes": [
+         "decrease-counter.custom.value"
+        ],
+        "behavior": "subtract 1 from the current counter value without enforcing a lower bound",
+        "operationId": "decrease-counter",
+        "capabilityId": null,
+        "outputEffect": null,
+        "declaredReads": [
+         "value"
+        ],
+        "customBehavior": "custom_behavior:decrease-counter",
+        "declaredWrites": [
+         "value"
+        ],
+        "interactionIds": [
+         "decrease-counter:2:action"
+        ],
+        "capabilityMethod": null,
+        "persistenceSource": null,
+        "semanticOperation": "update",
+        "persistenceHandoff": null,
+        "requestedCapability": null,
+        "downstreamDependencies": [],
+        "requiresTransformation": true,
+        "requestedCapabilityMethod": null
+       }
+      ]
+     }
+    ],
+    "uiInteractionRequirements": [
+     {
+      "kind": "action",
+      "machineId": "act_23b8f4f8",
+      "primitive": "button",
+      "interactionId": "decrease-counter:2:action"
+     }
+    ]
+   },
+   {
+    "state": [
+     "reset-counter.input.value",
+     "reset-counter.custom.value"
+    ],
+    "entities": [
+     "counterState"
+    ],
+    "dataFlows": [
+     {
+      "reads": [],
+      "writes": [],
+      "interactionId": "reset-counter:1:navigation",
+      "semanticOwner": null,
+      "customBehavior": null,
+      "capabilityMethod": null,
+      "responsibilities": [],
+      "downstreamDependencies": []
+     },
+     {
+      "reads": [
+       "reset-counter.input.value"
+      ],
+      "writes": [
+       "reset-counter.custom.value"
+      ],
+      "interactionId": "reset-counter:2:action",
+      "semanticOwner": "custom_behavior:reset-counter",
+      "customBehavior": "custom_behavior:reset-counter",
+      "capabilityMethod": null,
+      "responsibilities": [
+       "increase-counter:functional-1"
+      ],
+      "downstreamDependencies": [
+       "reset-counter:3:action"
+      ]
+     },
+     {
+      "reads": [
+       "reset-counter.custom.value",
+       "reset-counter.input.value"
+      ],
+      "writes": [
+       "reset-counter.custom.value"
+      ],
+      "interactionId": "reset-counter:3:action",
+      "semanticOwner": "custom_behavior:reset-counter",
+      "customBehavior": "custom_behavior:reset-counter",
+      "capabilityMethod": null,
+      "responsibilities": [
+       "reset-counter:functional-1"
+      ],
+      "downstreamDependencies": []
+     }
+    ],
+    "journeyId": "reset-counter",
+    "customBehavior": "custom_behavior:reset-counter",
+    "requiredNodeIds": [
+     "capability:interaction-primitives",
+     "custom_behavior:reset-counter"
+    ],
+    "durableStateOwner": null,
+    "operationResponsibilities": [
+     {
+      "entity": "counterState",
+      "journeyId": "reset-counter",
+      "stepIndex": 1,
+      "operationId": "increase-counter",
+      "responsibilities": [
+       {
+        "id": "increase-counter:functional-1",
+        "type": "custom_functional",
+        "owner": "custom_behavior:reset-counter",
+        "reads": [
+         "reset-counter.input.value"
+        ],
+        "entity": "counterState",
+        "writes": [
+         "reset-counter.custom.value"
+        ],
+        "behavior": "add 1 to the current counter value",
+        "operationId": "increase-counter",
+        "capabilityId": null,
+        "outputEffect": null,
+        "declaredReads": [
+         "value"
+        ],
+        "customBehavior": "custom_behavior:reset-counter",
+        "declaredWrites": [
+         "value"
+        ],
+        "interactionIds": [
+         "reset-counter:2:action"
+        ],
+        "capabilityMethod": null,
+        "persistenceSource": null,
+        "semanticOperation": "update",
+        "persistenceHandoff": null,
+        "requestedCapability": null,
+        "downstreamDependencies": [
+         "reset-counter:3:action"
+        ],
+        "requiresTransformation": true,
+        "requestedCapabilityMethod": null
+       }
+      ]
+     },
+     {
+      "entity": "counterState",
+      "journeyId": "reset-counter",
+      "stepIndex": 2,
+      "operationId": "reset-counter",
+      "responsibilities": [
+       {
+        "id": "reset-counter:functional-1",
+        "type": "custom_functional",
+        "owner": "custom_behavior:reset-counter",
+        "reads": [
+         "reset-counter.input.value"
+        ],
+        "entity": "counterState",
+        "writes": [
+         "reset-counter.custom.value"
+        ],
+        "behavior": "replace the current counter value with 0",
+        "operationId": "reset-counter",
+        "capabilityId": null,
+        "outputEffect": null,
+        "declaredReads": [
+         "value"
+        ],
+        "customBehavior": "custom_behavior:reset-counter",
+        "declaredWrites": [
+         "value"
+        ],
+        "interactionIds": [
+         "reset-counter:3:action"
+        ],
+        "capabilityMethod": null,
+        "persistenceSource": null,
+        "semanticOperation": "update",
+        "persistenceHandoff": null,
+        "requestedCapability": null,
+        "downstreamDependencies": [],
+        "requiresTransformation": true,
+        "requestedCapabilityMethod": null
+       }
+      ]
+     }
+    ],
+    "uiInteractionRequirements": [
+     {
+      "kind": "action",
+      "machineId": "act_e90434c4",
+      "primitive": "button",
+      "interactionId": "reset-counter:2:action"
+     },
+     {
+      "kind": "action",
+      "machineId": "act_8aa57a59",
+      "primitive": "button",
+      "interactionId": "reset-counter:3:action"
+     }
+    ]
+   }
+  ],
+  "buildProfile": {
+   "version": 1,
+   "confidence": 0.75,
+   "inferenceSource": "auto",
+   "resolvedBuildType": "application",
+   "applicationSubtype": "auto",
+   "requestedBuildType": "auto",
+   "requirementSignals": []
+  },
+  "customBehavior": [
+   "custom_behavior:increase-counter",
+   "custom_behavior:decrease-counter",
+   "custom_behavior:reset-counter"
+  ],
+  "registryVersions": {
+   "crud": "1.0.0",
+   "roles": "1.0.0",
+   "wizard": "1.0.0",
+   "booking": "1.0.0",
+   "contact": "1.0.0",
+   "session": "1.1.0",
+   "newsletter": "1.0.0",
+   "interaction-primitives": "1.0.0"
+  },
+  "operationResponsibilities": [
+   {
+    "entity": "counterState",
+    "journeyId": "increase-counter",
+    "stepIndex": 1,
+    "operationId": "increase-counter",
+    "responsibilities": [
+     {
+      "id": "increase-counter:functional-1",
+      "type": "custom_functional",
+      "owner": "custom_behavior:increase-counter",
+      "reads": [
+       "increase-counter.input.value"
+      ],
+      "entity": "counterState",
+      "writes": [
+       "increase-counter.custom.value"
+      ],
+      "behavior": "add 1 to the current counter value",
+      "operationId": "increase-counter",
+      "capabilityId": null,
+      "outputEffect": null,
+      "declaredReads": [
+       "value"
+      ],
+      "customBehavior": "custom_behavior:increase-counter",
+      "declaredWrites": [
+       "value"
+      ],
+      "interactionIds": [
+       "increase-counter:2:action"
+      ],
+      "capabilityMethod": null,
+      "persistenceSource": null,
+      "semanticOperation": "update",
+      "persistenceHandoff": null,
+      "requestedCapability": null,
+      "downstreamDependencies": [],
+      "requiresTransformation": true,
+      "requestedCapabilityMethod": null
+     }
+    ]
+   },
+   {
+    "entity": "counterState",
+    "journeyId": "decrease-counter",
+    "stepIndex": 1,
+    "operationId": "decrease-counter",
+    "responsibilities": [
+     {
+      "id": "decrease-counter:functional-1",
+      "type": "custom_functional",
+      "owner": "custom_behavior:decrease-counter",
+      "reads": [
+       "decrease-counter.input.value"
+      ],
+      "entity": "counterState",
+      "writes": [
+       "decrease-counter.custom.value"
+      ],
+      "behavior": "subtract 1 from the current counter value without enforcing a lower bound",
+      "operationId": "decrease-counter",
+      "capabilityId": null,
+      "outputEffect": null,
+      "declaredReads": [
+       "value"
+      ],
+      "customBehavior": "custom_behavior:decrease-counter",
+      "declaredWrites": [
+       "value"
+      ],
+      "interactionIds": [
+       "decrease-counter:2:action"
+      ],
+      "capabilityMethod": null,
+      "persistenceSource": null,
+      "semanticOperation": "update",
+      "persistenceHandoff": null,
+      "requestedCapability": null,
+      "downstreamDependencies": [],
+      "requiresTransformation": true,
+      "requestedCapabilityMethod": null
+     }
+    ]
+   },
+   {
+    "entity": "counterState",
+    "journeyId": "reset-counter",
+    "stepIndex": 1,
+    "operationId": "increase-counter",
+    "responsibilities": [
+     {
+      "id": "increase-counter:functional-1",
+      "type": "custom_functional",
+      "owner": "custom_behavior:reset-counter",
+      "reads": [
+       "reset-counter.input.value"
+      ],
+      "entity": "counterState",
+      "writes": [
+       "reset-counter.custom.value"
+      ],
+      "behavior": "add 1 to the current counter value",
+      "operationId": "increase-counter",
+      "capabilityId": null,
+      "outputEffect": null,
+      "declaredReads": [
+       "value"
+      ],
+      "customBehavior": "custom_behavior:reset-counter",
+      "declaredWrites": [
+       "value"
+      ],
+      "interactionIds": [
+       "reset-counter:2:action"
+      ],
+      "capabilityMethod": null,
+      "persistenceSource": null,
+      "semanticOperation": "update",
+      "persistenceHandoff": null,
+      "requestedCapability": null,
+      "downstreamDependencies": [
+       "reset-counter:3:action"
+      ],
+      "requiresTransformation": true,
+      "requestedCapabilityMethod": null
+     }
+    ]
+   },
+   {
+    "entity": "counterState",
+    "journeyId": "reset-counter",
+    "stepIndex": 2,
+    "operationId": "reset-counter",
+    "responsibilities": [
+     {
+      "id": "reset-counter:functional-1",
+      "type": "custom_functional",
+      "owner": "custom_behavior:reset-counter",
+      "reads": [
+       "reset-counter.input.value"
+      ],
+      "entity": "counterState",
+      "writes": [
+       "reset-counter.custom.value"
+      ],
+      "behavior": "replace the current counter value with 0",
+      "operationId": "reset-counter",
+      "capabilityId": null,
+      "outputEffect": null,
+      "declaredReads": [
+       "value"
+      ],
+      "customBehavior": "custom_behavior:reset-counter",
+      "declaredWrites": [
+       "value"
+      ],
+      "interactionIds": [
+       "reset-counter:3:action"
+      ],
+      "capabilityMethod": null,
+      "persistenceSource": null,
+      "semanticOperation": "update",
+      "persistenceHandoff": null,
+      "requestedCapability": null,
+      "downstreamDependencies": [],
+      "requiresTransformation": true,
+      "requestedCapabilityMethod": null
+     }
+    ]
+   }
+  ]
+ },
+ "interactionContract": {
+  "flows": [
+   {
+    "id": "increase-counter:1:navigation",
+    "kind": "navigation",
+    "reads": [],
+    "action": "open the counter page",
+    "target": "/",
+    "writes": [],
+    "control": null,
+    "dependsOn": [],
+    "journeyId": "increase-counter",
+    "stepIndex": 0,
+    "capability": null,
+    "observable": "the centered Simple Counter screen is visible with the counter starting at 0 and the Increase (+1), Decrease (-1), and Reset buttons visible",
+    "stateOwner": "src/screens/scaffold/HomeScreen.jsx",
+    "valueWritten": null,
+    "producedValues": [],
+    "semanticPurpose": "open the counter page",
+    "responsibleModules": [
+     "src/screens/scaffold/HomeScreen.jsx"
+    ],
+    "nextStateRequirement": "the centered Simple Counter screen is visible with the counter starting at 0 and the Increase (+1), Decrease (-1), and Reset buttons visible"
+   },
+   {
+    "id": "increase-counter:2:action",
+    "kind": "action",
+    "reads": [
+     "increase-counter.input.value"
+    ],
+    "action": "click the Increase (+1) button",
+    "entity": "counterState",
+    "target": null,
+    "writes": [
+     "increase-counter.custom.value"
+    ],
+    "control": {
+     "roles": [
+      "button"
+     ],
+     "purpose": "Increase (+1) button",
+     "machineId": "act_e90434c4",
+     "statePath": "increase-counter.custom.value",
+     "downstream": [],
+     "stateOwner": "src/screens/scaffold/HomeScreen.jsx",
+     "accessibleName": "Increase (+1) button",
+     "validationOwner": null
+    },
+    "dependsOn": [
+     "increase-counter.input.value"
+    ],
+    "journeyId": "increase-counter",
+    "stepIndex": 1,
+    "capability": null,
+    "observable": "the displayed counter value immediately changes from 0 to 1",
+    "stateOwner": "src/screens/scaffold/HomeScreen.jsx",
+    "operationId": "increase-counter",
+    "capabilityId": null,
+    "outputEffect": null,
+    "valueWritten": null,
+    "actionIdentity": {
+     "controlId": "act_e90434c4",
+     "operationId": "increase-counter",
+     "interactionId": "increase-counter:2:action"
+    },
+    "customBehavior": "custom_behavior:increase-counter",
+    "producedValues": [],
+    "semanticPurpose": "click the Increase (+1) button",
+    "capabilityMethod": null,
+    "durableOperation": null,
+    "declaredOperation": true,
+    "persistenceSource": null,
+    "responsibilityIds": [
+     "increase-counter:functional-1"
+    ],
+    "persistenceHandoff": null,
+    "responsibleModules": [
+     "src/extensions/custom/increase-counter.js",
+     "src/screens/scaffold/HomeScreen.jsx"
+    ],
+    "downstreamConsumers": [],
+    "customBehaviorModule": "src/extensions/custom/increase-counter.js",
+    "nextStateRequirement": "the displayed counter value immediately changes from 0 to 1",
+    "customBehaviorExports": [
+     "runIncreaseCounterCustomBehavior"
+    ],
+    "expectedStateTransition": {
+     "persists": [],
+     "produces": [
+      "increase-counter.custom.value"
+     ],
+     "requirement": "the displayed counter value immediately changes from 0 to 1",
+     "readsPersisted": []
+    },
+    "verificationObservation": "the displayed counter value immediately changes from 0 to 1",
+    "requiredProducerEntities": [],
+    "semanticResponsibilityTypes": [
+     "custom_functional"
+    ]
+   },
+   {
+    "id": "decrease-counter:1:navigation",
+    "kind": "navigation",
+    "reads": [],
+    "action": "open the counter page",
+    "target": "/",
+    "writes": [],
+    "control": null,
+    "dependsOn": [],
+    "journeyId": "decrease-counter",
+    "stepIndex": 0,
+    "capability": null,
+    "observable": "the Simple Counter screen is visible with the counter starting at 0",
+    "stateOwner": "src/screens/scaffold/HomeScreen.jsx",
+    "valueWritten": null,
+    "producedValues": [],
+    "semanticPurpose": "open the counter page",
+    "responsibleModules": [
+     "src/screens/scaffold/HomeScreen.jsx"
+    ],
+    "nextStateRequirement": "the Simple Counter screen is visible with the counter starting at 0"
+   },
+   {
+    "id": "decrease-counter:2:action",
+    "kind": "action",
+    "reads": [
+     "decrease-counter.input.value"
+    ],
+    "action": "click the Decrease (-1) button",
+    "entity": "counterState",
+    "target": null,
+    "writes": [
+     "decrease-counter.custom.value"
+    ],
+    "control": {
+     "roles": [
+      "button"
+     ],
+     "purpose": "Decrease (-1) button",
+     "machineId": "act_23b8f4f8",
+     "statePath": "decrease-counter.custom.value",
+     "downstream": [],
+     "stateOwner": "src/screens/scaffold/HomeScreen.jsx",
+     "accessibleName": "Decrease (-1) button",
+     "validationOwner": null
+    },
+    "dependsOn": [
+     "decrease-counter.input.value"
+    ],
+    "journeyId": "decrease-counter",
+    "stepIndex": 1,
+    "capability": null,
+    "observable": "the displayed counter value immediately changes from 0 to -1, proving negative numbers are allowed",
+    "stateOwner": "src/screens/scaffold/HomeScreen.jsx",
+    "operationId": "decrease-counter",
+    "capabilityId": null,
+    "outputEffect": null,
+    "valueWritten": null,
+    "actionIdentity": {
+     "controlId": "act_23b8f4f8",
+     "operationId": "decrease-counter",
+     "interactionId": "decrease-counter:2:action"
+    },
+    "customBehavior": "custom_behavior:decrease-counter",
+    "producedValues": [],
+    "semanticPurpose": "click the Decrease (-1) button",
+    "capabilityMethod": null,
+    "durableOperation": null,
+    "declaredOperation": true,
+    "persistenceSource": null,
+    "responsibilityIds": [
+     "decrease-counter:functional-1"
+    ],
+    "persistenceHandoff": null,
+    "responsibleModules": [
+     "src/extensions/custom/decrease-counter.js",
+     "src/screens/scaffold/HomeScreen.jsx"
+    ],
+    "downstreamConsumers": [],
+    "customBehaviorModule": "src/extensions/custom/decrease-counter.js",
+    "nextStateRequirement": "the displayed counter value immediately changes from 0 to -1, proving negative numbers are allowed",
+    "customBehaviorExports": [
+     "runDecreaseCounterCustomBehavior"
+    ],
+    "expectedStateTransition": {
+     "persists": [],
+     "produces": [
+      "decrease-counter.custom.value"
+     ],
+     "requirement": "the displayed counter value immediately changes from 0 to -1, proving negative numbers are allowed",
+     "readsPersisted": []
+    },
+    "verificationObservation": "the displayed counter value immediately changes from 0 to -1, proving negative numbers are allowed",
+    "requiredProducerEntities": [],
+    "semanticResponsibilityTypes": [
+     "custom_functional"
+    ]
+   },
+   {
+    "id": "reset-counter:1:navigation",
+    "kind": "navigation",
+    "reads": [],
+    "action": "open the counter page",
+    "target": "/",
+    "writes": [],
+    "control": null,
+    "dependsOn": [],
+    "journeyId": "reset-counter",
+    "stepIndex": 0,
+    "capability": null,
+    "observable": "the Simple Counter screen is visible with the counter starting at 0 and the Increase (+1) and Reset buttons visible",
+    "stateOwner": "src/screens/scaffold/HomeScreen.jsx",
+    "valueWritten": null,
+    "producedValues": [],
+    "semanticPurpose": "open the counter page",
+    "responsibleModules": [
+     "src/screens/scaffold/HomeScreen.jsx"
+    ],
+    "nextStateRequirement": "the Simple Counter screen is visible with the counter starting at 0 and the Increase (+1) and Reset buttons visible"
+   },
+   {
+    "id": "reset-counter:2:action",
+    "kind": "action",
+    "reads": [
+     "reset-counter.input.value"
+    ],
+    "action": "click the Increase (+1) button",
+    "entity": "counterState",
+    "target": null,
+    "writes": [
+     "reset-counter.custom.value"
+    ],
+    "control": {
+     "roles": [
+      "button"
+     ],
+     "purpose": "Increase (+1) button",
+     "machineId": "act_e90434c4",
+     "statePath": "reset-counter.custom.value",
+     "downstream": [
+      "reset-counter:3:action"
+     ],
+     "stateOwner": "src/screens/scaffold/HomeScreen.jsx",
+     "accessibleName": "Increase (+1) button",
+     "validationOwner": null
+    },
+    "dependsOn": [
+     "reset-counter.input.value"
+    ],
+    "journeyId": "reset-counter",
+    "stepIndex": 1,
+    "capability": null,
+    "observable": "the displayed counter value immediately changes to 1",
+    "stateOwner": "src/screens/scaffold/HomeScreen.jsx",
+    "operationId": "increase-counter",
+    "capabilityId": null,
+    "outputEffect": null,
+    "valueWritten": null,
+    "actionIdentity": {
+     "controlId": "act_e90434c4",
+     "operationId": "increase-counter",
+     "interactionId": "reset-counter:2:action"
+    },
+    "customBehavior": "custom_behavior:reset-counter",
+    "producedValues": [],
+    "semanticPurpose": "click the Increase (+1) button",
+    "capabilityMethod": null,
+    "durableOperation": null,
+    "declaredOperation": true,
+    "persistenceSource": null,
+    "responsibilityIds": [
+     "increase-counter:functional-1"
+    ],
+    "persistenceHandoff": null,
+    "responsibleModules": [
+     "src/extensions/custom/reset-counter.js",
+     "src/screens/scaffold/HomeScreen.jsx"
+    ],
+    "downstreamConsumers": [
+     "reset-counter:3:action"
+    ],
+    "customBehaviorModule": "src/extensions/custom/reset-counter.js",
+    "nextStateRequirement": "the displayed counter value immediately changes to 1",
+    "customBehaviorExports": [
+     "runResetCounterCustomBehavior"
+    ],
+    "expectedStateTransition": {
+     "persists": [],
+     "produces": [
+      "reset-counter.custom.value"
+     ],
+     "requirement": "the displayed counter value immediately changes to 1",
+     "readsPersisted": []
+    },
+    "verificationObservation": "the displayed counter value immediately changes to 1",
+    "requiredProducerEntities": [],
+    "semanticResponsibilityTypes": [
+     "custom_functional"
+    ]
+   },
+   {
+    "id": "reset-counter:3:action",
+    "kind": "action",
+    "reads": [
+     "reset-counter.custom.value",
+     "reset-counter.input.value"
+    ],
+    "action": "click the Reset button",
+    "entity": "counterState",
+    "target": null,
+    "writes": [
+     "reset-counter.custom.value"
+    ],
+    "control": {
+     "roles": [
+      "button"
+     ],
+     "purpose": "Reset button",
+     "machineId": "act_8aa57a59",
+     "statePath": "reset-counter.custom.value",
+     "downstream": [],
+     "stateOwner": "src/screens/scaffold/HomeScreen.jsx",
+     "accessibleName": "Reset button",
+     "validationOwner": null
+    },
+    "dependsOn": [
+     "reset-counter.custom.value",
+     "reset-counter.input.value"
+    ],
+    "journeyId": "reset-counter",
+    "stepIndex": 2,
+    "capability": null,
+    "observable": "the displayed counter value immediately returns to 0",
+    "stateOwner": "src/screens/scaffold/HomeScreen.jsx",
+    "operationId": "reset-counter",
+    "capabilityId": null,
+    "outputEffect": null,
+    "valueWritten": null,
+    "actionIdentity": {
+     "controlId": "act_8aa57a59",
+     "operationId": "reset-counter",
+     "interactionId": "reset-counter:3:action"
+    },
+    "customBehavior": "custom_behavior:reset-counter",
+    "producedValues": [],
+    "semanticPurpose": "click the Reset button",
+    "capabilityMethod": null,
+    "durableOperation": null,
+    "declaredOperation": true,
+    "persistenceSource": null,
+    "responsibilityIds": [
+     "reset-counter:functional-1"
+    ],
+    "persistenceHandoff": null,
+    "responsibleModules": [
+     "src/extensions/custom/reset-counter.js",
+     "src/screens/scaffold/HomeScreen.jsx"
+    ],
+    "downstreamConsumers": [],
+    "customBehaviorModule": "src/extensions/custom/reset-counter.js",
+    "nextStateRequirement": "the displayed counter value immediately returns to 0",
+    "customBehaviorExports": [
+     "runResetCounterCustomBehavior"
+    ],
+    "expectedStateTransition": {
+     "persists": [],
+     "produces": [
+      "reset-counter.custom.value"
+     ],
+     "requirement": "the displayed counter value immediately returns to 0",
+     "readsPersisted": []
+    },
+    "verificationObservation": "the displayed counter value immediately returns to 0",
+    "requiredProducerEntities": [],
+    "semanticResponsibilityTypes": [
+     "custom_functional"
+    ]
+   }
+  ],
+  "valid": true,
+  "issues": [],
+  "version": 2,
+  "problems": [],
+  "scenarios": {
+   "reset-counter": {
+    "role": "independent",
+    "basis": "data-flow",
+    "scenario": "independent:reset-counter",
+    "lifecycle": null,
+    "startState": "fresh",
+    "durableState": [],
+    "initialState": {
+     "value": null
+    },
+    "externalState": [],
+    "availableState": [],
+    "capabilityOutputs": []
+   },
+   "decrease-counter": {
+    "role": "independent",
+    "basis": "data-flow",
+    "scenario": "independent:decrease-counter",
+    "lifecycle": null,
+    "startState": "fresh",
+    "durableState": [],
+    "initialState": {
+     "value": null
+    },
+    "externalState": [],
+    "availableState": [],
+    "capabilityOutputs": []
+   },
+   "increase-counter": {
+    "role": "independent",
+    "basis": "data-flow",
+    "scenario": "independent:increase-counter",
+    "lifecycle": null,
+    "startState": "fresh",
+    "durableState": [],
+    "initialState": {
+     "value": null
+    },
+    "externalState": [],
+    "availableState": [],
+    "capabilityOutputs": []
+   }
+  },
+  "durableState": null,
+  "initialState": null,
+  "externalState": null,
+  "capabilityOutputs": null,
+  "operationCoverage": [
+   {
+    "journeyId": "increase-counter",
+    "operationId": "increase-counter",
+    "interactionIds": [
+     "increase-counter:2:action"
+    ],
+    "responsibilityIds": [
+     "increase-counter:functional-1"
+    ]
+   },
+   {
+    "journeyId": "decrease-counter",
+    "operationId": "decrease-counter",
+    "interactionIds": [
+     "decrease-counter:2:action"
+    ],
+    "responsibilityIds": [
+     "decrease-counter:functional-1"
+    ]
+   },
+   {
+    "journeyId": "reset-counter",
+    "operationId": "increase-counter",
+    "interactionIds": [
+     "reset-counter:2:action"
+    ],
+    "responsibilityIds": [
+     "increase-counter:functional-1"
+    ]
+   },
+   {
+    "journeyId": "reset-counter",
+    "operationId": "reset-counter",
+    "interactionIds": [
+     "reset-counter:3:action"
+    ],
+    "responsibilityIds": [
+     "reset-counter:functional-1"
+    ]
+   }
+  ],
+  "capabilityGraphVersion": 2,
+  "dependencyNormalization": {
+   "moves": [],
+   "changed": false,
+   "rebindings": []
+  }
+ }
+}

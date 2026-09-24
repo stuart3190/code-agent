@@ -9,7 +9,7 @@ import {
   resolvedCollectionMembershipExpectationSpec,
   detailObservationExpectationSpec, expectationRequestsControlReset, isObservationOnlyStep,
   removalExpectationSpec, selectedRemovalExpectationSpec,
-  requestsSingleCollectionMemberAction, selectedCollectionExpectationSpec, verifyJourneys,
+  requestsSingleCollectionMemberAction, selectedCollectionExpectationSpec, structuredStepVerdict, verifyJourneys,
 } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 import { verifyApp } from "../../shell/server/lib/appBuild/verificationAgent.mjs";
 import {
@@ -102,6 +102,42 @@ test("explicit reset expectations accept a proven native control reset", () => {
     verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY,
   });
   assert.equal(outcome.classification, VERIFICATION_RESULT_CLASS.PASS);
+});
+
+test("a control named Reset is not a request that anything reset", () => {
+  // The Simple Counter opening step (build 69f47bf4, 2026-09-24): three buttons listed by name.
+  assert.equal(expectationRequestsControlReset("open the counter page the centered Simple Counter screen is "
+    + "visible with the counter starting at 0 and the Increase (+1), Decrease (-1), and Reset buttons visible"), false);
+  assert.equal(expectationRequestsControlReset("the Reset button and the Clear control are visible"), false);
+  // Reset language about state is still a reset, with or without the control's name beside it.
+  assert.equal(expectationRequestsControlReset("click the Reset button the displayed counter value immediately returns to 0"), true);
+  assert.equal(expectationRequestsControlReset("click Reset the counter resets to zero"), true);
+  assert.equal(expectationRequestsControlReset("clear the current search the search box is blank"), true);
+});
+
+test("a reset the page cannot carry in a native control is judged on the declared outcome", () => {
+  const reset = (structured, extra = {}) => structuredStepVerdict({
+    structured: { resetExpected: true, ...structured }, drove: true, actionProven: true, ...extra,
+  });
+  // No native control on the page (the value lives in a div): the contracted visible text decides.
+  const carried = reset({ resetChecked: false, resetOk: false, explicitVisibleText: ["0"], explicitVisibleTextMissing: [],
+    actionDeclared: true, observedStateChanged: true });
+  assert.equal(carried.classification, VERIFICATION_RESULT_CLASS.PASS, carried.detail);
+  assert.equal(carried.checks.find((check) => check.kind === "reset").ok, true);
+  // ...and a reset that neither rendered its outcome nor changed anything is still red.
+  const dead = reset({ resetChecked: false, resetOk: false, explicitVisibleText: ["0"], explicitVisibleTextMissing: ["0"],
+    actionDeclared: true, observedStateChanged: false });
+  assert.equal(dead.classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE, dead.detail);
+  // A measurable native control that stayed at its non-default value, with nothing else declared,
+  // is the reset failure this check exists for.
+  const stuck = reset({ resetChecked: true, resetOk: false, actionDeclared: true, observedStateChanged: true });
+  assert.equal(stuck.classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE, stuck.detail);
+  assert.match(stuck.detail, /did not return to its default/);
+  // Callers that predate resetChecked keep the measurable rule.
+  const legacy = reset({ resetOk: false, actionDeclared: true, observedStateChanged: true });
+  assert.equal(legacy.classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE, legacy.detail);
+  const proven = reset({ resetChecked: true, resetOk: true, actionDeclared: true });
+  assert.equal(proven.classification, VERIFICATION_RESULT_CLASS.PASS, proven.detail);
 });
 
 test("layout guidance does not become required visible copy", () => {
@@ -1847,3 +1883,62 @@ test("the verifier policy is durable and historical interpretation is unchanged"
   const orchestrator = await readFile(new URL("../../shell/server/lib/builderV2/orchestrator.mjs", import.meta.url), "utf8");
   assert.equal((orchestrator.match(/verifier_policy: MINIMAL_CONTRACT_VERIFIER_POLICY/g) || []).length, 4);
 });
+
+// The retained Simple Counter contract (build 69f47bf4, 2026-09-24) replayed against a page that
+// mirrors the generated HomeScreen: the value is a div, the three buttons carry the contracted
+// machine identities, and no native form control exists anywhere. The deployed verifier failed the
+// OPENING step of increase-counter and reset-counter on this contract ("the contracted control did
+// not return to its default") because "Reset buttons visible" read as a reset request.
+const counterPage = (script) => `<main><p>Local app state</p><h1>Simple Counter</h1>
+  <p>A centered counter screen with locally owned state. It starts at zero, can increase by one,
+    decrease below zero, and reset back to zero without login, extra pages, or external APIs.</p>
+  <div id="value" aria-label="Displayed counter value">0</div>
+  <div aria-label="Counter controls">
+    <button type="button" aria-label="Increase (+1) button" data-thrallo-action="act_e90434c4" onclick="step(1)">Increase (+1)</button>
+    <button type="button" aria-label="Decrease (-1) button" data-thrallo-action="act_23b8f4f8" onclick="step(-1)">Decrease (-1)</button>
+    <button type="button" aria-label="Reset button" data-thrallo-action="act_8aa57a59" onclick="reset()">Reset</button>
+  </div>
+  <p id="status" role="status">Ready: counter loaded.</p>
+  <script>${script}</script></main>`;
+const workingCounter = `let value = 0;
+  const render = (message) => { document.getElementById("value").textContent = String(value);
+    document.getElementById("status").textContent = message; };
+  function step(delta) { value += delta; render("Success state: the displayed counter value immediately changes to " + value + "."); }
+  function reset() { value = 0; render("Success state: the displayed counter value immediately returns to zero."); }`;
+
+test("the retained Simple Counter contract is green against a working counter and red against a dead reset",
+  { ...needsBrowser, timeout: 300_000 }, async (t) => {
+    const contract = JSON.parse(await readFile(new URL(
+      "./fixtures/retained/simple-20260924-counter/contract.json", import.meta.url), "utf8"));
+    const replay = async (html) => {
+      pageBody = html;
+      return verifyJourneys({ previewUrl: baseUrl, contract, timeoutMs: 60_000,
+        verifierPolicy: MINIMAL_CONTRACT_VERIFIER_POLICY });
+    };
+
+    await t.test("every contracted journey passes, including the opening steps that name the Reset button", async () => {
+      const result = await replay(counterPage(workingCounter));
+      const summary = result.journeys.map((journey) => `${journey.id}: ${journey.status || journey.pass} `
+        + journey.steps.map((step) => `${step.classification}(${step.detail})`).join(" | "));
+      assert.equal(result.pass, true, summary.join("\n"));
+      for (const journey of result.journeys) {
+        for (const step of journey.steps) {
+          assert.equal(step.classification, VERIFICATION_RESULT_CLASS.PASS, `${journey.id}: ${step.detail}`);
+        }
+      }
+      const opening = result.journeys.find((journey) => journey.id === "increase-counter").steps[0];
+      assert.equal(opening.checks?.some((check) => check.kind === "reset"), false, JSON.stringify(opening));
+    });
+
+    await t.test("a Reset button that leaves the value alone is an application failure, not a verifier reading", async () => {
+      const result = await replay(counterPage(workingCounter.replace("value = 0; render(", "render(")));
+      const journey = result.journeys.find((row) => row.id === "reset-counter");
+      assert.equal(result.pass, false);
+      assert.equal(journey.steps[0].classification, VERIFICATION_RESULT_CLASS.PASS, journey.steps[0].detail);
+      assert.equal(journey.steps[1].classification, VERIFICATION_RESULT_CLASS.PASS, journey.steps[1].detail);
+      assert.equal(journey.steps[2].classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE, journey.steps[2].detail);
+      for (const other of result.journeys.filter((row) => row.id !== "reset-counter")) {
+        assert.equal(other.steps.every((step) => step.classification === VERIFICATION_RESULT_CLASS.PASS), true, other.id);
+      }
+    });
+  });
