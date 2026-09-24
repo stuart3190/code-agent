@@ -30,6 +30,7 @@ import {
   expectedMissingModuleTokens, moduleGenerationContractsBrief, moduleGenerationContractsRepairBrief,
 } from "./moduleContracts.mjs";
 import { capabilityCompositionBrief } from "./capabilityComposer.mjs";
+import { projectPublicAbi } from "./platformModules/abiProjection.mjs";
 import { scopeCapabilityGraph } from "./capabilityGraph.mjs";
 import { dependencyPlanBrief, scopeDependencyPlan } from "./dependencyPlan.mjs";
 import { journeySurfaceBrief, journeySurfaceContext } from "./surfaceIntegration.mjs";
@@ -666,6 +667,7 @@ export function renderPatchPrompt({
   regenerateFiles = [], advisory = [],
   capabilityGraph = contract?.capabilityGraph || null, compositionPlan = null,
   scaffoldGraph = contract?.scaffoldGraph || null, scaffoldPlan = null,
+  moduleLock = contract?.moduleLock || null,
 }) {
   if (repairScope?.kind === "structural_modularity") {
     return renderStructuralModularityPrompt({ tree, repairScope, onRetrieval });
@@ -683,6 +685,8 @@ export function renderPatchPrompt({
   if (compileScope) {
     return renderCompileCorrectionPrompt({ tree, repairScope: compileScope, problems, onRetrieval });
   }
+  // WP14: the compact public-ABI projection, where this build has a lock and a composed facade.
+  const publicAbi = projectPublicAbi({ moduleLock, compositionPlan, scaffoldPlan });
   const isEdit = step === "edit";
   const isRepair = step === "repair" || step === "correction";
   const activeScope = headroomScope || repairScope || moduleCorrectionScope;
@@ -901,8 +905,13 @@ export function renderPatchPrompt({
         ? boundedCapabilityGraphBrief(scopedCapabilityGraph)
         : scopedCapabilityGraph, null, 2),
     ].join("\n") : "CAPABILITY GRAPH: none.",
-    executionSpec ? renderExecutionSpecSection(executionSpec, "composition")
-      : scopedCapabilityGraph ? capabilityCompositionBrief(scopedCapabilityGraph) : "",
+    // WP14: a locked build is briefed with its PUBLIC ABI — what src/lib/app exports — rather
+    // than the whole composed surface. Smaller, and it names only what generated code may import.
+    // A build with no lock keeps the legacy projection: a tree composed before the facade existed
+    // cannot import from it.
+    publicAbi ? publicAbi.text
+      : executionSpec ? renderExecutionSpecSection(executionSpec, "composition")
+        : scopedCapabilityGraph ? capabilityCompositionBrief(scopedCapabilityGraph) : "",
     executionSpec ? renderExecutionSpecSection(executionSpec, "scaffold")
       : scopedScaffoldGraph ? scaffoldCompositionBrief(scopedScaffoldGraph) : "",
     dependencyPlanBrief(scopedContract.dependencyPlan),
@@ -1935,6 +1944,7 @@ export function createModelLanes({
             compositionPlan: spec?.compositionPlan || null,
             scaffoldGraph: spec?.scaffoldGraph || contract?.scaffoldGraph || null,
             scaffoldPlan: spec?.scaffoldCompositionPlan || null,
+            moduleLock: spec?.moduleLock || contract?.moduleLock || null,
             onRetrieval: (trace) => { retrievalTrace = trace; },
           });
           if (retrievalTrace && recordRetrieval) {

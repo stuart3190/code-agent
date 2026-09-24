@@ -166,7 +166,13 @@ test("the retained four-screen correction renders bounded briefs and fits the me
   });
   assert.match(prompt, /CORE CORRECTION: preserve the current candidate/);
   const graphStart = prompt.indexOf("CAPABILITY GRAPH (");
-  const graphEnd = prompt.indexOf("DETERMINISTIC CAPABILITY COMPOSITION", graphStart);
+  // WP14: a locked build carries the compact PUBLIC ABI where the full composed surface used
+  // to be, so the graph section is bounded by whichever of the two follows it. Match the heading
+  // on "PUBLIC ABI" alone — the rest of that line is prose, and pinning it here turned a reword
+  // into a failure in a test that is about byte budgets.
+  const compositionMarkers = ["PUBLIC ABI", "DETERMINISTIC CAPABILITY COMPOSITION"]
+    .map((marker) => prompt.indexOf(marker, graphStart)).filter((index) => index > graphStart);
+  const graphEnd = compositionMarkers.length ? Math.min(...compositionMarkers) : -1;
   assert.ok(graphStart > 0 && graphEnd > graphStart);
   const graphBytes = Buffer.byteLength(prompt.slice(graphStart, graphEnd), "utf8");
   assert.ok(graphBytes < 40_000, `the bounded graph brief is ${graphBytes} bytes; the raw scoped graph was 438k`);

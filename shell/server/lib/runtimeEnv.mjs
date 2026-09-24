@@ -109,6 +109,7 @@ export function runtimeEnvContents(projectId, options = {}) {
       `VITE_ACTIONS_URL=${config.url}/functions/v1/app-actions`,
       `VITE_RUNTIME_URL=${config.url}/functions/v1/app-runtime`,
       `VITE_CONNECTORS_URL=${config.platformUrl}/api/runtime/connectors`,
+      `VITE_ACCOUNTS_URL=${config.url}/functions/v1/app-accounts`,
       "",
     ].join("\n"),
   };

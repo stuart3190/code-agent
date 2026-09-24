@@ -139,6 +139,19 @@ export const RESTORE_ORDER = [
   "bv2_retrieval_traces",
   "bv2_patches",
   "bv2_verification_cache",
+  // Generated-application platform state (WP4, WP8, WP12). Profiles and memberships reference
+  // auth.users, so they follow app_users; the policy and audit configuration are per application
+  // and reference nothing; the two event tables are append-only and restored after the state they
+  // describe, so a restored trail never precedes the rows it explains.
+  "app_profiles",
+  "app_memberships",
+  "app_membership_events",
+  "app_account_policies",
+  "app_settings",
+  "app_audit_config",
+  "app_audit_events",
+  "app_subscriptions",
+  "app_billing_events",
   "data_erasure_jobs",
   "data_erasure_events",
 ];

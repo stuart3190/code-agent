@@ -8,13 +8,17 @@ import path from "node:path";
 
 import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
-import { scaffoldCompositionPlan, validateScaffoldComposition,
+import { scaffoldCompositionPlan, scaffoldCompositionPlanFor, validateScaffoldComposition,
   SCAFFOLD_MANIFEST_PATH } from "./scaffoldComposer.mjs";
 import { journeySurfaceContext } from "./surfaceIntegration.mjs";
 
 const SOURCE = /^src\/.*\.(?:jsx?|tsx?|mjs|cjs)$/;
 const ENTRY = /^src\/(?:main|index|App)\.(?:jsx?|tsx?)$/;
-const PLATFORM = /^src\/lib\/(?:backend\/|capabilities\/|scaffolds\/composed\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
+// Platform infrastructure is never judged as generated application source. WP3+ added the module
+// runtime (src/lib/modules) and the composed public facade (src/lib/app) to that infrastructure:
+// they are protected, qualified by their own module suites, and shipped identically to every
+// application, so gating them here would report the platform's own code as an application defect.
+const PLATFORM = /^src\/lib\/(?:backend\/|capabilities\/|modules\/|app\/|scaffolds\/composed\/|visitorSession\.js$|assets\.js$|assetData\.js$)/;
 const unique = (values) => [...new Set((values || []).filter(Boolean))];
 
 const GLOBALS = new Set([
@@ -652,7 +656,7 @@ export function runStaticApplicationGate(tree, { contract = null, modulePlan = [
   const blocking = [];
   const advisory = [];
   const checks = [];
-  const composition = validateScaffoldComposition(tree, scaffoldGraph, scaffoldCompositionPlan(scaffoldGraph), {
+  const composition = validateScaffoldComposition(tree, scaffoldGraph, scaffoldCompositionPlanFor(tree, scaffoldGraph), {
     requireExtensions, rejectScreenSlots, journeyIds: (journeys || []).map((journey) => journey?.id).filter(Boolean),
   });
   checks.push({ name: "scaffold_composition", ok: composition.ok, detail: composition.problems });

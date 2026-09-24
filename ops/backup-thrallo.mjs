@@ -147,6 +147,21 @@ export const CA_TABLES = [
   "bv2_retrieval_traces",
   "bv2_patches",
   "bv2_verification_cache",
+  // Generated-application platform state (WP4, WP8, WP12). Every one of these is service-role
+  // only and written solely by the app-accounts Edge Function, which is exactly why they must be
+  // backed up: nothing in a generated application can reconstruct them. A lost membership row is a
+  // customer locked out of their own application; a lost subscription row is a paying customer
+  // treated as unpaid; and the two event tables are append-only evidence that cannot be rebuilt
+  // from the state they produced.
+  "app_profiles",
+  "app_memberships",
+  "app_membership_events",
+  "app_account_policies",
+  "app_settings",
+  "app_audit_config",
+  "app_audit_events",
+  "app_subscriptions",
+  "app_billing_events",
   // Permanent erasure evidence contains references, hashes and counts only. It is required to
   // prove deletion without restoring the deleted content itself.
   "data_erasure_jobs",

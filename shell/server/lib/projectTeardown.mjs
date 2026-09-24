@@ -25,6 +25,19 @@ export const PROJECT_SCOPED_TABLES = Object.freeze([
   { table: "app_auth_events", column: "app_id", ownerScoped: false, label: "auth events" },
   { table: "app_password_resets", column: "app_id", ownerScoped: false, label: "reset codes" },
   { table: "app_users", column: "app_id", ownerScoped: false, label: "app users" },
+  // Accounts, settings and billing for the generated app's own members (WP4, WP8, WP12). Every one
+  // is app-scoped and holds data about real people: who belonged to the application, what they
+  // configured, what they were charged. Deleting the project without these would leave a deleted
+  // application's membership and payment history readable indefinitely.
+  { table: "app_profiles", column: "app_id", ownerScoped: false, label: "member profiles" },
+  { table: "app_memberships", column: "app_id", ownerScoped: false, label: "memberships" },
+  { table: "app_membership_events", column: "app_id", ownerScoped: false, label: "membership history" },
+  { table: "app_account_policies", column: "app_id", ownerScoped: false, label: "account policy" },
+  { table: "app_settings", column: "app_id", ownerScoped: false, label: "app settings" },
+  { table: "app_audit_config", column: "app_id", ownerScoped: false, label: "audit configuration" },
+  { table: "app_audit_events", column: "app_id", ownerScoped: false, label: "audit history" },
+  { table: "app_subscriptions", column: "app_id", ownerScoped: false, label: "subscriptions" },
+  { table: "app_billing_events", column: "app_id", ownerScoped: false, label: "billing history" },
 
   // Visitor analytics for the published site. Aggregates as well as raw events — keeping the
   // rollups would leave a deleted site's traffic readable indefinitely.

@@ -307,20 +307,124 @@ function manifestSource(graph) {
 `;
 }
 
-export function renderScaffoldFoundation(graph) {
+// WP6: with the routing module installed, the protected root no longer renders a navigation
+// design of its own. It mounts a MODEL-OWNED layout with an outlet and a model-owned presentation
+// of the route states, so structural and visual uniqueness belong to the application while
+// matching, parameters, guards, loaders and not-found stay deterministic (audit §10).
+export const APP_LAYOUT_PATH = "src/layout/AppLayout.jsx";
+export const ROUTE_STATES_PATH = "src/layout/RouteStates.jsx";
+export const ROUTING_RUNTIME_PATH = "src/lib/modules/routing.js";
+// The composed public routing facade. Its presence — not the mere presence of the runtime in the
+// scaffold — is what makes the routed shell installable: the shell imports the facade, and the
+// capability composer emits it only when routing is genuinely composed for this application.
+export const ROUTING_FACADE_PATH = "src/lib/app/routing.js";
+
+/** True when this tree has the composed routing facade the routed shell mounts. */
+export const routingInstalled = (tree) => typeof tree?.[ROUTING_FACADE_PATH] === "string";
+
+/**
+ * The composition plan for ONE tree. The routed shell is composed — and judged — only where the
+ * routing facade is actually installed, so a legacy base, a retained fixture or an application
+ * whose contract never selected routing keeps the pre-WP6 shell it was generated with instead of
+ * being measured against a router it never had. This is the same rule capability composition
+ * applies to its own runtime.
+ */
+export function scaffoldCompositionPlanFor(tree, graph) {
+  return scaffoldCompositionPlan(graph, { routePlan: routingInstalled(tree) ? (graph?.routePlan || null) : null });
+}
+
+function routedAppSource(graph, routePlan) {
+  const screens = graph?.screens || [];
+  const imports = screens.map((screen, index) => `import ${importName(screen, index)} from ${quote(`../../../${screen.module.replace(/^src\//, "").replace(/\.(?:jsx?|tsx?)$/, "")}.jsx`)};`);
+  const byRouteId = new Map((routePlan?.routes || []).map((route) => [route.id, route]));
+  const entries = screens.map((screen, index) => {
+    const route = (routePlan?.routes || []).find((candidate) => candidate.screen === screen.module)
+      || byRouteId.get(screen.screenId) || null;
+    return `  ${quote(route?.id || screen.screenId)}: ${importName(screen, index)},`;
+  });
+  return `${banner("mounted route authority")}import React, { Suspense } from "react";
+import AppLayout from "../../../layout/AppLayout.jsx";
+import RouteStates from "../../../layout/RouteStates.jsx";
+import { ScaffoldErrorBoundary, ScaffoldLoadingBoundary } from "./primitives.jsx";
+import { useRoute } from "../../app/routing.js";
+${imports.join("\n")}
+
+/** The screen each compiled route mounts, by route id. */
+export const ROUTE_SCREENS = Object.freeze({
+${entries.join("\n")}
+});
+/** The declared path of each mounted route, so the mount is traceable to the contract. */
+export const ROUTE_PATHS = Object.freeze({
+${screens.map((screen) => {
+    const route = (routePlan?.routes || []).find((candidate) => candidate.screen === screen.module);
+    return `  ${quote(route?.id || screen.screenId)}: ${quote(route?.path || screen.routePath)},`;
+  }).join("\n")}
+});
+
+export default function ScaffoldApp() {
+  const route = useRoute();
+  const Screen = route.route ? ROUTE_SCREENS[route.route.id] : null;
+  // Layout, navigation and every state's appearance are the application's; which route is active,
+  // whether it is admitted and whether its record loaded are the platform's.
+  return <ScaffoldErrorBoundary><AppLayout route={route.route} params={route.params} state={route.state} navigate={route.navigate}>
+    <Suspense fallback={<ScaffoldLoadingBoundary />}><main data-scaffold-screen={route.route?.id || "missing"} data-scaffold-route={route.route?.path || route.path}>
+      {route.state === "ready" && Screen
+        ? <Screen route={route.route} params={route.params} data={route.data} />
+        : <RouteStates state={route.state} reason={route.reason} redirectTo={route.redirectTo} error={route.error} route={route.route} />}
+    </main></Suspense>
+  </AppLayout></ScaffoldErrorBoundary>;
+}
+`;
+}
+
+function appLayoutSource() {
+  return `// Model-owned application layout. The protected router mounts this with an OUTLET: the active
+// screen arrives as \`children\`. Navigation placement, chrome, branding, typography and responsive
+// structure are entirely yours — replace this file's contents freely; deterministic recomposition
+// never overwrites it.
+export default function AppLayout({ children }) {
+  return <div data-app-layout>{children}</div>;
+}
+`;
+}
+
+function routeStatesSource() {
+  return `// Model-owned presentation of the route states the platform decides: loading, not_found,
+// forbidden and error. The platform says WHICH state the route is in; how each one looks, reads
+// and recovers is yours. Replace this file's contents freely.
+export default function RouteStates({ state, reason, redirectTo }) {
+  if (state === "loading") return <p role="status">Loading…</p>;
+  if (state === "not_found") return <p role="alert">We could not find that.</p>;
+  if (state === "forbidden") {
+    return <p role="alert">You need to sign in to view this{redirectTo ? <> — <a href={redirectTo}>sign in</a></> : null}.</p>;
+  }
+  if (state === "error") return <p role="alert">Something went wrong{reason ? \` (\${reason})\` : ""}.</p>;
+  return null;
+}
+`;
+}
+
+export function renderScaffoldFoundation(graph, { routePlan = graph?.routePlan || null } = {}) {
+  const routed = Boolean((routePlan?.routes || []).length);
   const protectedFiles = {
     [SCAFFOLD_ENTRY_PATH]: `${banner("application entry shim")}export { default } from "./lib/scaffolds/composed/ScaffoldApp.jsx";\n`,
     [SCAFFOLD_PRIMITIVES_PATH]: primitivesSource(),
-    [SCAFFOLD_APP_PATH]: scaffoldAppSource(graph),
+    [SCAFFOLD_APP_PATH]: routed ? routedAppSource(graph, routePlan) : scaffoldAppSource(graph),
     [SCAFFOLD_MANIFEST_PATH]: manifestSource(graph),
   };
   const screenFiles = Object.fromEntries((graph?.screens || []).map((screen) => [screen.module,
     screenSlotSource(screen, graph)]));
+  // The layout and the route-state presentation are model-owned slots, created once and never
+  // overwritten — exactly like a mounted screen.
+  if (routed) {
+    screenFiles[APP_LAYOUT_PATH] = appLayoutSource();
+    screenFiles[ROUTE_STATES_PATH] = routeStatesSource();
+  }
   return { protectedFiles, screenFiles };
 }
 
-export function scaffoldCompositionPlan(graph) {
-  const rendered = renderScaffoldFoundation(graph);
+export function scaffoldCompositionPlan(graph, { routePlan = graph?.routePlan || null } = {}) {
+  const rendered = renderScaffoldFoundation(graph, { routePlan });
   const protectedFiles = Object.keys(rendered.protectedFiles).sort();
   return {
     version: SCAFFOLD_COMPOSITION_VERSION,
@@ -340,13 +444,13 @@ export function scaffoldCompositionPlan(graph) {
 }
 
 /** Apply/refresh deterministic files. Existing model-owned screens are never overwritten. */
-export function composeScaffoldFoundation(tree, graph) {
-  const rendered = renderScaffoldFoundation(graph);
+export function composeScaffoldFoundation(tree, graph, { routePlan = (routingInstalled(tree) ? graph?.routePlan || null : null) } = {}) {
+  const rendered = renderScaffoldFoundation(graph, { routePlan });
   const next = { ...(tree || {}), ...rendered.protectedFiles };
   for (const [path, source] of Object.entries(rendered.screenFiles)) {
     if (typeof next[path] !== "string") next[path] = source;
   }
-  return { tree: next, plan: scaffoldCompositionPlan(graph), deterministicFilesCreated: Object.keys(rendered.protectedFiles),
+  return { tree: next, plan: scaffoldCompositionPlan(graph, { routePlan }), deterministicFilesCreated: Object.keys(rendered.protectedFiles),
     screenSlotsCreated: Object.keys(rendered.screenFiles).filter((path) => typeof tree?.[path] !== "string") };
 }
 
@@ -364,7 +468,7 @@ function isUnimplementedScreenSlot(source, screenId) {
     && source.includes("Application screen ready for composition.");
 }
 
-export function validateScaffoldComposition(tree, graph, plan = scaffoldCompositionPlan(graph), {
+export function validateScaffoldComposition(tree, graph, plan = scaffoldCompositionPlanFor(tree, graph), {
   requireExtensions = true, rejectScreenSlots = false, journeyIds = null,
 } = {}) {
   const problems = [];

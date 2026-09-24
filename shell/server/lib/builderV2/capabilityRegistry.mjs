@@ -12,6 +12,10 @@ const LEGACY_CAPABILITIES = Object.freeze({
     name: "crud",
     version: "1.0.0",
     package: "src/lib/capabilities/crud.js",
+    // WP5 named this capability `entities` (audit §7.1). It is the same capability and the same
+    // module, so the new name is an ALIAS — exactly as `auth` aliases `session` — rather than a
+    // second registry entry that could drift from this one.
+    aliases: ["entities"],
     interface: ["makeEntityStore"],
     storeInterface: ["list", "get", "create", "update", "remove", "count", "subscribe"],
     entities: [],            // generic — binds to whatever the contract declares
@@ -66,6 +70,44 @@ const LEGACY_CAPABILITIES = Object.freeze({
     name: "newsletter", version: "1.0.0", package: "src/lib/capabilities/forms.js",
     interface: ["makeNewsletter"], entities: ["newsletterSignup"],
     uiContract: ["idle", "invalid", "success", "duplicate"], upgradePolicy: "replace-on-iterate",
+  },
+  // WP4 — real accounts. Profiles, memberships, roles and administration are platform-owned
+  // through the app-accounts service; a role field on a business record is never authority.
+  accounts: {
+    name: "accounts", version: "1.0.0", package: "src/lib/modules/accounts.js",
+    interface: ["createAccountsController"], entities: [],
+    uiContract: ["idle", "loading", "ready", "error"], upgradePolicy: "replace-on-iterate",
+  },
+  authorization: {
+    name: "authorization", version: "1.1.0", package: "src/lib/modules/accounts.js",
+    interface: ["createAuthorization"], entities: [],
+    uiContract: [], upgradePolicy: "replace-on-iterate",
+  },
+  admin: {
+    name: "admin", version: "1.0.0", package: "src/lib/modules/accounts.js",
+    interface: ["createAdmin"], entities: [],
+    uiContract: ["idle", "loading", "ready", "error", "denied"], upgradePolicy: "replace-on-iterate",
+  },
+  // WP8. Settings are typed keys with declared scopes and defaults, never a fabricated singleton
+  // record; history is read-only to the application because the platform is the only honest
+  // author of "who changed what".
+  settings: {
+    name: "settings", version: "1.0.0", package: "src/lib/modules/settings.js",
+    interface: ["compileSettings", "createSettingsController"], entities: [],
+    uiContract: ["idle", "loading", "ready", "error", "denied"], upgradePolicy: "replace-on-iterate",
+  },
+  // WP15. A filtered read over durable records is a compiled query the backend executes, not a
+  // predicate over a page the browser happened to load. Registering it is what lets the contract
+  // say so, and what stops the last generic fallthrough in the retained corpus.
+  query: {
+    name: "query", version: "1.0.0", package: "src/lib/modules/query.js",
+    interface: ["compileQuery", "runQuery", "matchesQuery"], entities: [],
+    uiContract: ["idle", "loading", "ready", "empty", "error"], upgradePolicy: "replace-on-iterate",
+  },
+  audit: {
+    name: "audit", version: "1.0.0", package: "src/lib/modules/audit.js",
+    interface: ["createHistoryController"], entities: [],
+    uiContract: ["idle", "loading", "ready", "empty", "error", "denied"], upgradePolicy: "replace-on-iterate",
   },
 });
 
@@ -143,6 +185,72 @@ const metadata = Object.freeze({
     verificationSemantics: { actions: ["validate", "subscribe", "reject_duplicate"], stateChange: "signup result and record", durableMutation: true, observe: ["invalid", "success", "duplicate"] },
     testContract: ["invalid refused", "valid persisted", "duplicate refused"],
   },
+  accounts: {
+    supportedOperations: ["ensure", "reload", "getMe", "updateMe", "getMember"],
+    requiredInputs: { factory: [], operations: { updateMe: ["values"], getMember: ["email"] } },
+    operationOutputs: { ensure: ["account"], reload: ["account"], getMe: ["account"], updateMe: ["profile"], getMember: ["member"] },
+    outputs: { account: "principal, membership (role/status), profile and allowed actions of the signed-in member", profile: "the member's self-editable profile", member: "one membership (email, role, status)" },
+    stateOwnership: { owns: "account profile and membership state", scope: "signed-in member of this application" },
+    persistenceSemantics: { durable: true, owner: "app-accounts service (app_profiles, app_memberships)", browserStorage: false },
+    dependencies: ["session"], compatibleUiInteractionPrimitives: ["field", "action", "status"],
+    verificationSemantics: { actions: ["load", "updateProfile", "lookup"], stateChange: "profile and membership", durableMutation: true, observe: ["profile after reload", "membership role and status", "allowed actions"] },
+    testContract: ["me", "updateMe allow-listed", "reload keeps profile", "suspended denied"],
+  },
+  authorization: {
+    supportedOperations: ["can", "authorize", "explainAllowedActions", "role", "isOwner", "requireOwner"],
+    requiredInputs: { factory: [], operations: { can: ["action"], authorize: ["action"], isOwner: ["record", "user"], requireOwner: ["record", "user"] } },
+    operationOutputs: { can: ["decision"], authorize: ["decision"], explainAllowedActions: ["allowedActions"], role: ["role"] },
+    outputs: { decision: "allowed with a reason when denied", allowedActions: "actions the policy grants the actor", role: "the actor's membership role", authorization: "boolean or authorized record" },
+    stateOwnership: { owns: "no state", scope: "policy decision over the server-derived actor" },
+    persistenceSemantics: { durable: false, owner: "server policy (app-accounts) plus RLS; the client evaluation only shapes UI", browserStorage: false },
+    dependencies: ["session"], compatibleUiInteractionPrimitives: ["action", "status"],
+    verificationSemantics: { actions: ["authorize", "reject"], stateChange: "none", durableMutation: false, observe: ["allowed action visible", "denied action absent or refused", "server denial"] },
+    testContract: ["member allowed", "member denied", "admin allowed", "visitor denied", "own membership immutable"],
+  },
+  admin: {
+    supportedOperations: ["listMembers", "inviteMember", "provisionMember", "setMemberRole", "setMemberStatus"],
+    requiredInputs: { factory: [], operations: { inviteMember: ["email", "role"], provisionMember: ["email", "role"], setMemberRole: ["email", "role"], setMemberStatus: ["email", "status"] } },
+    operationOutputs: { listMembers: ["members"], inviteMember: ["member"], provisionMember: ["member"], setMemberRole: ["member"], setMemberStatus: ["member"] },
+    outputs: { members: "every membership of the application", member: "the membership after the command" },
+    stateOwnership: { owns: "memberships: invitations, roles and status", scope: "application, administered by a member the policy grants members.* actions" },
+    persistenceSemantics: { durable: true, owner: "app-accounts service (app_memberships, app_membership_events)", browserStorage: false },
+    dependencies: ["session", "accounts", "authorization"], compatibleUiInteractionPrimitives: ["field", "selection", "action", "status"],
+    verificationSemantics: { actions: ["list", "invite", "provision", "changeRole", "suspend", "reinstate"], stateChange: "membership rows", durableMutation: true, observe: ["member listed", "role after reload", "suspended member denied", "non-admin denied"] },
+    testContract: ["non-admin denied", "admin invites", "role change persists", "suspension denies sign-in", "cross-app isolation", "last admin protected"],
+  },
+  settings: {
+    supportedOperations: ["get", "all", "set", "reset"],
+    requiredInputs: { factory: ["schema"], operations: { get: ["key"], set: ["key", "value"], reset: ["key"] } },
+    operationOutputs: { get: ["value"], all: ["values"], set: ["value"], reset: ["value"] },
+    outputs: { value: "the current value of one declared key, or its declared default", values: "every declared key in one scope" },
+    stateOwnership: { owns: "application, workspace and member settings", scope: "the requested scope, isolated server-side" },
+    persistenceSemantics: { durable: true, owner: "app-accounts service (app_settings)", browserStorage: false },
+    dependencies: ["session", "authorization"], compatibleUiInteractionPrimitives: ["field", "selection", "action", "status"],
+    verificationSemantics: { actions: ["read", "change", "reset"], stateChange: "setting values", durableMutation: true, observe: ["declared default before any write", "changed value after reload", "member denied an application value"] },
+    testContract: ["declared default", "typed coercion", "scope isolation", "administration required", "reload"],
+  },
+  query: {
+    supportedOperations: ["query", "count", "page"],
+    requiredInputs: { factory: ["entity"], operations: { query: ["filters"], page: ["cursor"] } },
+    operationOutputs: { query: ["records"], count: ["total"], page: ["records"] },
+    outputs: { records: "the records matching a compiled query, across pages", total: "how many records match" },
+    stateOwnership: { owns: "the active query and its results", scope: "one entity collection for the signed-in actor" },
+    persistenceSemantics: { durable: true, owner: "entities backend through a compiled query", browserStorage: false },
+    dependencies: ["crud"], compatibleUiInteractionPrimitives: ["field", "selection", "action", "status"],
+    verificationSemantics: { actions: ["filter", "search", "sort", "clear", "page"], stateChange: "visible records", durableMutation: false, observe: ["filtered results across pages", "a cleared filter restores the full set"] },
+    testContract: ["allow-listed fields", "stable pagination", "filtering across pages", "cleared filters"],
+  },
+  audit: {
+    supportedOperations: ["list", "redact"],
+    requiredInputs: { factory: [], operations: { list: [] } },
+    operationOutputs: { list: ["events"] },
+    outputs: { events: "authorised history newest first, already redacted" },
+    stateOwnership: { owns: "no state: history is written by the platform", scope: "events this application's policy lets the actor read" },
+    persistenceSemantics: { durable: true, owner: "app-accounts service (app_audit_events)", browserStorage: false },
+    dependencies: ["session", "authorization"], compatibleUiInteractionPrimitives: ["selection", "status"],
+    verificationSemantics: { actions: ["list"], stateChange: "none", durableMutation: false, observe: ["a change is attributed", "no sensitive value appears", "a member without the grant sees none"] },
+    testContract: ["append-only", "attribution", "redaction", "authorised read", "paging"],
+  },
   "interaction-primitives": {
     supportedOperations: ["subscribe_state", "run_action", "field", "selection", "action", "flow_advance", "status"],
     requiredInputs: { factory: [], operations: { field: ["name", "value", "onChange"], selection: ["name", "value", "onSelect"], action: ["name", "onActivate"] } },
@@ -185,9 +293,32 @@ const RESPONSIBILITY_SEMANTICS = Object.freeze({
   }),
   contact: Object.freeze({ persistence: Object.freeze(["submitContact"]), functional: Object.freeze(["submitContact"]) }),
   newsletter: Object.freeze({ persistence: Object.freeze(["subscribe"]), functional: Object.freeze(["subscribe"]) }),
+  accounts: Object.freeze({
+    persistence: Object.freeze(["updateMe"]),
+    functional: Object.freeze(["ensure", "reload", "getMe", "updateMe", "getMember"]),
+  }),
+  authorization: Object.freeze({
+    persistence: Object.freeze([]),
+    functional: Object.freeze(["can", "authorize", "explainAllowedActions", "role", "isOwner", "requireOwner"]),
+  }),
+  admin: Object.freeze({
+    persistence: Object.freeze(["inviteMember", "provisionMember", "setMemberRole", "setMemberStatus"]),
+    functional: Object.freeze(["listMembers", "inviteMember", "provisionMember", "setMemberRole", "setMemberStatus"]),
+  }),
   "interaction-primitives": Object.freeze({
     persistence: Object.freeze([]),
     functional: Object.freeze(["subscribe_state", "run_action", "field", "selection", "action", "flow_advance", "status"]),
+  }),
+  settings: Object.freeze({
+    persistence: Object.freeze(["set", "reset"]),
+    functional: Object.freeze(["get", "all", "set", "reset"]),
+  }),
+  // There is deliberately no append: an application that could write its own history could write
+  // a false one, so the platform appends and the application only reads.
+  audit: Object.freeze({ persistence: Object.freeze([]), functional: Object.freeze(["list", "redact"]) }),
+  query: Object.freeze({
+    persistence: Object.freeze(["query", "count", "page"]),
+    functional: Object.freeze(["query", "count", "page"]),
   }),
 });
 
@@ -349,6 +480,9 @@ const INSTANCE_METHODS = Object.freeze({
   wizard: "makeWizardMachine({ id, steps, onConfirm }) → durable app-scoped state that HYDRATES ITSELF on first subscribe; getState()/subscribe snapshots expose canonical { stepId, stepIndex, values } plus compatible step/currentStep/current aliases; restore() reloads durable state and restore({ stepId, values, ... }) atomically adopts and saves a compatible state; methods { getState, subscribe, hydrate, restore, setValue, select, validateCurrent, next, back, goTo, confirm, cancel, reset }",
   contact: "makeContactForm(...) → { submitContact(fields) }   // NOT .submit",
   newsletter: "makeNewsletter(...) → { subscribe(email) }",
+  accounts: "composed `accountsController` → { ensure, reload, updateMe(values), getMember({ email }), getState, subscribe } — the signed-in member's profile/membership; never a generic entity store",
+  authorization: "composed `authorization` → { can(action, target?) → { allowed, reason }, authorize(action), explainAllowedActions(), role() } plus isOwner/requireOwner — the server enforces independently",
+  admin: "composed `admin` → { listMembers(), inviteMember({ email, role }), provisionMember({ email, role }), setMemberRole({ email, role }), setMemberStatus({ email, status }), getState, subscribe }",
 });
 
 /** The interface brief a build prompt carries — small, byte-stable, sorted. */

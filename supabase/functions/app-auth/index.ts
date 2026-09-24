@@ -308,6 +308,12 @@ Deno.serve(async (req: Request) => {
       // A duplicate mapping row = we lost the race after user creation; the winner's rows
       // stand and the sign-in below resolves the session either way.
       await logEvent("signup", ip, appId);
+      // WP4: an invitation for this address becomes an active membership with the invited role.
+      // Nothing else about authority changes at signup — an uninvited signup is an ordinary member.
+      await svc.from("app_memberships")
+        .update({ auth_user_id: created.user.id, status: "active", updated_at: new Date().toISOString() })
+        .eq("app_id", appId).eq("email", email).eq("status", "invited")
+        .then(() => undefined, () => undefined);
       // Real event integration 1: the first thing a new end user sees in the app's notification
       // surface, and proof the surface works from the moment they arrive.
       await notifyAppUser(appId, created.user.id, "app_welcome", "Welcome",

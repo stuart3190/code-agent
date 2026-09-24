@@ -29,6 +29,7 @@
 // the step stays on the mounted screen (scaffold ownership). Nothing here guesses.
 
 import { canonicalOperationKind } from "./lifecycleOperations.mjs";
+import { isSessionOperation } from "../../../shared/implementationContract.mjs";
 
 export const ROUTE_RESOLUTION_VERSION = 1;
 export const ROUTE_UNRESOLVED_ISSUE = "journey_route_unresolved";
@@ -163,7 +164,11 @@ function authRoute(contract, step) {
     if (!operation) return false;
     const kind = normalized(operation.kind || operation.action || "");
     const capabilities = (operation.responsibilities || []).map((row) => normalized(row?.capability));
-    return kind === "auth" || kind === "signin" || kind === "login" || capabilities.includes("auth");
+    // The canonical session vocabulary (capability "session", kinds signIn/signUp/signOut) is
+    // the same authentication as the legacy "auth" spelling; before WP2 a contract written the
+    // way the prompt teaches never received the authentication route basis at all.
+    return kind === "auth" || kind === "signin" || kind === "login" || capabilities.includes("auth")
+      || isSessionOperation(operation);
   });
   if (!performsAuth) return null;
   const routes = unique((contract?.routes || []).filter((route) => {

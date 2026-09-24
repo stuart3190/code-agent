@@ -7,11 +7,20 @@
 
 import { CAPABILITIES } from "./capabilityRegistry.mjs";
 import { CAPABILITY_COMPOSITION_RULES } from "./executionSpecRules.mjs";
+import { satisfiesRange } from "./platformModules/semver.mjs";
 
 
 export const CAPABILITY_COMPOSITION_VERSION = 1;
 export const COMPOSED_ROOT = "src/lib/capabilities/composed";
 export const CAPABILITY_CONFIGURATION_PATH = "src/extensions/capabilityConfiguration.js";
+// WP1: when a build carries a module lock, the composer ships it inside the protected root so the
+// snapshot records the exact module versions and artefact hashes it was built from. Trees without
+// a lock (retained fixtures, legacy specs) compose exactly as before.
+export const MODULE_LOCK_PATH = `${COMPOSED_ROOT}/lock.js`;
+
+function lockFileSource(moduleLock) {
+  return `${banner("module lock")}export const MODULE_LOCK = Object.freeze(${jsObject(moduleLock)});\n`;
+}
 
 const unique = (values) => [...new Set((values || []).filter(Boolean))];
 const quote = (value) => JSON.stringify(String(value));
@@ -35,7 +44,767 @@ function wizardDefinitions(graph) {
   });
 }
 
-function capabilityFiles(graph) {
+// WP3: the identity module is composed when the lock resolves thrallo.identity at 1.2 or later
+// and the base tree ships the module runtime (a legacy base does not; it composes as before).
+export const IDENTITY_COMPOSED_PATH = `${COMPOSED_ROOT}/identity.js`;
+export const APP_FACADE_ROOT = "src/lib/app";
+export const APP_FACADE_INDEX_PATH = `${APP_FACADE_ROOT}/index.js`;
+export const APP_FACADE_IDENTITY_PATH = `${APP_FACADE_ROOT}/identity.js`;
+export const IDENTITY_RUNTIME_PATH = "src/lib/modules/identity.js";
+
+export function identityModuleLocked(moduleLock) {
+  return (moduleLock?.modules || []).some((row) => row.id === "thrallo.identity" && satisfiesRange(row.version, ">=1.2.0"));
+}
+
+function identityFiles(moduleLock, identityPlan) {
+  const files = {};
+  files[IDENTITY_COMPOSED_PATH] = `${banner("identity")}import { auth } from "../../backend/index.js";
+import { ensureVisitorSession } from "../../visitorSession.js";
+import { createIdentityController } from "../../modules/identity.js";
+
+export const identityPlan = Object.freeze(${jsObject(identityPlan)});
+export const identity = createIdentityController({ auth, ensureVisitorSession, mode: identityPlan.mode });
+`;
+  files[APP_FACADE_IDENTITY_PATH] = `${banner("public identity ABI")}import { identity } from "../capabilities/composed/identity.js";
+import { useIdentityAction, useIdentityGuard, useIdentityState } from "../modules/identityReact.js";
+
+/** The live session state: initializing | signed_out | visitor | signed_in | expired | error. */
+export function useSession() { return useIdentityState(identity); }
+export function useSignIn() { return useIdentityAction(identity, "signIn"); }
+export function useSignUp() { return useIdentityAction(identity, "signUp"); }
+export function useSignOut() { return useIdentityAction(identity, "signOut"); }
+export function usePasswordReset() { return useIdentityAction(identity, "resetPassword"); }
+export function useConfirmReset() { return useIdentityAction(identity, "confirmReset"); }
+/** { allowed, reason, pending } for a surface that needs "member", "visitor" or "any". */
+export function useSessionGuard(requirement = "member") { return useIdentityGuard(identity, requirement); }
+`;
+  return files;
+}
+
+// WP4: accounts, authorization and admin are composed over the identity controller. The account
+// policy (declared roles, self-editable profile fields) comes from the identity plan; the server
+// holds the same policy and enforces it independently of anything rendered here.
+export const ACCOUNTS_COMPOSED_PATH = `${COMPOSED_ROOT}/accounts.js`;
+export const AUTHORIZATION_COMPOSED_PATH = `${COMPOSED_ROOT}/authorization.js`;
+export const ADMIN_COMPOSED_PATH = `${COMPOSED_ROOT}/admin.js`;
+export const APP_FACADE_ACCOUNTS_PATH = `${APP_FACADE_ROOT}/accounts.js`;
+
+function accountFiles(nodes, identityPlan) {
+  const files = {};
+  const interfaces = [];
+  const policy = identityPlan?.accountPolicy || { roles: [], profileFields: [] };
+  const hasAccounts = nodes.has("capability:accounts");
+  const hasAuthorization = nodes.has("capability:authorization");
+  const hasAdmin = nodes.has("capability:admin");
+  if (!hasAccounts && !hasAuthorization && !hasAdmin) return { files, interfaces };
+  files[ACCOUNTS_COMPOSED_PATH] = `${banner("accounts")}import { accounts } from "../../backend/index.js";
+import { identity } from "./identity.js";
+import { createAccountsController } from "../../modules/accounts.js";
+import { buildPolicy } from "../../modules/policy.js";
+
+export const accountPolicy = buildPolicy(${jsObject({ roles: policy.roles })});
+export const accountProfileFields = Object.freeze(${jsObject(policy.profileFields)});
+export const accountsController = createAccountsController({ accounts, identity });
+`;
+  interfaces.push({ module: ACCOUNTS_COMPOSED_PATH, exports: ["accountsController", "accountPolicy", "accountProfileFields"], owns: ["account"],
+    operations: [...CAPABILITIES.accounts.supportedOperations] });
+  if (hasAuthorization || hasAdmin) {
+    files[AUTHORIZATION_COMPOSED_PATH] = `${banner("authorization")}import { accountPolicy, accountsController } from "./accounts.js";
+import { createAuthorization } from "../../modules/accounts.js";
+
+export const authorization = createAuthorization({ policy: accountPolicy, accountsController });
+`;
+    interfaces.push({ module: AUTHORIZATION_COMPOSED_PATH, exports: ["authorization"], operations: [...CAPABILITIES.authorization.supportedOperations] });
+  }
+  if (hasAdmin) {
+    files[ADMIN_COMPOSED_PATH] = `${banner("admin")}import { accounts } from "../../backend/index.js";
+import { authorization } from "./authorization.js";
+import { createAdmin } from "../../modules/accounts.js";
+
+export const admin = createAdmin({ accounts, authorization });
+`;
+    interfaces.push({ module: ADMIN_COMPOSED_PATH, exports: ["admin"], operations: [...CAPABILITIES.admin.supportedOperations] });
+  }
+  files[APP_FACADE_ACCOUNTS_PATH] = `${banner("public accounts ABI")}import { accountsController } from "../capabilities/composed/accounts.js";
+${hasAuthorization || hasAdmin ? 'import { authorization } from "../capabilities/composed/authorization.js";\n' : ""}${hasAdmin ? 'import { admin } from "../capabilities/composed/admin.js";\n' : ""}import {
+  useProfile as useProfileState, usePermissions as usePermissionsState,
+  useAdminMembers as useAdminMembersState, useAdminOperation as useAdminOperationState,
+} from "../modules/accountsReact.js";
+
+/** { status, principal, membership, profile, profileFields, allowedActions, error } of the signed-in member. */
+export function useProfile() { return useProfileState(accountsController); }
+export const updateProfile = (values) => accountsController.updateMe(values);
+${hasAuthorization || hasAdmin ? `/** { can(action, target?), explain, allowedActions, role } over the server-derived actor. */
+export function usePermissions() { return usePermissionsState(authorization, accountsController); }
+export const can = (action, target = null) => authorization.can(action, target).allowed;
+` : ""}${hasAdmin ? `/** { members, status, error, reload } for an administration surface. */
+export function useAdminMembers() { return useAdminMembersState(admin); }
+/** { run, pending, error, result } for inviteMember | provisionMember | setMemberRole | setMemberStatus. */
+export function useAdminOperation(operation) { return useAdminOperationState(admin, operation); }
+` : ""}`;
+  return { files, interfaces };
+}
+
+// WP5: typed repositories over the schema the platform compiled. The generated application
+// compiles the embedded declarations with the same schema module, so both validate one schema.
+export const ENTITIES_COMPOSED_PATH = `${COMPOSED_ROOT}/entities.js`;
+export const APP_FACADE_ENTITIES_PATH = `${APP_FACADE_ROOT}/entities.js`;
+
+function entityFiles(nodes, entitySchema) {
+  const files = {};
+  const interfaces = [];
+  if (!nodes.has("capability:crud") || !(entitySchema?.definitions || []).length) return { files, interfaces };
+  files[ENTITIES_COMPOSED_PATH] = `${banner("entities")}import { db } from "../../backend/index.js";
+import { compileSchema, queryableFields, validateValues } from "../../modules/schema.js";
+import { createEntityRepositories } from "../../modules/entities.js";
+
+export const entityDefinitions = Object.freeze(${jsObject(entitySchema.definitions)});
+export const entitySchema = compileSchema(entityDefinitions);
+export const repositories = createEntityRepositories({ db, schema: entitySchema });
+
+/** The typed repository for one declared entity: { create, get, update, remove, list, count, subscribe }. */
+export function repository(entity) {
+  const found = repositories[String(entity)];
+  if (!found) throw new Error(\`No entity "\${entity}" is declared for this application\`);
+  return found;
+}
+export { queryableFields, validateValues };
+`;
+  interfaces.push({ module: ENTITIES_COMPOSED_PATH, exports: ["entityDefinitions", "entitySchema", "repositories", "repository", "queryableFields", "validateValues"],
+    owns: [...entitySchema.entities], operations: ["create", "get", "update", "remove", "list", "count", "subscribe"] });
+  files[APP_FACADE_ENTITIES_PATH] = `${banner("public entities ABI")}import { entitySchema, queryableFields, repositories, repository } from "../capabilities/composed/entities.js";
+import { useEntity as useEntityState, useEntityMutation as useEntityMutationState } from "../modules/entitiesReact.js";
+import { createCollection as makeCollection } from "../modules/collections.js";
+import { createForm as makeForm } from "../modules/forms.js";
+import { createMutation as makeMutation, createResource as makeResource } from "../modules/asyncState.js";
+import {
+  useCollectionState, useFormState, useMutationState, useResourceState,
+} from "../modules/uiReact.js";
+import React from "react";
+
+export { entitySchema, repositories, repository, queryableFields };
+/** { status: loading|ready|not_found|error, record: { id, version, createdAt, updatedAt, values }, reload } by canonical id. */
+export function useEntity(entity, id) { return useEntityState(repository(entity), id); }
+/** { create, update, remove, pending, error, result } bound to one entity's repository. */
+export function useEntityMutation(entity) { return useEntityMutationState(repository(entity)); }
+
+/** A query-state controller over one entity: the server runs the specification, never a page filter. */
+export const createCollection = (entity, initialQuery = {}) => makeCollection({ repository: repository(entity), schema: entitySchema, entity, initialQuery });
+/** A headless form over one entity's schema (or a free form when entity is null). */
+export const createForm = (entity, options = {}) => makeForm({ schema: entitySchema, entity, ...options });
+export const createResource = (options = {}) => makeResource(options);
+export const createMutation = (options = {}) => makeMutation(options);
+
+/**
+ * { items, count, status, error, nextCursor, filter, search, sort, clear, more, refresh } for one
+ * entity. The fields a screen may filter and sort on are the schema's; anything else is refused.
+ */
+export function useCollection(entity, initialQuery = {}) {
+  const collection = React.useMemo(() => createCollection(entity, initialQuery), [entity, JSON.stringify(initialQuery)]);
+  return useCollectionState(collection);
+}
+/** { values, errors, touched, status, field, setValue, submit, reset } for one entity's schema. */
+export function useForm(entity, options = {}) {
+  const form = React.useMemo(() => createForm(entity, options), [entity, options.submit]);
+  return useFormState(form);
+}
+/** { status: idle|loading|ready|empty|error, data, error, load, invalidate } for one async read. */
+export function useResource(fetcher, options = {}) {
+  const resource = React.useMemo(() => createResource(options), [options.key]);
+  return useResourceState(resource, fetcher);
+}
+/** { status, result, error, run, reset } for one operation, with optimistic rollback when bound. */
+export function useMutation(options = {}) {
+  const mutation = React.useMemo(() => createMutation(options), [options.operation]);
+  return useMutationState(mutation);
+}
+`;
+  return { files, interfaces };
+}
+
+// WP6: the compiled route table and the router, rendered from the route plan. The application
+// owns navigation placement, layout and the appearance of every route state.
+export const ROUTES_COMPOSED_PATH = `${COMPOSED_ROOT}/routes.js`;
+export const APP_FACADE_ROUTING_PATH = `${APP_FACADE_ROOT}/routing.js`;
+
+function routeFiles(nodes, routePlan, { entitySchema = null } = {}) {
+  const files = {};
+  const interfaces = [];
+  if (!(routePlan?.routes || []).length) return { files, interfaces };
+  const definitions = routePlan.routes.map((route) => ({
+    id: route.id, path: route.path, name: route.name, params: route.params,
+    guard: route.guard, loader: route.loader, states: route.states, screen: route.screen,
+  }));
+  // A loader is bound only when its entity really is a declared durable record; anything else
+  // would name a repository the application does not have.
+  const loaderEntities = unique(definitions.map((route) => route.loader?.entity)
+    .filter((entity) => entity && (entitySchema?.entities || []).includes(entity)));
+  const identity = nodes.has("capability:session");
+  files[ROUTES_COMPOSED_PATH] = `${banner("routes")}import { compileRoutes } from "../../modules/routing.js";
+import { createRouter } from "../../modules/router.js";
+${identity ? 'import { identity } from "./identity.js";\n' : ""}${loaderEntities.length ? 'import { repository } from "./entities.js";\n' : ""}
+export const routePlan = Object.freeze(${jsObject({ version: routePlan.version, order: routePlan.order, redirect: routePlan.redirect, parameterised: routePlan.parameterised, guarded: routePlan.guarded })});
+export const routeDefinitions = Object.freeze(${jsObject(definitions)});
+export const routeTable = compileRoutes(routeDefinitions);
+
+/** Route loaders: a detail route reads its record through the entity module, by canonical id. */
+export const routeLoaders = Object.freeze({
+${loaderEntities.map((entity) => `  ${quote(`${entity}.get`)}: async ({ id }) => repository(${quote(entity)}).get(id),`).join("\n")}
+});
+
+export const router = createRouter({
+  table: routeTable,
+  ${identity ? "identity," : "identity: null,"}
+  loaders: routeLoaders,
+  signInRoute: ${JSON.stringify(routePlan.redirect?.signedOut || null)},
+});
+`;
+  interfaces.push({ module: ROUTES_COMPOSED_PATH, exports: ["routePlan", "routeDefinitions", "routeTable", "routeLoaders", "router"],
+    owns: ["active route"], operations: ["resolve", "href", "navigate", "guard", "load"] });
+  files[APP_FACADE_ROUTING_PATH] = `${banner("public routing ABI")}import React from "react";
+import { router, routeTable } from "../capabilities/composed/routes.js";
+import { useRouterState } from "../modules/uiReact.js";
+
+/** The matched route: { path, route, params, state: loading|ready|not_found|forbidden|error, data, navigate, href }. */
+export function useRoute() { return useRouterState(router); }
+/** A concrete href for a route id. Every declared parameter must be supplied. */
+export const routeHref = (id, params = {}) => router.href(id, params);
+export const navigate = (target, options) => router.navigate(target, options);
+export const routeIds = Object.freeze(routeTable.routes.map((route) => route.id));
+
+/** An anchor bound to a route id, so a parameterised path is never written by hand. */
+export function Link({ to, params = {}, replace = false, children, onClick, ...rest }) {
+  const href = routeHref(to, params);
+  return React.createElement("a", {
+    ...rest, href,
+    onClick: (event) => {
+      onClick?.(event);
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      void navigate(href, { replace });
+    },
+  }, children);
+}
+`;
+  return { files, interfaces };
+}
+
+// WP8: typed settings with declared scopes and defaults, and authorised append-only history.
+export const SETTINGS_COMPOSED_PATH = `${COMPOSED_ROOT}/settings.js`;
+export const AUDIT_COMPOSED_PATH = `${COMPOSED_ROOT}/audit.js`;
+export const APP_FACADE_SETTINGS_PATH = `${APP_FACADE_ROOT}/settings.js`;
+
+function settingsFiles(settingsPlan) {
+  const files = {};
+  const interfaces = [];
+  const declarations = settingsPlan?.declarations || [];
+  const audit = settingsPlan?.audit?.enabled === true;
+  if (!declarations.length && !audit) return { files, interfaces };
+  if (declarations.length) {
+    files[SETTINGS_COMPOSED_PATH] = `${banner("settings")}import { accounts } from "../../backend/index.js";
+import { compileSettings, createSettingsController } from "../../modules/settings.js";
+
+export const settingsSchema = compileSettings(${jsObject(declarations)});
+/** Reads and writes go through the accounts service, which enforces the scope's policy. */
+export const settings = createSettingsController({
+  schema: settingsSchema,
+  transport: {
+    get: (scope, target) => accounts.settings({ scope, target }),
+    set: (scope, target, key, value) => accounts.setSetting({ key, value, target }).then((row) => row.value),
+  },
+});
+`;
+    interfaces.push({ module: SETTINGS_COMPOSED_PATH, exports: ["settings", "settingsSchema"], owns: ["application settings"],
+      operations: ["get", "set", "reset"] });
+  }
+  if (audit) {
+    files[AUDIT_COMPOSED_PATH] = `${banner("audit history")}import { accounts } from "../../backend/index.js";
+import { createHistoryController } from "../../modules/audit.js";
+
+/** Read-only by construction: the platform appends history, the application never does. */
+export const history = createHistoryController({
+  transport: { list: (query) => accounts.history(query) },
+  sensitiveFields: ${jsObject(settingsPlan?.audit?.sensitiveFields || [])},
+});
+`;
+    interfaces.push({ module: AUDIT_COMPOSED_PATH, exports: ["history"], owns: ["audit history"], operations: ["list"] });
+  }
+  files[APP_FACADE_SETTINGS_PATH] = `${banner("public settings ABI")}${declarations.length ? 'import { settings, settingsSchema } from "../capabilities/composed/settings.js";\n' : ""}${audit ? 'import { history } from "../capabilities/composed/audit.js";\n' : ""}import {
+  ${[declarations.length ? "useSettingsState" : null, audit ? "useHistoryState" : null].filter(Boolean).join(", ")},
+} from "../modules/uiReact.js";
+
+${declarations.length ? `export { settings, settingsSchema };
+/** { values, get, set, reset, status } for one scope; an unwritten key answers with its default. */
+export function useSettings(options = {}) { return useSettingsState(settings, options); }
+` : ""}${audit ? `export { history };
+/** { events, status, more } — authorised history, newest first, already redacted. */
+export function useHistory(query = {}) { return useHistoryState(history, query); }
+` : ""}`;
+  return { files, interfaces };
+}
+
+// WP9: declared workflows, workspace lifecycle and reversible editor state.
+export const WORKFLOW_COMPOSED_PATH = `${COMPOSED_ROOT}/workflow.js`;
+export const WORKSPACE_COMPOSED_PATH = `${COMPOSED_ROOT}/workspace.js`;
+export const EDITOR_COMPOSED_PATH = `${COMPOSED_ROOT}/editor.js`;
+export const APP_FACADE_WORKFLOW_PATH = `${APP_FACADE_ROOT}/workflow.js`;
+export const APP_FACADE_WORKSPACE_PATH = `${APP_FACADE_ROOT}/workspace.js`;
+export const APP_FACADE_EDITOR_PATH = `${APP_FACADE_ROOT}/editor.js`;
+
+function behaviourFiles(behaviourPlan, { entitySchema = null } = {}) {
+  const files = {};
+  const interfaces = [];
+  const facades = [];
+  const workflows = behaviourPlan?.workflows || [];
+  const workspaces = behaviourPlan?.workspaces || [];
+  const editors = behaviourPlan?.editors || [];
+
+  if (workflows.length) {
+    const durable = workflows.some((workflow) => workflow.persistence === "durable");
+    files[WORKFLOW_COMPOSED_PATH] = `${banner("workflows")}import { compileWorkflow, createWorkflow${durable ? ", durableWorkflowPersistence" : ""} } from "../../modules/workflow.js";
+${durable ? 'import { repository } from "./entities.js";\n' : ""}
+/** The declared state graph of each multi-step journey. Steps and fields come from the contract. */
+export const workflowDefinitions = Object.freeze({
+${workflows.map((workflow) => `  ${quote(workflow.id)}: compileWorkflow(${jsObject({ id: workflow.id, steps: workflow.steps, review: workflow.review })}),`).join("\n")}
+});
+
+/**
+ * One workflow controller per declared journey. Persistence mode is explicit per workflow: a flow
+ * the contract did not describe as resumable writes nothing anywhere.
+ */
+export function createAppWorkflow(id, { values = {}, validate = null, onConfirm = null } = {}) {
+  const definition = workflowDefinitions[id];
+  if (!definition) throw new Error(\`no workflow "\${id}" is declared for this application\`);
+  return createWorkflow({
+    definition, values, validate, onConfirm,
+    persistence: ${durable
+      ? `WORKFLOW_PERSISTENCE_MODE[id] === "durable"\n      ? durableWorkflowPersistence({ repository, entity: "workflowState", key: id }) : null`
+      : "null"},
+  });
+}
+
+export const WORKFLOW_PERSISTENCE_MODE = Object.freeze(${jsObject(Object.fromEntries(workflows.map((workflow) => [workflow.id, workflow.persistence])))});
+export const workflows = Object.freeze(Object.keys(workflowDefinitions));
+`;
+    interfaces.push({ module: WORKFLOW_COMPOSED_PATH, exports: ["workflowDefinitions", "createAppWorkflow", "workflows"],
+      owns: ["workflow position"], operations: ["transition", "restore", "confirmWorkflow"] });
+    files[APP_FACADE_WORKFLOW_PATH] = `${banner("public workflow ABI")}import { createAppWorkflow, workflowDefinitions, workflows } from "../capabilities/composed/workflow.js";
+import { useWorkflowState } from "../modules/uiReact.js";
+
+export { workflowDefinitions, workflows, createAppWorkflow };
+
+const controllers = new Map();
+/** The controller for one declared journey. The same one, so two screens share its position. */
+export function workflowFor(id, options = {}) {
+  if (!controllers.has(id)) controllers.set(id, createAppWorkflow(id, options));
+  return controllers.get(id);
+}
+/** { step, values, errors, status, next, back, goTo, confirm, cancel } for one declared journey. */
+export function useWorkflow(id, options = {}) { return useWorkflowState(workflowFor(id, options)); }
+`;
+    facades.push("workflow");
+  }
+
+  if (workspaces.length) {
+    files[WORKSPACE_COMPOSED_PATH] = `${banner("workspace lifecycle")}import { createWorkspace } from "../../modules/workspace.js";
+import { repository } from "./entities.js";
+
+/** Every durable root the contract opens, edits and saves in place. */
+export const workspaceRoots = Object.freeze(${jsObject(workspaces.map((workspace) => ({ entity: workspace.entity, fields: workspace.fields })))});
+
+const controllers = new Map();
+/**
+ * The workspace for one root entity. The SAME controller is returned for the same entity, so two
+ * screens editing one project share its draft and its identity instead of racing each other.
+ */
+export function workspaceFor(entity) {
+  const declared = workspaceRoots.find((root) => root.entity === entity);
+  if (!declared) throw new Error(\`no workspace is declared for "\${entity}"\`);
+  if (!controllers.has(entity)) {
+    controllers.set(entity, createWorkspace({ repository: repository(entity), fields: declared.fields }));
+  }
+  return controllers.get(entity);
+}
+export const workspaces = Object.freeze(workspaceRoots.map((root) => root.entity));
+`;
+    interfaces.push({ module: WORKSPACE_COMPOSED_PATH, exports: ["workspaceRoots", "workspaceFor", "workspaces"],
+      owns: ["active workspace"], operations: ["open", "save", "discard"] });
+    files[APP_FACADE_WORKSPACE_PATH] = `${banner("public workspace ABI")}import { workspaceFor, workspaceRoots, workspaces } from "../capabilities/composed/workspace.js";
+import { useWorkspaceState } from "../modules/uiReact.js";
+
+export { workspaceRoots, workspaces, workspaceFor };
+/** { draft, dirty, status, record, open, save, discard, reopen } for one declared root entity. */
+export function useWorkspace(entity, options = {}) { return useWorkspaceState(workspaceFor(entity), options); }
+`;
+    facades.push("workspace");
+  }
+
+  if (editors.length) {
+    const editor = editors[0];
+    files[EDITOR_COMPOSED_PATH] = `${banner("editor state and history")}import { createEditor, objectCommands } from "../../modules/editor.js";
+
+/**
+ * The reversible command vocabulary. Each command declares its own inverse, so undo replays what
+ * actually happened rather than what a screen believed it did. A domain command is added here with
+ * its inverse beside it; one without an inverse is refused at registration.
+ */
+export const editorCommands = objectCommands({ collection: "objects" });
+export const editorCollection = ${quote(editor.collection)};
+
+/** A fresh editor over one document. History belongs to the document it was opened with. */
+export function createAppEditor(document = { objects: [] }) {
+  return createEditor({ document, commands: editorCommands });
+}
+`;
+    interfaces.push({ module: EDITOR_COMPOSED_PATH, exports: ["editorCommands", "editorCollection", "createAppEditor"],
+      owns: ["editor document"], operations: ["select", "execute", "undo", "redo"] });
+    files[APP_FACADE_EDITOR_PATH] = `${banner("public editor ABI")}import { createAppEditor, editorCollection, editorCommands } from "../capabilities/composed/editor.js";
+import { useEditorState } from "../modules/uiReact.js";
+
+export { editorCommands, editorCollection, createAppEditor };
+/** { objects, selected, canUndo, canRedo, select, execute, undo, redo } over one editor instance. */
+export function useEditor(editor) { return useEditorState(editor); }
+`;
+    facades.push("editor");
+  }
+
+  return { files, interfaces, facades };
+}
+
+// WP10: a declared file policy, declared notification events and declared realtime topics.
+export const FILES_COMPOSED_PATH = `${COMPOSED_ROOT}/files.js`;
+export const NOTIFICATIONS_COMPOSED_PATH = `${COMPOSED_ROOT}/notifications.js`;
+export const REALTIME_COMPOSED_PATH = `${COMPOSED_ROOT}/realtime.js`;
+export const APP_FACADE_FILES_PATH = `${APP_FACADE_ROOT}/files.js`;
+export const APP_FACADE_NOTIFICATIONS_PATH = `${APP_FACADE_ROOT}/notifications.js`;
+export const APP_FACADE_REALTIME_PATH = `${APP_FACADE_ROOT}/realtime.js`;
+
+function deliveryFiles(deliveryPlan, { entitySchema = null } = {}) {
+  const files = {};
+  const interfaces = [];
+  const facades = [];
+  const policy = deliveryPlan?.files?.policy || null;
+  const events = deliveryPlan?.notifications?.events || [];
+  const topics = deliveryPlan?.realtime?.topics || [];
+  const durable = entitySchema?.entities || [];
+
+  if (policy) {
+    const metadataEntity = durable.includes("storedFile") ? "storedFile" : null;
+    files[FILES_COMPOSED_PATH] = `${banner("files")}import { storage } from "../../backend/index.js";
+import { compileFilePolicy, createFiles } from "../../modules/files.js";
+${metadataEntity ? 'import { repository } from "./entities.js";\n' : ""}
+/** The declared upload policy. Checked BEFORE a byte is sent, so a refusal names what is wrong. */
+export const filePolicy = compileFilePolicy(${jsObject({ kinds: policy.kinds, maxBytes: policy.maxBytes, maxPerSubject: policy.maxPerSubject, signedUrlSeconds: policy.signedUrlSeconds })});
+
+export const fileSubjects = Object.freeze(${jsObject((deliveryPlan?.files?.subjects || []).map((row) => ({ subject: row.subject, fields: row.fields.map((field) => field.name) })))});
+
+export const files = createFiles({
+  policy: filePolicy,
+  storage,
+  metadata: ${metadataEntity ? `repository(${quote(metadataEntity)})` : "null"},
+});
+`;
+    interfaces.push({ module: FILES_COMPOSED_PATH, exports: ["files", "filePolicy", "fileSubjects"],
+      owns: ["stored files"], operations: ["check", "upload", "fileUrl", "removeFile"] });
+    files[APP_FACADE_FILES_PATH] = `${banner("public files ABI")}import { filePolicy, fileSubjects, files } from "../capabilities/composed/files.js";
+import { useFilesState } from "../modules/uiReact.js";
+
+export { files, filePolicy, fileSubjects };
+/** { files, status, progress, error, upload, remove, url } for one subject record. */
+export function useFiles(options = {}) { return useFilesState(files, options); }
+/** The accept attribute a file input should carry, so the picker and the policy agree. */
+export const fileAccept = filePolicy.accept.join(",");
+`;
+    facades.push("files");
+  }
+
+  if (events.length) {
+    files[NOTIFICATIONS_COMPOSED_PATH] = `${banner("notifications")}import { notifications as transport } from "../../backend/index.js";
+import { compileNotifications, createNotifications } from "../../modules/notifications.js";
+
+/** Every message this application declared it sends. One it never declared cannot be sent. */
+export const notificationEvents = compileNotifications(${jsObject(events.map((event) => ({ id: event.id, title: event.title, body: event.body, recipient: event.recipient, channel: event.channel })))});
+
+export const notifications = createNotifications({ schema: notificationEvents, transport });
+`;
+    interfaces.push({ module: NOTIFICATIONS_COMPOSED_PATH, exports: ["notifications", "notificationEvents"],
+      owns: ["notification inbox"], operations: ["inbox", "send", "markRead"] });
+    files[APP_FACADE_NOTIFICATIONS_PATH] = `${banner("public notifications ABI")}import { notificationEvents, notifications } from "../capabilities/composed/notifications.js";
+import { useNotificationsState } from "../modules/uiReact.js";
+
+export { notifications, notificationEvents };
+/** { notifications, unread, status, markRead, markAllRead, reload } — the badge follows the list. */
+export function useNotifications(options = {}) { return useNotificationsState(notifications, options); }
+`;
+    facades.push("notifications");
+  }
+
+  if (topics.length) {
+    files[REALTIME_COMPOSED_PATH] = `${banner("realtime")}import { db } from "../../backend/index.js";
+import { compileTopics, createRealtime } from "../../modules/realtime.js";
+
+/** The topics this application watches. Each names the entity it re-reads after a gap. */
+export const realtimeTopics = compileTopics(${jsObject(topics.map((topic) => ({ id: topic.id, entity: topic.entity, resync: topic.resync })))});
+
+export const realtime = createRealtime({
+  schema: realtimeTopics,
+  // One channel per topic. The adapter reports connection status so a reconnect can resync.
+  connect: (definition, handler) => db.entity(definition.entity)
+    .subscribe((event) => handler({ type: "event", event })),
+  // The gap closer: after a reconnect the topic re-reads its own rows rather than assuming
+  // nothing happened while the socket was down.
+  resync: (definition) => db.entity(definition.entity).list({ limit: 200 }),
+});
+`;
+    interfaces.push({ module: REALTIME_COMPOSED_PATH, exports: ["realtime", "realtimeTopics"],
+      owns: ["live subscriptions"], operations: ["watch", "resync"] });
+    files[APP_FACADE_REALTIME_PATH] = `${banner("public realtime ABI")}import { realtime, realtimeTopics } from "../capabilities/composed/realtime.js";
+import { useLiveState } from "../modules/uiReact.js";
+
+export { realtime, realtimeTopics };
+/** { status, events, last } for one declared topic; unsubscribes when the screen leaves. */
+export function useLive(topic, onEvent) { return useLiveState(realtime, topic, onEvent); }
+`;
+    facades.push("realtime");
+  }
+
+  return { files, interfaces, facades };
+}
+
+// WP11: declared telemetry events, declared domain metrics and declared exports.
+export const ANALYTICS_COMPOSED_PATH = `${COMPOSED_ROOT}/analytics.js`;
+export const METRICS_COMPOSED_PATH = `${COMPOSED_ROOT}/metrics.js`;
+export const EXPORTS_COMPOSED_PATH = `${COMPOSED_ROOT}/exports.js`;
+export const APP_FACADE_ANALYTICS_PATH = `${APP_FACADE_ROOT}/analytics.js`;
+export const APP_FACADE_METRICS_PATH = `${APP_FACADE_ROOT}/metrics.js`;
+export const APP_FACADE_EXPORTS_PATH = `${APP_FACADE_ROOT}/exports.js`;
+
+function insightFiles(insightPlan) {
+  const files = {};
+  const interfaces = [];
+  const facades = [];
+  const events = insightPlan?.telemetry?.events || [];
+  const metrics = insightPlan?.metrics || [];
+  const exportDefinitions = insightPlan?.exports || [];
+
+  if (events.length) {
+    files[ANALYTICS_COMPOSED_PATH] = `${banner("telemetry")}import { analytics as transport } from "../../backend/index.js";
+import { compileAnalyticsEvents, createTelemetry } from "../../modules/analytics.js";
+
+/**
+ * Product-usage telemetry ONLY. Domain values belong in metrics, never here: this stream is
+ * retained and read by whoever operates the product.
+ */
+export const analyticsEvents = compileAnalyticsEvents(${jsObject(events.map((event) => ({ id: event.id, properties: event.properties })))}, ${jsObject({ consentRequired: insightPlan?.telemetry?.consentRequired !== false, retentionDays: insightPlan?.telemetry?.retentionDays || 365 })});
+
+let consent = false;
+/** Telemetry sends nothing until the visitor agrees. The application decides when to ask. */
+export function setAnalyticsConsent(granted) { consent = granted === true; }
+export const telemetry = createTelemetry({ schema: analyticsEvents, transport, hasConsent: () => consent });
+`;
+    interfaces.push({ module: ANALYTICS_COMPOSED_PATH, exports: ["telemetry", "analyticsEvents", "setAnalyticsConsent"],
+      owns: ["telemetry"], operations: ["track"] });
+    files[APP_FACADE_ANALYTICS_PATH] = `${banner("public telemetry ABI")}import { analyticsEvents, setAnalyticsConsent, telemetry } from "../capabilities/composed/analytics.js";
+
+export { telemetry, analyticsEvents, setAnalyticsConsent };
+/** Record one declared event. A property outside its declared list never leaves the browser. */
+export const track = (event, properties) => telemetry.track(event, properties);
+`;
+    facades.push("analytics");
+  }
+
+  if (metrics.length) {
+    files[METRICS_COMPOSED_PATH] = `${banner("domain metrics")}import { compileMetrics, createMetrics } from "../../modules/analytics.js";
+import { entitySchema, repository } from "./entities.js";
+
+/** Every metric this application declared, checked against the compiled schema. */
+export const metricDefinitions = compileMetrics(${jsObject(metrics)}, { schema: entitySchema });
+
+export const metrics = createMetrics({
+  metrics: metricDefinitions,
+  // EVERY matching record, not one page. A metric over a page is a wrong answer told confidently.
+  read: (entity, filters) => repository(entity).list({ filters, limit: 10000 }),
+});
+`;
+    interfaces.push({ module: METRICS_COMPOSED_PATH, exports: ["metrics", "metricDefinitions"],
+      owns: ["domain metrics"], operations: ["metric", "report"] });
+    files[APP_FACADE_METRICS_PATH] = `${banner("public metrics ABI")}import { metricDefinitions, metrics } from "../capabilities/composed/metrics.js";
+import { useMetricState } from "../modules/uiReact.js";
+
+export { metrics, metricDefinitions };
+/** { value, series, status } for one declared metric. */
+export function useMetric(id, options = {}) { return useMetricState(metrics, id, options); }
+/** Several metrics together, so a dashboard does not fire one read per tile. */
+export function useReport(ids, options = {}) { return useMetricState(metrics, ids, options); }
+`;
+    facades.push("metrics");
+  }
+
+  if (exportDefinitions.length) {
+    files[EXPORTS_COMPOSED_PATH] = `${banner("exports")}import { compileExports, createExports } from "../../modules/exports.js";
+import { entitySchema, repository } from "./entities.js";
+
+/** What may be exported, and which columns leave. Declared, so nothing leaves by accident. */
+export const exportDefinitions = compileExports(${jsObject(exportDefinitions.map((row) => ({ id: row.id, entity: row.entity, columns: row.columns, format: row.format, filename: row.filename })))}, { schema: entitySchema });
+
+export const exports = createExports({
+  schema: exportDefinitions,
+  // The whole result set, re-read: an export of the page on screen is a wrong answer in a file.
+  read: (entity, filters) => repository(entity).list({ filters, limit: 10000 }),
+});
+`;
+    interfaces.push({ module: EXPORTS_COMPOSED_PATH, exports: ["exports", "exportDefinitions"],
+      owns: ["export artifacts"], operations: ["buildExport", "download"] });
+    files[APP_FACADE_EXPORTS_PATH] = `${banner("public exports ABI")}import { exportDefinitions, exports as exportController } from "../capabilities/composed/exports.js";
+import { useExportState } from "../modules/uiReact.js";
+
+export { exportController as exports, exportDefinitions };
+/** { build, download, artifact, status } for one declared export. */
+export function useExport(id, options = {}) { return useExportState(exportController, id, options); }
+`;
+    facades.push("exports");
+  }
+
+  return { files, interfaces, facades };
+}
+
+// WP12: the declared plan catalogue and its entitlements.
+export const BILLING_COMPOSED_PATH = `${COMPOSED_ROOT}/billing.js`;
+export const APP_FACADE_BILLING_PATH = `${APP_FACADE_ROOT}/billing.js`;
+
+function billingFiles(billingPlan) {
+  const files = {};
+  const interfaces = [];
+  const facades = [];
+  const plans = billingPlan?.plans || [];
+  if (!plans.length) return { files, interfaces, facades };
+
+  files[BILLING_COMPOSED_PATH] = `${banner("billing")}import { accounts, payments } from "../../backend/index.js";
+import { compilePlans, createBilling } from "../../modules/billing.js";
+
+/** The declared plan catalogue. A plan nobody declared cannot be bought or granted. */
+export const planCatalogue = compilePlans(${jsObject(plans)});
+
+/**
+ * Entitlements are read from the SERVER's subscription state. A plan field an application could
+ * write would be a plan anybody could write, so nothing here consults one.
+ */
+export const billing = createBilling({
+  catalogue: planCatalogue,
+  transport: {
+    status: () => accounts.subscription(),
+    checkout: (options) => payments.checkout(options),
+  },
+});
+`;
+  interfaces.push({ module: BILLING_COMPOSED_PATH, exports: ["billing", "planCatalogue"],
+    owns: ["entitlements", "subscription"], operations: ["entitlement", "limit", "checkout", "subscriptionStatus"] });
+  files[APP_FACADE_BILLING_PATH] = `${banner("public billing ABI")}import { billing, planCatalogue } from "../capabilities/composed/billing.js";
+import { useBillingState } from "../modules/uiReact.js";
+
+export { billing, planCatalogue };
+/** { plan, status, entitlements, can, checkout } — every denial carries its reason. */
+export function useBilling(options = {}) { return useBillingState(billing, options); }
+`;
+  facades.push("billing");
+  return { files, interfaces, facades };
+}
+
+// WP13: declared actions, schedules and third-party connectors.
+export const JOBS_COMPOSED_PATH = `${COMPOSED_ROOT}/jobs.js`;
+export const SCHEDULES_COMPOSED_PATH = `${COMPOSED_ROOT}/schedules.js`;
+export const CONNECTORS_COMPOSED_PATH = `${COMPOSED_ROOT}/connectors.js`;
+export const APP_FACADE_JOBS_PATH = `${APP_FACADE_ROOT}/jobs.js`;
+export const APP_FACADE_CONNECTORS_PATH = `${APP_FACADE_ROOT}/connectors.js`;
+
+function automationFiles(automationPlan) {
+  const files = {};
+  const interfaces = [];
+  const facades = [];
+  const actions = automationPlan?.actions || [];
+  const schedules = automationPlan?.schedules || [];
+  const connectors = automationPlan?.connectors || [];
+
+  if (actions.length) {
+    files[JOBS_COMPOSED_PATH] = `${banner("jobs")}import { actions as transport, usage } from "../../backend/index.js";
+import { compileActions, createJobs } from "../../modules/jobs.js";
+
+/** Every long-running action this application declared. One it never declared cannot run. */
+export const actionCatalogue = compileActions(${jsObject(actions.map((action) => ({ id: action.id, actionKey: action.actionKey, inputs: action.inputs, required: action.required, cost: action.cost, grant: action.grant })))});
+
+export const jobs = createJobs({ actions: actionCatalogue, transport, usage });
+`;
+    interfaces.push({ module: JOBS_COMPOSED_PATH, exports: ["jobs", "actionCatalogue"],
+      owns: ["jobs", "usage"], operations: ["invokeAction", "jobStatus", "cancelJob", "balance"] });
+    files[APP_FACADE_JOBS_PATH] = `${banner("public jobs ABI")}import { actionCatalogue, jobs } from "../capabilities/composed/jobs.js";
+import { useJobState } from "../modules/uiReact.js";
+
+export { jobs, actionCatalogue };
+/** { job, status, invoke, cancel, wait } — one job per action and input, not per click. */
+export function useJob(options = {}) { return useJobState(jobs, options); }
+`;
+    facades.push("jobs");
+  }
+
+  if (schedules.length) {
+    files[SCHEDULES_COMPOSED_PATH] = `${banner("scheduled actions")}import { createSchedules } from "../../modules/jobs.js";
+import { jobs } from "./jobs.js";
+import { repository } from "./entities.js";
+
+/** The declared schedules. An occurrence runs once, however many workers see it due. */
+export const scheduleDefinitions = Object.freeze(${jsObject(schedules)});
+
+export const schedules = createSchedules({
+  schedules: scheduleDefinitions,
+  jobs,
+  storage: {
+    list: async () => (await repository("scheduleState").list({ limit: 200 })).map((row) => ({ id: row.id, ...row.values })),
+    put: async (row) => repository("scheduleState").create(row),
+  },
+});
+`;
+    interfaces.push({ module: SCHEDULES_COMPOSED_PATH, exports: ["schedules", "scheduleDefinitions"],
+      owns: ["schedules"], operations: ["listSchedules", "pauseSchedule", "runDue"] });
+  }
+
+  if (connectors.length) {
+    files[CONNECTORS_COMPOSED_PATH] = `${banner("http connectors")}import { compileConnectors, createConnectors } from "../../modules/connectors.js";
+
+/**
+ * Declared third-party endpoints. Each names the one host it may reach and the secret it needs;
+ * the secret VALUE is supplied by the deployment and never appears here, in a prompt or in an error.
+ */
+export const connectorCatalogue = compileConnectors(${jsObject(connectors.map((row) => ({ id: row.id, method: row.method, url: row.url, secret: row.secret, inputs: row.inputs, required: row.required, responseShape: row.responseShape, timeoutMs: row.timeoutMs, retries: row.retries })))});
+
+export const connectors = createConnectors({
+  schema: connectorCatalogue,
+  secrets: async (name) => import.meta.env?.["VITE_" + name] ?? null,
+});
+`;
+    interfaces.push({ module: CONNECTORS_COMPOSED_PATH, exports: ["connectors", "connectorCatalogue"],
+      owns: ["integrations"], operations: ["invokeConnector"] });
+    files[APP_FACADE_CONNECTORS_PATH] = `${banner("public connectors ABI")}export { connectors, connectorCatalogue } from "../capabilities/composed/connectors.js";
+`;
+    facades.push("connectors");
+  }
+
+  return { files, interfaces, facades };
+}
+
+function facadeIndexSource(moduleLock, facadeModules) {
+  return `${banner("public application ABI")}// The one import surface for generated application code. Everything here is deterministic and
+// protected; layout, styling, copy and domain logic remain entirely the application's.
+export * from "../capabilities/composed/index.js";
+${facadeModules.map((name) => `export * from "./${name}.js";`).join("\n")}
+export const THRALLO_APP_ABI = Object.freeze(${jsObject({
+    version: 1,
+    modules: (moduleLock?.modules || []).map((row) => `${row.id}@${row.version}`),
+    facades: facadeModules,
+  })});
+`;
+}
+
+function capabilityFiles(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null, billingPlan = null, automationPlan = null } = {}) {
   const nodes = new Map((graph?.nodes || []).map((node) => [node.id, node]));
   const files = {};
   const interfaces = [];
@@ -140,6 +909,75 @@ export const newsletterCapability = makeNewsletter({ entity: ${quote(entity)} })
     ] });
   }
 
+  const composeIdentity = Boolean(identityPlan) && identityModuleLocked(moduleLock) && identityRuntime;
+  if (composeIdentity && nodes.has("capability:session")) {
+    Object.assign(files, identityFiles(moduleLock, identityPlan));
+    interfaces.push({ module: IDENTITY_COMPOSED_PATH, exports: ["identity", "identityPlan"], owns: ["session"],
+      operations: identityPlan.methods, facades: ["identity"] });
+    const facades = ["identity"];
+    const account = accountFiles(nodes, identityPlan);
+    if (Object.keys(account.files).length) {
+      Object.assign(files, account.files);
+      interfaces.push(...under(account.interfaces, "accounts"));
+      facades.push("accounts");
+    }
+    const entity = entityFiles(nodes, entitySchema);
+    if (Object.keys(entity.files).length) {
+      Object.assign(files, entity.files);
+      interfaces.push(...under(entity.interfaces, "entities"));
+      facades.push("entities");
+    }
+    const route = routeFiles(nodes, routePlan, { entitySchema });
+    if (Object.keys(route.files).length) {
+      Object.assign(files, route.files);
+      interfaces.push(...under(route.interfaces, "routing"));
+      facades.push("routing");
+    }
+    const settings = settingsFiles(settingsPlan);
+    if (Object.keys(settings.files).length) {
+      Object.assign(files, settings.files);
+      interfaces.push(...under(settings.interfaces, "settings"));
+      facades.push("settings");
+    }
+    const behaviour = behaviourFiles(behaviourPlan, { entitySchema });
+    if (Object.keys(behaviour.files).length) {
+      Object.assign(files, behaviour.files);
+      interfaces.push(...under(behaviour.interfaces, ...behaviour.facades));
+      facades.push(...behaviour.facades);
+    }
+    const delivery = deliveryFiles(deliveryPlan, { entitySchema });
+    if (Object.keys(delivery.files).length) {
+      Object.assign(files, delivery.files);
+      interfaces.push(...under(delivery.interfaces, ...delivery.facades));
+      facades.push(...delivery.facades);
+    }
+    const insight = insightFiles(insightPlan);
+    if (Object.keys(insight.files).length) {
+      Object.assign(files, insight.files);
+      interfaces.push(...under(insight.interfaces, ...insight.facades));
+      facades.push(...insight.facades);
+    }
+    const billing = billingFiles(billingPlan);
+    if (Object.keys(billing.files).length) {
+      Object.assign(files, billing.files);
+      interfaces.push(...under(billing.interfaces, ...billing.facades));
+      facades.push(...billing.facades);
+    }
+    const automation = automationFiles(automationPlan);
+    if (Object.keys(automation.files).length) {
+      Object.assign(files, automation.files);
+      interfaces.push(...under(automation.interfaces, ...automation.facades));
+      facades.push(...automation.facades);
+    }
+    for (const row of interfaces) {
+      const base = row.module.split("/").pop().replace(/[.]js$/, "");
+      const covering = FACADE_SUPERSEDES[base];
+      if (covering && facades.includes(covering)) row.facades = [covering];
+    }
+    files[APP_FACADE_INDEX_PATH] = facadeIndexSource(moduleLock, facades);
+  }
+  if (moduleLock) files[MODULE_LOCK_PATH] = lockFileSource(moduleLock);
+
   const composedModules = interfaces.map((row) => row.module);
   files[`${COMPOSED_ROOT}/index.js`] = `${banner("public composition surface")}${composedModules
     .map((module) => `export * from "./${module.split("/").at(-1)}";`).join("\n")}
@@ -159,24 +997,64 @@ export { CAPABILITY_COMPOSITION } from "./manifest.js";
   return { files, interfaces };
 }
 
-export function capabilityCompositionPlan(graph) {
-  const rendered = capabilityFiles(graph);
+// WP14: a composed module covered by an app/* facade is private — the facade exists to hide it.
+// One with no facade is the import surface itself. The public-ABI brief has to tell those apart,
+// and it cannot do it from filenames: composed/crud.js sits behind the entities facade under a
+// different name, while composed/contact.js has no facade at all. Recorded here, where the facade
+// and the modules behind it are assembled in the same breath.
+const under = (rows, ...names) => rows.map((row) => ({ ...row, facades: names }));
+
+// Legacy composed modules that a later facade absorbed without taking its name.
+const FACADE_SUPERSEDES = Object.freeze({ crud: "entities", session: "identity", roles: "accounts" });
+
+/** The exports of each composed public facade, read from the source the composer just wrote. */
+function publicFacadesOf(files = {}) {
+  const facades = [];
+  for (const [path, source] of Object.entries(files)) {
+    if (!path.startsWith(APP_FACADE_ROOT) || path.endsWith("/index.js")) continue;
+    const names = new Set();
+    for (const match of String(source).matchAll(/export\s+(?:async\s+)?(?:function|const|let|var)\s+([A-Za-z0-9_$]+)/g)) {
+      names.add(match[1]);
+    }
+    for (const match of String(source).matchAll(/export\s*\{([^}]+)\}/g)) {
+      for (const part of match[1].split(",")) {
+        const name = part.split(/\s+as\s+/).pop().trim();
+        if (name && name !== "default") names.add(name);
+      }
+    }
+    facades.push({
+      facade: path.slice(APP_FACADE_ROOT.length + 1).replace(/\.js$/, ""),
+      module: path,
+      exports: [...names].sort(),
+    });
+  }
+  return facades.sort((a, b) => a.facade.localeCompare(b.facade));
+}
+
+export function capabilityCompositionPlan(graph, { moduleLock = null, identityPlan = null, identityRuntime = true, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null, billingPlan = null, automationPlan = null } = {}) {
+  const rendered = capabilityFiles(graph, { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan, deliveryPlan, insightPlan, billingPlan, automationPlan });
   const extensionPoints = (graph?.nodes || []).filter((node) => node.type === "custom_behavior")
     .map((node) => ({ id: node.id, ...node.extension, inputs: node.requiredInputs, outputs: node.outputs,
       stateOwnership: node.stateOwnership, persistenceSemantics: node.persistenceSemantics }));
+  const composedIdentity = IDENTITY_COMPOSED_PATH in rendered.files;
   return {
     version: CAPABILITY_COMPOSITION_VERSION,
     graphVersion: graph?.version || 1,
     protectedRoot: COMPOSED_ROOT,
     protectedFiles: Object.keys(rendered.files).sort(),
     interfaces: rendered.interfaces,
+    // WP14: what src/lib/app actually exports, read from the composed bytes rather than declared
+    // twice. This is the surface generated code may import, and the only one it is briefed with.
+    publicFacades: publicFacadesOf(rendered.files),
     configurationModule: CAPABILITY_CONFIGURATION_PATH,
     extensionPoints,
+    ...(moduleLock ? { moduleLockPath: MODULE_LOCK_PATH } : {}),
+    ...(composedIdentity ? { publicFacade: APP_FACADE_INDEX_PATH, identityModule: IDENTITY_COMPOSED_PATH } : {}),
   };
 }
 
 /** Apply or refresh the foundation. Existing model-owned extension configuration is preserved. */
-export function composeCapabilityFoundation(tree, graph) {
+export function composeCapabilityFoundation(tree, graph, { moduleLock = null, identityPlan = null, entitySchema = null, routePlan = null, settingsPlan = null, behaviourPlan = null, deliveryPlan = null, insightPlan = null, billingPlan = null, automationPlan = null } = {}) {
   // Production Builder V2 starts from the full React/Vite scaffold. Some retained unit/legacy
   // baselines intentionally predate the capability runtime; do not emit adapters with dangling
   // imports into those trees. They remain on the migration-compatible path until refreshed from
@@ -192,14 +1070,18 @@ export function composeCapabilityFoundation(tree, graph) {
         skipped: "legacy_base_without_capability_runtime", missingRuntime },
     };
   }
-  const rendered = capabilityFiles(graph);
+  // A base tree without the module runtime (a legacy snapshot, a retained fixture) composes the
+  // capability adapters exactly as before and simply does not receive the identity controller.
+  const identityRuntime = typeof tree?.[IDENTITY_RUNTIME_PATH] === "string";
+  const options = { moduleLock, identityPlan, identityRuntime, entitySchema, routePlan, settingsPlan, behaviourPlan, deliveryPlan, insightPlan, billingPlan, automationPlan };
+  const rendered = capabilityFiles(graph, options);
   const next = { ...(tree || {}), ...rendered.files };
   if (typeof next[CAPABILITY_CONFIGURATION_PATH] !== "string") {
     next[CAPABILITY_CONFIGURATION_PATH] = `// Model-owned domain configuration for the protected capability composition.\n`
       + `// Configuration may supply visual/domain values and bounded hooks; it must not replace persistence.\n`
       + `export const capabilityConfiguration = Object.freeze({ booking: Object.freeze({ slots: [] }), wizard: Object.freeze({}) });\n`;
   }
-  return { tree: next, plan: capabilityCompositionPlan(graph) };
+  return { tree: next, plan: capabilityCompositionPlan(graph, options) };
 }
 
 export function capabilityCompositionBrief(graph, plan = capabilityCompositionPlan(graph)) {

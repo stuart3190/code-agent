@@ -60,6 +60,18 @@ log(`ceiling ${CEILING_CREDITS} credits (hard) · target ≤${TARGET_CREDITS} fi
 log(`pexels configured: ${pexels.configured()} ${pexels.configured() ? "" : "— placeholder lane (build never blocks on imagery)"}`);
 log(`preview mode: ${process.env.PREVIEW_MODE || "local"}`);
 
+// The dedicated project must EXIST before a build can reference it. bv2_builds carries
+// bv2_builds_project_owner_fkey against (project_id, owner), so a generated id with no row behind
+// it fails at the first insert — which is exactly how this script failed on 2026-09-20, before
+// reaching a single model call. Created only for a live run: a dry preflight still writes nothing.
+if (live) {
+  const { error: projectError } = await client.from("projects").insert({
+    id: projectId, owner, name: "bv2-first-build", builder_version: "v2",
+  });
+  if (projectError) { console.error(`project create failed: ${projectError.message}`); process.exit(1); }
+  log(`dedicated project row created`);
+}
+
 if (!live) { log("DRY RUN — pass --live to run the ONE approved build."); process.exit(0); }
 
 // ── assembly: real everything, one shared ceiling ─────────────────────────────────────────────

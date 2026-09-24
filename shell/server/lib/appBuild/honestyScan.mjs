@@ -25,8 +25,16 @@ const SOURCE = /\.(jsx?|tsx?)$/;
 // bootstrap (its credential cache is session state, not records). Both are platform infrastructure,
 // centrally tested, and protected from edits by the stage gate — app-code REIMPLEMENTATIONS of
 // either remain blocking findings.
+// WP14 completes that boundary. Every finding here is about GENERATED application code pretending
+// to do something: a fake delay imitating a network call, a handler that only logs. The platform's
+// own runtime does the real thing, and its timers are real — a retry backoff, a poll interval, a
+// debounce — so scanning it produces findings that are false by construction and, worse, push a
+// composing build into a correction loop over code the model may not even write. The boundary is
+// stated identically in staticApplicationGate, moduleContracts, persistenceLint, wizardEntryTransform
+// and repairGovernance; this is the same one.
+const PLATFORM_SOURCE = /^src\/lib\/(?:backend|capabilities|scaffolds\/composed|modules|app)\//;
 const APP_SOURCE = (path) => SOURCE.test(path) && path.startsWith("src/")
-  && !path.startsWith("src/lib/backend/") && path !== "src/lib/visitorSession.js";
+  && !PLATFORM_SOURCE.test(path) && path !== "src/lib/visitorSession.js";
 
 // Comments and string bodies produce false hits — a comment saying "TODO: wire up the backend" is
 // not a fake handler. Blanked, preserving newlines so reported line numbers stay true.

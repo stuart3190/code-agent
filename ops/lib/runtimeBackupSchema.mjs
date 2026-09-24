@@ -57,6 +57,15 @@ export const PRODUCTION_PUBLIC_TABLES_98 = Object.freeze([...PRODUCTION_PUBLIC_T
   "bv2_build_envelopes", "bv2_build_progress", "bv2_build_settlements",
   "bv2_duration_extensions", "bv2_recovery_approvals", "bv2_repair_strategies", "bv2_verification_defects",
 ].sort());
+// The catalog after the WP4/WP8/WP12 migrations were applied on 2026-09-20, read back from
+// information_schema: 101 public tables before, nine added, 110 after. The 98-table constant stays
+// exactly as it was, because a historical backup must keep validating against the catalog it was
+// actually taken from.
+export const PRODUCTION_PUBLIC_TABLES_107 = Object.freeze([...PRODUCTION_PUBLIC_TABLES_98,
+  "app_account_policies", "app_audit_config", "app_audit_events", "app_billing_events",
+  "app_membership_events", "app_memberships", "app_profiles", "app_settings", "app_subscriptions",
+].sort());
+
 export const PRODUCTION_PUBLIC_TABLES_98_SHA256 =
   "7e055d0b204b6254d11c66da0f6dbf5e0b4bc99ea17faac4b1bda5c55ed70417";
 
@@ -207,13 +216,36 @@ export function canonicalRowsForRestoreComparison(table, rows) {
   return prepareRowsForBackup(table, rows);
 }
 
-export function findCatalogCoverageGaps(liveTables, backedUpTables, ignoredTables = []) {
+/**
+ * Compare the live catalog against the backup manifest.
+ *
+ * `pendingTables` are tables whose creating migration exists in the repository but has not been
+ * applied to this database yet. Those are correctly ABSENT from the live catalog and correctly
+ * PRESENT in the manifest: a table must be listed for backup before it is created, or the first
+ * snapshot taken after the migration lands silently omits it. They are reported separately rather
+ * than counted as a gap, so "the manifest names a table production does not have" keeps meaning
+ * what it says.
+ */
+/**
+ * Tables whose creating migration is present in this repository but NOT yet applied to production.
+ * They belong in the backup manifest already — a table added to the manifest after its migration
+ * lands is a table the first snapshot silently omits — and they are correctly absent from the live
+ * catalog until the migration is applied. Empty this list as each migration is applied.
+ */
+// Empty since 2026-09-20: the WP4, WP8 and WP12 migrations were applied to production, so their
+// nine tables moved from here into PRODUCTION_PUBLIC_TABLES_107 below. Add to this list only for
+// the window between a migration landing in the repository and being applied.
+export const PENDING_MIGRATION_TABLES = Object.freeze([]);
+
+export function findCatalogCoverageGaps(liveTables, backedUpTables, ignoredTables = [], pendingTables = []) {
   const live = new Set(liveTables);
   const backed = new Set(backedUpTables);
   const ignored = new Set(ignoredTables);
+  const pending = new Set(pendingTables);
   return {
     missingFromBackup: [...live].filter((table) => !backed.has(table) && !ignored.has(table)).sort(),
-    missingFromCatalog: [...backed].filter((table) => !live.has(table)).sort(),
+    missingFromCatalog: [...backed].filter((table) => !live.has(table) && !pending.has(table)).sort(),
+    pendingMigration: [...backed].filter((table) => !live.has(table) && pending.has(table)).sort(),
   };
 }
 

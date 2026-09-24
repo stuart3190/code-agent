@@ -25,6 +25,11 @@ export const REPAIR_OWNERSHIP = Object.freeze({
   PLATFORM_PROVIDER: "platform_provider",   // provider/model/credit availability, never the app
   PACKAGING_RUNTIME: "packaging_runtime",   // the sandbox/runtime image is not the host's code
   UNDETERMINED: "undetermined",             // the evidence does not settle who owns it
+  // WP14. A defect whose implicated files are ALL platform-owned is the platform's to fix, by
+  // remediation or a versioned module upgrade. It is never an application patch, because the model
+  // cannot write those files and a repair that tries will either fail the write guard or, worse,
+  // rewrite the application around a module that is working correctly (audit §14).
+  MODULE_FAULT: "module_fault",
 });
 
 export const REPAIR_STRATEGY_ORDER = Object.freeze([
@@ -34,7 +39,10 @@ export const REPAIR_STRATEGY_ORDER = Object.freeze([
 const unique = (values) => [...new Set((values || []).filter(Boolean))];
 const SOURCE = /\.(?:jsx?|tsx?|mjs)$/;
 // Platform-owned runtime modules: read context for a repair, never something it may rewrite.
-const PLATFORM_PATH = /(?:^|\/)lib\/(?:capabilities|scaffolds|backend)\//;
+// Repair may never rewrite platform code. WP3+ put the module runtime (lib/modules) and the
+// composed public facade (lib/app) inside that boundary: a module fault is platform remediation
+// or a versioned module upgrade, never an application patch (audit §14).
+const PLATFORM_PATH = /(?:^|\/)lib\/(?:capabilities|scaffolds|backend|modules|app)\//;
 const generatedSource = (path) => SOURCE.test(String(path || "")) && !PLATFORM_PATH.test(String(path || ""));
 
 const PACKAGING_SIGNS = /ERR_MODULE_NOT_FOUND|Cannot find (?:module|package)|sandbox_version_mismatch|sandbox (?:image|identity)|not copied|does not support|ENOENT.*node_modules/i;
@@ -50,6 +58,16 @@ export function classifyRepairOwnership(defect, { tree = null } = {}) {
   const observed = String(defect?.evidence?.observed || defect?.evidence?.detail || "");
   const modules = unique(defect?.modules || []);
   const decide = (ownership, reason, evidence = {}) => ({ ownership, reason, evidence: { code, modules, ...evidence } });
+
+  // WP14: a defect that implicates ONLY platform files is a module fault, decided before anything
+  // else. Reaching the generated-app default with a list of module paths is how a model is asked
+  // to patch code it may not write, and the write guard then reports that as an application
+  // failure. One rule, checked first: if every implicated file is platform-owned, it is ours.
+  const platformOnly = modules.length > 0 && modules.every((path) => PLATFORM_PATH.test(String(path || "")));
+  if (platformOnly && defect?.defectClass !== DEFECT_CLASS.CONTRACT) {
+    return decide(REPAIR_OWNERSHIP.MODULE_FAULT,
+      "every file the defect implicates is platform-owned: this is module remediation or a versioned module upgrade, never an application patch");
+  }
 
   // The contract or its execution projection cannot be executed as written.
   if (defect?.defectClass === DEFECT_CLASS.CONTRACT
