@@ -3,7 +3,10 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-export const AUDITED_MAIN_COMMIT = "92e4c9fe5c864799eee228f304849064bacb0190";
+// The main an integration branch was validated against. Re-pinned 2026-09-24 when
+// feat/smoke-verifier-bypass-toggle merged main at 5d83498 (WP0-WP15 + hotfixes) and ran the
+// focused verification suites against that merge; the previous pin was 92e4c9f.
+export const AUDITED_MAIN_COMMIT = "5d83498e70384dc2f448d8f9ac650832408dbd43";
 export const SAFETY_ENV_KEYS = Object.freeze([
   "THRALLO_MANAGED_SETTLEMENT_PAUSED",
   "THRALLO_BV2_KILL",
