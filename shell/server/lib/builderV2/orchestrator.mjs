@@ -20,6 +20,7 @@ import { memoryGraph } from "./graphStore.mjs";
 import { applyPatches, escalationPlan, patchOutcomes, REJECTION } from "./patchEngine.mjs";
 import { completionEligibility } from "./contractTiering.mjs";
 import { deriveBuildSpec, journeysInMountedScreenUnit, scopeBuildSpec } from "./buildSpec.mjs";
+import { refreshAutoBuildProfile } from "../../../shared/buildProfile.mjs";
 import { coreGenerationScope, preprocessCandidateTree, staticCandidateVerdict } from "./preRepairPipeline.mjs";
 import { deriveVerificationManifest } from "./verificationManifest.mjs";
 import { advisoryMessages, partitionFindings } from "./validationSeverity.mjs";
@@ -1224,7 +1225,17 @@ export function createOrchestrator({
         abortIfRequested(signal);
         // 1. contract → tiers, capability bindings, image intents (deterministic after the call).
         await setState("contracting");
-        const rawContract = await contractFn({ owner, projectId, buildId, request, profile, buildProfile, signal });
+        // Intake stamps auto signals on the raw user turn. The request here is the brief the
+        // contract is actually written from, often rewritten by the lead agent. Re-infer auto
+        // signals from that brief so an exclusion the rewrite made explicit is what the gate
+        // enforces. Explicit and adjusted profiles stay as the user set them.
+        const contractProfile = refreshAutoBuildProfile(buildProfile, request);
+        const beforeSignals = [...(buildProfile?.requirementSignals || [])].sort().join(",");
+        const afterSignals = [...(contractProfile?.requirementSignals || [])].sort().join(",");
+        if (buildProfile?.inferenceSource === "auto" && beforeSignals !== afterSignals) {
+          log(`build profile re-inferred from the authoritative brief (${beforeSignals || "none"} -> ${afterSignals || "none"})`);
+        }
+        const rawContract = await contractFn({ owner, projectId, buildId, request, profile, buildProfile: contractProfile, signal });
         // ONE derivation for the whole build: tiers, bindings, module plan, interaction
         // contract, per-module contracts, persistence ownership and image intents all come
         // from here and are passed down, so no subsystem re-reads the contract prose alone.
@@ -1259,7 +1270,7 @@ export function createOrchestrator({
               ...(spec.verdict.interaction?.issues || []), ...(spec.verdict.scaffoldGraph?.issues || []),
             ];
             const repairedContract = await contractFn({
-              owner, projectId, buildId, request, profile, buildProfile, signal,
+              owner, projectId, buildId, request, profile, buildProfile: contractProfile, signal,
               priorContract: rawContract, problems: spec.verdict.problems || [],
               issues: dependencyIssuesBefore,
             });
