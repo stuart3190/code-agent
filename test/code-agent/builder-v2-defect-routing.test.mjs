@@ -394,7 +394,17 @@ test("collection repairs retain durable mutation, structural membership, and fre
   const lines = defectEvidence([defect]);
   assert.ok(lines.some((line) => /structuralMemberCount=0/.test(line)));
   assert.ok(lines.some((line) => /Backend evidence recorded 1 created row/.test(line)));
-  assert.ok(lines.some((line) => /dependent step from racing an unfinished async transition/.test(line)));
+  assert.ok(lines.some((line) => /context \(verifier advisory, not the repair\)/.test(line)
+    && /dependent step from racing an unfinished async transition/.test(line)));
+  const staleWording = defectEvidence([{
+    ...defect,
+    evidence: {
+      ...defect.evidence,
+      journeyAdvisories: [{ stepIndex: 1, code: "text_freshness_not_observed", detail: "timing note only" }],
+    },
+  }]);
+  assert.equal(staleWording.some((line) => /dependent step from racing/.test(line)), false,
+    "freshness is context only while the advisory still uses the actionable wording");
   const structured = lines.map((line) => { try { return JSON.parse(line); } catch { return null; } })
     .find(Boolean);
   assert.deepEqual(structured.collectionMembership, defect.evidence.collectionMembership);

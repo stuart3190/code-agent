@@ -40,7 +40,7 @@ import {
   defectEvidence, defectWriteBoundary, defectProgress, defectSignature, mergeDefectAttribution,
   verificationDefectRecords,
 } from "./verificationDefects.mjs";
-import { governRepairRound, reclassifyStalledDefects } from "./repairGovernance.mjs";
+import { REPAIR_OWNERSHIP, governRepairRound, reclassifyStalledDefects } from "./repairGovernance.mjs";
 import { createSnapshotStore } from "./snapshotStore.mjs";
 import { serviceClient } from "../supabase.mjs";
 import { generationPolicyFor } from "./generationPolicy.mjs";
@@ -1600,28 +1600,37 @@ export function createOrchestrator({
           while (!currentEligibility.eligible && rounds < maxRounds
             && strategy < REPAIR_STRATEGIES.length) {
             let actionable = actionableDefects(currentDefects);
-            if (!actionable.length) break; // nothing an application patch can answer
             // OWNERSHIP BEFORE PATCHING. Only a defect the generated application owns may spend an
             // application repair. A missing producer chain, an unexecutable contract, a verifier or
             // sandbox failure is recorded with its owner and stops the tier instead of buying a
-            // patch that can change nothing. Feasibility is decided at the same time: a boundary
-            // that omits evidence-named modules widens the strategy NOW rather than after a round
-            // failed on scope, and a planned-but-unwritten module goes straight to regeneration.
+            // patch that can change nothing. Advisory and inconclusive checks are verifier noise:
+            // they are logged and withheld even when they are the only defects, so the stop reason
+            // is repair_withheld_verifier_noise rather than a silent no-actionable exit. Feasibility
+            // is decided at the same time: a boundary that omits evidence-named modules widens the
+            // strategy NOW rather than after a round failed on scope, and a planned-but-unwritten
+            // module goes straight to regeneration.
             let mode = REPAIR_STRATEGIES[strategy];
             const governance = governRepairRound({
               tree: currentTree, defects: currentDefects, strategy: mode,
               boundary: mode === "exact_owning_file_repair" ? defectWriteBoundary(currentDefects) : null,
             });
-            await events.telemetry?.({ owner, projectId, buildId, kind: "repair_governance", details: {
-              strategy: mode, dispatchable: governance.dispatchable.length, withheld: governance.withheld,
-              ownership: governance.ownershipCounts, escalateTo: governance.escalateTo,
-              feasibility: governance.feasibility ? { feasible: governance.feasibility.feasible,
-                reasons: governance.feasibility.reasons, missingModules: governance.feasibility.missingModules } : null,
-            } });
+            const verifierNoise = governance.withheld.filter((row) => row.ownership === REPAIR_OWNERSHIP.VERIFIER_NOISE);
+            if (governance.dispatchable.length || verifierNoise.length || actionable.length) {
+              await events.telemetry?.({ owner, projectId, buildId, kind: "repair_governance", details: {
+                strategy: mode, dispatchable: governance.dispatchable.length, withheld: governance.withheld,
+                verifierNoise, ownership: governance.ownershipCounts, escalateTo: governance.escalateTo,
+                feasibility: governance.feasibility ? { feasible: governance.feasibility.feasible,
+                  reasons: governance.feasibility.reasons, missingModules: governance.feasibility.missingModules } : null,
+              } });
+            }
             if (!governance.dispatchable.length) {
-              governanceStop = governance.stopReason;
-              log(`${label}: no defect the generated application owns - ${governance.withheld
-                .map((row) => `${row.journeyId || "-"}:${row.code} is ${row.ownership}`).join("; ")} - stopping without a repair`);
+              if (verifierNoise.length || actionable.length) {
+                governanceStop = governance.stopReason;
+                log(`${label}: no defect the generated application owns - ${governance.withheld
+                  .map((row) => `${row.journeyId || "-"}:${row.code} is ${row.ownership}`).join("; ")}`
+                  + (verifierNoise.length ? ` - ${verifierNoise.length} verifier-noise withhold(s)` : "")
+                  + " - stopping without a repair");
+              }
               break;
             }
             if (governance.escalateTo && REPAIR_STRATEGIES.indexOf(governance.escalateTo) > strategy) {
@@ -1819,8 +1828,10 @@ export function createOrchestrator({
             // NO PROGRESS RECLASSIFIES BEFORE IT REGENERATES. A defect whose control is bound and was
             // operated, and which an exact and a causal repair both left unchanged, is not answered
             // by rewriting the owner again: it is reclassified as undetermined (contract expectation
-            // or verifier reading to review) and leaves the actionable set. Only a control bound
-            // nowhere keeps the application as owner and earns the regeneration.
+            // or verifier reading to review) and leaves the actionable set. Values and computed
+            // output that did not move after one round stop there, without waiting for the second
+            // strategy. Only a control bound nowhere keeps the application as owner and earns the
+            // regeneration.
             const strategiesTried = REPAIR_STRATEGIES.slice(0, strategy);
             const reclassification = reclassifyStalledDefects(currentDefects, { tree: currentTree, strategiesTried });
             if (reclassification.reclassified.length) {

@@ -12,10 +12,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  BYPASSED_VERIFIER_POLICY, LEGACY_RICH_VERIFIER_POLICY, SMOKE_VERIFIER_POLICY, VERIFICATION_RESULT_CLASS,
+} from "../../shell/server/lib/appBuild/verifierPolicy.mjs";
+import {
   REPAIR_OWNERSHIP, bindingSitesOf, classifyRepairOwnership, dependencyClosure, governRepairRound,
   reclassifyStalledDefects, repairFeasibility,
 } from "../../shell/server/lib/builderV2/repairGovernance.mjs";
-import { DEFECT_CLASS, DEFECT_OWNER, REPAIR_TIER } from "../../shell/server/lib/builderV2/verificationDefects.mjs";
+import {
+  DEFECT_CLASS, DEFECT_OWNER, REPAIR_TIER, actionableDefects, verificationDefects,
+} from "../../shell/server/lib/builderV2/verificationDefects.mjs";
 import { controlIdFor } from "../../shell/server/lib/builderV2/verificationManifest.mjs";
 
 const appDefect = (overrides = {}) => ({
@@ -159,4 +164,108 @@ test("a stalled defect on a bound, operated control is reclassified as undetermi
   // No identity evidence at all: the existing ladder decides, nothing is reclassified.
   const anonymous = appDefect({ control: null });
   assert.equal(reclassifyStalledDefects([anonymous], { tree: TREE, strategiesTried: ["exact_owning_file_repair", "causal_dependency_repair"] }).reclassified.length, 0);
+});
+
+test("verifier noise is withheld and a noise-only set does not dispatch", () => {
+  const advisory = appDefect({
+    tier: REPAIR_TIER.REPAIR,
+    evidence: { expected: "Saved", observed: "saved", drove: true, failingChecks: ["visible_text"] },
+  });
+  const inconclusive = appDefect({
+    journeyId: "filter-board",
+    evidence: {
+      expected: "the row", observed: "the collection region was not found", drove: true,
+      failingChecks: [{ kind: "collection", inconclusive: true }],
+    },
+  });
+  assert.equal(classifyRepairOwnership(advisory, { tree: TREE }).ownership, REPAIR_OWNERSHIP.VERIFIER_NOISE);
+  assert.equal(classifyRepairOwnership(inconclusive, { tree: TREE }).ownership, REPAIR_OWNERSHIP.VERIFIER_NOISE);
+
+  const onlyAdvisory = governRepairRound({ tree: TREE, defects: [advisory], strategy: "exact_owning_file_repair" });
+  assert.deepEqual(onlyAdvisory.dispatchable, []);
+  assert.equal(onlyAdvisory.withheld.length, 1);
+  assert.equal(onlyAdvisory.withheld[0].ownership, REPAIR_OWNERSHIP.VERIFIER_NOISE);
+  assert.equal(onlyAdvisory.stopReason, "repair_withheld_verifier_noise");
+
+  const onlyInconclusive = governRepairRound({ tree: TREE, defects: [inconclusive], strategy: "exact_owning_file_repair" });
+  assert.deepEqual(onlyInconclusive.dispatchable, []);
+  assert.equal(onlyInconclusive.stopReason, "repair_withheld_verifier_noise");
+
+  const mixedChecks = governRepairRound({
+    tree: TREE,
+    defects: [appDefect({ evidence: { drove: true, failingChecks: ["visible_text", "values"] } })],
+    strategy: "exact_owning_file_repair",
+    boundary: { allowedFiles: ["src/screens/scaffold/ProjectScreen.jsx"] },
+  });
+  assert.equal(mixedChecks.dispatchable.length, 1, "a blocking check beside advisory copy still dispatches");
+  assert.equal(mixedChecks.stopReason, null);
+
+  const alongside = governRepairRound({
+    tree: TREE,
+    defects: [appDefect(), advisory],
+    strategy: "exact_owning_file_repair",
+    boundary: { allowedFiles: ["src/screens/scaffold/ProjectScreen.jsx"] },
+  });
+  assert.equal(alongside.dispatchable.length, 1);
+  assert.deepEqual(alongside.withheld.map((row) => row.ownership), [REPAIR_OWNERSHIP.VERIFIER_NOISE]);
+  assert.equal(alongside.stopReason, null);
+});
+
+test("an operated bound control whose failing kinds are only values or computed_output stalls after one unchanged round", () => {
+  const stalled = appDefect({
+    evidence: { expected: "42", observed: "0", drove: true, failingChecks: ["values", "computed_output"] },
+  });
+  const untouched = reclassifyStalledDefects([stalled], { tree: TREE, strategiesTried: [] });
+  assert.equal(untouched.reclassified.length, 0, "no round has run yet");
+  const afterOne = reclassifyStalledDefects([stalled], { tree: TREE, strategiesTried: ["exact_owning_file_repair"] });
+  assert.equal(afterOne.reclassified.length, 1);
+  assert.equal(afterOne.defects[0].repairOwnership, REPAIR_OWNERSHIP.UNDETERMINED);
+  assert.equal(afterOne.defects[0].tier, REPAIR_TIER.NONE);
+  assert.equal(afterOne.defects[0].owner, DEFECT_OWNER.UNKNOWN);
+  assert.match(afterOne.defects[0].repairOwnershipReason, /one repair round left only values\/computed_output/);
+  const outputOnly = appDefect({
+    evidence: { drove: true, failingChecks: ["computed_output"] },
+  });
+  assert.equal(reclassifyStalledDefects([outputOnly], {
+    tree: TREE, strategiesTried: ["exact_owning_file_repair"],
+  }).reclassified.length, 1);
+  const mixed = appDefect({
+    evidence: { drove: true, failingChecks: ["values", "mutation"] },
+  });
+  assert.equal(reclassifyStalledDefects([mixed], {
+    tree: TREE, strategiesTried: ["exact_owning_file_repair"],
+  }).reclassified.length, 0, "a non-value kind still waits for both scoped strategies");
+  const unbound = appDefect({
+    control: { id: controlIdFor("task.dueDate"), logicalField: "dueDate", scope: "task" },
+    evidence: { drove: true, failingChecks: ["values"] },
+  });
+  const kept = reclassifyStalledDefects([unbound], { tree: TREE, strategiesTried: ["exact_owning_file_repair"] });
+  assert.equal(kept.reclassified.length, 0, "an unbound control is not an early stall");
+  assert.equal(kept.defects[0].tier, REPAIR_TIER.REPAIR);
+});
+
+test("smoke is never repairable and a non-minimal policy is not repairable by default", () => {
+  const contract = { journeys: [{ id: "calc", steps: [{ action: "add", expect: "4" }] }], operations: [] };
+  const step = {
+    action: "add", expect: "4", status: "fail", drove: true,
+    classification: VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
+    detail: "computed output wrong",
+    checks: [{ kind: "computed_output", ok: false }],
+  };
+  const defectsFor = (verifierPolicy, over = {}) => verificationDefects({
+    contract,
+    interactionContract: { flows: [] },
+    journeyResults: {
+      verifierPolicy,
+      journeys: [{ id: "calc", status: "fail", owners: ["src/screens/Calc.jsx"], steps: [{ ...step, ...over }] }],
+    },
+  });
+  assert.equal(actionableDefects(defectsFor(SMOKE_VERIFIER_POLICY)).length, 0, "smoke never opens a repair");
+  assert.equal(actionableDefects(defectsFor(BYPASSED_VERIFIER_POLICY)).length, 0);
+  assert.equal(actionableDefects(defectsFor("future_policy_v9", {
+    classification: VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE,
+  })).length, 0, "an unknown policy is not repairable just because it is not minimal");
+  assert.equal(actionableDefects(defectsFor(LEGACY_RICH_VERIFIER_POLICY, { classification: undefined })).length, 1,
+    "a historical verdict with no result class stays repairable");
+  assert.equal(actionableDefects(defectsFor(null, { classification: undefined })).length, 1);
 });

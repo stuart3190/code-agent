@@ -15,6 +15,7 @@
 // prose, nothing consults a model.
 
 import { parseImports } from "../appBuild/importPreflight.mjs";
+import { SEVERITY, verifierCheckSeverity } from "./validationSeverity.mjs";
 import { DEFECT_CLASS, DEFECT_OWNER, REPAIR_TIER, actionableDefects } from "./verificationDefects.mjs";
 
 export const REPAIR_OWNERSHIP = Object.freeze({
@@ -25,6 +26,9 @@ export const REPAIR_OWNERSHIP = Object.freeze({
   PLATFORM_PROVIDER: "platform_provider",   // provider/model/credit availability, never the app
   PACKAGING_RUNTIME: "packaging_runtime",   // the sandbox/runtime image is not the host's code
   UNDETERMINED: "undetermined",             // the evidence does not settle who owns it
+  // Every failing check is advisory copy or an inconclusive verifier reading. It must not
+  // open or continue an application repair: there is nothing a patch can honestly change.
+  VERIFIER_NOISE: "verifier_noise",
   // WP14. A defect whose implicated files are ALL platform-owned is the platform's to fix, by
   // remediation or a versioned module upgrade. It is never an application patch, because the model
   // cannot write those files and a repair that tries will either fail the write guard or, worse,
@@ -47,6 +51,18 @@ const generatedSource = (path) => SOURCE.test(String(path || "")) && !PLATFORM_P
 
 const PACKAGING_SIGNS = /ERR_MODULE_NOT_FOUND|Cannot find (?:module|package)|sandbox_version_mismatch|sandbox (?:image|identity)|not copied|does not support|ENOENT.*node_modules/i;
 const PROVIDER_SIGNS = /\b(?:provider|model|credit|budget|rate.?limit|quota|token limit|429|overloaded|billing)\b/i;
+const failingCheckKind = (check) => (typeof check === "string" ? check : String(check?.kind || ""));
+
+/** True when every recorded failing check is advisory copy or an inconclusive verifier reading. */
+export function failingChecksAreVerifierNoise(checks) {
+  if (!Array.isArray(checks) || checks.length === 0) return false;
+  const allAdvisory = checks.every((check) => (
+    check?.inconclusive !== true
+    && verifierCheckSeverity(failingCheckKind(check)) === SEVERITY.ADVISORY
+  ));
+  if (allAdvisory) return true;
+  return checks.every((check) => check && typeof check === "object" && check.inconclusive === true);
+}
 
 /**
  * Who owns one verified defect.
@@ -85,6 +101,16 @@ export function classifyRepairOwnership(defect, { tree = null } = {}) {
     return producerRan
       ? decide(REPAIR_OWNERSHIP.GENERATED_APP, "the chain names a control or producer in the application that did not establish the record")
       : decide(REPAIR_OWNERSHIP.PREREQUISITE_MISSING, "the journey's starting state has no reproducible producer in the application");
+  }
+  // Advisory copy and inconclusive readings are not application defects. A probe that proved the
+  // control cannot hold a value still is: that correction is structural, and Phase A keeps it
+  // even when the only structured checks are advisory.
+  if (defect?.tier !== REPAIR_TIER.CORRECTION
+    && defect?.code !== "control_cannot_hold_value"
+    && failingChecksAreVerifierNoise(defect?.evidence?.failingChecks)) {
+    return decide(REPAIR_OWNERSHIP.VERIFIER_NOISE,
+      "every failing check is advisory or inconclusive: a repair cannot change what the verifier failed to decide",
+      { failingChecks: defect.evidence.failingChecks });
   }
   // The platform could not run or could not decide.
   if (defect?.owner === DEFECT_OWNER.PLATFORM || defect?.defectClass === DEFECT_CLASS.PLATFORM) {
@@ -234,7 +260,9 @@ export function repairFeasibility({ tree, defects = [], boundary = null, strateg
 export function governRepairRound({ tree, defects = [], boundary = null, strategy = REPAIR_STRATEGY_ORDER[0] } = {}) {
   const decisions = (defects || []).map((defect) => ({ defect, ...classifyRepairOwnership(defect, { tree }) }));
   const dispatchable = decisions.filter((row) => row.ownership === REPAIR_OWNERSHIP.GENERATED_APP && row.defect.tier !== REPAIR_TIER.NONE);
-  const withheld = decisions.filter((row) => !dispatchable.includes(row) && row.defect.owner !== DEFECT_OWNER.PLATFORM);
+  const withheld = decisions.filter((row) => !dispatchable.includes(row) && (
+    row.ownership === REPAIR_OWNERSHIP.VERIFIER_NOISE || row.defect.owner !== DEFECT_OWNER.PLATFORM
+  ));
   const feasibility = dispatchable.length
     ? repairFeasibility({ tree, defects: dispatchable.map((row) => row.defect), boundary, strategy })
     : null;
@@ -259,36 +287,54 @@ export function governRepairRound({ tree, defects = [], boundary = null, strateg
 
 // ── stalls ─────────────────────────────────────────────────────────────────────────────────────
 
+const VALUE_OUTPUT_KINDS = new Set(["values", "computed_output"]);
+
+function valueOutputKindsOnly(defect) {
+  const kinds = (defect?.evidence?.failingChecks || []).map(failingCheckKind).filter(Boolean);
+  return kinds.length > 0 && kinds.every((kind) => VALUE_OUTPUT_KINDS.has(kind));
+}
+
 /**
  * A defect that survived the exact AND the causal strategy unchanged is not answered by regenerating
  * its owner unless the evidence still says the owner is where the defect lives. When the contracted
  * control is bound in the tree and was operated (the failure is the outcome, not the control), two
  * scoped repairs that changed nothing say the defect is not in that module: it is reclassified as
  * undetermined - a contract expectation or a verifier reading to review - and stops spending.
+ * An operated bound control whose failing kinds are only `values` or `computed_output` reaches that
+ * same stop after one unchanged round: another strategy will not make a stable numeric reading move.
  * When the control is bound nowhere, the owner is provably incomplete and regeneration is justified.
  */
 export function reclassifyStalledDefects(defects = [], { tree = null, strategiesTried = [] } = {}) {
   const exhaustedScoped = ["exact_owning_file_repair", "causal_dependency_repair"]
     .every((strategy) => strategiesTried.includes(strategy));
+  const triedOneRound = (strategiesTried || []).length > 0;
   const reclassified = [];
   const next = (defects || []).map((defect) => {
-    if (!exhaustedScoped || defect.owner === DEFECT_OWNER.PLATFORM || defect.tier === REPAIR_TIER.NONE) return defect;
+    const earlyValueStall = valueOutputKindsOnly(defect) && triedOneRound;
+    if (!(exhaustedScoped || earlyValueStall) || defect.owner === DEFECT_OWNER.PLATFORM || defect.tier === REPAIR_TIER.NONE) return defect;
     const control = defect.control?.id ? defect.control : null;
     if (!control) return defect; // no identity evidence: the ladder keeps its existing escalation
     const sites = bindingSitesOf(tree, control);
     const operated = defect.evidence?.drove === true || defect.defectClass === DEFECT_CLASS.BEHAVIOUR
       || defect.defectClass === DEFECT_CLASS.DURABILITY;
     if (!sites.length) {
+      if (!exhaustedScoped) return defect;
       return { ...defect, repairOwnership: REPAIR_OWNERSHIP.GENERATED_APP,
         repairOwnershipReason: "the contracted control is bound nowhere in the tree: the owner is incomplete" };
     }
     if (!operated) return defect;
+    const bound = sites.map((site) => site.file).join(", ");
+    const repairOwnershipReason = earlyValueStall && !exhaustedScoped
+      ? `the control is bound (${bound}) and was operated; one repair round left only values/computed_output `
+        + "checks unchanged, so the defect is not in those modules: review the contracted expectation and "
+        + "the verifier's reading before spending further repairs"
+      : `the control is bound (${bound}) and was operated; `
+        + "an exact and a causal repair left the outcome unchanged, so the defect is not in those modules: "
+        + "review the contracted expectation and the verifier's reading before spending further repairs";
     const row = {
       ...defect, owner: DEFECT_OWNER.UNKNOWN, tier: REPAIR_TIER.NONE,
       repairOwnership: REPAIR_OWNERSHIP.UNDETERMINED,
-      repairOwnershipReason: `the control is bound (${sites.map((site) => site.file).join(", ")}) and was operated; `
-        + "an exact and a causal repair left the outcome unchanged, so the defect is not in those modules: "
-        + "review the contracted expectation and the verifier's reading before spending further repairs",
+      repairOwnershipReason,
     };
     reclassified.push({ code: defect.code, journeyId: defect.journeyId || null, stepIndex: defect.stepIndex ?? null,
       control: control.id, ownership: row.repairOwnership, reason: row.repairOwnershipReason });
