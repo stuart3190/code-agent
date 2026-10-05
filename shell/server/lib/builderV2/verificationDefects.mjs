@@ -42,6 +42,7 @@ import {
   VERIFICATION_RESULT_CLASS,
   isAppRepairableVerificationClass,
 } from "../appBuild/verifierPolicy.mjs";
+import { SEVERITY, verifierCheckSeverity } from "./validationSeverity.mjs";
 
 export const DEFECT_CLASS = Object.freeze({
   INTERACTION: "interaction",   // the browser could not operate a contracted control
@@ -174,6 +175,16 @@ function modulesFor(diagnostic, journey) {
  * or, when the contract says the step's subject is a durable record, DURABILITY (run #9's refused
  * commit, run #10's booking that did not survive a reload).
  */
+function failingVerifierChecks(step) {
+  return (Array.isArray(step?.checks) ? step.checks : [])
+    .filter((check) => check && check.ok === false && check.kind)
+    .map((check) => String(check.kind));
+}
+
+function advisoryVerifierChecksOnly(kinds) {
+  return kinds.length > 0 && kinds.every((kind) => verifierCheckSeverity(kind) === SEVERITY.ADVISORY);
+}
+
 function classifyStep({ status, drove, kinds }) {
   if (status === "undriveable") return DEFECT_CLASS.INTERACTION;
   const durable = kinds.some((kind) => DURABLE_KINDS.has(kind));
@@ -395,6 +406,10 @@ export function verificationDefects({
       ...surfaceIntegration.mountedPaths,
       ...surfaceIntegration.unreachableJourneyModules,
     ]).filter(generatedSource) : [];
+    const failingChecks = failingVerifierChecks(step);
+    // A miss that is only declared visible text is not something a repair round can honestly fix.
+    // Blocking checks still present keep the normal tier.
+    const advisoryOnly = advisoryVerifierChecksOnly(failingChecks);
     defects.push({
       code: proven ? "control_cannot_hold_value"
         : status === "undriveable" ? "contracted_control_undriveable"
@@ -404,7 +419,7 @@ export function verificationDefects({
       owner: (platformInconclusive && !appSelectionValueMissing) || contractIncomplete || inconclusiveAddressing ? DEFECT_OWNER.PLATFORM
         : (ambiguous ? DEFECT_OWNER.UNKNOWN : DEFECT_OWNER.APP),
       uncertain: ambiguous || undefined,
-      tier: (platformInconclusive && !appSelectionValueMissing) || inconclusiveAddressing || !repairableResult ? REPAIR_TIER.NONE
+      tier: (advisoryOnly && !proven) || (platformInconclusive && !appSelectionValueMissing) || inconclusiveAddressing || !repairableResult ? REPAIR_TIER.NONE
         : (proven ? REPAIR_TIER.CORRECTION : REPAIR_TIER.REPAIR),
       journeyId: diagnostic.journeyId, stepIndex: diagnostic.stepIndex,
       action: diagnostic.userAction, control,
@@ -419,6 +434,7 @@ export function verificationDefects({
         expected: diagnostic.expectedStateAfter || null,
         observed: diagnostic.actualObservedState || null,
         drove: step?.drove ?? null,
+        failingChecks,
         // Collection verification already distinguishes "the action did not run" from "the
         // durable row exists but the mounted collection still renders no matching member". Keep
         // that distinction through repair dispatch; dropping it made repeated rounds rewrite a
@@ -677,6 +693,7 @@ export function defectEvidence(defects = []) {
       journeyAdvisories: defect.evidence?.journeyAdvisories || [],
       backendEntityDiff: defect.evidence?.entityDiff || null,
       drove: defect.evidence?.drove ?? null,
+      failingChecks: defect.evidence?.failingChecks || [],
       pageTextWhenItFailed: defect.evidence?.pageText || null,
       consoleErrorsDuringStep: defect.evidence?.consoleErrors || [],
       failedRequestsDuringStep: defect.evidence?.failedRequests || [],
