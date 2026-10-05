@@ -14,7 +14,8 @@ import assert from "node:assert/strict";
 import { deriveBuildSpec, scopeBuildSpec } from "../../shell/server/lib/builderV2/buildSpec.mjs";
 import { validateModuleConformance } from "../../shell/server/lib/builderV2/moduleContracts.mjs";
 import { lintDurablePersistence } from "../../shell/server/lib/builderV2/persistenceLint.mjs";
-import { partitionFindings } from "../../shell/server/lib/builderV2/validationSeverity.mjs";
+import { runStaticApplicationGate } from "../../shell/server/lib/builderV2/staticApplicationGate.mjs";
+import { partitionFindings, SEVERITY, severityOf } from "../../shell/server/lib/builderV2/validationSeverity.mjs";
 import { durableOperationOwner } from "../../shell/server/lib/builderV2/interactionContract.mjs";
 import { bindCapabilities } from "../../shell/server/lib/builderV2/contractTiering.mjs";
 import { aggregateCapabilityFacts } from "../../shell/server/lib/builderV2/capabilityLint.mjs";
@@ -233,6 +234,22 @@ test("FALSE-REJECTION RATE over known-working implementations is zero", () => {
   const rate = rejected.length / total;
   assert.equal(rate, 0,
     `false-rejection rate ${rejected.length}/${total}: ${JSON.stringify(rejected, null, 2)}`);
+});
+
+test("entity store integrity adds no rejections to the known-working corpus", () => {
+  assert.equal(severityOf("entity_store_unmounted"), SEVERITY.ADVISORY);
+  const rejected = [];
+  for (const [name, tree] of Object.entries(IDIOMATIC)) {
+    const spec = scopeBuildSpec(deriveBuildSpec(BOOKING), BOOKING.journeys);
+    const result = runStaticApplicationGate(tree, {
+      contract: spec.contract, modulePlan: spec.modulePlan, journeys: BOOKING.journeys,
+    });
+    const hits = [...result.blocking, ...result.advisory]
+      .filter((finding) => finding.code === "entity_store_unmounted");
+    if (hits.length) rejected.push({ name, hits });
+  }
+  assert.deepEqual(rejected, [],
+    `entity_store_unmounted rejected ${rejected.length} known-working implementation(s): ${JSON.stringify(rejected, null, 2)}`);
 });
 
 test("useSyncExternalStore(store.subscribe, store.getState) counts as real capability usage", () => {

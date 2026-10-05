@@ -122,6 +122,32 @@ export default function App() {
   assert.match(finding.message, /nothing the user creates is saved anywhere/);
 });
 
+test("a Builder V2 facade or entity store counts as backend use", () => {
+  const bodies = [
+    `import { entityStore } from "./lib/capabilities/composed/crud.js";
+const bookings = entityStore("booking");
+export default function App() { return <button onClick={() => bookings.create({})}>Book</button>; }`,
+    `import { useEntityMutation } from "./lib/app/entities.js";
+export default function App() { const save = useEntityMutation("booking"); return <button onClick={() => save.create({})}>Book</button>; }`,
+    `import { repository } from "./lib/app/entities.js";
+export default function App() { return <button onClick={() => repository("booking").create({})}>Book</button>; }`,
+    `import { useEntity } from "./lib/app/entities.js";
+export default function App() { const record = useEntity("booking", "b1"); return <p>{record.status}</p>; }`,
+    `import { makeEntityStore } from "./lib/capabilities/crud.js";
+const bookings = makeEntityStore("booking");
+export default function App() { return <button onClick={() => bookings.create({})}>Book</button>; }`,
+    `import { entityStores } from "./lib/capabilities/composed/crud.js";
+export default function App() { return <button onClick={() => entityStores.booking.create({})}>Book</button>; }`,
+    `import { repositories } from "./lib/app/entities.js";
+export default function App() { return <button onClick={() => repositories["booking"].list()}>Book</button>; }`,
+  ];
+  for (const body of bodies) {
+    const result = honestyScan({ "src/App.jsx": body }, { contract: CONTRACT });
+    assert.equal(result.findings.some((finding) => finding.id === "no_backend_at_all"), false, body);
+    assert.equal(result.ok, true, JSON.stringify(result.findings));
+  }
+});
+
 test("comments and strings do not produce false findings", () => {
   // "TODO: wire up the backend" in a comment is a note, not a fake handler. A scan that cannot
   // tell them apart would report every well-annotated file.

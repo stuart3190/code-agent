@@ -130,8 +130,10 @@ const PATTERNS = [
 ];
 
 // A file that talks to the backend at all. Used to decide whether component state is a cache or
-// the whole database.
-const USES_BACKEND = /\b(?:db\s*\.\s*entity|auth\s*\.\s*(?:signUp|signIn|currentUser)|storage\s*\.)/;
+// the whole database. Builder V2 application code calls the public facade or entity store
+// (entityStore, repository, useEntity, useEntityMutation) instead of db.entity(); those calls
+// are the same backend, and a whole-app scan must not treat a V2 tree as if it stored nothing.
+const USES_BACKEND = /\b(?:db\s*\.\s*entity|auth\s*\.\s*(?:signUp|signIn|currentUser)|storage\s*\.|entityStore\s*\(|makeEntityStore\s*\(|useEntityMutation\s*\(|useEntity\s*\(|repository\s*\(|entityStores\s*(?:\.|\[)|repositories\s*(?:\.|\[))/;
 
 // ── Session-credential bootstrap (run cf130c23, src/App.jsx ensureBookingSession) ─────────────
 //
@@ -290,7 +292,7 @@ export function honestyScan(tree, { contract = null, stageScoped = false } = {})
       label: "declared data that is never stored",
       snippet: "",
       message: `the contract declares ${entities.join(", ")} but nothing in src/ ever calls `
-        + "db.entity(), so nothing the user creates is saved anywhere",
+        + "db.entity() or a Builder V2 entity facade/store, so nothing the user creates is saved anywhere",
     });
   }
 

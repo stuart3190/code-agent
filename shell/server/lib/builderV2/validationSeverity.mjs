@@ -124,6 +124,12 @@ export const ADVISORY_CODES = Object.freeze({
   durable_cancellation_missing: "the cancellation journey proves durable cancellation in the browser",
   process_memory: "a mutable module binding is only a defect if reload recovery actually fails",
   structural_expansion_exceeded: "the source tree is materially larger than its contract-derived scaffold surface",
+  // Entity/store integrity. A durable entity missing from the composed schema or entityStores,
+  // or never called from a module the running app can load, is worth naming before the browser.
+  // The call patterns this recognises are not yet complete enough to reject a build: a correct
+  // app may persist through a wrapper this walker does not follow. Reported, therefore, and not
+  // enforced — promote to blocking only after builder-v2-false-rejection scores zero of these.
+  entity_store_unmounted: "a durable entity is missing from the composed schema or entityStores, or no reachable module calls its facade or store",
 });
 
 /** Codes that must never be demoted, even by an explicit override. */
