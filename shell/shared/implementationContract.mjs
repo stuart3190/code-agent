@@ -211,6 +211,7 @@ export function isVague(text) {
  */
 /** Everything a step is allowed to name: the contract's own declared vocabulary, nothing else. */
 const normaliseReference = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+const referenceKey = (value) => normaliseReference(String(value ?? "").split(".").pop());
 
 const VERIFICATION_VALUE_INTENT = /\b(?:correct|incorrect)(?:ly)?\b/i;
 // Keyboard focus is a real control interaction, not an observation. Without structured operands
@@ -338,6 +339,82 @@ export function fieldNames(contract) {
   return names;
 }
 
+function operationKeys(operation) {
+  return [operation?.id, operation?.name].map((value) => normaliseReference(value)).filter(Boolean);
+}
+
+function operandKeys(step, key) {
+  return new Set((Array.isArray(step?.[key]) ? step[key] : []).flatMap((reference) => (
+    [normaliseReference(reference), referenceKey(reference)]
+  )));
+}
+
+function isDeclaredField(contract, reference) {
+  const names = fieldNames(contract);
+  return names.has(normaliseReference(reference)) || names.has(referenceKey(reference));
+}
+
+/**
+ * Functional output fields this step can name in expectedOutputs, with the responsibilities
+ * that write them. A field qualifies only when a functional responsibility writes it and the
+ * step reaches that write: it operates the operation, it produces the field, or it reads the
+ * field or operation after an earlier step operated that operation or produced the field.
+ */
+function functionalOutputReach(contract, step, priorSteps = []) {
+  const operations = contract?.operations || [];
+  const operatedHere = operandKeys(step, "operates");
+  const producedHere = operandKeys(step, "produces");
+  const readHere = operandKeys(step, "reads");
+  const operatedEarlier = new Set();
+  const producedEarlier = new Set();
+  for (const prior of priorSteps) {
+    for (const key of operandKeys(prior, "operates")) operatedEarlier.add(key);
+    for (const key of operandKeys(prior, "produces")) producedEarlier.add(key);
+  }
+  for (const operation of operations) {
+    if (!operationKeys(operation).some((key) => operatedEarlier.has(key))) continue;
+    for (const responsibility of operation?.responsibilities || []) {
+      if (responsibility?.type !== "functional") continue;
+      for (const field of responsibility?.writes || []) producedEarlier.add(referenceKey(field));
+    }
+  }
+  const byField = new Map();
+  for (const operation of operations) {
+    const keys = operationKeys(operation);
+    const performs = keys.some((key) => operatedHere.has(key));
+    const performedEarlier = keys.some((key) => operatedEarlier.has(key));
+    for (const responsibility of operation?.responsibilities || []) {
+      if (responsibility?.type !== "functional") continue;
+      for (const field of responsibility?.writes || []) {
+        const key = referenceKey(field);
+        if (!key || !isDeclaredField(contract, field)) continue;
+        const produces = producedHere.has(key);
+        const reads = readHere.has(key) || keys.some((opKey) => readHere.has(opKey));
+        if (!(performs || produces || (reads && (performedEarlier || producedEarlier.has(key))))) continue;
+        const list = byField.get(key) || [];
+        list.push(responsibility);
+        byField.set(key, list);
+      }
+    }
+  }
+  return byField;
+}
+
+function journeyFixtureKeys(steps) {
+  const keys = new Set();
+  for (const candidate of steps || []) {
+    const values = candidate?.verificationValues;
+    if (!values || typeof values !== "object" || Array.isArray(values)) continue;
+    for (const field of Object.keys(values)) keys.add(referenceKey(field));
+  }
+  return keys;
+}
+
+function isOutputPrimitive(value) {
+  return ["string", "number", "boolean"].includes(typeof value)
+    && !(typeof value === "string" && !value.trim());
+}
+
 export function validateContract(contract) {
   const problems = [];
   const warnings = [];
@@ -390,26 +467,30 @@ export function validateContract(contract) {
     for (const [stepIndex, step] of journey.steps.entries()) {
       // EVERY STEP STATES A VERIFIABLE OUTCOME. The browser verifier judges a step on structured
       // contract evidence only: the route it opens, the controls or operation it operates, the
-      // values an earlier step entered, or the exact text the screen must show (visibleText).
-      // Prose alone ("fixture cards are visible") is CONTRACT_INCOMPLETE in the browser and can
-      // never turn a build green; the 2026-09-16 corpus carried four such steps. Named here, free,
-      // before any generation is paid for.
+      // values an earlier step entered, the exact text the screen must show (visibleText), or the
+      // computed result a functional step must show (expectedOutputs). Prose alone ("fixture cards
+      // are visible") is CONTRACT_INCOMPLETE in the browser and can never turn a build green; the
+      // 2026-09-16 corpus carried four such steps. Named here, free, before any generation is paid for.
       const routeNames = new Set((c.routes || []).flatMap((route) => [route?.path, route?.name])
         .filter(Boolean).map((value) => String(value).trim().toLowerCase()));
       const targetText = String(step?.target || "").trim().toLowerCase();
       const opensRoute = Boolean(step?.route) || (targetText && (targetText.startsWith("/") || routeNames.has(targetText)));
       const operatesSomething = Array.isArray(step?.operates) && step.operates.some(Boolean);
       const declaresVisibleText = Array.isArray(step?.visibleText) && step.visibleText.some((text) => String(text || "").trim());
+      const expectedOutputs = step?.expectedOutputs;
+      const declaresExpectedOutputs = Boolean(expectedOutputs && typeof expectedOutputs === "object"
+        && !Array.isArray(expectedOutputs) && Object.values(expectedOutputs).some(isOutputPrimitive));
       const reads = Array.isArray(step?.reads) ? step.reads.filter(Boolean) : [];
       const readsEntered = reads.some((field) => enteredSoFar.has(normaliseReference(field)) || declaredOperationIds.has(normaliseReference(field)));
       const reloads = /(?:^|[^a-z])(?:reload|refresh)(?:$|[^a-z])/i.test(String(step?.action || ""));
       // A reload is the recovery of the record an earlier step committed; the browser proves it on
       // that record's captured values and reference, so it needs no further declaration.
-      if (!opensRoute && !operatesSomething && !declaresVisibleText && !readsEntered && !reloads) {
+      if (!opensRoute && !operatesSomething && !declaresVisibleText && !readsEntered && !reloads && !declaresExpectedOutputs) {
         problems.push(`${where} step ${stepIndex + 1} states no verifiable outcome: `
           + (reads.length ? `it reads ${JSON.stringify(reads)} that no earlier step entered; ` : "")
           + "name the route it opens in \"target\", the controls or operation it operates in \"operates\", "
-          + "fields an earlier step entered in \"reads\", or the exact text the screen must show in \"visibleText\"");
+          + "fields an earlier step entered in \"reads\", the exact text the screen must show in \"visibleText\", "
+          + "or the computed result in \"expectedOutputs\"");
       }
       for (const field of Array.isArray(step?.operates) ? step.operates : []) {
         if (!field) continue;
@@ -532,6 +613,41 @@ export function validateContract(contract) {
               + `because "${step.action}" asks for a domain-constrained value the browser cannot safely invent`);
           }
         }
+      }
+      // COMPUTED OUTPUTS. A calculator step names the primitive its functional write must show.
+      // The key has to be a functional write or produce this step actually reaches, and every
+      // field that responsibility reads needs a verificationValues fixture already in the journey
+      // so the expected number is fixed by declared inputs.
+      if (expectedOutputs !== undefined && (expectedOutputs === null
+          || Array.isArray(expectedOutputs) || typeof expectedOutputs !== "object")) {
+        problems.push(`${where} step ${stepIndex + 1} expectedOutputs is not an object keyed by output field`);
+      } else if (expectedOutputs) {
+        const reached = functionalOutputReach(c, step, journey.steps.slice(0, stepIndex));
+        const fixtures = journeyFixtureKeys(journey.steps.slice(0, stepIndex + 1));
+        const missingInputs = new Map();
+        for (const [field, value] of Object.entries(expectedOutputs)) {
+          const key = referenceKey(field);
+          if (!key) {
+            problems.push(`${where} step ${stepIndex + 1} expectedOutputs names an empty field`);
+          } else if (!isDeclaredField(c, field)) {
+            problems.push(`${where} step ${stepIndex + 1} expectedOutputs names "${field}", which is not a declared entity field`);
+          } else if (!reached.has(key)) {
+            problems.push(`${where} step ${stepIndex + 1} expectedOutputs names "${field}", which is not a functional output this step reaches`);
+          } else {
+            for (const responsibility of reached.get(key) || []) {
+              for (const read of responsibility?.reads || []) {
+                const input = referenceKey(read);
+                if (!input || !isDeclaredField(c, read) || fixtures.has(input) || missingInputs.has(input)) continue;
+                missingInputs.set(input, `${where} step ${stepIndex + 1} requires verificationValues.${String(read).split(".").pop()} `
+                  + `because expectedOutputs.${field} is computed from that input`);
+              }
+            }
+          }
+          if (!isOutputPrimitive(value)) {
+            problems.push(`${where} step ${stepIndex + 1} expectedOutputs.${field} must be a non-empty JSON primitive`);
+          }
+        }
+        for (const problem of missingInputs.values()) problems.push(problem);
       }
     }
     if (journey.stage && !STAGES.includes(journey.stage)) problems.push(`${where} names unknown stage "${journey.stage}"`);
@@ -692,6 +808,10 @@ export function contractBrief(contract) {
       if (step.verificationValues && Object.keys(step.verificationValues).length) {
         lines.push(`     verification inputs: ${JSON.stringify(step.verificationValues)}`);
       }
+      if (step.expectedOutputs && typeof step.expectedOutputs === "object" && !Array.isArray(step.expectedOutputs)
+          && Object.keys(step.expectedOutputs).length) {
+        lines.push(`     computed outputs: ${JSON.stringify(step.expectedOutputs)}`);
+      }
       lines.push(`  ${i + 1}. ${step.action}${step.target ? ` (${step.target})` : ""} → ${step.expect}`);
     }
     lines.push("");
@@ -753,11 +873,19 @@ export function contractBrief(contract) {
 /** One-line summary for logs and the Diagnostics header. */
 export function contractSummary(contract) {
   if (!contract) return "no contract";
+  const computedOutcomes = (contract.journeys || []).reduce((total, journey) => (
+    total + (journey?.steps || []).reduce((count, step) => {
+      const outputs = step?.expectedOutputs;
+      if (!outputs || typeof outputs !== "object" || Array.isArray(outputs)) return count;
+      return count + Object.keys(outputs).length;
+    }, 0)
+  ), 0);
   return [
     `${(contract.journeys || []).length} journeys`,
     `${(contract.entities || []).length} entities`,
     `${(contract.operations || []).length} operations`,
     `${(contract.acceptance || []).length} acceptance tests`,
+    computedOutcomes ? `${computedOutcomes} computed outcomes` : null,
     contract.deferred?.length ? `${contract.deferred.length} deferred` : null,
   ].filter(Boolean).join(" · ");
 }
