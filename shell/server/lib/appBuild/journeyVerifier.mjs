@@ -2554,6 +2554,74 @@ export function surfaceIncludes(surface, value) {
   return foldedSurface(surface).includes(needle);
 }
 
+// A computed result is a whole number token, never a substring: 12 must not pass inside 120.
+// Grouping separators and a trailing unit are not part of the value. The tolerance absorbs
+// binary float noise (0.1 + 0.2) and nothing a person would call a different result.
+function numberTokenPattern() {
+  return /(?<![\d.])[+-]?(?:[$£€¥]\s*)?(?:\d{1,3}(?:[,_\u00a0\u202f ]\d{3})+|\d+)(?:\.\d+)?(?:\s*[a-zA-Zµμ%][a-zA-Zµμ%0-9²³]*)?(?![\d])/gu;
+}
+
+function parseNumericToken(token) {
+  let body = String(token ?? "").normalize("NFKC").trim();
+  if (!body) return null;
+  let sign = 1;
+  if (body.startsWith("+")) body = body.slice(1).trim();
+  else if (body.startsWith("-")) { sign = -1; body = body.slice(1).trim(); }
+  body = body.replace(/^[$£€¥]\s*/, "");
+  body = body.replace(/\s*[a-zA-Zµμ%][a-zA-Zµμ%0-9²³]*$/u, "");
+  body = body.replace(/[,_\u00a0\u202f ]/g, "");
+  if (!/^\d+(?:\.\d+)?$/.test(body)) return null;
+  const value = sign * Number(body);
+  return Number.isFinite(value) ? value : null;
+}
+
+function looseNumber(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const token = value.trim().normalize("NFKC");
+  if (!token) return null;
+  const match = token.match(numberTokenPattern());
+  if (!match || match.length !== 1 || match[0].length !== token.length) return null;
+  return parseNumericToken(match[0]);
+}
+
+function numbersClose(expected, actual) {
+  const scale = Math.max(Math.abs(expected), Math.abs(actual), 1);
+  return Math.abs(expected - actual) <= Math.max(1e-6, scale * 1e-6);
+}
+
+function surfaceHasNumber(surface, expected) {
+  const tokens = String(surface ?? "").normalize("NFKC").match(numberTokenPattern()) || [];
+  return tokens.some((token) => {
+    const actual = parseNumericToken(token);
+    return actual !== null && numbersClose(expected, actual);
+  });
+}
+
+function surfaceHasPrimitive(surface, expected) {
+  const numeric = looseNumber(expected);
+  if (numeric !== null) return surfaceHasNumber(surface, numeric);
+  if (typeof expected === "boolean") {
+    const word = expected ? "true" : "false";
+    return new RegExp(`(?<![a-z0-9])${word}(?![a-z0-9])`, "i").test(String(surface ?? ""));
+  }
+  return surfaceIncludes(surface, expected);
+}
+
+/**
+ * Contract-policy facts for a step's expectedOutputs. Numbers are compared as numbers.
+ * Exported so a verdict can be proven without a browser.
+ */
+export function computedOutputFacts(surface, expectedOutputs) {
+  const entries = expectedOutputs && typeof expectedOutputs === "object" && !Array.isArray(expectedOutputs)
+    ? Object.entries(expectedOutputs).filter(([, value]) => ["string", "number", "boolean"].includes(typeof value)
+      && !(typeof value === "string" && !String(value).trim()))
+    : [];
+  const computedOutputs = entries.map(([field, expected]) => ({ field, expected }));
+  const missingComputedOutputs = computedOutputs.filter((row) => !surfaceHasPrimitive(surface, row.expected));
+  return { computedOutputs, missingComputedOutputs };
+}
+
 // Operation-transition copy such as "duplicated object disappears" proves the immediate action,
 // but requiring those verbs after reload would reject correctly persisted state merely because a
 // toast/status message is intentionally transient. Everything else remains load-bearing: this
@@ -4030,6 +4098,7 @@ async function runStep(page, step, {
       explicitVisibleText: Array.isArray(step.visibleText) ? step.visibleText.map(String) : [],
       explicitVisibleTextMissing: (Array.isArray(step.visibleText) ? step.visibleText.map(String) : [])
         .filter((text) => !surfaceIncludes(surface, text)),
+      ...computedOutputFacts(surface, step.expectedOutputs),
       observedStateChanged,
       observationOnly,
     };
@@ -4420,11 +4489,11 @@ export function routeMatchesCurrent(currentUrl, route, previewUrl = null) {
  * structured proof: a route reached, a contracted value rendered, a contracted member present, a
  * removal or reset measured on the controls, an action fired through its contracted control with
  * a surface change, a flow entry that exposed the contract's next control, an input accepted, a
- * selection transitioned. Declared visible text is compared loosely (case, whitespace, NBSP); a
- * miss of that check alone is an advisory pass, not an application failure. The expectation's
- * words are never a check. A step whose contract states none of these is CONTRACT_INCOMPLETE:
- * the contract, not the application, is what is missing. Exported so the rule can be proven
- * without a browser.
+ * selection transitioned, or a computed output matched as a number. Declared visible text is
+ * compared loosely (case, whitespace, NBSP); a miss of that check alone is an advisory pass, not
+ * an application failure. A wrong computed output is blocking. The expectation's words are never
+ * a check. A step whose contract states none of these is CONTRACT_INCOMPLETE: the contract, not
+ * the application, is what is missing. Exported so the rule can be proven without a browser.
  */
 export function structuredStepVerdict({
   structured, drove = false, actionProven = false, wanted = [], found = [], expect = "",
@@ -4454,6 +4523,14 @@ export function structuredStepVerdict({
     checks.push({ kind: "visible_text", ok: !missing.length,
       detail: !missing.length ? "the contract's declared visible text is present"
         : `declared visible text missing: ${missing.slice(0, 3).map((text) => JSON.stringify(text)).join(", ")}` });
+  }
+  const computedOutputs = Array.isArray(facts.computedOutputs) ? facts.computedOutputs : [];
+  if (computedOutputs.length) {
+    const missing = Array.isArray(facts.missingComputedOutputs) ? facts.missingComputedOutputs : [];
+    checks.push({ kind: "computed_output", ok: missing.length === 0,
+      detail: missing.length === 0 ? `${computedOutputs.length} computed output(s) match`
+        : `computed output wrong or missing: ${missing.slice(0, 4).map((row) => (
+          `${row.field} expected ${JSON.stringify(row.expected)}`)).join(", ")}` });
   }
   if (collectionStateRequired) {
     if (facts.memberStructured && facts.collectionRegionFound === false && !collectionStateSatisfied) {
@@ -4493,10 +4570,10 @@ export function structuredStepVerdict({
         : measurable ? "the contracted control did not return to its default"
         : "the contracted reset produced no observable change and no native control carries the value" });
   }
-  // The contract's declared outcome (route, values, visible text, member, removal, reset, next
-  // control) is the stronger evidence: when every declared outcome is present, an action that
-  // repainted nothing still reached its contracted result.
-  const declaredOutcomeChecks = checks.filter((check) => ["route", "values", "visible_text", "collection", "removal", "reset"].includes(check.kind));
+  // The contract's declared outcome (route, values, visible text, computed output, member,
+  // removal, reset, next control) is the stronger evidence: when every declared outcome is
+  // present, an action that repainted nothing still reached its contracted result.
+  const declaredOutcomeChecks = checks.filter((check) => ["route", "values", "visible_text", "computed_output", "collection", "removal", "reset"].includes(check.kind));
   const declaredSatisfied = declaredOutcomeChecks.length > 0 && declaredOutcomeChecks.every((check) => check.ok);
   if (semanticNavigation) {
     const ok = changed || declaredSatisfied;
@@ -4549,10 +4626,10 @@ export function structuredStepVerdict({
   if (!failing.length) {
     // An action or mutation proven only by "it fired and the surface changed" has no declared
     // outcome to hold it to. That is a pass on the contract's own terms, and the gap is recorded.
-    const declaredOutcome = checks.some((check) => ["route", "values", "visible_text", "collection", "removal", "reset", "flow_entry"].includes(check.kind))
+    const declaredOutcome = checks.some((check) => ["route", "values", "visible_text", "computed_output", "collection", "removal", "reset", "flow_entry"].includes(check.kind))
       || mutationWithValues || facts.nextControlVisible || facts.actionAutoApplied;
     const undeclared = checks.some((check) => ["action", "mutation"].includes(check.kind)) && !declaredOutcome
-      ? [{ code: "action_outcome_undeclared", detail: "the contract declares no route, value, member, visible text or next control for this action; only its firing and a surface change were verifiable" }]
+      ? [{ code: "action_outcome_undeclared", detail: "the contract declares no route, value, member, visible text, computed output or next control for this action; only its firing and a surface change were verifiable" }]
       : [];
     return verificationVerdict(VERIFICATION_RESULT_CLASS.PASS, checks.map((check) => check.detail).join(" · "),
       { drove, checks, advisories: [...proseAdvisory, ...undeclared] });

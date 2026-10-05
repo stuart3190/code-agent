@@ -394,6 +394,10 @@ export function createOrchestrator({
     throw new Error("orchestrator needs contractFn, patchesFn, assetService and baseTree");
   }
 
+  // Stamp the policy this run actually executes. Smoke and bypass pass theirs on
+  // verificationContext; a caller that sets none keeps the contract-verifier policy.
+  const verifierPolicy = verificationContext.verifierPolicy || MINIMAL_CONTRACT_VERIFIER_POLICY;
+
   const gateOptions = (contract, stepId, journeys, execution, modulePlan = []) => ({
     contract, stage: { id: stepId, journeys }, compile: (tree) => compile(tree, execution),
     modulePlan,
@@ -1185,7 +1189,7 @@ export function createOrchestrator({
       maxRepairs = maxJourneyRepairs, userCritical = [], signal = null }) {
       const buildId = await buildStore.create({
         owner, project_id: projectId, profile, request, state: "created",
-        verifier_policy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+        verifier_policy: verifierPolicy,
         budget_credits: budgetCredits, max_repair_dispatches: maxRepairs,
         started_at: new Date().toISOString(),
       });
@@ -2261,7 +2265,7 @@ export function createOrchestrator({
       const sourceBuild = await buildStore.get(sourceBuildId);
       const buildId = await buildStore.create({
         owner, project_id: projectId, profile: sourceBuild?.profile || "simple", request, state: "created",
-        verifier_policy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+        verifier_policy: verifierPolicy,
         // Persist the dispatch allowance as well as inheriting historical source metadata. Old
         // repair rows pre-date ceiling propagation and can legitimately have a null budget.
         budget_credits: Number(budgetCredits || sourceBuild?.budget_credits || 0) || null,
@@ -2413,7 +2417,7 @@ export function createOrchestrator({
       userCritical = [], signal = null }) {
       const buildId = await buildStore.create({
         owner, project_id: projectId, profile: "verify", request, state: "created",
-        verifier_policy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+        verifier_policy: verifierPolicy,
         max_repair_dispatches: 0, started_at: new Date().toISOString(),
       });
       await events.buildCreated?.({ owner, projectId, buildId, mode: "resume_verify", sourceBuildId });
@@ -2489,7 +2493,7 @@ export function createOrchestrator({
       userCritical = [], signal = null }) {
       const buildId = await buildStore.create({
         owner, project_id: projectId, profile: "edit", request, state: "created",
-        verifier_policy: MINIMAL_CONTRACT_VERIFIER_POLICY,
+        verifier_policy: verifierPolicy,
         max_repair_dispatches: maxRepairs, started_at: new Date().toISOString(),
       });
       await events.buildCreated?.({ owner, projectId, buildId, mode: "edit" });

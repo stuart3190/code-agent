@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import {
   structuredStepVerdict, expectationOutcome, recoveryEvidenceVerdict, accessDenialVerdict,
   routeMatchesCurrent, flowDeclaresDurableStatus, durableStatusWords, selectionTransition,
-  surfaceIncludes, durableCommitIdentity,
+  surfaceIncludes, durableCommitIdentity, computedOutputFacts,
 } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 import {
   MINIMAL_CONTRACT_VERIFIER_POLICY, VERIFICATION_RESULT_CLASS, statusForVerificationClass,
@@ -234,6 +234,41 @@ test("visible text that is truly absent still fails the check; that miss alone i
   });
   assert.equal(missingValue.classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE);
   assert.match(missingValue.detail, /contracted values not visible: Ada Lovelace/);
+});
+
+test("computed outputs pass, reject a wrong number, accept grouped digits, and refuse a substring", () => {
+  const verdictFor = (surface, expected, extra = {}) => structuredStepVerdict({
+    wanted: [], found: [], expect: "the computed result is visible",
+    structured: { ...computedOutputFacts(surface, expected), observationOnly: true, ...extra },
+    drove: true, actionProven: true,
+  });
+
+  const pass = verdictFor("Area 120", { area: 120 });
+  assert.equal(pass.classification, VERIFICATION_RESULT_CLASS.PASS);
+  assert.equal(pass.checks.find((check) => check.kind === "computed_output").ok, true);
+  assert.equal(pass.checks.find((check) => check.kind === "computed_output").detail, "1 computed output(s) match");
+
+  const wrong = verdictFor("Area 99", { area: 120 }, { actionDeclared: true, observedStateChanged: true });
+  assert.equal(wrong.classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE);
+  assert.match(wrong.detail, /computed output wrong or missing: area expected 120/);
+  assert.equal(VERIFIER_CHECK_SEVERITY.computed_output, SEVERITY.BLOCKING);
+
+  assert.equal(verdictFor("Total 1,200 lm", { area: 1200 }).classification, VERIFICATION_RESULT_CLASS.PASS);
+  assert.equal(verdictFor("1200", { area: "1,200" }).classification, VERIFICATION_RESULT_CLASS.PASS);
+  assert.deepEqual(computedOutputFacts("1 200", { area: 1200 }).missingComputedOutputs, []);
+  assert.deepEqual(computedOutputFacts("0.30000000000000004", { area: 0.3 }).missingComputedOutputs, []);
+  assert.equal(verdictFor("The area is 12.", { area: 12 }).classification, VERIFICATION_RESULT_CLASS.PASS);
+
+  const substring = verdictFor("Result 120", { area: 12 });
+  assert.equal(substring.classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE);
+  assert.equal(verdictFor("Result 1,200", { area: 12 }).classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE);
+  assert.equal(verdictFor("Result 12", { area: 12 }).classification, VERIFICATION_RESULT_CLASS.PASS);
+
+  const quiet = verdictFor("Area 120", { area: 120 }, {
+    actionDeclared: true, observedStateChanged: false, observationOnly: false,
+  });
+  assert.equal(quiet.classification, VERIFICATION_RESULT_CLASS.PASS);
+  assert.equal(quiet.checks.find((check) => check.kind === "action").ok, true);
 });
 
 test("an undriven step with unproven structured facts is inconclusive, not an application failure", () => {

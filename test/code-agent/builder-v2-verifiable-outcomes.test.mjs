@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 
 import { validateContract } from "../../shell/shared/implementationContract.mjs";
-import { SYSTEM_PROMPT } from "../../shell/server/lib/appBuild/contractAgent.mjs";
+import { SYSTEM_PROMPT, normaliseContract } from "../../shell/server/lib/appBuild/contractAgent.mjs";
 
 const RETAINED = new URL("./fixtures/retained/advanced-20260916/", import.meta.url);
 const base = (steps) => ({
@@ -82,7 +82,53 @@ test("the retained Advanced contracts carry exactly the four pre-rule observatio
   ]);
 });
 
-test("the contract prompt teaches visibleText and the verifiable-outcome rule", () => {
+test("expectedOutputs is a verifiable outcome, and an empty declaration is not", () => {
+  const declared = validateContract(base([
+    { action: "open the library", target: "/library", expect: "the library is visible" },
+    { action: "show the computed area", expectedOutputs: { area: 1200 },
+      expect: "the computed area is visible" },
+  ]));
+  assert.deepEqual(unverifiable(declared.problems), []);
+
+  const empty = validateContract(base([
+    { action: "open the library", target: "/library", expect: "the library is visible" },
+    { action: "show the computed area", expectedOutputs: {}, expect: "the computed area is visible" },
+  ]));
+  assert.equal(unverifiable(empty.problems).length, 1);
+  const blank = validateContract(base([
+    { action: "open the library", target: "/library", expect: "the library is visible" },
+    { action: "show the computed area", expectedOutputs: { area: "  " }, expect: "the computed area is visible" },
+  ]));
+  assert.equal(unverifiable(blank.problems).length, 1);
+});
+
+test("the contract prompt teaches expectedOutputs, and the normaliser strips credential keys", () => {
   assert.match(SYSTEM_PROMPT, /"visibleText"/);
   assert.match(SYSTEM_PROMPT, /verifiable outcome/i);
+  assert.match(SYSTEM_PROMPT, /"expectedOutputs"/);
+
+  const kept = normaliseContract({
+    journeys: [{ id: "compute", steps: [
+      { action: "open the calculator", target: "/", expect: "the calculator is visible" },
+      { action: "compute the area", expectedOutputs: { area: 1200, authPassword: "secret", authEmail: "a@b.c" },
+        expect: "the area is visible" },
+    ] }],
+  }, { prompt: "compute a rectangular area" });
+  assert.deepEqual(kept.journeys[0].steps[1].expectedOutputs, { area: 1200 });
+
+  const passthrough = normaliseContract({
+    journeys: [{ id: "compute", steps: [
+      { action: "open the calculator", target: "/", expect: "the calculator is visible" },
+      { action: "compute the area", expectedOutputs: ["1200"], expect: "the area is visible" },
+    ] }],
+  }, { prompt: "compute a rectangular area" });
+  assert.deepEqual(passthrough.journeys[0].steps[1].expectedOutputs, ["1200"]);
+
+  const stripped = normaliseContract({
+    journeys: [{ id: "compute", steps: [
+      { action: "open the calculator", target: "/", expect: "the calculator is visible" },
+      { action: "compute the area", expectedOutputs: { authPassword: "secret" }, expect: "the area is visible" },
+    ] }],
+  }, { prompt: "compute a rectangular area" });
+  assert.equal(Object.hasOwn(stripped.journeys[0].steps[1], "expectedOutputs"), false);
 });

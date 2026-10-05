@@ -374,6 +374,60 @@ test("an operation naming a journey that does not exist is refused before genera
     `the dangling journey reference is named: ${JSON.stringify(verdict.problems)}`);
 });
 
+test("forged expectedOutputs keys are refused before generation", hostOnly, () => {
+  const calculator = {
+    summary: "A visitor computes a rectangular area from length and width.",
+    projectType: "calculator", version: 2,
+    auth: { required: false },
+    routes: [{ path: "/", name: "Calculator" }],
+    entities: [{ name: "calculation", owned: false, fields: [
+      { name: "length", type: "number" }, { name: "width", type: "number" }, { name: "area", type: "number" },
+    ] }],
+    operations: [{
+      id: "compute-area", entity: "calculation", kind: "calculate", journey: "compute",
+      description: "Multiply length by width.",
+      responsibilities: [{
+        type: "functional", behavior: "multiply length by width", reads: ["length", "width"], writes: ["area"],
+      }],
+    }],
+    acceptance: [
+      { id: "a1", statement: "the calculator form is visible" },
+      { id: "a2", statement: "the entered dimensions are visible" },
+      { id: "a3", statement: "the computed area is visible" },
+    ],
+    states: [], deferred: [], integrations: [],
+    journeys: [{ id: "compute", title: "Compute an area", priority: "primary", steps: [
+      { action: "open the calculator", target: "/", expectedOutputs: { area: 1 },
+        expect: "the calculator form is visible" },
+      { action: "enter the length and the width", operates: ["length", "width"],
+        verificationValues: { length: 30, width: 40 }, expect: "the entered dimensions are visible" },
+      { action: "compute the rectangular area", operates: ["compute-area"],
+        expectedOutputs: { length: 30, lumens: 1200 }, expect: "the computed area is visible" },
+    ] }],
+  };
+  const forged = validation.validateContract(calculator);
+  assert.equal(forged.ok, false);
+  assert.ok(forged.problems.some((problem) => /step 1 expectedOutputs names "area", which is not a functional output this step reaches/.test(problem)),
+    JSON.stringify(forged.problems));
+  assert.ok(forged.problems.some((problem) => /step 3 expectedOutputs names "length", which is not a functional output this step reaches/.test(problem)),
+    JSON.stringify(forged.problems));
+  assert.ok(forged.problems.some((problem) => /step 3 expectedOutputs names "lumens", which is not a declared entity field/.test(problem)),
+    JSON.stringify(forged.problems));
+
+  calculator.journeys[0].steps[0].expectedOutputs = undefined;
+  calculator.journeys[0].steps[2].expectedOutputs = { area: 1200 };
+  const honest = validation.validateContract(calculator);
+  assert.equal(honest.ok, true, JSON.stringify(honest.problems));
+
+  const persistence = validation.validateContract(contractWith({
+    action: "confirm the booking", operates: ["create-booking"],
+    expectedOutputs: { guestName: "Ada" },
+    expect: "a confirmation with status Confirmed and a reference",
+  }));
+  assert.ok(persistence.problems.some((problem) => /expectedOutputs names "guestName", which is not a functional output this step reaches/.test(problem)),
+    JSON.stringify(persistence.problems));
+});
+
 test("an operation writing an entity that does not exist is refused before generation", hostOnly, () => {
   const verdict = validation.validateContract(withJourneys([], [
     { id: "create-invoice", entity: "invoice", kind: "create", journey: "book" }]));

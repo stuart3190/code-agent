@@ -193,11 +193,13 @@ export function advisoryMessages(advisory = []) {
 /**
  * Browser verifier checks. visible_text is copy the contract named; case, whitespace, and NBSP
  * are already folded before this check runs, and a remaining miss does not prove the application
- * failed. Every other structured check is a contracted outcome the browser measured directly.
- * A kind absent from this table stays blocking: an unclassified check must not become a pass.
+ * failed. computed_output is the primitive a functional step must show; a wrong result is an
+ * application failure. Every other structured check is a contracted outcome the browser measured
+ * directly. A kind absent from this table stays blocking: an unclassified check must not become a pass.
  */
 export const VERIFIER_CHECK_SEVERITY = Object.freeze({
   visible_text: SEVERITY.ADVISORY,
+  computed_output: SEVERITY.BLOCKING,
   route: SEVERITY.BLOCKING,
   values: SEVERITY.BLOCKING,
   collection: SEVERITY.BLOCKING,

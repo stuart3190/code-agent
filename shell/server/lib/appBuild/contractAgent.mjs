@@ -109,9 +109,10 @@ Rules:
   operates controls stays on the screen it is already on. Reload steps say "reload" and name no route.
 - EVERY step states a VERIFIABLE OUTCOME the browser can hold the app to: the route it opens
   ("target"/"route"), the controls or operation it operates ("operates"), fields an earlier step
-  entered that it must show ("reads"), or "visibleText": [exact strings the screen must render]
-  for a pure observation ("visibleText": ["Pendant Light", "Wall Sconce"]). The verifier never
-  matches the "expect" sentence literally; a step with none of those is rejected as unverifiable.
+  entered that it must show ("reads"), "visibleText": [exact strings the screen must render]
+  for a pure observation ("visibleText": ["Pendant Light", "Wall Sconce"]), or "expectedOutputs"
+  for a computed result. The verifier never matches the "expect" sentence literally; a step with
+  none of those is rejected as unverifiable.
 - Add "primitive": "selection" or "textbox" only when the verb leaves it ambiguous.
 - A keyboard-focus or tab-navigation step is a control interaction, not a passive observation. It
   MUST name the focused entity field(s) in "operates" and declare "primitive". Split text-entry
@@ -130,6 +131,13 @@ Rules:
   field in its own selection step unless an earlier step changed that same field to a non-default
   value. Keep the sentinel in a compound filter step where another field genuinely changes, choose
   a non-default option, or first change this field so the browser has a real transition to verify.
+- A step that calculates or otherwise transforms declared inputs states the exact result the
+  browser must see: "expectedOutputs": { "outputField": <number, string or boolean> }. Each key
+  is a field a functional responsibility writes, or a field this step produces, that this step
+  reaches by operating that operation, producing the field, or reading it after an earlier step
+  produced it. Every entity field that responsibility reads must have a verificationValues
+  fixture on this step or an earlier step of the same journey, so the expected result is fixed
+  by those inputs. Never put authEmail, authPassword, or any other secret in expectedOutputs.
 - EXACTLY ONE journey has priority "primary".
 - A journey that starts from records another journey created names that journey in "dependsOn".
   When two journeys could each be the creator, "dependsOn" names exactly one of them; the
@@ -221,13 +229,20 @@ export function normaliseContract(contract, { prompt, buildProfile = null, legac
       // verification account itself, and a demo credential in the contract would be typed
       // straight into the generated sign-in screen (6833295 pre-filled demo credentials, 401).
       // Stripped deterministically so one stray fixture never costs a contract retry.
-      const { verificationValues: rawFixtures, ...rest } = step || {};
+      // expectedOutputs is passed through unchanged apart from the same credential strip.
+      const { verificationValues: rawFixtures, expectedOutputs: rawOutputs, ...rest } = step || {};
       const fixtures = rawFixtures && typeof rawFixtures === "object" && !Array.isArray(rawFixtures)
         ? Object.fromEntries(Object.entries(rawFixtures).filter(([key]) => !isReservedCredentialField(key)))
         : null;
+      const outputs = rawOutputs && typeof rawOutputs === "object" && !Array.isArray(rawOutputs)
+        ? Object.fromEntries(Object.entries(rawOutputs).filter(([key]) => !isReservedCredentialField(key)))
+        : rawOutputs;
+      const keepOutputs = outputs !== undefined && !(typeof outputs === "object" && outputs !== null
+        && !Array.isArray(outputs) && Object.keys(outputs).length === 0);
       return {
         ...rest,
         ...(fixtures && Object.keys(fixtures).length ? { verificationValues: fixtures } : {}),
+        ...(keepOutputs ? { expectedOutputs: outputs } : {}),
         ...(operates?.length ? { operates } : {}),
         ...(reads?.length ? { reads } : {}),
         ...(produces?.length ? { produces } : {}),
@@ -348,7 +363,7 @@ export const COLLISION_REPAIR_INSTRUCTION = "A field name listed under invalidCo
   + "for two different entities inside one journey, so both controls share one identity. Rename that field on "
   + "the entity that is not the journey's primary subject (for example task.dueDate becomes taskDueDate) and "
   + "use the new name consistently: in that entity's fields, in every operation responsibility that reads or "
-  + "writes it, and in every journey step's operates, reads, produces and verificationValues that refer to it. "
+  + "writes it, and in every journey step's operates, reads, produces, verificationValues and expectedOutputs that refer to it. "
   + "Leave the other entity's field name unchanged. Do not add, remove or reorder steps, operations or entities.";
 
 // A navigation step the platform could not bind to a declared route (routeResolution.mjs). The

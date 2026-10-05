@@ -1942,7 +1942,8 @@ test("the verifier policy is durable and historical interpretation is unchanged"
   assert.match(migration, /default 'legacy_rich_v1'/i);
   assert.match(migration, /minimal_contract_v1/i);
   const orchestrator = await readFile(new URL("../../shell/server/lib/builderV2/orchestrator.mjs", import.meta.url), "utf8");
-  assert.equal((orchestrator.match(/verifier_policy: MINIMAL_CONTRACT_VERIFIER_POLICY/g) || []).length, 4);
+  assert.match(orchestrator, /verificationContext\.verifierPolicy \|\| MINIMAL_CONTRACT_VERIFIER_POLICY/);
+  assert.equal((orchestrator.match(/verifier_policy: verifierPolicy/g) || []).length, 4);
 });
 
 // The retained Simple Counter contract (build 69f47bf4, 2026-09-24) replayed against a page that

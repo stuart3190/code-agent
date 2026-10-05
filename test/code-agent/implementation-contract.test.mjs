@@ -295,6 +295,86 @@ test("transient software search inputs require one matching generated-data fixtu
   assert.equal(validateContract(contract).ok, true, JSON.stringify(validateContract(contract).problems));
 });
 
+function areaContract() {
+  return {
+    version: CONTRACT_VERSION,
+    summary: "A visitor computes a rectangular area from length and width.",
+    projectType: "calculator",
+    routes: [{ path: "/", name: "Calculator" }],
+    entities: [{ name: "calculation", owned: false, fields: [
+      { name: "length", type: "number" },
+      { name: "width", type: "number" },
+      { name: "area", type: "number" },
+    ] }],
+    operations: [{
+      id: "compute-area", entity: "calculation", kind: "calculate", journey: "compute",
+      description: "Multiply length by width.",
+      responsibilities: [{
+        type: "functional", behavior: "multiply length by width",
+        reads: ["length", "width"], writes: ["area"],
+      }],
+    }],
+    journeys: [{ id: "compute", title: "Compute an area", priority: "primary", steps: [
+      { action: "open the calculator", target: "/", expect: "the calculator form is visible" },
+      { action: "enter the length and the width", operates: ["length", "width"],
+        verificationValues: { length: 30, width: 40 },
+        expect: "the entered dimensions are visible" },
+      { action: "compute the rectangular area", operates: ["compute-area"],
+        expectedOutputs: { area: 1200 },
+        expect: "the computed area is visible" },
+    ] }],
+    acceptance: [
+      { id: "a1", statement: "the calculator form is visible" },
+      { id: "a2", statement: "the entered dimensions are visible" },
+      { id: "a3", statement: "the computed area is visible" },
+    ],
+    deferred: [],
+  };
+}
+
+test("expectedOutputs names a reached functional result and requires fixtures for its inputs", () => {
+  const contract = areaContract();
+  const verdict = validateContract(contract);
+  assert.equal(verdict.ok, true, JSON.stringify(verdict.problems));
+  assert.match(contractSummary(contract), /1 computed outcomes/);
+  assert.match(contractBrief(contract), /computed outputs: \{"area":1200\}/);
+
+  const produced = areaContract();
+  produced.journeys[0].steps[2] = {
+    action: "show the computed area", produces: ["area"], expectedOutputs: { area: 1200 },
+    expect: "the computed area is visible",
+  };
+  assert.equal(validateContract(produced).ok, true, JSON.stringify(validateContract(produced).problems));
+
+  const reviewed = areaContract();
+  reviewed.journeys[0].steps[1].operates = ["length", "width", "compute-area"];
+  reviewed.journeys[0].steps[2] = {
+    action: "review the computed area", reads: ["area"], expectedOutputs: { area: 1200 },
+    expect: "the computed area is still visible",
+  };
+  assert.equal(validateContract(reviewed).ok, true, JSON.stringify(validateContract(reviewed).problems));
+
+  const zero = areaContract();
+  zero.journeys[0].steps[2].expectedOutputs = { area: 0 };
+  assert.equal(validateContract(zero).problems.some((problem) => /expectedOutputs\.area must be/.test(problem)), false);
+
+  const missing = areaContract();
+  delete missing.journeys[0].steps[1].verificationValues;
+  const missingVerdict = validateContract(missing);
+  assert.equal(missingVerdict.ok, false);
+  assert.ok(missingVerdict.problems.some((problem) => /verificationValues\.length/.test(problem)
+    && /expectedOutputs\.area/.test(problem)), JSON.stringify(missingVerdict.problems));
+  assert.ok(missingVerdict.problems.some((problem) => /verificationValues\.width/.test(problem)));
+
+  const shaped = areaContract();
+  shaped.journeys[0].steps[2].expectedOutputs = ["1200"];
+  assert.ok(validateContract(shaped).problems.some((problem) => /expectedOutputs is not an object/.test(problem)));
+  shaped.journeys[0].steps[2].expectedOutputs = { area: { value: 1200 } };
+  assert.ok(validateContract(shaped).problems.some((problem) => /expectedOutputs\.area must be a non-empty JSON primitive/.test(problem)));
+  shaped.journeys[0].steps[2].expectedOutputs = { area: "  " };
+  assert.ok(validateContract(shaped).problems.some((problem) => /expectedOutputs\.area must be a non-empty JSON primitive/.test(problem)));
+});
+
 test("genuinely observable statements are not rejected for using unlisted verbs", () => {
   // Every one of these was rejected by the first version of isVague, in production, on a real
   // contract — which was then discarded whole, dropping the build back to uncontracted one-shot
