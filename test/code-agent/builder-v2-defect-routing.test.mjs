@@ -174,6 +174,40 @@ test("a behavioural failure on a driven control is neither interaction nor durab
   const defect = defects.find((row) => row.journeyId === "booking");
   assert.equal(defect.defectClass, DEFECT_CLASS.BEHAVIOUR);
   assert.equal(defect.tier, REPAIR_TIER.REPAIR);
+  assert.deepEqual(defect.evidence.failingChecks, []);
+});
+
+test("a visible-text-only miss is recorded and does not enter repair", () => {
+  const defects = defectsFrom(verdicts({
+    failAt: 1,
+    step: {
+      status: "fail", drove: true, classification: "APP_FUNCTIONAL_FAILURE",
+      detail: "declared visible text missing: \"Saved\"",
+      checks: [
+        { kind: "visible_text", ok: false, detail: "declared visible text missing: \"Saved\"" },
+        { kind: "action", ok: true },
+      ],
+    },
+  }));
+  const defect = defects.find((row) => row.journeyId === "booking");
+  assert.deepEqual(defect.evidence.failingChecks, ["visible_text"]);
+  assert.equal(defect.tier, REPAIR_TIER.NONE);
+  assert.equal(actionableDefects(defects).length, 0);
+
+  const mixed = defectsFrom(verdicts({
+    failAt: 1,
+    step: {
+      status: "fail", drove: true, classification: "APP_FUNCTIONAL_FAILURE",
+      detail: "contracted values not visible: Ada",
+      checks: [
+        { kind: "visible_text", ok: false },
+        { kind: "values", ok: false },
+      ],
+    },
+  }));
+  const blocking = mixed.find((row) => row.journeyId === "booking");
+  assert.deepEqual(blocking.evidence.failingChecks, ["visible_text", "values"]);
+  assert.equal(blocking.tier, REPAIR_TIER.REPAIR);
 });
 
 test("a verification platform failure is owned by the platform and is not repairable", () => {

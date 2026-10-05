@@ -36,6 +36,7 @@ import {
   isMinimalContractVerifier,
   verificationVerdict,
 } from "./verifierPolicy.mjs";
+import { SEVERITY, verifierCheckSeverity } from "../builderV2/validationSeverity.mjs";
 import { isKeyboardFocusOnlyStep } from "../builderV2/interactionSemantics.mjs";
 
 const requireCjs = createRequire(import.meta.url);
@@ -1701,7 +1702,7 @@ export function confirmationReflectsSelections(confirmationText, selections = []
   const numbers = [...new Set(selections.flatMap((s) => String(s || "").match(/\d[\d:.]*/g) || []))];
   if (!numbers.length) return { checked: false, ok: true };
   const text = String(confirmationText || "");
-  const matched = numbers.find((n) => text.includes(n));
+  const matched = numbers.find((n) => surfaceIncludes(text, n));
   return matched
     ? { checked: true, ok: true, matched }
     : { checked: true, ok: false, detail: `the confirmation shows none of the selected values (${numbers.slice(0, 5).join(", ")})` };
@@ -2534,6 +2535,25 @@ export function durableRecordKey(flow) {
 
 const REFERENCE_TOKEN = /\b[A-Z0-9]{2,}-[A-Z0-9][A-Z0-9-]{1,}\b/g;
 
+// Comparison form for declared visible text. NFKC, NBSP→space, collapsed whitespace, and
+// case-folding apply only to this copy. REFERENCE_TOKEN extraction must keep the original
+// surface: folding it to lower case would drop every durable reference.
+function foldedSurface(value) {
+  return String(value ?? "")
+    .replace(/\u00a0/g, " ")
+    .normalize("NFKC")
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+export function surfaceIncludes(surface, value) {
+  const needle = foldedSurface(value);
+  if (!needle) return false;
+  return foldedSurface(surface).includes(needle);
+}
+
 // Operation-transition copy such as "duplicated object disappears" proves the immediate action,
 // but requiring those verbs after reload would reject correctly persisted state merely because a
 // toast/status message is intentionally transient. Everything else remains load-bearing: this
@@ -2591,7 +2611,8 @@ export function durableCommitIdentity({ enteredValues = [], textBefore = "", tex
   // on the page (a task form filled with the project's own title, then a commit that stored
   // nothing) proves nothing about the commit, exactly as an old reference proves nothing.
   return {
-    value: enteredValues.find((value) => value && String(textAfter).includes(value) && !String(textBefore).includes(value)) || null,
+    value: enteredValues.find((value) => value
+      && surfaceIncludes(textAfter, value) && !surfaceIncludes(textBefore, value)) || null,
     reference: (String(textAfter).match(REFERENCE_TOKEN) || [])
       .find((reference) => !before.has(reference)) || null,
   };
@@ -2616,8 +2637,8 @@ export function mutationCommitEvidence({ flow, enteredValues = [], textBefore = 
 
   const beforeText = String(textBefore || "");
   const afterText = String(textAfter || "");
-  const visibleValues = values.filter((value) => afterText.includes(value));
-  const freshValues = visibleValues.filter((value) => !beforeText.includes(value));
+  const visibleValues = values.filter((value) => surfaceIncludes(afterText, value));
+  const freshValues = visibleValues.filter((value) => !surfaceIncludes(beforeText, value));
   const beforeReferences = new Set(beforeText.match(REFERENCE_TOKEN) || []);
   const afterReferences = new Set(afterText.match(REFERENCE_TOKEN) || []);
   const stableReferences = [...beforeReferences].filter((reference) => afterReferences.has(reference));
@@ -2657,7 +2678,7 @@ async function captureDurableEvidence(page, { enteredValues, selections, expect,
     captured: true,
     // Only what is actually ON the confirmation: a value the app never showed cannot be evidence
     // that it survived.
-    values: candidates.filter((value) => value && text.includes(value)),
+    values: candidates.filter((value) => value && surfaceIncludes(text, value)),
     references: [...new Set(text.match(REFERENCE_TOKEN) || [])].slice(0, 4),
     statusWords: !flow || flowDeclaresDurableStatus(flow)
       || statusEntities.has(String(flow.entity || durableRecordKey(flow)?.split(":").at(-1) || "").toLowerCase())
@@ -2670,6 +2691,8 @@ async function captureDurableEvidence(page, { enteredValues, selections, expect,
  * the evidence is the exact values and references that record rendered, never words.
  */
 export function accessDenialVerdict({ privateEvidence = [], visibleText = "" } = {}) {
+  // Exact substring. A case- or whitespace-folded comparison would treat a different token as
+  // the same secret and fail a correct account boundary.
   const leaked = (privateEvidence || []).filter((value) => value && String(visibleText).includes(value));
   return leaked.length
     ? { status: "fail", detail: `the different account can see private durable evidence: ${leaked.slice(0, 3).join(", ")}` }
@@ -2680,7 +2703,7 @@ export function accessDenialVerdict({ privateEvidence = [], visibleText = "" } =
 export function recoveryEvidenceVerdict(durable, textAfter) {
   const text = String(textAfter || "");
   if (!durable?.captured) return { checked: false };
-  const missingValues = (durable.values || []).filter((value) => !text.includes(value));
+  const missingValues = (durable.values || []).filter((value) => !surfaceIncludes(text, value));
   // Status vocabulary belongs to the screen that created the record, not to the record. A manage
   // view legitimately says "Status Confirmed" without saying "confirmation screen" or "durable",
   // so those words are only held against a recovery of the SAME screen.
@@ -2695,7 +2718,7 @@ export function recoveryEvidenceVerdict(durable, textAfter) {
   const missingStatus = durable.sameSurface === false ? []
     : (durable.statusWords || []).filter((word) => !new RegExp(word, "i").test(text));
   const references = durable.references || [];
-  const survivingReference = references.find((reference) => text.includes(reference)) || null;
+  const survivingReference = references.find((reference) => surfaceIncludes(text, reference)) || null;
   if (references.length && !survivingReference) {
     return { checked: true, ok: false,
       detail: `the durable reference did not survive (expected ${references.slice(0, 2).join(" or ")})` };
@@ -3808,7 +3831,7 @@ async function runStep(page, step, {
           const declared = [...declaredText, ...declaredValues];
           const surface = declared.length ? await page.evaluate(() => document.body?.innerText || "").catch(() => "") : "";
           const expectationEvidence = minimal
-            ? { met: declared.length > 0 && declared.every((text) => surface.includes(text)), declared }
+            ? { met: declared.length > 0 && declared.every((text) => surfaceIncludes(surface, text)), declared }
             : await expectationIsVisible(page, expect);
           if (expectationEvidence.met) {
             activated = true;
@@ -3985,7 +4008,7 @@ async function runStep(page, step, {
     return {
       route, routeReached: route ? routeMatchesCurrent(page.url(), route, previewUrl) : false, currentPath: new URL(page.url()).pathname,
       expectedValues: expectedVisibleValues,
-      missingValues: expectedVisibleValues.filter((value) => !surface.includes(value)),
+      missingValues: expectedVisibleValues.filter((value) => !surfaceIncludes(surface, value)),
       // A membership clause that survived resolution names literal record identities (entered,
       // selected or stated by name); a generic reference the contract never entered is dropped
       // upstream. Locating the collection region is a locator concern: when none is found the
@@ -4006,7 +4029,7 @@ async function runStep(page, step, {
       actionAutoApplied: selectionAutoApplied || actionAppliedOnLoad,
       explicitVisibleText: Array.isArray(step.visibleText) ? step.visibleText.map(String) : [],
       explicitVisibleTextMissing: (Array.isArray(step.visibleText) ? step.visibleText.map(String) : [])
-        .filter((text) => !surface.includes(text)),
+        .filter((text) => !surfaceIncludes(surface, text)),
       observedStateChanged,
       observationOnly,
     };
@@ -4281,7 +4304,7 @@ async function runStep(page, step, {
 
   if (outcome.status === "pass" && isReviewStep && reviewValues.length) {
     const reviewText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-    const missingValues = reviewValues.filter(({ value }) => !reviewText.includes(value));
+    const missingValues = reviewValues.filter(({ value }) => !surfaceIncludes(reviewText, value));
     if (missingValues.length) return { ...outcome, status: "fail",
       ...(minimal ? { classification: VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE } : {}),
       detail: `review omitted exact contracted values: ${missingValues.map((row) => row.field).join(", ")}`,
@@ -4397,9 +4420,11 @@ export function routeMatchesCurrent(currentUrl, route, previewUrl = null) {
  * structured proof: a route reached, a contracted value rendered, a contracted member present, a
  * removal or reset measured on the controls, an action fired through its contracted control with
  * a surface change, a flow entry that exposed the contract's next control, an input accepted, a
- * selection transitioned. The expectation's words are never a check. A step whose contract states
- * none of these is CONTRACT_INCOMPLETE: the contract, not the application, is what is missing.
- * Exported so the rule can be proven without a browser.
+ * selection transitioned. Declared visible text is compared loosely (case, whitespace, NBSP); a
+ * miss of that check alone is an advisory pass, not an application failure. The expectation's
+ * words are never a check. A step whose contract states none of these is CONTRACT_INCOMPLETE:
+ * the contract, not the application, is what is missing. Exported so the rule can be proven
+ * without a browser.
  */
 export function structuredStepVerdict({
   structured, drove = false, actionProven = false, wanted = [], found = [], expect = "",
@@ -4456,11 +4481,15 @@ export function structuredStepVerdict({
     const priorDeclared = checks.filter((check) => ["values", "visible_text", "collection", "removal"].includes(check.kind));
     const priorSatisfied = priorDeclared.length > 0 && priorDeclared.every((check) => check.ok);
     const measurable = facts.resetChecked !== false;
-    const ok = Boolean(facts.resetOk) || priorSatisfied || (!measurable && changed);
+    // A status sentence can change the surface while the contracted value stays wrong. When the
+    // contract declared that value, a bare surface change does not prove the reset.
+    const ok = Boolean(facts.resetOk) || priorSatisfied
+      || (priorDeclared.length === 0 && !measurable && changed);
     checks.push({ kind: "reset", ok,
       detail: facts.resetOk ? "the contracted control returned to its default"
         : priorSatisfied ? "the contracted outcome after the reset is present"
         : ok ? "the contracted reset changed the surface (no native control carries the value)"
+        : priorDeclared.length && !priorSatisfied ? "the contracted outcome after the reset is missing"
         : measurable ? "the contracted control did not return to its default"
         : "the contracted reset produced no observable change and no native control carries the value" });
   }
@@ -4536,6 +4565,16 @@ export function structuredStepVerdict({
     return verificationVerdict(VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE,
       `the verifier could not reliably drive the contracted step (${failing.map((check) => check.kind).join(", ")} unproven)`,
       { drove, checks });
+  }
+  // Case, whitespace, and NBSP differences are already absorbed by surfaceIncludes. A declared
+  // string that is still absent is recorded, but it does not prove the application failed when
+  // every blocking check passed.
+  if (failing.every((check) => verifierCheckSeverity(check.kind) === SEVERITY.ADVISORY)) {
+    return verificationVerdict(VERIFICATION_RESULT_CLASS.PASS, checks.map((check) => check.detail).join(" · "),
+      { drove, checks, advisories: [...proseAdvisory, {
+        code: "declared_visible_text_mismatch",
+        detail: failing.map((check) => check.detail).join("; "),
+      }] });
   }
   return verificationVerdict(VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
     failing.map((check) => check.detail).join("; "), { drove, checks });

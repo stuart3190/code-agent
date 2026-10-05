@@ -190,6 +190,31 @@ export function advisoryMessages(advisory = []) {
   }));
 }
 
+/**
+ * Browser verifier checks. visible_text is copy the contract named; case, whitespace, and NBSP
+ * are already folded before this check runs, and a remaining miss does not prove the application
+ * failed. Every other structured check is a contracted outcome the browser measured directly.
+ * A kind absent from this table stays blocking: an unclassified check must not become a pass.
+ */
+export const VERIFIER_CHECK_SEVERITY = Object.freeze({
+  visible_text: SEVERITY.ADVISORY,
+  route: SEVERITY.BLOCKING,
+  values: SEVERITY.BLOCKING,
+  collection: SEVERITY.BLOCKING,
+  removal: SEVERITY.BLOCKING,
+  reset: SEVERITY.BLOCKING,
+  mutation: SEVERITY.BLOCKING,
+  action: SEVERITY.BLOCKING,
+  flow_entry: SEVERITY.BLOCKING,
+  submission: SEVERITY.BLOCKING,
+  input: SEVERITY.BLOCKING,
+  selection: SEVERITY.BLOCKING,
+});
+
+export function verifierCheckSeverity(kind) {
+  return VERIFIER_CHECK_SEVERITY[kind] || SEVERITY.BLOCKING;
+}
+
 /** Assert the two tables stay disjoint — a code with two severities has no single authority. */
 export function assertSeverityTablesDisjoint() {
   const overlap = Object.keys(BLOCKING_CODES).filter((code) => Object.hasOwn(ADVISORY_CODES, code));

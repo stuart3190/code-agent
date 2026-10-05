@@ -9,7 +9,7 @@ import {
   resolvedCollectionMembershipExpectationSpec,
   detailObservationExpectationSpec, expectationRequestsControlReset, isObservationOnlyStep,
   removalExpectationSpec, selectedRemovalExpectationSpec,
-  requestsSingleCollectionMemberAction, selectedCollectionExpectationSpec, structuredStepVerdict, verifyJourneys,
+  requestsSingleCollectionMemberAction, selectedCollectionExpectationSpec, structuredStepVerdict, surfaceIncludes, verifyJourneys,
 } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 import { verifyApp } from "../../shell/server/lib/appBuild/verificationAgent.mjs";
 import {
@@ -115,6 +115,42 @@ test("a control named Reset is not a request that anything reset", () => {
   assert.equal(expectationRequestsControlReset("clear the current search the search box is blank"), true);
 });
 
+test("uppercase and NBSP declared text passes; a truly missing value still fails", () => {
+  assert.equal(surfaceIncludes("COMPETITION\u00a0CARDS", "Competition cards"), true);
+  assert.equal(surfaceIncludes("Nothing listed yet", "Competition cards"), false);
+  const present = structuredStepVerdict({
+    structured: {
+      explicitVisibleText: ["Competition cards"],
+      explicitVisibleTextMissing: [],
+      observationOnly: true,
+    },
+    drove: false, actionProven: false,
+  });
+  assert.equal(present.classification, VERIFICATION_RESULT_CLASS.PASS, present.detail);
+  assert.equal((present.advisories || []).some((row) => row.code === "declared_visible_text_mismatch"), false);
+  const missingText = structuredStepVerdict({
+    structured: {
+      explicitVisibleText: ["Competition cards"],
+      explicitVisibleTextMissing: ["Competition cards"],
+      observationOnly: true,
+    },
+    drove: false, actionProven: false,
+  });
+  assert.equal(missingText.classification, VERIFICATION_RESULT_CLASS.PASS, missingText.detail);
+  assert.equal(missingText.checks.find((check) => check.kind === "visible_text").ok, false);
+  assert.ok(missingText.advisories.some((row) => row.code === "declared_visible_text_mismatch"));
+  const missingValue = structuredStepVerdict({
+    structured: {
+      expectedValues: ["Ada Lovelace"],
+      missingValues: ["Ada Lovelace"],
+      explicitVisibleText: ["Saved"],
+      explicitVisibleTextMissing: [],
+    },
+    drove: true, actionProven: true,
+  });
+  assert.equal(missingValue.classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE, missingValue.detail);
+});
+
 test("a reset the page cannot carry in a native control is judged on the declared outcome", () => {
   const reset = (structured, extra = {}) => structuredStepVerdict({
     structured: { resetExpected: true, ...structured }, drove: true, actionProven: true, ...extra,
@@ -128,6 +164,11 @@ test("a reset the page cannot carry in a native control is judged on the declare
   const dead = reset({ resetChecked: false, resetOk: false, explicitVisibleText: ["0"], explicitVisibleTextMissing: ["0"],
     actionDeclared: true, observedStateChanged: false });
   assert.equal(dead.classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE, dead.detail);
+  // A status line can change while the declared value stays absent. That is still a failed reset.
+  const narrated = reset({ resetChecked: false, resetOk: false, explicitVisibleText: ["0"], explicitVisibleTextMissing: ["0"],
+    actionDeclared: true, observedStateChanged: true });
+  assert.equal(narrated.classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE, narrated.detail);
+  assert.equal(narrated.checks.find((check) => check.kind === "reset").ok, false);
   // A measurable native control that stayed at its non-default value, with nothing else declared,
   // is the reset failure this check exists for.
   const stuck = reset({ resetChecked: true, resetOk: false, actionDeclared: true, observedStateChanged: true });
@@ -425,9 +466,18 @@ test("retained false negatives and concrete failures classify correctly in a rea
       const shown = await run("<main><h1>Live competitions</h1><p>Competition cards are visible</p></main>", step);
       assert.equal(shown.pass, true, JSON.stringify(shown.journeys));
       assert.equal(shown.journeys[0].steps[0].classification, VERIFICATION_RESULT_CLASS.PASS);
+      const cased = await run("<main><meta charset=\"utf-8\"><h1>Live competitions</h1><p>COMPETITION&nbsp;CARDS</p></main>", step);
+      assert.equal(cased.pass, true, JSON.stringify(cased.journeys));
+      assert.equal(cased.journeys[0].steps[0].classification, VERIFICATION_RESULT_CLASS.PASS);
+      assert.equal(cased.journeys[0].steps[0].checks.find((check) => check.kind === "visible_text").ok, true);
+      assert.equal((cased.journeys[0].steps[0].advisories || [])
+        .some((row) => row.code === "declared_visible_text_mismatch"), false);
       const missing = await run("<main><h1>Live competitions</h1><p>Nothing listed yet</p></main>", step);
-      assert.equal(missing.journeys[0].steps[0].classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
-        JSON.stringify(missing.journeys));
+      const missingStep = missing.journeys[0].steps[0];
+      assert.equal(missingStep.classification, VERIFICATION_RESULT_CLASS.PASS, JSON.stringify(missing.journeys));
+      assert.equal(missingStep.checks.find((check) => check.kind === "visible_text").ok, false);
+      assert.ok(missingStep.advisories.some((row) => row.code === "declared_visible_text_mismatch"));
+      assert.match(missingStep.detail, /declared visible text missing: "Competition cards"/);
     });
 
     await t.test("a detail observation declared only in prose is CONTRACT_INCOMPLETE, not a structural guess", async () => {
@@ -1399,7 +1449,7 @@ test("retained false negatives and concrete failures classify correctly in a rea
         "the already-proven toggle must not be clicked a second time");
     });
 
-    await t.test("filled catalogue controls cannot replace a missing contracted filter result", async () => {
+    await t.test("a missing filter card is advisory visible text, not a filled-input pass", async () => {
       const search = { ...control("searchQuery", "catalogue-search"), verificationValue: "atlas" };
       const apply = control("catalogue controls", "apply-catalogue-filter", ["button"]);
       const result = await run(`<main><label>Software search
@@ -1409,15 +1459,17 @@ test("retained false negatives and concrete failures classify correctly in a rea
           <section id="results"><h2>Other software</h2><p>No matching catalogue item is available.</p></section></main>`,
       { action: "search and filter the software catalogue", operates: ["searchQuery"],
         expect: "the results area shows a visible card named Atlas CLI and the result count reflects the active search",
-        // The contract states the result it expects; a filled input and a hidden results area do not show it.
+        // The contracted card is absent. The action did change the surface, so the miss is the
+        // advisory visible-text check; a filled input must not be what makes the step pass.
         visibleText: ["Atlas CLI"] }, [
         { kind: "input", valueWritten: "searchQuery", writes: ["journey.searchQuery"], control: search },
         { kind: "action", operationId: "filter-catalogue", reads: ["journey.searchQuery"],
           writes: ["journey.resultItemIds"], control: apply },
       ]);
-      assert.equal(result.pass, false, "filled inputs do not prove a contracted operation result");
-      assert.equal(result.journeys[0].steps[0].classification,
-        VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE, JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].classification, VERIFICATION_RESULT_CLASS.PASS,
+        JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].checks.find((check) => check.kind === "visible_text").ok, false);
+      assert.ok(result.journeys[0].steps[0].advisories.some((row) => row.code === "declared_visible_text_mismatch"));
       assert.doesNotMatch(result.journeys[0].steps[0].detail, /fields hold values/i);
     });
 
@@ -1668,18 +1720,27 @@ test("retained false negatives and concrete failures classify correctly in a rea
       assert.equal(result.journeys[0].classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE);
     });
 
-    await t.test("a real wrong state transition is an app-functional failure", async () => {
+    await t.test("absent declared visible text is advisory when the action changed the surface", async () => {
       const action = control("complete project", "complete-project", ["button"]);
       const html = `<main><button data-thrallo-action="complete-project"
           onclick="document.getElementById('out').textContent='Still editing'">Complete project</button>
           <p id="out"></p></main>`;
-      // The contract states the completed state as its visible result; the app moved to the wrong one.
+      // The action ran and the surface changed. The declared copy is absent, which is advisory:
+      // visible text alone does not make the step an application failure.
       const result = await run(html,
         { action: "click complete project", expect: "project completion result visible", visibleText: ["Completed"] },
         [{ kind: "action", control: action }]);
-      assert.equal(result.journeys[0].classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
+      assert.equal(result.journeys[0].classification, VERIFICATION_RESULT_CLASS.PASS,
         JSON.stringify(result.journeys));
+      assert.equal(result.journeys[0].steps[0].checks.find((check) => check.kind === "visible_text").ok, false);
+      assert.ok(result.journeys[0].steps[0].advisories.some((row) => row.code === "declared_visible_text_mismatch"));
       assert.match(result.journeys[0].steps[0].detail, /declared visible text missing: "Completed"/);
+      // The same declared text, with an action that changes nothing, is still a functional failure.
+      const stuck = await run("<main><button data-thrallo-action=\"complete-project\">Complete project</button><p id=out></p></main>",
+        { action: "click complete project", expect: "project completion result visible", visibleText: ["Completed"] },
+        [{ kind: "action", control: action }]);
+      assert.equal(stuck.journeys[0].classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
+        JSON.stringify(stuck.journeys));
       // Without any declared result the contract cannot tell a wrong state from a right one: the
       // action fired and changed the surface, which passes, and the contract gap is recorded.
       const undeclared = await run(html,

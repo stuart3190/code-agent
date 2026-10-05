@@ -15,11 +15,15 @@ import assert from "node:assert/strict";
 import {
   structuredStepVerdict, expectationOutcome, recoveryEvidenceVerdict, accessDenialVerdict,
   routeMatchesCurrent, flowDeclaresDurableStatus, durableStatusWords, selectionTransition,
+  surfaceIncludes, durableCommitIdentity,
 } from "../../shell/server/lib/appBuild/journeyVerifier.mjs";
 import {
   MINIMAL_CONTRACT_VERIFIER_POLICY, VERIFICATION_RESULT_CLASS, statusForVerificationClass,
   isAppRepairableVerificationClass,
 } from "../../shell/server/lib/appBuild/verifierPolicy.mjs";
+import {
+  SEVERITY, VERIFIER_CHECK_SEVERITY, verifierCheckSeverity,
+} from "../../shell/server/lib/builderV2/validationSeverity.mjs";
 
 const MINIMAL = MINIMAL_CONTRACT_VERIFIER_POLICY;
 // Prose words the app never rendered: every verdict below must be indifferent to them.
@@ -157,6 +161,79 @@ test("expectationOutcome under the contract policy routes structured facts to th
     structured: { mutationDeclared: true, observedStateChanged: false },
   });
   assert.equal(words.classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE);
+});
+
+test("declared visible text matches through case, NBSP, and collapsed whitespace", () => {
+  assert.equal(surfaceIncludes("COMPETITION\u00a0CARDS are visible", "Competition cards"), true);
+  assert.equal(surfaceIncludes("Hello   World", "hello world"), true);
+  assert.equal(surfaceIncludes("\uFF28\uFF45\uFF4C\uFF4C\uFF4F", "hello"), true);
+  assert.equal(surfaceIncludes("Nothing listed yet", "Competition cards"), false);
+  assert.equal(surfaceIncludes("Hello", "   "), false);
+  // The folded copy is for inclusion only. A lowercased reference is not a REFERENCE_TOKEN.
+  const identity = durableCommitIdentity({
+    enteredValues: ["Journey 924950"],
+    textBefore: "Generate asset",
+    textAfter: "journey 924950 Asset. Saved version asset-924950.",
+  });
+  assert.equal(identity.value, "Journey 924950");
+  assert.equal(identity.reference, null);
+  const exact = durableCommitIdentity({
+    enteredValues: ["Journey 924950"],
+    textBefore: "Generate asset",
+    textAfter: "Journey 924950 Asset. Saved version ASSET-924950.",
+  });
+  assert.equal(exact.reference, "ASSET-924950");
+  assert.equal(VERIFIER_CHECK_SEVERITY.visible_text, SEVERITY.ADVISORY);
+  for (const kind of ["route", "values", "collection", "removal", "reset", "mutation", "action", "flow_entry", "submission", "input", "selection"]) {
+    assert.equal(VERIFIER_CHECK_SEVERITY[kind], SEVERITY.BLOCKING, kind);
+  }
+  assert.equal(verifierCheckSeverity("navigation"), SEVERITY.BLOCKING);
+});
+
+test("visible text that is truly absent still fails the check; that miss alone is an advisory pass", () => {
+  const onlyText = structuredStepVerdict({
+    wanted: [], found: [], expect: "a Saved status is visible",
+    structured: {
+      explicitVisibleText: ["Saved"],
+      explicitVisibleTextMissing: ["Saved"],
+      observationOnly: true,
+    },
+    drove: false, actionProven: false,
+  });
+  assert.equal(onlyText.classification, VERIFICATION_RESULT_CLASS.PASS);
+  assert.equal(onlyText.status, "pass");
+  assert.equal(onlyText.checks.find((check) => check.kind === "visible_text").ok, false);
+  assert.equal(onlyText.advisories.some((row) => row.code === "declared_visible_text_mismatch"), true);
+  assert.match(onlyText.advisories.find((row) => row.code === "declared_visible_text_mismatch").detail,
+    /declared visible text missing: "Saved"/);
+
+  const cased = structuredStepVerdict({
+    wanted: [], found: [], expect: "a Saved status is visible",
+    structured: {
+      explicitVisibleText: ["Saved"],
+      explicitVisibleTextMissing: [],
+      actionDeclared: true,
+      observedStateChanged: true,
+    },
+    drove: true, actionProven: true,
+  });
+  assert.equal(cased.classification, VERIFICATION_RESULT_CLASS.PASS);
+  assert.equal(cased.checks.find((check) => check.kind === "visible_text").ok, true);
+  assert.equal((cased.advisories || []).some((row) => row.code === "declared_visible_text_mismatch"), false);
+
+  const missingValue = structuredStepVerdict({
+    wanted: ["saved"], found: ["saved"], expect: "the saved lead is visible",
+    structured: {
+      expectedValues: ["Ada Lovelace"],
+      missingValues: ["Ada Lovelace"],
+      explicitVisibleText: ["Saved"],
+      explicitVisibleTextMissing: ["Saved"],
+      observationOnly: true,
+    },
+    drove: true, actionProven: true,
+  });
+  assert.equal(missingValue.classification, VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE);
+  assert.match(missingValue.detail, /contracted values not visible: Ada Lovelace/);
 });
 
 test("an undriven step with unproven structured facts is inconclusive, not an application failure", () => {
