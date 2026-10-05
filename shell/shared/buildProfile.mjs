@@ -79,7 +79,7 @@ const APPLICATION_PATTERNS = [
 ];
 const SIGNAL_PATTERNS = Object.freeze({
   user_accounts: [
-    /\b(?:user accounts?|sign[ -]?in|log[ -]?in|registered users?|multi[ -]?user|member portal)\b/i,
+    /\b(?:user accounts?|authentication|sign[ -]?in|log[ -]?in|registered users?|multi[ -]?user|member portal)\b/i,
     /\b(?:users?|members?)\s+(?:can\s+|must\s+|may\s+)?register\b/i,
     /\bregister(?:ed|ing)?\s+(?:users?|members?|an?\s+account|for\s+an?\s+account)\b/i,
     /\bteam members?\s+(?:accounts?|access|log[ -]?in|sign[ -]?in)\b/i,
@@ -118,16 +118,59 @@ function normalizeClauseWhitespace(value) {
   return String(value || "").replace(/\r?\n(?!\s*\r?\n)/g, " ");
 }
 
+// Phrases that forbid a capability. Apostrophes cover both straight and curly forms.
+// An adversative "but"/"however" ends the exclusion, same as a sentence boundary.
+const FORBIDDEN_CAPABILITY_LEAD = [
+  "are not required",
+  "not requiring",
+  "does not require",
+  "do not require",
+  "doesn't require",
+  "don't require",
+  "does not need",
+  "do not need",
+  "doesn't need",
+  "don't need",
+  "not needed",
+  "does not use",
+  "do not use",
+  "doesn't use",
+  "don't use",
+  "does not include",
+  "do not include",
+  "doesn't include",
+  "don't include",
+  "does not add",
+  "do not add",
+  "doesn't add",
+  "don't add",
+  "must not include",
+  "must not use",
+  "never include",
+  "never use",
+  "without",
+  "no",
+].map((phrase) => phrase.replace(/'/g, "['’]").replace(/ /g, "\\s+")).join("|");
+const NEGATED_CLAUSE = "(?:(?!\\b(?:but|however)\\b)[^.!?;\\n])";
+const NEGATED_INFRASTRUCTURE = new RegExp(
+  `\\b(?:${FORBIDDEN_CAPABILITY_LEAD})\\b${NEGATED_CLAUSE}{0,120}\\b(?:database|backend|saved data|persistence)\\b${NEGATED_CLAUSE}*`,
+  "gi",
+);
+const NEGATED_CAPABILITY = new RegExp(
+  `\\b(?:${FORBIDDEN_CAPABILITY_LEAD})\\b${NEGATED_CLAUSE}{0,64}\\b(?:user accounts?|auth(?:entication)?|sign[ -]?in|log[ -]?in|saved data|database|backend|persistence|payments?|billing|checkout|subscriptions?|file uploads?|real[ -]?time|admin(?:istration)?|exports?|downloads?)\\b`,
+  "gi",
+);
+
 function withoutNegatedRequirements(value) {
-  return normalizeClauseWhitespace(value)
+  NEGATED_INFRASTRUCTURE.lastIndex = 0;
+  NEGATED_CAPABILITY.lastIndex = 0;
+  const stripped = normalizeClauseWhitespace(value)
     // A comma-separated exclusion such as "no payments, accounts, or admin backend" previously
     // stopped at the first recognized capability (`accounts`) and left `backend` behind as a
     // positive durability signal. Consume the complete negated infrastructure clause, while an
     // explicit adversative clause ("but save to the backend") remains authoritative.
-    .replace(
-      /\b(?:no|without|not requiring|does not require|do not require|does not need|do not need|not needed)\b(?:(?!\b(?:but|however)\b)[^.!?;\n]){0,120}\b(?:database|backend|saved data|persistence)\b(?:(?!\b(?:but|however)\b)[^.!?;\n])*/gi,
-      "",
-    )
+    // Verb forms ("do not use", "must not include", "never use") are the same exclusion.
+    .replace(NEGATED_INFRASTRUCTURE, "")
     .replace(
       /\b(?:do not|does not|don't|doesn't|must not|should not|will not|never)\s+(?:implement|integrate|use|process|take|accept|enable|support)\s+(?:real(?:-money|\s+money)?\s+)?(?:payments?|billing|checkout|subscriptions?)\b/gi,
       "",
@@ -140,10 +183,10 @@ function withoutNegatedRequirements(value) {
       /\b(?:simulat(?:e|ed|ing)|mock(?:ed)?|demo(?:-only)?)\b[^.!?;\n]{0,48}\b(?:payments?|billing|checkout)\b/gi,
       "",
     )
-    .replace(
-    /\b(?:no|without|not requiring|does not require|do not require|does not need|do not need|not needed|are not required)\b[^.!?;\n]{0,64}\b(?:user accounts?|auth(?:entication)?|sign[ -]?in|log[ -]?in|saved data|database|backend|persistence|payments?|billing|checkout|subscriptions?|file uploads?|real[ -]?time|admin(?:istration)?|exports?|downloads?)\b/gi,
-    "",
-  );
+    .replace(NEGATED_CAPABILITY, "");
+  NEGATED_INFRASTRUCTURE.lastIndex = 0;
+  NEGATED_CAPABILITY.lastIndex = 0;
+  return stripped;
 }
 
 const DURABLE_REQUEST = /\b(?:save|saved|stored|persist(?:ed|ence|ent)?|database|backend|history|reload|refresh|recover(?:y|ed)?|look[ -]?up|retrieve)\b/i;
@@ -305,6 +348,29 @@ export function resolveBuildProfile({ prompt = "", input = null, legacy = false 
     requirementSignals,
     inferenceSource,
     confidence: Number(confidence.toFixed(2)),
+  });
+}
+
+/**
+ * Re-infer an auto intake profile from the brief that will actually be contracted.
+ *
+ * Intake stamps signals on the raw user turn. A later rewritten brief is the authoritative
+ * prompt, and adopting the stored auto signals kept exclusions that brief had removed.
+ * Explicit and adjusted profiles are user choices and stay as stored. A profile that is not a
+ * resolved auto DTO is returned unchanged so legacy and partial callers keep their own resolution.
+ */
+export function refreshAutoBuildProfile(profile, brief = "") {
+  const adopted = adoptBuildProfile(profile);
+  if (!adopted || adopted.inferenceSource !== "auto") return adopted || profile || null;
+  const prompt = String(brief || "").trim();
+  if (!prompt) return adopted;
+  return resolveBuildProfile({
+    prompt,
+    input: {
+      requestedBuildType: adopted.requestedBuildType || "auto",
+      ...(adopted.applicationSubtype && adopted.applicationSubtype !== "auto"
+        ? { applicationSubtype: adopted.applicationSubtype } : {}),
+    },
   });
 }
 

@@ -18,7 +18,7 @@ import { killSwitchActive } from "./cutoverPolicy.mjs";
 import { requireFreshWorkerAdmission } from "./workerAdmission.mjs";
 import { classifyComplexity, profileFor } from "../appBuild/buildProfile.mjs";
 import { buildBudgetApprovals } from "./buildBudgetApprovals.mjs";
-import { latestBuildProfile, resolveBuildProfile } from "../../../shared/buildProfile.mjs";
+import { latestBuildProfile, refreshAutoBuildProfile, resolveBuildProfile } from "../../../shared/buildProfile.mjs";
 
 export async function v2BuildEligible(_owner, options = {}) {
   if (killSwitchActive(options.env || process.env)) {
@@ -289,8 +289,12 @@ export async function startAppBuildV2(ctx, input, options = {}) {
   const deps = productionDeps(options.deps);
   const storedTurns = ctx.buildProfile || typeof ctx.conversations?.listTurns !== "function" ? []
     : await ctx.conversations.listTurns(ctx.owner, ctx.conversation.id, { limit: 30 }).catch(() => []);
-  const buildProfile = ctx.buildProfile || latestBuildProfile(storedTurns)
-    || resolveBuildProfile({ prompt: String(input.description || "") });
+  const description = String(input.description || "");
+  // The queued prompt is the lead agent's rewritten brief when one exists. Auto intake signals
+  // were inferred from the raw user turn and are stale once that brief is authoritative.
+  const intakeProfile = ctx.buildProfile || latestBuildProfile(storedTurns) || null;
+  const buildProfile = refreshAutoBuildProfile(intakeProfile, description)
+    || resolveBuildProfile({ prompt: description });
   const workerAdmission = await deps.requireWorkerAdmission({ client: deps.client, jobType: "builder_pipeline" });
   const complexity = classifyComplexity({ prompt: String(input.description) });
   const profile = profileFor(complexity.level);

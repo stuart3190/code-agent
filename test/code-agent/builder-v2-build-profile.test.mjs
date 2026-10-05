@@ -4,7 +4,8 @@ import test from "node:test";
 process.env.CODE_AGENT_STORE = "memory";
 
 const {
-  latestBuildProfile, requestUsesTransientSimulation, resolveBuildProfile, validateBuildProfileInput,
+  inferRequirementSignals, latestBuildProfile, refreshAutoBuildProfile, requestUsesTransientSimulation,
+  resolveBuildProfile, validateBuildProfileInput,
 } = await import("../../shell/shared/buildProfile.mjs");
 const { classifyComplexity } = await import("../../shell/server/lib/appBuild/buildProfile.mjs");
 const { deriveBuildSpec } = await import("../../shell/server/lib/builderV2/buildSpec.mjs");
@@ -310,6 +311,99 @@ test("explicitly excluded capabilities do not become inferred requirement signal
   assert.equal(profile.resolvedBuildType, "website");
   assert.equal(profile.requirementSignals.includes("payments"), false);
   assert.equal(profile.requirementSignals.includes("saved_data"), false);
+});
+
+test("do-not-use exclusions clear accounts and saved data without dropping other signals", () => {
+  const exclusion = "Do not use a database, authentication, or user accounts";
+  const prompt = `Build a client-side calculator. ${exclusion}. Visitors can export a pdf of the result. Calculate spacing from the room size.`;
+  const signals = inferRequirementSignals(prompt);
+  assert.equal(signals.includes("user_accounts"), false, signals.join(","));
+  assert.equal(signals.includes("saved_data"), false, signals.join(","));
+  assert.equal(signals.includes("custom_logic"), true);
+  assert.equal(signals.includes("export"), true);
+
+  for (const negated of [
+    "Do not need authentication, a database, or user accounts.",
+    "Don't use a database or user accounts.",
+    "Do not include authentication or a database.",
+    "Must not use authentication or user accounts.",
+    "Must not include a database or user accounts.",
+    "Never use a database or user accounts.",
+    "Never include authentication or a database.",
+    "No authentication.",
+  ]) {
+    const negatedSignals = inferRequirementSignals(`${negated} Calculate the total.`);
+    assert.equal(negatedSignals.includes("user_accounts"), false, negated);
+    assert.equal(negatedSignals.includes("saved_data"), false, negated);
+    assert.equal(negatedSignals.includes("custom_logic"), true, negated);
+  }
+
+  assert.equal(inferRequirementSignals("Please use authentication for members.").includes("user_accounts"), true);
+  assert.equal(inferRequirementSignals("User accounts required before anyone can continue.").includes("user_accounts"), true);
+  assert.equal(inferRequirementSignals("Save every record in the database.").includes("saved_data"), true);
+  const kept = inferRequirementSignals("Do not use a database, but user accounts are required.");
+  assert.equal(kept.includes("saved_data"), false);
+  assert.equal(kept.includes("user_accounts"), true);
+  const keptPersistence = inferRequirementSignals("Do not use authentication, but save records in the database.");
+  assert.equal(keptPersistence.includes("user_accounts"), false);
+  assert.equal(keptPersistence.includes("saved_data"), true);
+});
+
+test("an auto profile is re-inferred from a rewritten client-side brief before the contract gate", () => {
+  const stale = {
+    version: 1, requestedBuildType: "auto", resolvedBuildType: "application",
+    applicationSubtype: "auto", requirementSignals: ["user_accounts", "saved_data", "custom_logic"],
+    inferenceSource: "auto", confidence: 0.89,
+  };
+  const brief = [
+    "Build a client-side downlight calculator.",
+    "Do not use a database, authentication, persistence, or user accounts.",
+    "Calculate spacing from room dimensions in the browser.",
+  ].join(" ");
+  const refreshed = refreshAutoBuildProfile(stale, brief);
+  assert.equal(refreshed.inferenceSource, "auto");
+  assert.equal(refreshed.requirementSignals.includes("user_accounts"), false);
+  assert.equal(refreshed.requirementSignals.includes("saved_data"), false);
+  assert.equal(refreshed.requirementSignals.includes("custom_logic"), true);
+
+  const adjusted = resolveBuildProfile({
+    prompt: "Calculate something",
+    input: {
+      requestedBuildType: "application",
+      requirementSignals: ["user_accounts", "saved_data"],
+      inferenceSource: "adjusted",
+    },
+  });
+  assert.deepEqual(refreshAutoBuildProfile(adjusted, brief).requirementSignals, adjusted.requirementSignals);
+
+  const explicit = resolveBuildProfile({
+    prompt: "Build an application where users log in and their records are saved.",
+    input: { requestedBuildType: "application" },
+  });
+  const keptExplicit = refreshAutoBuildProfile(explicit, brief);
+  assert.equal(keptExplicit.inferenceSource, "explicit");
+  assert.equal(keptExplicit.requirementSignals.includes("user_accounts"), true);
+  assert.equal(keptExplicit.requirementSignals.includes("saved_data"), true);
+  assert.equal(refreshAutoBuildProfile(null, brief), null);
+
+  const spec = deriveBuildSpec(normaliseContract(contract({
+    summary: "A client-side downlight calculator",
+    entities: [{ name: "estimate", owned: false, fields: [field("roomSize"), field("spacing", "number")] }],
+    operations: [{
+      id: "calculate-spacing", entity: "estimate", kind: "update", journey: "primary-flow",
+      responsibilities: [{
+        type: "functional", behavior: "derive spacing from the room size",
+        reads: ["roomSize"], writes: ["spacing"],
+      }],
+    }],
+    steps: [
+      { action: "enter the room size", target: "room size", operates: ["roomSize"], expect: "the room size is visible" },
+      { action: "calculate spacing", target: "calculate", operates: ["calculate-spacing"], expect: "the spacing is visible" },
+    ],
+  }), { prompt: brief, buildProfile: refreshed }));
+  assert.equal(spec.verdict.problems.some((problem) => /signal=user_accounts|signal=saved_data/.test(problem)), false,
+    spec.verdict.problems.join("; "));
+  assert.equal(spec.verdict.ok, true, spec.verdict.problems.join("; "));
 });
 
 test("simulated rather than real payments do not become a payment requirement", () => {

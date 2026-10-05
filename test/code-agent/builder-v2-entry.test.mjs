@@ -70,6 +70,47 @@ test("accepted Builder V2 dispatch is durable-worker-only and returns handled:tr
   assert.deepEqual(calls[0].providerSelection, { provider: "unknown", billingLane: "byok_api", manualModel: null });
 });
 
+test("a rewritten brief replaces stale auto intake signals before the job is queued", async () => {
+  const calls = [];
+  const project = { id: "project-1", name: "Test" };
+  const client = {
+    from() {
+      return { insert: () => ({ select: () => ({ single: async () => ({ data: project, error: null }) }) }) };
+    },
+  };
+  const stale = {
+    version: 1, requestedBuildType: "auto", resolvedBuildType: "application",
+    applicationSubtype: "auto", requirementSignals: ["user_accounts", "saved_data", "custom_logic"],
+    inferenceSource: "auto", confidence: 0.89,
+  };
+  const accepted = await startAppBuildV2({
+    owner: "owner-1",
+    conversation: { id: "conversation-1", product_id: null },
+    conversations: { upsertProduct: async () => null, updateConversation: async () => {}, appendTurn: async () => {} },
+    emit: async () => {},
+    buildProfile: stale,
+  }, {
+    description: "Build a client-side calculator. Do not use a database, authentication, or user accounts. Calculate the spacing.",
+    productName: null,
+  }, {
+    deps: {
+      client,
+      resolveBuildContext: async () => ({ byok: true }),
+      budgetLedger: () => ({ getBalance: async () => ({ total: 60 }) }),
+      startDiagSessionSafe: async () => ({ id: "diag-1", recorderForJob: () => ({ sessionId: "diag-1" }) }),
+      workerEnabled: () => true,
+      requireWorkerAdmission: async () => ({ workerId: "worker-1" }),
+      createJob: async (input) => { calls.push(input); return { job: { id: "job-1", projectId: project.id, status: "queued", phase: "queued", subscribers: new Set() } }; },
+    },
+  });
+  assert.equal(accepted.handled, true);
+  const signals = calls[0].v2Input.buildProfile.requirementSignals;
+  assert.equal(signals.includes("user_accounts"), false, signals.join(","));
+  assert.equal(signals.includes("saved_data"), false, signals.join(","));
+  assert.equal(signals.includes("custom_logic"), true);
+  assert.equal(calls[0].v2Input.buildProfile.inferenceSource, "auto");
+});
+
 test("new V2 build requires a fresh compatible worker before creating a project", async () => {
   let inserted = false;
   const ctx = {

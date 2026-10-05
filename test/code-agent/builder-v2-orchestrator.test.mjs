@@ -1341,6 +1341,44 @@ test("CONTRACT GATE — a contract the gate accepts is never re-asked", async ()
   assert.equal(calls, 1, "a derivable contract paid for a second contract dispatch");
 });
 
+test("CONTRACT GATE — a rewritten client-side brief drops stale auto auth and persistence signals", async () => {
+  const stale = {
+    version: 1, requestedBuildType: "auto", resolvedBuildType: "application",
+    applicationSubtype: "auto", requirementSignals: ["user_accounts", "saved_data", "custom_logic"],
+    inferenceSource: "auto", confidence: 0.89,
+  };
+  const brief = [
+    "Build a client-side downlight calculator.",
+    "Do not use a database, authentication, persistence, or user accounts.",
+    "Calculate spacing from room dimensions in the browser.",
+  ].join(" ");
+  const seen = [];
+  const { orchestrator } = harness({
+    contractFn: async ({ buildProfile }) => {
+      seen.push(buildProfile);
+      return { ...CONTRACT, buildProfile };
+    },
+  });
+  const result = await orchestrator.runBuild({
+    owner: "o", projectId: "gate-exclusion", request: brief, buildProfile: stale,
+  });
+
+  assert.equal(seen.length, 2, "the refreshed profile is what both contract attempts are judged against");
+  for (const profile of seen) {
+    assert.equal(profile.inferenceSource, "auto");
+    assert.equal(profile.requirementSignals.includes("user_accounts"), false, profile.requirementSignals.join(","));
+    assert.equal(profile.requirementSignals.includes("saved_data"), false, profile.requirementSignals.join(","));
+    assert.equal(profile.requirementSignals.includes("custom_logic"), true);
+  }
+  assert.equal(result.state, "blocked");
+  assert.equal(result.contractRepairUsed, true);
+  assert.equal(result.failingGates.includes("buildProfile"), true);
+  assert.equal(result.problems.some((problem) => /signal=user_accounts|signal=saved_data/.test(problem)), false,
+    result.problems.join("; "));
+  assert.equal(result.problems.some((problem) => problem.includes("signal=custom_logic")), true,
+    result.problems.join("; "));
+});
+
 // ── repair governance in the live loop ─────────────────────────────────────────────────────────
 
 test("REPAIR GOVERNANCE — a stalled defect on a bound, operated control is reclassified instead of regenerating its owner", async () => {
