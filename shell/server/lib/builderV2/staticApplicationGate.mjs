@@ -1,16 +1,19 @@
 // Cheap pre-browser application integration gates for composed Builder V2 trees.
-// Browser verification remains authoritative for behaviour. These checks reject only defects
+// Browser verification remains authoritative for behaviour. Blocking checks reject only defects
 // that execution cannot make valid: unparseable source, unresolved identifiers, broken protected
-// composition, missing exports and unreachable contracted modules/extensions.
+// composition, missing exports and unreachable contracted modules/extensions. Advisory checks,
+// including entity/store mount integrity, are recorded and do not stop a runnable candidate.
 
 import { parse } from "@babel/parser";
 import path from "node:path";
 
+import { operationUsesDurablePersistence } from "../../../shared/implementationContract.mjs";
 import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
 import { scaffoldCompositionPlan, scaffoldCompositionPlanFor, validateScaffoldComposition,
   SCAFFOLD_MANIFEST_PATH } from "./scaffoldComposer.mjs";
-import { journeySurfaceContext } from "./surfaceIntegration.mjs";
+import { journeySurfaceContext, reachableSourcePaths } from "./surfaceIntegration.mjs";
+import { partitionFindings } from "./validationSeverity.mjs";
 
 const SOURCE = /^src\/.*\.(?:jsx?|tsx?|mjs|cjs)$/;
 const ENTRY = /^src\/(?:main|index|App)\.(?:jsx?|tsx?)$/;
@@ -633,6 +636,211 @@ export function lintCustomExtensionInterfaces(tree = {}, scaffoldGraph = null, j
   return findings;
 }
 
+const FACADE_CALLS = new Set(["entityStore", "repository", "useEntityMutation"]);
+const STORE_MAPS = new Set(["entityStores", "repositories"]);
+const COMPOSED_ENTITIES_PATH = "src/lib/capabilities/composed/entities.js";
+const COMPOSED_CRUD_PATH = "src/lib/capabilities/composed/crud.js";
+
+function literalString(node) {
+  if (!node) return null;
+  if (node.type === "StringLiteral" || (node.type === "Literal" && typeof node.value === "string")) return node.value;
+  if (node.type === "TemplateLiteral" && (node.expressions || []).length === 0) {
+    return node.quasis?.[0]?.value?.cooked ?? "";
+  }
+  return null;
+}
+
+function unwrapFreeze(node) {
+  if (["CallExpression", "OptionalCallExpression"].includes(node?.type)
+      && ["MemberExpression", "OptionalMemberExpression"].includes(node.callee?.type)
+      && !node.callee.computed
+      && node.callee.object?.type === "Identifier" && node.callee.object.name === "Object"
+      && node.callee.property?.name === "freeze") {
+    return node.arguments?.[0] || null;
+  }
+  return node;
+}
+
+function propertyName(property) {
+  if (!property || (property.type !== "ObjectProperty" && property.type !== "ObjectMethod")) return null;
+  if (!property.computed && property.key?.type === "Identifier") return property.key.name;
+  return literalString(property.key);
+}
+
+/** Entity names declared by the composed schema (`entityDefinitions`) or legacy `entityStores` map. */
+function composedEntityNames(tree) {
+  const names = new Set();
+  const take = (file, binding, extract) => {
+    const source = tree?.[file];
+    if (typeof source !== "string") return;
+    const ast = parseSource(source, file);
+    if (!ast) return;
+    const visit = (node) => {
+      if (!node || typeof node.type !== "string") return;
+      if (node.type === "VariableDeclarator" && node.id?.type === "Identifier" && node.id.name === binding) {
+        for (const name of extract(node.init)) if (name) names.add(name);
+      }
+      for (const [, child] of childrenOf(node)) visit(child);
+    };
+    visit(ast.program);
+  };
+  take(COMPOSED_ENTITIES_PATH, "entityDefinitions", (init) => {
+    const array = unwrapFreeze(init);
+    if (array?.type !== "ArrayExpression") return [];
+    return (array.elements || []).map((element) => {
+      if (element?.type !== "ObjectExpression") return null;
+      const name = element.properties?.map(propertyName).includes("name")
+        ? literalString(element.properties.find((property) => propertyName(property) === "name")?.value)
+        : null;
+      return name;
+    });
+  });
+  take(COMPOSED_CRUD_PATH, "entityStores", (init) => {
+    const object = unwrapFreeze(init);
+    if (object?.type !== "ObjectExpression") return [];
+    return (object.properties || []).map(propertyName);
+  });
+  return names;
+}
+
+function durableOperationEntities(contract) {
+  const platformNames = new Set((contract?.entities || [])
+    .filter((entity) => entity?.platform)
+    .map((entity) => entity.name)
+    .filter(Boolean));
+  const names = [];
+  for (const operation of contract?.operations || []) {
+    const entity = typeof operation?.entity === "string" ? operation.entity : "";
+    if (!entity || platformNames.has(entity)) continue;
+    if (!operationUsesDurablePersistence(contract, operation)) continue;
+    names.push(entity);
+  }
+  return unique(names).sort();
+}
+
+function stringConstants(ast) {
+  const counts = new Map();
+  const values = new Map();
+  const visit = (node) => {
+    if (!node || typeof node.type !== "string") return;
+    if (node.type === "VariableDeclarator" && node.id?.type === "Identifier") {
+      const value = literalString(node.init);
+      if (value !== null) {
+        counts.set(node.id.name, (counts.get(node.id.name) || 0) + 1);
+        values.set(node.id.name, value);
+      }
+    }
+    for (const [, child] of childrenOf(node)) visit(child);
+  };
+  visit(ast);
+  const constants = new Map();
+  for (const [name, count] of counts) if (count === 1) constants.set(name, values.get(name));
+  return constants;
+}
+
+function argumentEntity(node, constants) {
+  const literal = literalString(node);
+  if (literal !== null) return literal;
+  if (node?.type === "Identifier" && constants.has(node.name)) return constants.get(node.name);
+  return null;
+}
+
+function facadeLocals(ast) {
+  const locals = new Map();
+  for (const name of FACADE_CALLS) locals.set(name, name);
+  locals.set("db", "db");
+  for (const statement of ast.program?.body || []) {
+    if (statement.type !== "ImportDeclaration") continue;
+    for (const specifier of statement.specifiers || []) {
+      if (specifier.type !== "ImportSpecifier") continue;
+      const imported = specifier.imported?.name || specifier.imported?.value;
+      if (FACADE_CALLS.has(imported) || imported === "db") locals.set(specifier.local.name, imported);
+    }
+  }
+  return locals;
+}
+
+function facadeCallee(callee, locals) {
+  if (!callee) return null;
+  if (callee.type === "Identifier" && FACADE_CALLS.has(locals.get(callee.name))) return locals.get(callee.name);
+  if (["MemberExpression", "OptionalMemberExpression"].includes(callee.type) && !callee.computed) {
+    const property = callee.property?.name || null;
+    if (FACADE_CALLS.has(property)) return property;
+    if (property === "entity") {
+      const object = callee.object;
+      if (object?.type === "Identifier" && (locals.get(object.name) === "db" || object.name === "db")) return "db.entity";
+      if (["MemberExpression", "OptionalMemberExpression"].includes(object?.type)
+          && !object.computed && object.property?.name === "db") return "db.entity";
+    }
+  }
+  return null;
+}
+
+/** Entity names a module passes to entityStore / db.entity / repository / useEntityMutation. */
+function entityFacadeCalls(source, file) {
+  const ast = parseSource(source, file);
+  if (!ast) return [];
+  const constants = stringConstants(ast);
+  const locals = facadeLocals(ast);
+  const found = [];
+  const visit = (node) => {
+    if (!node || typeof node.type !== "string") return;
+    if (["CallExpression", "OptionalCallExpression"].includes(node.type) && facadeCallee(node.callee, locals)) {
+      const entity = argumentEntity(node.arguments?.[0], constants);
+      if (entity) found.push(entity);
+    }
+    if (["MemberExpression", "OptionalMemberExpression"].includes(node.type)
+        && node.object?.type === "Identifier" && STORE_MAPS.has(node.object.name)) {
+      const key = node.computed
+        ? argumentEntity(node.property, constants)
+        : node.property?.name || null;
+      if (key) found.push(key);
+    }
+    for (const [, child] of childrenOf(node)) visit(child);
+  };
+  visit(ast.program);
+  return found;
+}
+
+/**
+ * Advisory mount check for every durable entity.
+ *
+ * The entity must be declared in the composed schema or `entityStores`, and some module the
+ * running application can load (`reachableSourcePaths`) must call its facade or store:
+ * `entityStore`, `db.entity`, `repository`, or `useEntityMutation`. Platform-owned entities
+ * (accounts, identity, authorization, admin) and transient storage never enter this set.
+ * Findings stay advisory until the false-rejection corpus reports none of them.
+ */
+export function lintEntityStoreIntegrity(tree = {}, contract = null) {
+  const entities = durableOperationEntities(contract);
+  if (!entities.length) return [];
+  const composed = composedEntityNames(tree);
+  const reachable = reachableSourcePaths(tree);
+  const called = new Set();
+  for (const file of reachable) {
+    if (typeof tree?.[file] !== "string") continue;
+    for (const name of entityFacadeCalls(tree[file], file)) called.add(name);
+  }
+  const findings = [];
+  for (const entity of entities) {
+    const inComposition = composed.has(entity);
+    const mounted = called.has(entity);
+    if (inComposition && mounted) continue;
+    const gaps = [
+      !inComposition ? "it does not appear in the composed schema or entityStores" : null,
+      !mounted ? "no module reachable from the application entry calls entityStore, db.entity, repository, or useEntityMutation for it" : null,
+    ].filter(Boolean);
+    findings.push({
+      code: "entity_store_unmounted",
+      entity,
+      composed: inComposition,
+      reachableCall: mounted,
+      message: `durable entity ${JSON.stringify(entity)} is not mounted: ${gaps.join("; ")}`,
+    });
+  }
+  return findings;
+}
+
 function structuralSurfaceFinding(tree, graph) {
   const expected = graph?.expectedModuleSurface;
   if (!expected?.extremeMaximum) return [];
@@ -714,6 +922,13 @@ export function runStaticApplicationGate(tree, { contract = null, modulePlan = [
   advisory.push(...expansion);
   checks.push({ name: "module_proportionality", ok: expansion.length === 0,
     detail: expansion.map((finding) => finding.message) });
+
+  const integrity = lintEntityStoreIntegrity(tree, contract);
+  const integrityVerdict = partitionFindings(integrity);
+  advisory.push(...integrityVerdict.advisory);
+  blocking.push(...integrityVerdict.blocking);
+  checks.push({ name: "entity_store_integrity", ok: integrity.length === 0,
+    detail: integrity.map((finding) => finding.message) });
 
   return { ok: blocking.length === 0, active: true, blocking, advisory, checks,
     mountedSurface: surface, reachable: [...reachable].sort() };
