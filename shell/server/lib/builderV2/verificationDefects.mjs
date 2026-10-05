@@ -37,6 +37,8 @@ import { CAPABILITY_CONFIGURATION_PATH, COMPOSED_ROOT } from "./capabilityCompos
 import { journeySurfaceContext } from "./surfaceIntegration.mjs";
 import { routeScaffoldDefect, SCAFFOLD_REPAIR_CLASS } from "./scaffoldRepairRouting.mjs";
 import {
+  BYPASSED_VERIFIER_POLICY,
+  LEGACY_RICH_VERIFIER_POLICY,
   MINIMAL_CONTRACT_VERIFIER_POLICY,
   SMOKE_VERIFIER_POLICY,
   VERIFICATION_RESULT_CLASS,
@@ -166,6 +168,41 @@ function modulesFor(diagnostic, journey) {
   ].filter(generatedSource));
 }
 
+const failingCheckKind = (check) => (typeof check === "string" ? check : String(check?.kind || ""));
+
+function failingVerifierChecks(step) {
+  return (Array.isArray(step?.checks) ? step.checks : [])
+    .filter((check) => check && check.ok === false && check.kind)
+    .map((check) => (check.inconclusive === true
+      ? { kind: String(check.kind), inconclusive: true }
+      : String(check.kind)));
+}
+
+function advisoryVerifierChecksOnly(checks) {
+  return checks.length > 0 && checks.every((check) => (
+    check?.inconclusive !== true
+    && verifierCheckSeverity(failingCheckKind(check)) === SEVERITY.ADVISORY
+  ));
+}
+
+/**
+ * Whether this step's result may spend an application repair.
+ *
+ * Named per policy. Smoke and a bypassed preview never repair: they carry no contracted
+ * outcome a patch can answer. The minimal contract policy repairs only a class the verifier
+ * called an application failure, plus an unexposed contracted selection value. Every other
+ * policy is not repairable merely because it is not minimal — a named non-application class
+ * stays withheld. Only a historical verdict that recorded no class at all (legacy rich, or
+ * evidence from before classes existed) remains repairable by default.
+ */
+function repairableVerificationResult({ policy, resultClass, selectionValueMissing = false } = {}) {
+  if (policy === SMOKE_VERIFIER_POLICY || policy === BYPASSED_VERIFIER_POLICY) return false;
+  const classRepairable = isAppRepairableVerificationClass(resultClass) || selectionValueMissing === true;
+  if (policy === MINIMAL_CONTRACT_VERIFIER_POLICY) return classRepairable;
+  if (!resultClass && (policy == null || policy === LEGACY_RICH_VERIFIER_POLICY)) return true;
+  return classRepairable;
+}
+
 /**
  * Classify one failing step.
  *
@@ -175,16 +212,6 @@ function modulesFor(diagnostic, journey) {
  * or, when the contract says the step's subject is a durable record, DURABILITY (run #9's refused
  * commit, run #10's booking that did not survive a reload).
  */
-function failingVerifierChecks(step) {
-  return (Array.isArray(step?.checks) ? step.checks : [])
-    .filter((check) => check && check.ok === false && check.kind)
-    .map((check) => String(check.kind));
-}
-
-function advisoryVerifierChecksOnly(kinds) {
-  return kinds.length > 0 && kinds.every((kind) => verifierCheckSeverity(kind) === SEVERITY.ADVISORY);
-}
-
 function classifyStep({ status, drove, kinds }) {
   if (status === "undriveable") return DEFECT_CLASS.INTERACTION;
   const durable = kinds.some((kind) => DURABLE_KINDS.has(kind));
@@ -230,7 +257,8 @@ export function verificationDefects({
     journeyId: null, stepIndex: null, action: null, control: null, modules: [],
     evidence: { observed: "retained browser evidence belongs to a different execution contract; fresh verification is required" },
   }];
-  const minimal = verdicts.verifierPolicy === MINIMAL_CONTRACT_VERIFIER_POLICY;
+  const policy = verdicts.verifierPolicy || null;
+  const minimal = policy === MINIMAL_CONTRACT_VERIFIER_POLICY;
   const journeysById = new Map((verdicts.journeys || []).map((journey) => [journey.id, journey]));
   const mechanics = verdicts.mechanics || null;
   const defects = [];
@@ -377,8 +405,9 @@ export function verificationDefects({
     const contractIncomplete = minimal
       && resultClass === VERIFICATION_RESULT_CLASS.CONTRACT_INCOMPLETE;
     const appSelectionValueMissing = platformInconclusive && selectionFixtureIsUnexposed(step, status);
-    const repairableResult = !minimal || isAppRepairableVerificationClass(resultClass)
-      || appSelectionValueMissing;
+    const repairableResult = repairableVerificationResult({
+      policy, resultClass, selectionValueMissing: appSelectionValueMissing,
+    });
     const defectClass = resultClass === VERIFICATION_RESULT_CLASS.PERSISTENCE_FAILURE
       ? DEFECT_CLASS.DURABILITY
       : contractIncomplete ? DEFECT_CLASS.CONTRACT
@@ -491,7 +520,11 @@ export function verificationDefects({
   // That is still a defect and still has to be briefed — what it is NOT is a defect anyone can
   // name, so its class and its owner both stay unknown rather than being invented.
   const journeysWithSteps = new Set(diagnostics.map((row) => row.journeyId));
-  const smoke = verdicts.verifierPolicy === SMOKE_VERIFIER_POLICY;
+  const smoke = policy === SMOKE_VERIFIER_POLICY;
+  // A journey with no step evidence is repairable only for the historical policies that
+  // recorded failures that way. Minimal, smoke, bypass, and any unnamed future policy are not.
+  const unnamedJourneyRepairable = !minimal && !smoke && policy !== BYPASSED_VERIFIER_POLICY
+    && (policy == null || policy === LEGACY_RICH_VERIFIER_POLICY);
   for (const journey of verdicts.journeys || []) {
     if (["pass", "reused"].includes(journey.status) || journeysWithSteps.has(journey.id)) continue;
     if (journey.setup?.ok === false) continue; // already reported as a prerequisite defect
@@ -515,7 +548,7 @@ export function verificationDefects({
       code: "journey_failed_without_step_evidence",
       defectClass: minimal ? DEFECT_CLASS.PLATFORM : DEFECT_CLASS.UNKNOWN,
       owner: minimal ? DEFECT_OWNER.PLATFORM : DEFECT_OWNER.UNKNOWN, uncertain: true,
-      tier: minimal ? REPAIR_TIER.NONE : REPAIR_TIER.REPAIR,
+      tier: unnamedJourneyRepairable ? REPAIR_TIER.REPAIR : REPAIR_TIER.NONE,
       journeyId: journey.id, stepIndex: null, action: null, control: null,
       modules: unique([...(journey.owners || []), ...(journey.fallbackRefs || [])].filter(generatedSource)),
       failureRefs: unique([...(journey.owners || []), ...(journey.fallbackRefs || [])]),
@@ -649,9 +682,14 @@ export function defectEvidence(defects = []) {
           ? `Backend evidence recorded ${created.length} created row(s), so repair the mounted state/filter/render handoff rather than duplicating the mutation.`
           : "Repair the action-to-mounted-collection state transition."));
     }
-    if ((defect.evidence?.journeyAdvisories || [])
-      .some((advisory) => advisory.code === "text_freshness_not_observed")) {
-      lines.push("an earlier contracted result was already visible before its action completed. Prevent the dependent step from racing an unfinished async transition: do not pre-render the post-action outcome, or publish/await the completed state before dependent controls can run.");
+    // Freshness is verifier context. Brief it only while the advisory still says the result was
+    // already visible — that wording is the race a repair can answer. Any other wording is noise
+    // and must not become an instruction.
+    if ((defect.evidence?.journeyAdvisories || []).some((advisory) => (
+      advisory?.code === "text_freshness_not_observed"
+      && /already visible/i.test(String(advisory.detail || ""))
+    ))) {
+      lines.push("context (verifier advisory, not the repair): an earlier contracted result was already visible before its action completed. Prevent the dependent step from racing an unfinished async transition: do not pre-render the post-action outcome, or publish/await the completed state before dependent controls can run.");
     }
     if (defect.evidence?.surfaceIntegration) {
       const surface = defect.evidence.surfaceIntegration;

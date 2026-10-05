@@ -12,6 +12,7 @@ import { readdir, readFile } from "node:fs/promises";
 
 import { deriveBuildSpec, scopeBuildSpec, journeysInMountedScreenUnit } from "../../shell/server/lib/builderV2/buildSpec.mjs";
 import { coreGenerationScope, staticCandidateVerdict } from "../../shell/server/lib/builderV2/preRepairPipeline.mjs";
+import { governRepairRound } from "../../shell/server/lib/builderV2/repairGovernance.mjs";
 import { validateModuleConformance } from "../../shell/server/lib/builderV2/moduleContracts.mjs";
 import { lintDurablePersistence } from "../../shell/server/lib/builderV2/persistenceLint.mjs";
 import { runStaticApplicationGate } from "../../shell/server/lib/builderV2/staticApplicationGate.mjs";
@@ -100,6 +101,22 @@ test("a whole-app scope is NOT the core scope: secondary placeholders appear onl
     "the placeholder screens of increment journeys are real, and belong to the increments");
   const core = staticCandidateVerdict(tree, coreGenerationScope(spec, contract));
   assert.deepEqual(core.blocking, []);
+});
+
+test("a verifier-noise-only defect set does not dispatch a pre-repair round", () => {
+  const noise = {
+    code: "contracted_outcome_missing", defectClass: "behaviour", owner: "app", tier: "repair",
+    journeyId: "calculate", stepIndex: 0, modules: ["src/screens/Calc.jsx"],
+    evidence: { drove: true, observed: "declared visible text missing", failingChecks: ["visible_text"] },
+  };
+  const inconclusive = {
+    ...noise, journeyId: "collect",
+    evidence: { drove: true, failingChecks: [{ kind: "collection", inconclusive: true }] },
+  };
+  const round = governRepairRound({ defects: [noise, inconclusive], strategy: "exact_owning_file_repair" });
+  assert.deepEqual(round.dispatchable, []);
+  assert.equal(round.stopReason, "repair_withheld_verifier_noise");
+  assert.equal(round.withheld.length, 2);
 });
 
 test("the retained first core candidates carry the blocking findings production corrected", async () => {

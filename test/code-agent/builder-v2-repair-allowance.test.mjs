@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { deriveBuildEnvelope } from "../../shell/server/lib/builderV2/buildEnvelope.mjs";
 import { MAX_REPAIR_DISPATCHES } from "../../shell/server/lib/builderV2/modelReservations.mjs";
+import { governRepairRound } from "../../shell/server/lib/builderV2/repairGovernance.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const migrations = path.join(root, "supabase", "migrations");
@@ -36,6 +37,22 @@ test("repair strategy capacity is derived from the validated contract, not a uni
   assert.ok(large.thralloRecovery.strategyCapacity > small.thralloRecovery.strategyCapacity);
   assert.ok(large.thralloRecovery.strategyCapacity < MAX_REPAIR_DISPATCHES,
     "the database bound remains an emergency guard, not the primary capacity");
+});
+
+test("a verifier-noise-only defect set does not spend a repair dispatch", () => {
+  const noiseOnly = [{
+    code: "contracted_outcome_missing", defectClass: "behaviour", owner: "app", tier: "repair",
+    journeyId: "calculate", modules: ["src/screens/Calc.jsx"],
+    evidence: { drove: true, failingChecks: ["visible_text"] },
+  }, {
+    code: "contracted_outcome_missing", defectClass: "behaviour", owner: "app", tier: "none",
+    journeyId: "review", modules: ["src/screens/Calc.jsx"],
+    evidence: { drove: true, failingChecks: [{ kind: "collection", inconclusive: true }] },
+  }];
+  const round = governRepairRound({ defects: noiseOnly, strategy: "exact_owning_file_repair" });
+  assert.deepEqual(round.dispatchable, [], "noise must not reach the allowance");
+  assert.equal(round.stopReason, "repair_withheld_verifier_noise");
+  assert.ok(round.dispatchable.length < MAX_REPAIR_DISPATCHES);
 });
 
 test("an explicit emergency value is clamped to the database bound", () => {
