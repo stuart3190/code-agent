@@ -208,7 +208,14 @@ test("the deployment marker is generated from the pin, never hand-maintained", a
     "the marker may only be written when a pin actually happened");
   // The image is built from a subset of the tree, so the record distinguishes the two commits
   // instead of claiming the image is as new as the checkout.
-  assert.match(source, /sandboxImageSourceCommit: imageCommit/);
+  assert.match(source, /probeImageSandboxIdentity\(\{ image: digest, runSandboxJob \}\)/,
+    "the pin probes the built image, not the host tree");
+  assert.doesNotMatch(source, /sandboxIdentity:\s*hostIdentity/,
+    "provenance must not stamp the host identity over the image");
+  const provenanceLib = await readFile(path.join(ROOT, "ops", "lib", "sandboxImagePin.mjs"), "utf8");
+  assert.match(provenanceLib, /sandboxImageSourceCommit: imageCommit/);
+  assert.ok(pinBlock.indexOf("assertSandboxPinAllowed(decision)") < pinBlock.indexOf("writeFile(provenancePath"),
+    "--pin must refuse an incompatible image before writing provenance");
   assert.match(pinBlock, /THRALLO_BUILD_WORKER_VERSION=\$\{commit\}\$\{channel\}/,
     "the atomic pin also refreshes the operator-visible worker source identity");
   assert.match(pinBlock, /endsWith\("-dark"\) \? "-dark" : ""/,

@@ -54,6 +54,33 @@ sudo node ops/pin-build-sandbox-image.mjs \
   --tag <immutable-built-tag> --pin
 ```
 
+`ops/pin-build-sandbox-image.mjs` probes the image with the same `sandbox_provenance` job as
+`ops/prove-sandbox-provenance.mjs` and writes that probed identity into
+`.deployment-provenance.json`. `--pin` is refused when the image is incompatible with the host,
+including a verdict-deciding import-closure mismatch. Do not record the host identity in place of
+a probe.
+
+## Sandbox image rebuild (no silent noimage)
+
+`deploy.sh` lives on the VPS and is not in this repository. It must not choose `noimage` only
+because `build-worker/Dockerfile` is unchanged. Verdict-deciding shell files are copied into the
+image; a stale image then fails live builds with `sandbox_version_mismatch`.
+
+Before taking the noimage path, run:
+
+```bash
+node ops/require-sandbox-image-rebuild.mjs --from <previous-release-sha> --to HEAD
+```
+
+- Exit 0: no provenance-critical file changed. Reusing the previous image is allowed.
+- Exit 2: the Dockerfile or a verdict-deciding file (the sandbox identity list and its import
+  closure) changed. Rebuild the image, or stop and require an explicit `--image`. Do not continue
+  with noimage.
+- Exit 1: the diff could not be read. Treat that as rebuild-required.
+
+An explicit `--image` is the operator override after a rebuild. It is not implied by an unchanged
+Dockerfile. The shared decision is `ops/lib/sandboxImageRebuild.mjs`.
+
 Any worker allowed to execute `builder_pipeline` also requires `SUPABASE_URL` and exactly one
 public browser credential (`SUPABASE_PUBLISHABLE_KEY`, preferred, or the legacy
 `SUPABASE_ANON_KEY`). These values come from the same private configuration authority as the shell.
