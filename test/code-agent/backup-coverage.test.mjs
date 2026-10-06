@@ -341,15 +341,17 @@ test("migration history validation reports the effective applied ledger, not the
   assert.equal(result.authoritativeBase, 60);
   assert.equal(result.appliedOverlay, 27);
   assert.equal(result.effectiveApplied, 87);
-  assert.equal(result.active, 87);
+  assert.equal(result.active, 88);
   // The overlay used to stop at 74 while production had gone on to 83, so this test asserted a
   // pending list that its own comment admitted was already applied. Every entry was verified
   // against supabase_migrations.schema_migrations on 2026-09-04 and recorded in the 2026-09-04
   // overlay; row 84 was confirmed applied on 2026-09-19.
   //
-  // Nothing is pending again: the WP4/WP8/WP12 migrations were applied on 2026-09-20 and their
-  // tables moved from PENDING_MIGRATION_TABLES into the live catalog.
-  assert.deepEqual(result.pending, []);
+  // WP4/WP8/WP12 were applied on 2026-09-20. The one pending row widens bv2_builds.verifier_policy
+  // and is deliberately not applied.
+  assert.deepEqual(result.pending, [
+    { version: "20261006080000", name: "bv2_widen_verifier_policy_smoke_bypassed" },
+  ]);
   // Five were pushed under an apply-time version that differs from the authored filename. Their SQL
   // is identical to the ledger; only the version differs, and it is reported rather than hidden.
   assert.deepEqual(result.versionDrift, [
