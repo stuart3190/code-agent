@@ -61,10 +61,31 @@ export const PRODUCTION_PUBLIC_TABLES_98 = Object.freeze([...PRODUCTION_PUBLIC_T
 // information_schema: 101 public tables before, nine added, 110 after. The 98-table constant stays
 // exactly as it was, because a historical backup must keep validating against the catalog it was
 // actually taken from.
-export const PRODUCTION_PUBLIC_TABLES_107 = Object.freeze([...PRODUCTION_PUBLIC_TABLES_98,
-  "app_account_policies", "app_audit_config", "app_audit_events", "app_billing_events",
-  "app_membership_events", "app_memberships", "app_profiles", "app_settings", "app_subscriptions",
+// WP4 (ledger 85) adds the four account tables. WP8 (86) and WP12 (87) add the rest.
+// Each step is its own catalog: a backup taken between those applies must not be checked
+// against tables that did not exist yet.
+export const PRODUCTION_PUBLIC_TABLES_102 = Object.freeze([...PRODUCTION_PUBLIC_TABLES_98,
+  "app_account_policies", "app_membership_events", "app_memberships", "app_profiles",
 ].sort());
+export const PRODUCTION_PUBLIC_TABLES_102_SHA256 =
+  "353f0a0b0e10c9abe523be5623abcac489907d5e7bfcfe5ce8bcb37e7a96ce50";
+export const PRODUCTION_PUBLIC_TABLES_105 = Object.freeze([...PRODUCTION_PUBLIC_TABLES_102,
+  "app_audit_config", "app_audit_events", "app_settings",
+].sort());
+export const PRODUCTION_PUBLIC_TABLES_105_SHA256 =
+  "2ba7163cbf4152c77ba1b6ba55a983e9ff17bf2bbd504c10b483753da34095a8";
+export const PRODUCTION_PUBLIC_TABLES_107 = Object.freeze([...PRODUCTION_PUBLIC_TABLES_105,
+  "app_billing_events", "app_subscriptions",
+].sort());
+export const PRODUCTION_PUBLIC_TABLES_107_SHA256 =
+  "d8d73f8bc6a231abe9ca7cca8050c26198b05303367c9f82469ae1e3fd5b4ca0";
+
+// Ledger 87 is the live production count after WP12 (2026-09-20). On-disk #177
+// (20261006080000, verifier_policy check only) becomes 88 once applied and adds no table.
+// The window runs through 96 so later catalog-neutral migrations do not break backup again.
+// A migration that creates or drops a public table must open a new catalog instead of
+// extending this range.
+export const CURRENT_CATALOG_MIGRATION_RANGE = Object.freeze({ min: 87, max: 96 });
 
 export const PRODUCTION_PUBLIC_TABLES_98_SHA256 =
   "7e055d0b204b6254d11c66da0f6dbf5e0b4bc99ea17faac4b1bda5c55ed70417";
@@ -138,27 +159,59 @@ export const PRODUCTION_PUBLIC_FK_PAIRS_68 = Object.freeze(PRODUCTION_PUBLIC_FK_
 export const PRODUCTION_PUBLIC_FK_PAIRS_68_SHA256 =
   "2b9a0e622e191ace556179b2d6837ed158e6f5fa42b65ce3664a68f8fd3b3bc2";
 
+function migrationCountInRange(migrationCount, min, max) {
+  const count = Number(migrationCount);
+  return Number.isInteger(count) && count >= min && count <= max;
+}
+
+function catalogEvidence(migrationCount, tables, tablesSha256, fkPairs, fkPairsSha256) {
+  return {
+    migrationCount: Number(migrationCount),
+    tables,
+    tablesSha256,
+    fkPairs,
+    fkPairsSha256,
+  };
+}
+
 export function runtimeCatalogEvidence(migrationCount) {
-  if (Number(migrationCount) === 68) return {
-    migrationCount: 68, tables: PRODUCTION_PUBLIC_TABLES_68, tablesSha256: PRODUCTION_PUBLIC_TABLES_68_SHA256,
-    fkPairs: PRODUCTION_PUBLIC_FK_PAIRS_68, fkPairsSha256: PRODUCTION_PUBLIC_FK_PAIRS_68_SHA256,
-  };
-  if (Number(migrationCount) === 69) return {
-    migrationCount: 69, tables: PRODUCTION_PUBLIC_TABLES_69, tablesSha256: PRODUCTION_PUBLIC_TABLES_69_SHA256,
-    fkPairs: PRODUCTION_PUBLIC_FK_PAIRS_70, fkPairsSha256: PRODUCTION_PUBLIC_FK_PAIRS_70_SHA256,
-  };
-  if ([70, 71, 72, 73, 74].includes(Number(migrationCount))) return {
-    migrationCount: Number(migrationCount), tables: PRODUCTION_PUBLIC_TABLES_70, tablesSha256: PRODUCTION_PUBLIC_TABLES_70_SHA256,
-    fkPairs: PRODUCTION_PUBLIC_FK_PAIRS_70, fkPairsSha256: PRODUCTION_PUBLIC_FK_PAIRS_70_SHA256,
-  };
-  if ([75, 76, 77, 78, 79].includes(Number(migrationCount))) return {
-    migrationCount: Number(migrationCount), tables: PRODUCTION_PUBLIC_TABLES_75, tablesSha256: PRODUCTION_PUBLIC_TABLES_75_SHA256,
-    fkPairs: PRODUCTION_PUBLIC_FK_PAIRS_75, fkPairsSha256: PRODUCTION_PUBLIC_FK_PAIRS_75_SHA256,
-  };
-  if ([80, 81].includes(Number(migrationCount))) return {
-    migrationCount: Number(migrationCount), tables: PRODUCTION_PUBLIC_TABLES_98, tablesSha256: PRODUCTION_PUBLIC_TABLES_98_SHA256,
-    fkPairs: PRODUCTION_PUBLIC_FK_PAIRS_99, fkPairsSha256: PRODUCTION_PUBLIC_FK_PAIRS_99_SHA256,
-  };
+  if (migrationCountInRange(migrationCount, 68, 68)) return catalogEvidence(
+    migrationCount, PRODUCTION_PUBLIC_TABLES_68, PRODUCTION_PUBLIC_TABLES_68_SHA256,
+    PRODUCTION_PUBLIC_FK_PAIRS_68, PRODUCTION_PUBLIC_FK_PAIRS_68_SHA256,
+  );
+  if (migrationCountInRange(migrationCount, 69, 69)) return catalogEvidence(
+    migrationCount, PRODUCTION_PUBLIC_TABLES_69, PRODUCTION_PUBLIC_TABLES_69_SHA256,
+    PRODUCTION_PUBLIC_FK_PAIRS_70, PRODUCTION_PUBLIC_FK_PAIRS_70_SHA256,
+  );
+  if (migrationCountInRange(migrationCount, 70, 74)) return catalogEvidence(
+    migrationCount, PRODUCTION_PUBLIC_TABLES_70, PRODUCTION_PUBLIC_TABLES_70_SHA256,
+    PRODUCTION_PUBLIC_FK_PAIRS_70, PRODUCTION_PUBLIC_FK_PAIRS_70_SHA256,
+  );
+  if (migrationCountInRange(migrationCount, 75, 79)) return catalogEvidence(
+    migrationCount, PRODUCTION_PUBLIC_TABLES_75, PRODUCTION_PUBLIC_TABLES_75_SHA256,
+    PRODUCTION_PUBLIC_FK_PAIRS_75, PRODUCTION_PUBLIC_FK_PAIRS_75_SHA256,
+  );
+  // 80 adds the envelope/settlement tables. 81–84 (retry payload, owner-connected recovery,
+  // minimal verifier policy, terminal failure pool) add no public tables. Ledger 84 is the
+  // last pre-WP production count.
+  if (migrationCountInRange(migrationCount, 80, 84)) return catalogEvidence(
+    migrationCount, PRODUCTION_PUBLIC_TABLES_98, PRODUCTION_PUBLIC_TABLES_98_SHA256,
+    PRODUCTION_PUBLIC_FK_PAIRS_99, PRODUCTION_PUBLIC_FK_PAIRS_99_SHA256,
+  );
+  if (migrationCountInRange(migrationCount, 85, 85)) return catalogEvidence(
+    migrationCount, PRODUCTION_PUBLIC_TABLES_102, PRODUCTION_PUBLIC_TABLES_102_SHA256,
+    PRODUCTION_PUBLIC_FK_PAIRS_99, PRODUCTION_PUBLIC_FK_PAIRS_99_SHA256,
+  );
+  if (migrationCountInRange(migrationCount, 86, 86)) return catalogEvidence(
+    migrationCount, PRODUCTION_PUBLIC_TABLES_105, PRODUCTION_PUBLIC_TABLES_105_SHA256,
+    PRODUCTION_PUBLIC_FK_PAIRS_99, PRODUCTION_PUBLIC_FK_PAIRS_99_SHA256,
+  );
+  if (migrationCountInRange(migrationCount, CURRENT_CATALOG_MIGRATION_RANGE.min, CURRENT_CATALOG_MIGRATION_RANGE.max)) {
+    return catalogEvidence(
+      migrationCount, PRODUCTION_PUBLIC_TABLES_107, PRODUCTION_PUBLIC_TABLES_107_SHA256,
+      PRODUCTION_PUBLIC_FK_PAIRS_99, PRODUCTION_PUBLIC_FK_PAIRS_99_SHA256,
+    );
+  }
   throw new Error(`unsupported production migration count for backup/restore: ${migrationCount}`);
 }
 

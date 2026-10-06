@@ -65,7 +65,13 @@ curl -fsS https://app.thrallo.com/api/v1/capabilities
 After a code or environment update, build the release web application with the fail-closed auth
 gate. For a V2-only production release, activate the validated deployment manifest, pin the
 compatible immutable sandbox through `ops/pin-build-sandbox-image.mjs`, then restart both runtime
-consumers of that release identity:
+consumers of that release identity.
+
+The VPS `deploy.sh` is not in this repository. It must not default to `noimage` when the
+Dockerfile is unchanged if verdict-deciding files changed. Run
+`node ops/require-sandbox-image-rebuild.mjs --from <previous-release-sha> --to HEAD` first
+(exit 2 means rebuild or pass `--image`; exit 1 means the check failed closed). See
+`docs/BUILD-WORKER-DEPLOYMENT.md`.
 
 ```sh
 npm run build:web:production

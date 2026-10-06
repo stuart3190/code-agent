@@ -3,9 +3,10 @@
 // drift apart again.
 //
 // The pin previously lived only as a hand-written line in /etc/thrallo/build-worker.env, with no
-// record of what the digest contained. Here the digest is derived from a build, the build is
-// stamped with its source commit, and both are written to a generated provenance file that
-// replaces the hand-maintained DEPLOYED_COMMIT marker.
+// record of what the digest contained. Here the digest is derived from a build, the image is
+// probed with the sandbox_provenance job, and that probed identity — not the host checkout — is
+// written to a generated provenance file that replaces the hand-maintained DEPLOYED_COMMIT marker.
+// --pin is refused when the probed image is incompatible with the host.
 //
 //   node ops/pin-build-sandbox-image.mjs --commit <sha> [--tag <tag>] [--build] [--pin] [--restart]
 //
@@ -17,8 +18,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { runProcess } from "../build-worker/processTree.mjs";
+import { runSandboxJob } from "../build-worker/sandboxRunner.mjs";
 import { computeSandboxIdentity } from "../shell/server/lib/builderV2/sandboxProvenance.mjs";
 import { readDeploymentIdentity } from "../shell/server/lib/deploymentIdentity.mjs";
+import {
+  assertSandboxPinAllowed, deploymentProvenanceRecord, probeImageSandboxIdentity, sandboxPinDecision,
+} from "./lib/sandboxImagePin.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
@@ -75,20 +80,22 @@ if (flag("build")) {
 const digest = await capture("docker", ["image", "inspect", tag, "--format", "{{.Id}}"]);
 const created = await capture("docker", ["image", "inspect", tag, "--format", "{{.Created}}"]);
 
-const record = {
-  sourceCommit: commit,
-  deploymentManifestSha256: deployment.manifestSha256,
-  sandboxImageSourceCommit: imageCommit,
-  sandboxImageTag: tag,
-  sandboxImageDigest: digest,
-  sandboxImageCreated: created,
-  sandboxIdentity: hostIdentity.identity,
-  verifierHash: hostIdentity.verifier,
-  files: hostIdentity.files,
-  pinnedAt: new Date().toISOString(),
-};
+// Probe the built image with the same sandbox_provenance job as prove-sandbox-provenance.
+// The digest, not the host tree, is what .deployment-provenance.json records.
+const probed = await probeImageSandboxIdentity({ image: digest, runSandboxJob });
+const decision = sandboxPinDecision(hostIdentity, probed, { imageDigest: digest });
+const record = deploymentProvenanceRecord({
+  commit,
+  deployment,
+  imageCommit,
+  tag,
+  digest,
+  created,
+  imageIdentity: probed,
+});
 
 if (flag("pin")) {
+  assertSandboxPinAllowed(decision);
   // Rewrite in place, preserving every other line, exactly as the worker-authority tool does —
   // so the two can be run in either order without one clobbering the other.
   const current = await readFile(envPath, "utf8");
@@ -121,4 +128,12 @@ if (flag("pin")) {
 
 if (flag("restart")) await run("sudo", ["systemctl", "restart", "thrallo-build-worker"], { wallMs: 120_000 });
 
-console.log(JSON.stringify({ ...record, built: flag("build"), pinned: flag("pin"), restarted: flag("restart") }, null, 2));
+console.log(JSON.stringify({
+  ...record,
+  compatible: decision.compatible,
+  detail: decision.detail,
+  built: flag("build"),
+  pinned: flag("pin"),
+  restarted: flag("restart"),
+}, null, 2));
+if (!decision.compatible) process.exitCode = 1;

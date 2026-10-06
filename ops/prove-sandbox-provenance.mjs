@@ -14,15 +14,13 @@ import { runSandboxJob } from "../build-worker/sandboxRunner.mjs";
 import {
   compareSandboxIdentity, computeSandboxIdentity, sandboxSkewSummary,
 } from "../shell/server/lib/builderV2/sandboxProvenance.mjs";
+import { sandboxProvenanceProbeJob } from "./lib/sandboxImagePin.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const image = process.env.THRALLO_BUILD_SANDBOX_IMAGE || "thrallo-build-sandbox:latest";
 
 const host = await computeSandboxIdentity({ root });
-const outcome = await runSandboxJob({
-  id: `provenance-${Date.now().toString(36)}`, job_type: "sandbox_provenance", attempts: 1,
-  payload: {}, resource_limits: { wallSeconds: 60, cpu: 1, memoryMb: 512, pids: 64, outputBytes: 256 * 1024 },
-}, {});
+const outcome = await runSandboxJob(sandboxProvenanceProbeJob(), {});
 
 const report = compareSandboxIdentity(host, { ...(outcome?.provenance || {}), imageDigest: image });
 console.log(JSON.stringify({

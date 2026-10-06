@@ -24,8 +24,12 @@ import {
   PRODUCTION_PUBLIC_TABLES_70,
   PRODUCTION_PUBLIC_TABLES_75,
   PRODUCTION_PUBLIC_TABLES_98,
+  PRODUCTION_PUBLIC_TABLES_102,
+  PRODUCTION_PUBLIC_TABLES_105,
   PRODUCTION_PUBLIC_TABLES_107,
   PRODUCTION_PUBLIC_FK_PAIRS_99,
+  CURRENT_CATALOG_MIGRATION_RANGE,
+  sha256Lines,
   backupTablesToVerify,
   canonicalRowsForRestoreComparison,
   collectDeferredRestorePatches,
@@ -425,7 +429,7 @@ test("the current runtime catalog and backup manifest are exactly aligned", () =
     ["forgotten_runtime_table"]);
 });
 
-test("backup/restore recognizes historical ledgers and the current 81-migration catalog", () => {
+test("backup/restore recognizes historical ledgers and the current production catalog window", () => {
   assert.equal(PRODUCTION_PUBLIC_TABLES_68.length, 83);
   assert.equal(PRODUCTION_PUBLIC_FK_PAIRS_68.length, 83);
   assert.equal(runtimeCatalogEvidence(68).tables.length, 83);
@@ -441,9 +445,42 @@ test("backup/restore recognizes historical ledgers and the current 81-migration 
   assert.equal(runtimeCatalogEvidence(77).tables.length, 91);
   assert.equal(runtimeCatalogEvidence(78).tables.length, 91);
   assert.equal(runtimeCatalogEvidence(79).tables.length, 91);
-  assert.equal(runtimeCatalogEvidence(80).tables.length, 98);
-  assert.equal(runtimeCatalogEvidence(81).tables.length, 98);
-  assert.throws(() => runtimeCatalogEvidence(82), /unsupported production migration count/);
+  // Envelope tables land at 80. Counts 81–84 add no public tables, including the
+  // pre-WP production ledger of 84 that backup previously rejected.
+  for (const count of [80, 81, 82, 83, 84]) {
+    const evidence = runtimeCatalogEvidence(count);
+    assert.equal(evidence.tables.length, 98, `ledger ${count}`);
+    assert.equal(evidence.tablesSha256, sha256Lines(PRODUCTION_PUBLIC_TABLES_98));
+    assert.equal(evidence.fkPairs.length, 99);
+  }
+  const wp4 = runtimeCatalogEvidence(85);
+  assert.equal(wp4.tables.length, 102);
+  assert.equal(wp4.tablesSha256, sha256Lines(PRODUCTION_PUBLIC_TABLES_102));
+  assert.ok(wp4.tables.includes("app_memberships"));
+  assert.equal(wp4.tables.includes("app_settings"), false);
+  assert.equal(wp4.tables.includes("app_subscriptions"), false);
+  const wp8 = runtimeCatalogEvidence(86);
+  assert.equal(wp8.tables.length, 105);
+  assert.equal(wp8.tablesSha256, sha256Lines(PRODUCTION_PUBLIC_TABLES_105));
+  assert.ok(wp8.tables.includes("app_settings"));
+  assert.equal(wp8.tables.includes("app_subscriptions"), false);
+  // Live ledger is 87. On-disk #177 is catalog-neutral and will be 88 after it is applied.
+  // The accepted window keeps headroom past that so the next constraint migration does not
+  // take backup down again.
+  assert.ok(CURRENT_CATALOG_MIGRATION_RANGE.max >= 96);
+  assert.ok(CURRENT_CATALOG_MIGRATION_RANGE.max - CURRENT_CATALOG_MIGRATION_RANGE.min >= 8);
+  for (const count of [87, 88, CURRENT_CATALOG_MIGRATION_RANGE.max]) {
+    const evidence = runtimeCatalogEvidence(count);
+    assert.equal(evidence.tables.length, 107, `ledger ${count}`);
+    assert.equal(evidence.tablesSha256, sha256Lines(PRODUCTION_PUBLIC_TABLES_107));
+    assert.ok(evidence.tables.includes("app_subscriptions"));
+    assert.ok(evidence.tables.includes("app_billing_events"));
+    assert.equal(evidence.fkPairsSha256, sha256Lines(evidence.fkPairs));
+  }
+  assert.equal(PRODUCTION_PUBLIC_TABLES_107.length, 107);
+  assert.throws(() => runtimeCatalogEvidence(CURRENT_CATALOG_MIGRATION_RANGE.max + 1), /unsupported production migration count/);
+  assert.throws(() => runtimeCatalogEvidence(67), /unsupported production migration count/);
+  assert.throws(() => runtimeCatalogEvidence("87-migrations"), /unsupported production migration count/);
 });
 
 test("the restore order satisfies the complete production FK graph or explicitly defers a nullable cycle", () => {
