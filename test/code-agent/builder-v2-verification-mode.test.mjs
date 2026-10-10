@@ -146,7 +146,7 @@ test("verifier on: a smoke pass takes the Simple Counter green with the smoke po
   assert.ok(h.verificationCache.puts.every(([, , , , verdict]) => verdict.status === "pass"));
 });
 
-test("verifier on: a smoke CRASH blocks the build and never briefs an AI repair round", async () => {
+test("verifier on: a smoke CRASH that repair cannot cure still blocks the build, but only after repair rounds were spent on it", async () => {
   const h = harness({ journeysFn: smokeVerdict("fail", {
     detail: 'button "Reset": fatal runtime error after activation: TypeError: x is not a function',
     fatal: ['button "Reset": fatal runtime error after activation: TypeError: x is not a function'],
@@ -154,7 +154,12 @@ test("verifier on: a smoke CRASH blocks the build and never briefs an AI repair 
   const result = await h.orchestrator.runBuild({ owner: "owner", projectId: "counter-smoke-crash", request: "Simple Counter" });
   assert.notEqual(result.state, "green", JSON.stringify(result));
   assert.equal(result.state, "blocked", JSON.stringify(result));
-  assert.deepEqual(h.patchCalls, ["core"], "a crash verdict carries no expectation to repair against; no repair dispatch");
+  // The crash is the application's defect, so repair runs (it used to be tier none: zero rounds, an
+  // immediate no_actionable_defect stop). The stubbed verdict never turns green, so the tier ends
+  // red with the retained checkpoint.
+  assert.equal(h.patchCalls[0], "core");
+  assert.ok(h.patchCalls.slice(1).length >= 1 && h.patchCalls.slice(1).every((step) => step === "repair"),
+    `a crash is briefed to repair: ${JSON.stringify(h.patchCalls)}`);
   assert.ok(result.workingSnapshotId, "the compiled candidate is retained");
   assert.match(String(result.error || result.stopReason), /fatal|no_actionable_defect|red/i);
 });

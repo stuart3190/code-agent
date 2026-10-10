@@ -38,7 +38,7 @@ import {
 } from "./verification.mjs";
 import {
   verificationDefects, actionableDefects, platformDefectsOf,
-  defectEvidence, defectWriteBoundary, defectProgress, defectSignature, mergeDefectAttribution,
+  defectEvidence, defectWriteBoundary, previousAttemptNotes, defectProgress, defectSignature, mergeDefectAttribution,
   verificationDefectRecords,
 } from "./verificationDefects.mjs";
 import { REPAIR_OWNERSHIP, governRepairRound, reclassifyStalledDefects } from "./repairGovernance.mjs";
@@ -201,6 +201,9 @@ const treesEqual = (a, b) => {
   return left.length === right.length && left.every((path, index) => path === right[index] && a[path] === b[path]);
 };
 const TARGETED_CANDIDATE_MAX_FILES = 3;
+/** Paths whose content differs between two trees (added, removed or edited), sorted. */
+export const changedTreePaths = (before, after) => [...new Set([...Object.keys(before || {}), ...Object.keys(after || {})])]
+  .filter((path) => before?.[path] !== after?.[path]).sort();
 const sourcePaths = (values) => [...new Set((values || []).flatMap((value) => (
   String(value || "").match(/src\/[a-zA-Z0-9_./-]+\.(?:jsx?|tsx?|json|css)/g) || []
 )).map((path) => path.replace(/[):,;]+$/, "")))].sort();
@@ -1582,6 +1585,11 @@ export function createOrchestrator({
           let roundError = null;
           let governanceStop = null;
           let reclassifiedDefects = [];
+          // WHAT EARLIER ROUNDS TRIED. A round that moves nothing is discarded (the retained tree is
+          // restored), so without this the next round starts from the same code and the same
+          // sentence and makes the same change. Entries feed the "previous attempt did not fix it"
+          // block of the next brief.
+          const attemptLedger = [];
           // WHY THE TIER STOPPED, decided where it actually stopped rather than re-derived from
           // counters afterwards. "used its reserved share" and "ran out of ideas" are different
           // outcomes and only one of them is a platform problem.
@@ -1651,14 +1659,14 @@ export function createOrchestrator({
               mode = REPAIR_STRATEGIES[strategy];
             }
             actionable = governance.dispatchable;
-            const evidence = browserRepairEvidence({
+            const evidence = [...browserRepairEvidence({
               contract, interactionContract, journeyResults: currentVerdicts, tree: currentTree,
               backendRowFailures: rows, defects: currentDefects,
               // Shape findings that did not stop the build ride along as CONTEXT for a repair
               // that is now driven by observed browser failure. They explain, they do not accuse.
               advisory: advisoryMessages((advisory || [])
                 .filter((finding) => finding.code !== "interaction_control_undriveable")),
-            });
+            }), ...previousAttemptNotes({ attempts: attemptLedger, defects: currentDefects, tree: currentTree })];
             if (!evidence.length) break;
             const scaffoldRepairClasses = [...new Set(actionable
               .map((defect) => defect.scaffoldRouting?.classification).filter(Boolean))];
@@ -1825,6 +1833,11 @@ export function createOrchestrator({
               strategy = 0;
               continue;
             }
+            attemptLedger.push({
+              round: rounds, strategy: mode,
+              changedFiles: changedTreePaths(retained.tree, currentTree),
+              persisted: progress.persisted,
+            });
             // Keep the last browser-proven checkpoint as the repair baseline. A compilable
             // candidate can still be a behavioural regression; carrying it into the next wider
             // strategy lets one failed repair poison every attempt that follows.

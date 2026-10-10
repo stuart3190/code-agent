@@ -18,7 +18,7 @@ import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
 import { retrieve, renderRetrieval } from "./retrieval.mjs";
 import {
-  bindCapabilities, capabilityRequirementsBrief, persistenceOwnershipPlan,
+  bindCapabilities, capabilityRequirementsBrief, persistenceOwnershipPlan, transientStateBrief,
 } from "./contractTiering.mjs";
 import { getKnowledge, knowledgeBrief } from "./knowledge.mjs";
 import { creditsForUsage } from "../../../../src/billing/costModel.mjs";
@@ -958,6 +958,8 @@ export function renderPatchPrompt({
       : compactPersistencePlan
       ? `PERSISTENCE OWNERSHIP CONTRACT (machine-enforced JSON; hard constraints, not advice):\n${JSON.stringify(compactPersistencePlan, null, 2)}`
       : "PERSISTENCE OWNERSHIP CONTRACT: no durable journey in this scope.",
+    // Entities with no platform store get one explicit line (nothing else tells the model so).
+    ...(transientStateBrief(contract) ? [transientStateBrief(contract)] : []),
     "",
     executionSpec ? renderExecutionSpecSection(executionSpec, "interactions") : interactionContractBrief(repairInteractionPlan),
     headroomScope ? "" : preferredAssemblyBrief(assemblyNeeds(repairInteractionPlan, bindCapabilities(contract))),

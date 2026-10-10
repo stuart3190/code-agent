@@ -817,10 +817,75 @@ export const entityStores = Object.freeze({
 ${entities.map((entity) => `  ${quote(entity)}: makeEntityStore(${quote(entity)}),`).join("\n")}
 });
 
+// An entity with no composed store (transient, not owned by the platform, or simply not durable)
+// must not take the whole page down: a module-scope entityStore("x") that throws fails while the
+// screen is being imported, so nothing mounts and no error boundary can catch it. Such an entity
+// gets an in-memory store that lives as long as the page and is never persisted.
+const ephemeralStores = new Map();
+
+function makeEphemeralEntityStore(type) {
+  const rows = new Map();
+  const listeners = new Set();
+  let counter = 0;
+  const flat = (row) => (row ? { id: row.id, createdAt: row.createdAt, ...row.data } : null);
+  const emit = (eventType, row) => {
+    for (const listener of [...listeners]) {
+      try { listener({ eventType, record: flat(row) }); } catch { /* one bad listener must not break the store */ }
+    }
+  };
+  const matches = (row, filters) => Object.entries(filters || {}).every(([field, wanted]) => {
+    const value = field === "id" ? row.id : row.data?.[field];
+    return wanted && typeof wanted === "object" && !Array.isArray(wanted) && "eq" in wanted
+      ? value === wanted.eq : value === wanted;
+  });
+  return {
+    async list(options = {}) {
+      const ascending = options.ascending === true;
+      const limit = Math.max(1, Math.min(500, Number(options.limit) || 100));
+      return [...rows.values()].filter((row) => matches(row, options.filters))
+        .sort((a, b) => (ascending ? a.order - b.order : b.order - a.order))
+        .slice(0, limit).map(flat);
+    },
+    async get(id) {
+      const row = rows.get(String(id));
+      if (!row) throw new Error(\`No \${type} record with id \${id}\`);
+      return flat(row);
+    },
+    async create(values = {}) {
+      counter += 1;
+      const row = { id: \`\${type}-\${counter}\`, order: counter, createdAt: new Date().toISOString(), data: { ...values } };
+      rows.set(row.id, row);
+      emit("INSERT", row);
+      return flat(row);
+    },
+    async update(id, values = {}) {
+      const row = rows.get(String(id));
+      if (!row) throw new Error(\`No \${type} record with id \${id}\`);
+      row.data = { ...row.data, ...values };
+      emit("UPDATE", row);
+      return flat(row);
+    },
+    async remove(id) {
+      const row = rows.get(String(id));
+      if (rows.delete(String(id)) && row) emit("DELETE", row);
+    },
+    async count(filters = {}) {
+      return [...rows.values()].filter((row) => matches(row, filters)).length;
+    },
+    subscribe(callback) {
+      if (typeof callback !== "function") throw new Error("entityStore(type).subscribe(callback): callback is required.");
+      listeners.add(callback);
+      return () => listeners.delete(callback);
+    },
+  };
+}
+
 export function entityStore(entityType) {
-  const store = entityStores[String(entityType)];
-  if (!store) throw new Error(\`No composed entity store for \${entityType}\`);
-  return store;
+  const key = String(entityType);
+  const store = entityStores[key];
+  if (store) return store;
+  if (!ephemeralStores.has(key)) ephemeralStores.set(key, makeEphemeralEntityStore(key));
+  return ephemeralStores.get(key);
 }
 `;
     interfaces.push({ module: `${COMPOSED_ROOT}/crud.js`, exports: ["entityStores", "entityStore"], owns: entities });

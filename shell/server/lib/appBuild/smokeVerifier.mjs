@@ -86,6 +86,37 @@ async function activate(el, info) {
   return el.click({ timeout: CLICK_TIMEOUT_MS, noWaitAfter: true });
 }
 
+const STACK_FRAME_LIMIT = 5;
+const STACK_FRAME_CHARS = 200;
+// `src/...` as it appears inside a dev-server frame such as `http://host:5173/src/App.jsx?t=1:12:5`
+// or `at Flow (/src/components/Flow.jsx:12:5)`. Bundled preview builds carry no such path; the
+// error message is then the only address and the repair brief greps the tree for its identifiers.
+const SOURCE_FRAME = /(?:^|[\s(@/])(src\/[A-Za-z0-9_./-]+\.(?:jsx?|tsx?|mjs|css))(?:\?[^\s:)]*)?(?::(\d+))?/;
+
+/**
+ * What a page error actually said: message, the first few stack frames and any generated source
+ * file those frames name. The smoke gate used to keep `e.message` truncated to 300 characters,
+ * so a crash reached repair with no address at all.
+ */
+export function describePageError(error) {
+  const message = String(error?.message || error).slice(0, 300);
+  const raw = typeof error?.stack === "string" ? error.stack : "";
+  const frames = raw.split("\n").map((line) => line.trim()).filter(Boolean)
+    // The first line repeats the message; frames are the rest.
+    .filter((line, index) => !(index === 0 && !/^at\s|@/.test(line)))
+    .slice(0, STACK_FRAME_LIMIT)
+    .map((line) => line.slice(0, STACK_FRAME_CHARS));
+  const sourceFiles = [];
+  for (const frame of frames) {
+    const match = SOURCE_FRAME.exec(frame);
+    if (match && !sourceFiles.includes(match[1])) sourceFiles.push(match[1]);
+  }
+  return { message, stack: frames, sourceFiles };
+}
+
+const crashEvidence = (detail) => (detail
+  ? { message: detail.message, stack: detail.stack, sourceFiles: detail.sourceFiles } : {});
+
 /**
  * @returns {Promise<{
  *   pass: boolean|null, unavailable: boolean, error: string|null, verifierPolicy: string,
@@ -101,6 +132,7 @@ export async function smokeVerifyJourneys({
   const startedAt = Date.now();
   const deadline = startedAt + Math.max(10_000, Number(timeoutMs) || 120_000);
   const pageErrors = [];
+  const pageErrorDetails = [];
   const consoleErrors = [];
   const failedRequests = [];
   const crashes = [];
@@ -117,7 +149,11 @@ export async function smokeVerifyJourneys({
   const page = await context.newPage();
   // Popups opened by the app are closed; the listener is attached AFTER the smoke's own page exists.
   context.on("page", (popup) => { if (popup !== page) popup.close().catch(() => {}); });
-  page.on("pageerror", (e) => pageErrors.push(String(e?.message || e).slice(0, 300)));
+  page.on("pageerror", (e) => {
+    const described = describePageError(e);
+    pageErrors.push(described.message);
+    pageErrorDetails.push(described);
+  });
   page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text().slice(0, 200)); });
   page.on("dialog", (d) => { d.dismiss().catch(() => {}); });
   page.on("crash", () => { crashed = true; });
@@ -156,7 +192,8 @@ export async function smokeVerifyJourneys({
         crashes.push({ phase: "load", control: null, error: "the page crashed while loading" });
       } else if (!render.rendered) {
         crashes.push({ phase: "load", control: null,
-          error: pageErrors[0] ? `fatal runtime error during load: ${pageErrors[0]}` : "nothing rendered in the preview" });
+          error: pageErrors[0] ? `fatal runtime error during load: ${pageErrors[0]}` : "nothing rendered in the preview",
+          ...crashEvidence(pageErrorDetails[0]) });
       }
     }
 
@@ -210,7 +247,8 @@ export async function smokeVerifyJourneys({
         if (crashed || !state?.rendered) {
           crashes.push({ phase: "activate", control: describeControl(info),
             error: crashed ? "the page crashed" : pageErrors.at(-1)
-              ? `fatal runtime error after activation: ${pageErrors.at(-1)}` : "the application went blank after activation" });
+              ? `fatal runtime error after activation: ${pageErrors.at(-1)}` : "the application went blank after activation",
+            ...(crashed ? {} : crashEvidence(pageErrorDetails.at(-1))) });
           break;
         }
       }
@@ -230,6 +268,11 @@ export async function smokeVerifyJourneys({
   const journeys = (contract?.journeys || []).map((journey) => ({
     id: journey.id, title: journey.title, priority: journey.priority,
     status, classification, detail,
+    // The first crash's message and stack travel with every journey verdict so the repair brief
+    // can name the failing identifier and the files that contain it.
+    ...(fatal && crashes[0]?.message ? { crash: {
+      phase: crashes[0].phase, control: crashes[0].control,
+      message: crashes[0].message, stack: crashes[0].stack || [], sourceFiles: crashes[0].sourceFiles || [] } } : {}),
     // The smoke drives no contracted steps; it has nothing to say about any of them.
     steps: [], failedSteps: fatal ? 1 : 0, verifiedBy: SMOKE_VERIFIER_POLICY,
   }));
