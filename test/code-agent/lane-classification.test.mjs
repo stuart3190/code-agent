@@ -47,11 +47,12 @@ test("LEAD AGENT — the silent codex→managed rewrite is gone and Codex execut
 test("LEAD AGENT — with Codex selected, zero managed dispatch and zero managed fallback", async () => {
   const policy = resolveProviderPolicy({ provider: "codex" });
   assert.equal(policy.allowManagedFallback, false);
-  // The build side, same account: six stages, all codex, no gpt-5.6.
+  // The build side, same account: every stage is the Codex transport on a ChatGPT-plan model.
   const context = await resolveBuildContext("o", { credentialResolver: async () => ({ provider: "codex" }) });
   for (const intent of ["generate", "edit"]) {
     const provider = context.buildProvider(intent);
-    assert.ok(!/gpt-5\.6/.test(provider.model || ""), "no managed gpt-5.6 model on any stage");
+    assert.equal(provider.providerId, "codex", "Codex transport, not the managed OpenAI adapter");
+    assert.match(provider.model, /^gpt-5\.6-(sol|terra|luna)$/);
   }
 });
 
@@ -100,7 +101,7 @@ test("PAUSE + CEILING — a Codex repair is allowed through both, and codex fail
   assert.equal(usesManagedCredits(context.policy), false);
 
   // And a codex failure has nowhere to fall: permitted alternatives are empty (proven in the
-  // provider-policy suite), so the provider-blocked stop path runs. No fallback, no gpt-5.6.
+  // provider-policy suite), so the provider-blocked stop path runs. No managed-lane fallback.
   const { permittedAlternatives } = await import("../../shell/server/lib/appBuild/providerPolicy.mjs");
   assert.deepEqual(permittedAlternatives(context.policy, ["managed", "openai", "anthropic", "xai"]), []);
 });

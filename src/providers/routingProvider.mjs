@@ -27,7 +27,7 @@ function defaultMakeProvider(decision, config = {}) {
     return createAnthropicProvider({ model: decision.model, cache: !!config.cache, apiKey: config.apiKey ?? null });
   }
   if (decision.provider === "codex") {
-    return createCodexProvider();
+    return createCodexProvider({ model: decision.model });
   }
   throw new Error(`routingProvider: unknown provider "${decision.provider}"`);
 }

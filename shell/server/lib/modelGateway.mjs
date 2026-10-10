@@ -3,7 +3,10 @@ import { createGeminiCodingProvider } from "./geminiCodingProvider.mjs";
 import { createOpenAIProvider, openAIConfigured } from "./openAIProvider.mjs";
 import { createXaiProvider } from "./xaiProvider.mjs";
 import { createCodexProvider } from "../../../src/providers/codexProvider.mjs";
-import { MODEL_LANES, approvedConfiguredModel, canonicalModelIdentity, parseSelection } from "./modelCatalogue.mjs";
+import {
+  CODEX_DEFAULT_MODEL, MODEL_LANES, approvedConfiguredModel, canonicalModelIdentity, codexExecutionModel,
+  parseSelection, selectionForActiveCredential,
+} from "./modelCatalogue.mjs";
 
 export function createCodingModel(requested = "auto") {
   const selection = resolveModelSelection(requested, { defaultLane: MODEL_LANES.managed });
@@ -16,7 +19,8 @@ export function createCodingModelForCredential(credential, requested = "auto") {
   if (!credential || credential.provider === "managed") return createCodingModel(requested);
   const lane = credential.provider === "codex" ? MODEL_LANES.codex : MODEL_LANES.byok;
   const selection = resolveModelSelection(requested, { defaultLane: lane, defaultProvider: credential.provider });
-  const identity = canonicalModelIdentity({ ...selection, lane });
+  const aligned = selectionForActiveCredential(credential, selection);
+  const identity = canonicalModelIdentity({ ...aligned, lane });
   if (identity.provider !== credential.provider) throw modelLaneError(credential.provider, identity.provider);
   if (credential.provider !== "codex" && !credential.secret) {
     throw Object.assign(new Error(`The selected ${credential.provider} model requires that provider's credential.`), { code: "byok_credential_unavailable", status: 400 });
@@ -31,7 +35,7 @@ export function createCodingModelForCredential(credential, requested = "auto") {
     return createOpenAIProvider({ apiKey: credential.secret, model: identity.model });
   }
   if (credential.provider === "xai") return createXaiProvider({ apiKey: credential.secret, model: identity.model });
-  if (credential.provider === "codex") return codexLeadAdapter(createCodexProvider());
+  if (credential.provider === "codex") return codexLeadAdapter(createCodexProvider({ model: identity.model }), identity.model);
   throw new Error(`Unsupported coding model credential: ${credential.provider}`);
 }
 
@@ -42,12 +46,15 @@ export function resolveModelSelection(requested = "auto", { defaultLane = MODEL_
     if (provider === "anthropic") return { provider, model: approvedConfiguredModel("ANTHROPIC_MODEL", "claude-sonnet-5", { provider }) };
     if (provider === "gemini") return { provider, model: approvedConfiguredModel("GEMINI_MODEL", "gemini-3.6-flash", { provider }) };
     if (provider === "xai") return { provider, model: approvedConfiguredModel("XAI_BALANCED_MODEL", "grok-build-0.1", { provider }) };
-    if (provider === "codex") return { provider, model: "gpt-5.5" };
+    if (provider === "codex") return { provider, model: CODEX_DEFAULT_MODEL };
     return { provider: "openai", model: approvedConfiguredModel("OPENAI_MODEL", "gpt-5.6-sol", { provider: "openai" }) };
   }
   const parsed = parseSelection(value, { defaultLane });
   canonicalModelIdentity({ ...parsed, lane: parsed.lane || defaultLane });
-  return { provider: parsed.provider, model: parsed.model };
+  return {
+    provider: parsed.provider,
+    model: parsed.provider === "codex" ? codexExecutionModel(parsed.model) : parsed.model,
+  };
 }
 
 function modelLaneError(expected, actual) {
@@ -76,9 +83,9 @@ export function toCodexLeadMessages(input = []) {
 }
 
 // Exported so the adapter is provable with an injected provider (no ChatGPT login on the box).
-export function codexLeadAdapter(provider) {
+export function codexLeadAdapter(provider, model = provider?.model) {
   return {
-    id: "codex", model: provider.model,
+    id: "codex", model: model || provider?.model,
     async turn({ instructions, input = [], tools = [], maxOutputTokens = null }) {
       const result = await provider.runTurn({
         systemPrompt: instructions,
@@ -96,6 +103,8 @@ export function codexLeadAdapter(provider) {
       return {
         text: result.text,
         output: toolCalls,
+        notice: result.notice || null,
+        model: result.model || model || provider?.model,
         usage: {
           inputTokens: Number(usage.input || usage.inputTokens || 0),
           cachedTokens: Number(usage.cached || usage.cachedTokens || 0),

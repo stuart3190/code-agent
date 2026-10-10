@@ -55,6 +55,9 @@ const USER_ACTIONABLE = /(allowance|budget|quota|not connected|sign in|unauthor|
 export function classifyFailure(error) {
   const text = `${error?.code || ""} ${error?.message || ""}`;
   const status = Number(error?.status || 0);
+  // The code itself contains "unavailable", which the retry regex would otherwise treat
+  // as a transient provider blip and show the generic saving-progress line.
+  if (error?.code === "model_lane_unavailable") return { kind: "needs_user", retryable: false };
   if (["provider_replay_unsafe", "billing_settlement_failed"].includes(error?.code)) {
     return { kind: "unexpected", retryable: false };
   }
@@ -92,9 +95,11 @@ export const FRIENDLY = {
   provider: "The model service was briefly unavailable. I'm retrying now — nothing for you to do.",
   recovered: "That issue is fixed and the build is continuing.",
   unresolved: "I couldn't resolve this automatically. Your work is safe and the technical details have been saved for support.",
+  modelLane: "That model isn't available on your connected plan. Pick another model or switch provider.",
 };
 
-export function friendlyFor(service, classification) {
+export function friendlyFor(service, classification, error = null) {
+  if (error?.code === "model_lane_unavailable") return FRIENDLY.modelLane;
   if (classification?.kind === "needs_user") return null; // caller supplies its own sanitised sentence
   if (service === "conversation_events" || service === "persistence") return FRIENDLY.saving;
   if (service === "model" || service === "provider") return FRIENDLY.provider;
@@ -143,6 +148,7 @@ export async function captureIncident({
   const id = randomUUID();
   const reference = referenceFrom(id);
   const classification = classifyFailure(error);
+  const friendly = friendlyFor(service, classification, error);
   const record = {
     id,
     reference,
@@ -176,8 +182,10 @@ export async function captureIncident({
     classification,
     fingerprint: fingerprintIncident(error, service),
     // What the USER may see — sanitised, calm, and never technical.
-    friendly: friendlyFor(service, classification),
-    unresolvedMessage: `${FRIENDLY.unresolved}\n\nError reference: ${reference}`,
+    friendly,
+    unresolvedMessage: error?.code === "model_lane_unavailable"
+      ? `${FRIENDLY.modelLane}\n\nError reference: ${reference}`
+      : `${FRIENDLY.unresolved}\n\nError reference: ${reference}`,
     // What the LEAD AGENT may see privately (full detail, for classification + repair).
     privateBriefing: [
       `PRIVATE FAILURE REPORT (never repeat any of this to the user):`,

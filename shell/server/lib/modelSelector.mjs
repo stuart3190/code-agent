@@ -11,7 +11,12 @@ import { anthropicProviderMeta } from "./anthropicCodingProvider.mjs";
 import { geminiProviderMeta } from "./geminiCodingProvider.mjs";
 import { xaiProviderMeta } from "./xaiProvider.mjs";
 import { serviceClient } from "./supabase.mjs";
-import { MODEL_LANES, canonicalModelIdentity, selectionValue } from "./modelCatalogue.mjs";
+import { decryptSecret } from "./secretCrypto.mjs";
+import { discoverCodexModels } from "../../../src/providers/codexProvider.mjs";
+import {
+  MODEL_LANES, canonicalModelIdentity, codexExecutionModel, codexStaticModels, modelEntriesFor,
+  parseSelection, selectionValue,
+} from "./modelCatalogue.mjs";
 
 // ── Provider registry: adding a provider = registering its adapter meta here. The
 // selector UI populates entirely from this — no provider-specific UI anywhere else. ──
@@ -120,7 +125,7 @@ function relCost(model) {
 // The full selectable catalog for one owner. `credentials` = the owner's connected
 // providers (no secrets — provider names only); managed availability comes from the
 // platform's own configured env keys via modelCatalog().
-export function selectableModels({ credentials = [], routing = {} } = {}) {
+export function selectableModels({ credentials = [], routing = {}, activeProvider = null, codexModels = null } = {}) {
   const connected = new Set(credentials.map((c) => c.provider));
   const options = [{
     value: "auto",
@@ -150,18 +155,28 @@ export function selectableModels({ credentials = [], routing = {} } = {}) {
   }
 
   if (connected.has("codex")) {
-    const identity = canonicalModelIdentity({ provider: "codex", model: "gpt-5.5", lane: MODEL_LANES.codex });
-    options.push({
-      value: selectionValue(identity), lane: MODEL_LANES.codex, identity: identity.key,
-      provider: "codex",
-      model: "gpt-5.5",
-      source: "Included plan",
-      label: "Your ChatGPT plan",
-      relCost: "included",
-      available: true,
-      detail: "Conversation and Builder V2 work use your connected ChatGPT Codex allowance. There is no managed fallback.",
-    });
+    for (const row of codexRowsForSelection(codexModels)) {
+      const identity = canonicalModelIdentity({ provider: "codex", model: row.model, lane: MODEL_LANES.codex });
+      options.push({
+        value: selectionValue(identity), lane: MODEL_LANES.codex, identity: identity.key,
+        provider: "codex",
+        model: row.model,
+        source: "Included plan",
+        label: TIER_LABEL[row.tier] || row.tier,
+        relCost: "included",
+        available: true,
+        detail: row.visibility === "discovered"
+          ? "Your ChatGPT plan lists this model."
+          : "Conversation and Builder V2 work use your connected ChatGPT Codex allowance. There is no managed fallback.",
+      });
+    }
   }
+
+  // While Codex is the active provider, managed and BYOK rows are not executable.
+  // Offering them stored a lane routeCandidates then rejected.
+  const selectable = activeProvider === "codex"
+    ? options.filter((option) => option.value === "auto" || option.provider === "codex")
+    : options;
 
   const unconfigured = PROVIDER_METAS().map((m) => m.id)
     .filter((provider) => !connected.has(provider) && !options.some((o) => o.provider === provider));
@@ -171,7 +186,7 @@ export function selectableModels({ credentials = [], routing = {} } = {}) {
     id: "auto", name: "Auto", recommended: true, available: true, source: "Thrallo managed", models: [],
   }];
   for (const meta of PROVIDER_METAS()) {
-    const providerOptions = options.filter((o) => o.provider === meta.id);
+    const providerOptions = selectable.filter((o) => o.provider === meta.id);
     if (providerOptions.length) {
       for (const lane of [...new Set(providerOptions.map((o) => o.lane))]) {
         const laneOptions = providerOptions.filter((o) => o.lane === lane);
@@ -186,43 +201,57 @@ export function selectableModels({ credentials = [], routing = {} } = {}) {
           modes: modesForProvider(meta.id).map((m) => ({ ...m })),
         });
       }
+    } else if (options.some((o) => o.provider === meta.id)) {
+      providers.push({
+        id: meta.id, providerId: meta.id, name: meta.name, available: false, configure: false,
+        models: [], modes: [], detail: "Switch provider to use these models.",
+      });
     } else {
       providers.push({ id: meta.id, name: meta.name, available: false, configure: true, models: [], modes: [] });
     }
   }
-  if (connected.has("codex")) {
-    const option = options.find((o) => o.provider === "codex");
+  const codexOptions = selectable.filter((o) => o.provider === "codex");
+  if (codexOptions.length) {
     providers.push({
-      id: `${MODEL_LANES.codex}:codex`, providerId: "codex", name: "ChatGPT Codex", available: true, source: "Included plan",
-      models: [{ id: "gpt-5.5", name: "gpt-5.5", tier: "Your ChatGPT plan", relCost: "included", value: option.value }],
+      id: `${MODEL_LANES.codex}:codex`, providerId: "codex", name: "ChatGPT Codex", available: true,
+      source: "Included plan", lane: MODEL_LANES.codex,
+      models: codexOptions.map((o) => ({
+        id: o.model, name: o.model, tier: o.label, relCost: o.relCost, value: o.value,
+      })),
       modes: modesForProvider("codex").map((m) => ({ ...m })),
     });
   }
 
-  return { options, providers, modes: MODES, unconfigured, allowFallback: routing.allowFallback !== false };
+  return { options: selectable, providers, modes: MODES, unconfigured, allowFallback: routing.allowFallback !== false };
+}
+
+function codexRowsForSelection(codexModels) {
+  const allowed = new Set(Array.isArray(codexModels) && codexModels.length ? codexModels : codexStaticModels());
+  return modelEntriesFor({ provider: "codex", lane: MODEL_LANES.codex }).filter((row) => {
+    if (row.visibility === "discovered") return allowed.has(row.model);
+    return row.visibility === "public" && allowed.has(row.model);
+  });
 }
 
 export async function selectableModelsForOwner(owner, { store = aiCredentialStore() } = {}) {
-  const [credentials, credential] = await Promise.all([
-    store.listCredentials(owner).catch(() => []),
-    activeAiCredential(owner, { store }).catch(() => ({ routing: {} })),
-  ]);
+  const { credentials, credential, codexModels } = await selectorInputs(owner, store, { provider: null, routing: {} });
   return selectableModels({
-    credentials: (credentials || []).map((c) => ({ provider: c.provider })),
+    credentials: credentials.map((c) => ({ provider: c.provider })),
     routing: credential.routing || {},
+    activeProvider: credential.provider || null,
+    codexModels,
   });
 }
 
 // The full API payload: hierarchical catalog + measured per-model telemetry + the exact
 // Auto strategy (provider/model/mode/reason) so the UI can explain and let users override.
 export async function modelSelectorPayload(owner, { store = aiCredentialStore(), statsClient = null } = {}) {
-  const [credentials, credential] = await Promise.all([
-    store.listCredentials(owner).catch(() => []),
-    activeAiCredential(owner, { store }).catch(() => ({ provider: "managed", routing: {} })),
-  ]);
+  const { credentials, credential, codexModels } = await selectorInputs(owner, store, { provider: "managed", routing: {} });
   const catalog = selectableModels({
-    credentials: (credentials || []).map((c) => ({ provider: c.provider })),
+    credentials: credentials.map((c) => ({ provider: c.provider })),
     routing: credential.routing || {},
+    activeProvider: credential.provider || null,
+    codexModels,
   });
   const stats = await modelStats({ client: statsClient }).catch(() => ({}));
   for (const provider of catalog.providers) {
@@ -247,18 +276,21 @@ export async function modelSelectorPayload(owner, { store = aiCredentialStore(),
 // optional "#mode" suffix that must be a supported mode for that provider.
 export function validateModelChoice(catalog, rawValue) {
   const { value, mode } = parseModelPref(rawValue);
-  const option = catalog.options.find((o) => o.value === value);
+  const resolved = value === "auto"
+    ? { option: catalog.options.find((o) => o.value === "auto" && o.available) }
+    : optionForPreference(catalog, value);
+  const option = resolved?.option;
   if (!option || !option.available) {
     const error = new Error("That model isn't available on your account — pick one from the list or Auto.");
     error.status = 400;
     error.code = "model_unavailable";
     throw error;
   }
-  const providerId = value === "auto" ? "auto" : option.provider;
+  const providerId = option.value === "auto" ? "auto" : option.provider;
   const supported = providerId === "auto"
     ? MODES.some((m) => m.id === mode)
     : modesForProvider(providerId).some((m) => m.id === mode);
-  return formatModelPref(value, supported ? mode : "balanced");
+  return formatModelPref(option.value, supported ? mode : "balanced");
 }
 
 // The Lead Agent's request resolution for a conversation preference. NEVER silently
@@ -269,12 +301,74 @@ export function resolveConversationModel(conversation, catalog) {
   const pref = parsed.value;
   const mode = parsed.mode;
   if (pref === "auto") return { requested: "auto", mode, notice: null, warning: null };
-  const option = catalog.options.find((o) => o.value === pref);
-  if (option?.available) return { requested: pref, mode, notice: null, warning: null };
+  const resolved = optionForPreference(catalog, pref);
+  if (resolved?.option?.available) {
+    return { requested: resolved.option.value, mode, notice: resolved.notice, warning: null };
+  }
   return {
     requested: null,
     mode,
     notice: null,
     warning: `Your selected model (${pref.replaceAll(":", " · ")}) is not executable with the active provider and billing lane. Pick a valid listed model or explicitly switch to Auto.`,
   };
+}
+
+// Exact catalogue value wins. A stored managed/BYOK slug that this catalogue lists on the
+// ChatGPT plan is rewritten onto that lane so the active Codex credential can run it.
+// A retired gpt-5.5 preference resolves to its public successor when that row is listed.
+function optionForPreference(catalog, value) {
+  const exact = catalog.options.find((option) => option.value === value && option.available);
+  if (exact) return { option: exact, notice: null };
+  let parsed;
+  try { parsed = parseSelection(value); } catch { return null; }
+  const model = parsed.provider === "codex" ? codexExecutionModel(parsed.model) : parsed.model;
+  const matches = catalog.options.filter((option) => option.available && option.model === model);
+  const option = matches.find((row) => row.provider === parsed.provider)
+    || matches.find((row) => row.provider === "codex")
+    || null;
+  if (!option) return null;
+  const notice = parsed.model !== option.model
+    ? `${parsed.model} has left the ChatGPT plan. Continuing with ${option.model}.`
+    : `Using ${option.model} on your ChatGPT plan.`;
+  return { option, notice };
+}
+
+async function selectorInputs(owner, store, fallbackCredential) {
+  const [credentials, credential] = await Promise.all([
+    store.listCredentials(owner).catch(() => []),
+    activeAiCredential(owner, { store }).catch(() => fallbackCredential),
+  ]);
+  const list = credentials || [];
+  const codexModels = list.some((row) => row.provider === "codex")
+    ? await codexDiscoveryForOwner(owner, store, credential).catch(() => null)
+    : null;
+  return { credentials: list, credential: credential || fallbackCredential, codexModels };
+}
+
+async function codexDiscoveryForOwner(owner, store, credential) {
+  const fromActive = credential?.provider === "codex" ? authFromSecret(credential.secret) : null;
+  let auth = fromActive;
+  if (!auth && store?.getCredential) {
+    try {
+      const row = await store.getCredential(owner, "codex");
+      if (row?.status === "connected" && row.secret_encrypted) auth = authFromSecret(decryptSecret(row.secret_encrypted));
+    } catch {
+      auth = null;
+    }
+  }
+  if (!auth) return null;
+  return discoverCodexModels(auth.token, auth.accountId);
+}
+
+function authFromSecret(secret) {
+  if (!secret) return null;
+  try {
+    const auth = typeof secret === "string" ? JSON.parse(secret) : secret;
+    const token = auth?.tokens?.access_token;
+    const accountId = auth?.tokens?.account_id;
+    if (!token || !accountId) return null;
+    return { token, accountId };
+  } catch {
+    return null;
+  }
 }
