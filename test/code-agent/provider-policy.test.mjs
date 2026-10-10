@@ -39,8 +39,8 @@ test("TRACE — with Codex active, every stage resolves to Codex on the connecte
     const provider = context.buildProvider(intent);
     // The Codex transport, not an OpenAI-managed model. Its runTurn hits the ChatGPT backend.
     assert.equal(typeof provider.runTurn, "function", `${stage}: a real provider`);
-    assert.ok(!/gpt-5\.6-(sol|terra)/.test(provider.model || ""),
-      `${stage} must not resolve to a managed gpt-5.6 model`);
+    assert.equal(provider.providerId, "codex", `${stage} stays on the ChatGPT Codex transport`);
+    assert.match(provider.model, /^gpt-5\.6-(sol|terra|luna)$/, `${stage} uses a ChatGPT-plan model`);
   }
   // And managed credits are structurally out of reach for this lane.
   assert.equal(usesManagedCredits(context.policy), false);

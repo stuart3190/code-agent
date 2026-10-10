@@ -6,7 +6,7 @@ import { createCodingModelForCredential } from "./modelGateway.mjs";
 import { createXaiProvider, xaiConfigured, xaiPolicy } from "./xaiProvider.mjs";
 import {
   MODEL_LANES, canonicalModelIdentity, executableModelCatalogue,
-  modelEntriesFor, parseSelection,
+  modelEntriesFor, parseSelection, selectionForActiveCredential,
 } from "./modelCatalogue.mjs";
 
 export const ROUTING_MODES = Object.freeze(["balanced", "quality", "fast", "economy", "manual"]);
@@ -101,12 +101,13 @@ export async function createRoutedCodingModel({
             retryable: false,
           }).catch((error) => console.error(`[model-routing] success telemetry: ${error.message}`));
           activeIndex = index;
+          const servedModel = response.model || candidate.model;
           routed.id = candidate.provider;
-          routed.model = candidate.model;
+          routed.model = servedModel;
           return {
             ...response,
             provider: candidate.provider,
-            model: candidate.model,
+            model: servedModel,
             routing: index > firstIndex ? {
               fallbackFrom: candidates[index - 1],
               selected: candidate,
@@ -161,7 +162,14 @@ export function routeCandidates({ credential = { provider: "managed" }, requeste
   const lane = laneForCredential(credential);
   if (requested !== "auto") {
     const selection = parseSelection(requested, { defaultLane: lane });
-    const identity = canonicalModelIdentity({ ...selection, lane: selection.lane || lane, reasoningProfile: reasoningForMode(policy.mode) });
+    const aligned = selectionForActiveCredential(credential, selection);
+    const identityLane = aligned.provider === "codex" && credential?.provider === "codex"
+      ? lane
+      : (selection.lane || lane);
+    const identity = canonicalModelIdentity({
+      provider: aligned.provider, model: aligned.model, lane: identityLane,
+      reasoningProfile: reasoningForMode(policy.mode),
+    });
     const expectedProvider = credential.provider === "managed" ? identity.provider : credential.provider;
     if (identity.lane !== lane || identity.provider !== expectedProvider) {
       throw Object.assign(new Error("The selected model is not executable with the selected provider and billing lane."), {
@@ -214,8 +222,7 @@ function selectionTier(policy, prompt) {
 
 function credentialCandidate(credential, tier) {
   const lane = laneForCredential(credential);
-  const entry = modelEntriesFor({ provider: credential.provider, lane, tier })[0]
-    || modelEntriesFor({ provider: credential.provider, lane, tier: "balanced" })[0];
+  const entry = publicEntry(credential, lane, tier) || publicEntry(credential, lane, "balanced");
   if (!entry) throw Object.assign(new Error(`No executable ${credential.provider} model is available for ${lane}.`), {
     code: "model_provider_unavailable", status: 400, retryable: false,
   });
@@ -327,6 +334,11 @@ function preferredProviderOrder() {
 
 function uniqueModels(entries) {
   return [...new Map(entries.map((entry) => [entry.key, entry])).values()];
+}
+
+function publicEntry(credential, lane, tier) {
+  return modelEntriesFor({ provider: credential.provider, lane, tier })
+    .find((row) => row.visibility === "public");
 }
 
 function laneForCredential(credential) {

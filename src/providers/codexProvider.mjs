@@ -12,9 +12,16 @@
 
 import { getAccessToken } from "./auth.mjs";
 import { DISPATCH_STATES, providerFailure } from "../../shell/server/lib/providerOutcome.mjs";
+import {
+  CODEX_DEFAULT_MODEL, CODEX_PLAN_FALLBACKS, codexDiscoverableModels, codexExecutionModel, codexStaticModels,
+} from "../../shell/server/lib/modelCatalogue.mjs";
 
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
-const MODEL = "gpt-5.5"; // proven working for ChatGPT-account auth ("-codex" is rejected)
+const CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models";
+// Recent enough that the account catalogue is non-empty. Older client_version values return [].
+export const CODEX_MODELS_CLIENT_VERSION = "0.149.0";
+export const CODEX_MODEL_DISCOVERY_TTL_MS = 60_000;
+const discoveryCache = new Map();
 
 // neutral messages -> Responses `input` items
 function toInputItems(messages) {
@@ -48,7 +55,10 @@ function toWireTools(tools) {
   }));
 }
 
-export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAccessToken } = {}) {
+export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAccessToken, model = CODEX_DEFAULT_MODEL } = {}) {
+  // The wire model is the caller's selection. The balanced catalogue default is gpt-5.6-terra.
+  // A stored gpt-5.5 preference is rewritten to its public successor before the request.
+  const selectedModel = codexExecutionModel(model);
   // Phase 2.3: an optional prompt_cache_key improves prompt-cache ROUTING stickiness
   // (requests sharing the key + prefix are likelier to reuse the same cached KV state).
   // The field lives ONLY here, behind the seam; the engine passes a neutral `promptCacheKey`.
@@ -57,9 +67,13 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
   async function runTurn({ systemPrompt, messages, tools, promptCacheKey, toolChoice, reasoningEffort,
     signal = null, maxOutputTokens = null }) {
     let auth = await tokenProvider();
+    const attempts = codexAttemptModels(selectedModel);
+    let notice = null;
 
-    const body = {
-      model: MODEL,
+    for (let index = 0; index < attempts.length; index += 1) {
+      const attemptModel = attempts[index];
+      const body = {
+      model: attemptModel,
       instructions: systemPrompt,
       input: toInputItems(messages),
       stream: true,
@@ -124,6 +138,12 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
 
     if (!res.ok) {
       const errBody = preReadErrorBody ?? await res.text();
+      // Some Plus accounts reject gpt-5.6-sol (and occasionally the next slug) with this exact
+      // 400. The rejection is before a model turn, so terra then luna are safe to try.
+      if (chatGptPlanRejectsModel(res.status, errBody, attemptModel) && index < attempts.length - 1) {
+        notice = `${attemptModel} isn't available on this ChatGPT plan. Continuing with ${attempts[index + 1]}.`;
+        continue;
+      }
       const error = new Error(`Codex responses HTTP ${res.status}${providerRequestId ? ` (${providerRequestId})` : ""}: ${errBody}`);
       // A failed call that the backend received still has an identity — keep it for incident logs.
       error.providerRequestId = providerRequestId;
@@ -182,7 +202,7 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
       // and strands its durable reservation even though no replay is needed. Only the protocol's
       // terminal event permits this recovery. Any earlier interruption remains fail-closed.
       if (responseCompleted) {
-        return { text: text.trim(), toolCalls,
+        return { text: text.trim(), toolCalls, model: attemptModel, ...(notice ? { notice } : {}),
           usage: { ...normalizeUsage(usage), providerRequestId } };
       }
       // The backend opened a response and the stream died mid-flight: the turn happened, tokens
@@ -192,14 +212,96 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
       throw providerFailure(streamError, { state: DISPATCH_STATES.ambiguous, providerRequestId });
     }
 
-    return { text: text.trim(), toolCalls, usage: { ...normalizeUsage(usage), providerRequestId } };
+    return { text: text.trim(), toolCalls, model: attemptModel, ...(notice ? { notice } : {}),
+      usage: { ...normalizeUsage(usage), providerRequestId } };
+    }
+    throw providerFailure(new Error("Codex model fallback produced no response."), { state: DISPATCH_STATES.rejected });
   }
 
   // The transport's identity, exposed so telemetry stops recording model:null — which made every
   // Codex usage row price at the default rate and classify by guesswork. `model` is the REAL wire
   // model (the ChatGPT-account backend rejects "-codex"-suffixed names), and `providerId` names
   // the lane so billing rows are attributable without inference.
-  return { runTurn, model: MODEL, provider: "codex", providerId: "codex" };
+  return { runTurn, model: selectedModel, provider: "codex", providerId: "codex" };
+}
+
+function codexAttemptModels(selected) {
+  const ordered = [];
+  for (const candidate of [selected, ...CODEX_PLAN_FALLBACKS]) {
+    if (candidate && !ordered.includes(candidate)) ordered.push(candidate);
+  }
+  return ordered;
+}
+
+function chatGptPlanRejectsModel(status, body, model) {
+  if (Number(status) !== 400) return false;
+  const escaped = String(model || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`The ['"]${escaped}['"] model is not supported when using Codex with a ChatGPT account`, "i")
+    .test(String(body || ""));
+}
+
+export function clearCodexModelDiscoveryCache() {
+  discoveryCache.clear();
+}
+
+// Live ChatGPT-plan catalogue. Slugs only, intersected with our catalogue. An empty body is
+// what the backend returns when ChatGPT-Account-ID is missing, so that is a failure too.
+// Tokens are never written to logs or to the cache key.
+export async function discoverCodexModels(token, accountId, {
+  fetchImpl = fetch,
+  clientVersion = process.env.CODEX_CLIENT_VERSION || CODEX_MODELS_CLIENT_VERSION,
+  now = () => Date.now(),
+  ttlMs = CODEX_MODEL_DISCOVERY_TTL_MS,
+} = {}) {
+  const fallback = () => codexStaticModels();
+  const account = String(accountId || "").trim();
+  const access = String(token || "").trim();
+  if (!access || !account) return fallback();
+  const at = now();
+  const cached = discoveryCache.get(account);
+  if (cached && at - cached.at < ttlMs) return [...cached.slugs];
+  try {
+    const url = `${CODEX_MODELS_URL}?client_version=${encodeURIComponent(clientVersion)}`;
+    const response = await fetchImpl(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${access}`,
+        "ChatGPT-Account-ID": account,
+        originator: "codex_cli_rs",
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response?.ok) return fallback();
+    const payload = await response.json().catch(() => null);
+    const slugs = intersectDiscoveredCodexModels(slugsFromCodexPayload(payload));
+    if (!slugs.length) return fallback();
+    discoveryCache.set(account, { at, slugs });
+    return [...slugs];
+  } catch {
+    return fallback();
+  }
+}
+
+export function intersectDiscoveredCodexModels(liveSlugs) {
+  const live = new Set((liveSlugs || []).map((slug) => String(slug || "").trim()).filter(Boolean));
+  return codexDiscoverableModels().filter((slug) => live.has(slug));
+}
+
+function slugsFromCodexPayload(payload) {
+  const rows = Array.isArray(payload) ? payload : (payload?.models || payload?.data || []);
+  const slugs = [];
+  for (const row of rows) {
+    if (typeof row === "string") {
+      slugs.push(row);
+      continue;
+    }
+    const visibility = String(row?.visibility || "").toLowerCase();
+    if (visibility === "hide" || visibility === "hidden") continue;
+    const slug = row?.slug || row?.id || row?.model;
+    if (typeof slug === "string" && slug.trim()) slugs.push(slug.trim());
+  }
+  return slugs;
 }
 
 // Codex usage shape -> neutral blended shape a BYOK adapter could also fill.

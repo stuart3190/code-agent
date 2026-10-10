@@ -16,7 +16,11 @@ provider, exact model id and billing lane have an executable adapter.
 | xAI | `grok-4.5` | quality | BYOK | selectable when xAI policy permits |
 | xAI | `grok-build-0.1` | balanced | BYOK | selectable when xAI policy permits |
 | xAI | `grok-4.3` | fast | BYOK | selectable when xAI policy permits |
-| Codex | `gpt-5.5` | routed by reasoning effort | connected allowance | selectable only with a Codex connection |
+| Codex | `gpt-5.6-sol` | quality | connected allowance | selectable only with a Codex connection |
+| Codex | `gpt-5.6-terra` | balanced | connected allowance | selectable only with a Codex connection; wire default |
+| Codex | `gpt-5.6-luna` | fast | connected allowance | selectable only with a Codex connection |
+| Codex | `gpt-6-astra` | quality | connected allowance | optional; shown only when live discovery lists it |
+| Codex | `gpt-5.5` | quality | connected allowance | hidden; stored preferences resolve to `gpt-5.6-sol` |
 
 The capability runtime also has three non-selectable internal identities: `gpt-5.4-mini` for
 text/structured actions, `gpt-5.4` for image actions, `text-embedding-3-small` for embeddings, and
@@ -28,12 +32,16 @@ model overrides are rejected.
 `claude-opus-4-8`, `claude-sonnet-4-6`, and the ambiguous `claude-haiku-4-5` alias are retained
 only as hidden compatibility identities for historical configuration/telemetry. They are not
 advertised. Arbitrary environment-supplied ids are rejected as `model_configuration_invalid`.
+`gpt-5.5` is the same kind of hidden Codex identity: it stays resolvable, and execution uses
+`gpt-5.6-sol` (or `gpt-5.6-terra` when that successor is not public).
 
-The persisted selection syntax is `lane:provider:model`, optionally suffixed with `#mode`. Manual
-selection never changes lane or provider. `Auto` may choose another model only from executable
-candidates already permitted by the pinned billing policy. Unknown model, lane, provider or
-reasoning combinations fail deterministically; no adapter default or managed credential is used as
-a substitute.
+The persisted selection syntax is `lane:provider:model`, optionally suffixed with `#mode`. While
+the active provider is Codex, the selector lists only connected-allowance models. A stored
+preference that names one of those slugs on another lane runs on the ChatGPT plan instead of
+raising `model_lane_unavailable`. Other manual selections still cannot change provider. `Auto`
+may choose another model only from public executable candidates already permitted by the pinned
+billing policy. Unknown model, lane, provider or reasoning combinations fail deterministically;
+no adapter default or managed credential is used as a substitute.
 
 Reasoning tokens remain a subset of output tokens for providers that expose both. They are retained
 as diagnostic telemetry but are not added to output again for billing. Cached input uses the

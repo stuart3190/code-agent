@@ -543,6 +543,11 @@ export async function processConversation(conversation, {
         }
       }
 
+      if (response.notice) {
+        await store.appendTurn(conversation, { role: "lead", content: response.notice, payload: { progress: true } }).catch(() => {});
+        await emit("message", { role: "lead", text: response.notice });
+      }
+
       // The router falls back between providers on its own; surface that as a calm
       // sentence, record WHY privately, and carry on from this exact step — the loop
       // state (input) is untouched, so nothing restarts.
