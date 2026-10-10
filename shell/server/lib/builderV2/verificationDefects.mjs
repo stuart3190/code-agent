@@ -83,6 +83,86 @@ const generatedSource = (path) => typeof path === "string"
   && /^src\/.+\.(?:jsx?|tsx?|css)$/.test(path)
   && !PROTECTED_PATHS.some((pattern) => pattern.test(path));
 
+// ── runtime crash evidence ──────────────────────────────────────────────────────────────────────
+//
+// The smoke gate proves exactly one thing: the application threw (or went blank) in a real
+// browser. That is the application's defect and a repair can act on it, but only if the brief says
+// WHERE. The page error carries a message and sometimes a stack; the generated file that holds the
+// failing identifier is found here by a plain word-boundary search of the tree, no AST and no model.
+
+const CRASH_PATTERNS = Object.freeze([
+  /([\w$]+(?:\.[\w$]+)*)\s+is not (?:defined|a function|a constructor|iterable|an object)/g,
+  /Cannot (?:read|set) propert(?:y|ies) of (?:undefined|null) \((?:reading|setting) '([^']+)'\)/g,
+  /Cannot access '([^']+)' before initialization/g,
+  /does not provide an export named '([^']+)'/g,
+  /(?:for|of|named|entity|store|property|key|field)\s+["'`]?([A-Za-z_$][\w$]{2,})["'`]?\s*$/g,
+  /['"`]([A-Za-z_$][\w$]{2,})['"`]/g,
+  // camelCase / PascalCase / snake_case identifiers are specific enough to search for unprompted.
+  /\b([a-z][a-z0-9]*(?:[A-Z][A-Za-z0-9]*)+|[A-Z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+|[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+)\b/g,
+]);
+const GENERIC_TOKEN = /^(?:\w*Error|Uncaught|undefined|null|NaN|Object|Array|Promise|Symbol|Function|String|Number|Boolean|true|false|length|constructor|prototype|toString|default|module|exports|React|ReactDOM)$/;
+// A token found in more files than this names a habit of the codebase, not a cause.
+const CRASH_TOKEN_FILE_CAP = 4;
+const CRASH_FILE_CAP = 6;
+
+const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Identifiers worth searching the tree for, taken from a runtime error message. */
+export function crashIdentifiers(message) {
+  const text = String(message || "").slice(0, 600);
+  const tokens = [];
+  for (const pattern of CRASH_PATTERNS) {
+    for (const match of text.matchAll(new RegExp(pattern.source, pattern.flags))) {
+      for (const part of String(match[1] || "").split(".")) {
+        if (part.length >= 3 && !GENERIC_TOKEN.test(part) && !tokens.includes(part)) tokens.push(part);
+      }
+    }
+  }
+  return tokens.slice(0, 8);
+}
+
+/**
+ * The generated files a runtime crash points at: the source files named by the stack frames, then
+ * the files that contain a token from the error message (with the first line each appears on).
+ */
+export function crashSourceEvidence(tree, crash = null) {
+  const message = String(crash?.message || "");
+  const stackFiles = unique((crash?.sourceFiles || []).filter((path) => generatedSource(path)
+    && typeof tree?.[path] === "string"));
+  const tokens = crashIdentifiers(message);
+  const hits = [];
+  if (tree && tokens.length) {
+    const sources = Object.entries(tree).filter(([path, source]) => generatedSource(path) && typeof source === "string");
+    for (const token of tokens) {
+      const pattern = new RegExp(`(?<![\\w$])${escapeRegExp(token)}(?![\\w$])`);
+      const matching = sources.filter(([, source]) => pattern.test(source));
+      if (!matching.length || matching.length > CRASH_TOKEN_FILE_CAP) continue;
+      for (const [path, source] of matching) {
+        const rows = source.split("\n");
+        const line = rows.findIndex((row) => pattern.test(row)) + 1;
+        // A token passed as a string argument (entityStore("x"), repository("x")) is the call
+        // site the message is about, far more than a variable or comment that merely shares it.
+        const quoted = rows.some((row) => new RegExp(`["'\`]${escapeRegExp(token)}["'\`]`).test(row));
+        hits.push({ path, line, token, quoted });
+      }
+    }
+  }
+  // Files matching the most distinct tokens (a quoted call-site argument counts triple) come first.
+  // A distinctive identifier (camelCase, PascalCase, snake_case) outranks a plain word such as
+  // "open" or "rooms": the plain word is only searched for when no distinctive one matched anywhere.
+  const distinctive = (token) => /[a-z][A-Z]|_|^[A-Z][a-z0-9]+[A-Z]/.test(token);
+  const usable = hits.some((hit) => distinctive(hit.token)) ? hits.filter((hit) => distinctive(hit.token)) : hits;
+  const score = new Map();
+  for (const hit of usable) score.set(hit.path, (score.get(hit.path) || 0) + (hit.quoted ? 3 : 1));
+  const tokenFiles = [...score.keys()].sort((a, b) => score.get(b) - score.get(a) || a.localeCompare(b));
+  return {
+    tokens,
+    hits: usable.slice(0, 12),
+    stackFiles,
+    files: unique([...stackFiles, ...tokenFiles]).slice(0, CRASH_FILE_CAP),
+  };
+}
+
 /** The contracted flows a step drives, if the interaction contract knows about them. */
 function flowsForStep(interactionContract, journeyId, stepIndex) {
   return (interactionContract?.flows || [])
@@ -530,17 +610,38 @@ export function verificationDefects({
     if (journey.setup?.ok === false) continue; // already reported as a prerequisite defect
     if (smoke) {
       // The smoke gate drives no contracted steps, so a red smoke verdict is exactly one thing: the
-      // application crashed (or rendered nothing) in a real browser. It is the application's fault
-      // and it blocks the preview - but it carries no expectation to repair against, so it is not
-      // a repair-tier defect. The compiled candidate is retained for a deliberate repair request.
+      // application crashed (or rendered nothing) in a real browser. That is the application's
+      // defect and a repair CAN act on it: the thrown error is the expectation. It used to be filed
+      // as tier NONE ("nothing to repair against"), which ended the build with no repair spent and,
+      // on resume, briefed the crash as context rather than a defect. Only a verdict the smoke
+      // itself marked as the platform's (an unreachable preview) stays non-repairable.
+      const observed = journey.detail
+        || "the application crashed or rendered nothing in the browser smoke test";
+      const crash = journey.crash
+        || (verdicts.smoke?.crashes || []).find((row) => row?.message) || null;
+      const crashFacts = { ...(crash || {}), message: crash?.message
+        || String(observed).replace(/^.*?(?:fatal runtime error (?:during load|after activation):\s*)/i, "") };
+      const found = crashSourceEvidence(tree, crashFacts);
+      const platformVerdict = journey.classification === VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE
+        || journey.status === "undriveable";
+      const owners = unique([...(journey.owners || []), ...(journey.fallbackRefs || [])]);
       defects.push({
         code: "fatal_runtime_crash",
-        defectClass: DEFECT_CLASS.BEHAVIOUR, owner: DEFECT_OWNER.APP, tier: REPAIR_TIER.NONE,
+        defectClass: DEFECT_CLASS.BEHAVIOUR, owner: DEFECT_OWNER.APP,
+        tier: platformVerdict ? REPAIR_TIER.NONE : REPAIR_TIER.REPAIR,
         journeyId: journey.id, stepIndex: null, action: null, control: null,
-        modules: unique([...(journey.owners || []), ...(journey.fallbackRefs || [])].filter(generatedSource)),
-        failureRefs: unique([...(journey.owners || []), ...(journey.fallbackRefs || [])]),
-        evidence: { observed: journey.detail
-          || "the application crashed or rendered nothing in the browser smoke test" },
+        // The files the error actually names come first; the journey owners stay as the fallback.
+        modules: unique([...found.files, ...owners.filter(generatedSource)]),
+        failureRefs: unique([...found.files, ...owners]),
+        evidence: {
+          observed,
+          crash: crash || found.tokens.length || found.files.length ? {
+            phase: crash?.phase || null, control: crash?.control || null,
+            message: crashFacts.message || null, stack: crash?.stack || [],
+            sourceFiles: crash?.sourceFiles || [], tokens: found.tokens, hits: found.hits,
+            files: found.files,
+          } : null,
+        },
       });
       continue;
     }
@@ -628,6 +729,7 @@ export const platformDefectsOf = (defects = []) => defects
  */
 export function defectEvidence(defects = []) {
   const lines = [];
+  const crashNarrated = new Set();
   for (const defect of actionableDefects(defects)) {
     if (defect.journeyId && defect.action) {
       lines.push(`journey ${defect.journeyId} · step "${defect.action}" FAILED in a real browser: `
@@ -691,6 +793,15 @@ export function defectEvidence(defects = []) {
     ))) {
       lines.push("context (verifier advisory, not the repair): an earlier contracted result was already visible before its action completed. Prevent the dependent step from racing an unfinished async transition: do not pre-render the post-action outcome, or publish/await the completed state before dependent controls can run.");
     }
+    if (defect.code === "fatal_runtime_crash") {
+      // ONE narrative per distinct crash: the smoke stamps the same verdict on every contracted
+      // journey, and repeating the paragraph per journey only spends the model's context.
+      const key = JSON.stringify([defect.evidence?.observed, defect.evidence?.crash?.message]);
+      if (!crashNarrated.has(key)) {
+        crashNarrated.add(key);
+        lines.push(runtimeCrashBrief(defect, defects));
+      }
+    }
     if (defect.evidence?.surfaceIntegration) {
       const surface = defect.evidence.surfaceIntegration;
       lines.push(`journey ${defect.journeyId} has generated source that is not reachable from its `
@@ -737,6 +848,7 @@ export function defectEvidence(defects = []) {
       failedRequestsDuringStep: defect.evidence?.failedRequests || [],
       failureRefs: defect.failureRefs || defect.modules || [],
       surfaceIntegration: defect.evidence?.surfaceIntegration || null,
+      runtimeCrash: defect.evidence?.crash || null,
     }));
   }
   // Platform and prerequisite defects ride along as CONTEXT with their ownership stated. They
@@ -746,10 +858,38 @@ export function defectEvidence(defects = []) {
     // the one thing a defect with no owning module can honestly offer.
     const fallback = defect.modules?.length
       ? ` bounded fallback files: ${defect.modules.join(", ")}` : "";
-    lines.push(`context (${defect.owner}-owned, not an application defect) ${defect.code}: `
+    // An application-owned defect that no repair tier could be dispatched for is still the
+    // application's: say so. "not an application defect" is reserved for platform/unknown owners.
+    const framing = defect.owner === DEFECT_OWNER.APP
+      ? "application-owned defect, fix the cause"
+      : `${defect.owner}-owned, not an application defect`;
+    lines.push(`context (${framing}) ${defect.code}: `
       + `${defect.evidence?.observed || "no detail"}.${fallback}`);
   }
   return lines;
+}
+
+/** The one paragraph that tells repair what crashed, where, and what to do about it. */
+function runtimeCrashBrief(defect, defects = []) {
+  const crash = defect.evidence?.crash || {};
+  const message = crash.message || defect.evidence?.observed || "the application crashed";
+  const when = crash.phase === "activate"
+    ? `after activating ${crash.control ? JSON.stringify(crash.control) : "a control"}` : "while loading";
+  const journeys = unique((defects || []).filter((row) => row.code === "fatal_runtime_crash"
+    && row.evidence?.observed === defect.evidence?.observed).map((row) => row.journeyId));
+  const where = (crash.hits || []).length
+    ? ` Generated files that contain ${unique(crash.hits.map((hit) => JSON.stringify(hit.token))).join(", ")}: `
+      + `${unique(crash.hits.map((hit) => `${hit.path}${hit.line ? `:${hit.line}` : ""}`)).join(", ")}.`
+    : (crash.files || []).length ? ` Files named by the stack: ${crash.files.join(", ")}.` : "";
+  const stack = (crash.stack || []).length ? ` Stack: ${crash.stack.slice(0, 3).join(" | ")}.` : "";
+  const transient = /entity ?store/i.test(String(message))
+    ? " Platform stores exist only for durable entities. A calculation result or other transient value "
+      + "has no store: delete the entityStore(...) call and keep that value in local component state (useState)."
+    : "";
+  return `application crash (this is an application defect: the generated code throws, repair the cause): `
+    + `the app crashed ${when} with ${JSON.stringify(message)}${journeys.length > 1 ? ` (the same crash fails journeys ${journeys.join(", ")})` : ""}.`
+    + `${stack}${where} Remove or replace the failing call or reference in those files; do not keep it, and `
+    + `do not rewrite unrelated modules.${transient}`;
 }
 
 /**
@@ -769,8 +909,12 @@ export function defectWriteBoundary(defects = [], { maxFiles = 12 } = {}) {
     ...(defect.evidence?.surfaceIntegration?.mountedPaths || []),
     ...(defect.evidence?.surfaceIntegration?.unreachableJourneyModules || []),
   ])).filter(generatedSource).sort();
+  // A runtime crash names the file that throws. Keep those first so a long owner list cannot sort
+  // the one file that actually has to change out of the bounded first strategy.
+  const crashFiles = unique(actionable.flatMap((defect) => defect.evidence?.crash?.files || []))
+    .filter(generatedSource).sort();
   const ownerFiles = unique(actionable.flatMap((defect) => defect.modules)).filter(generatedSource).sort();
-  const files = unique([...surfaceFiles, ...ownerFiles]).slice(0, maxFiles);
+  const files = unique([...surfaceFiles, ...crashFiles, ...ownerFiles]).slice(0, maxFiles);
   if (!files.length) return null;
   const controls = unique(actionable.map((defect) => defect.control?.logicalField || defect.control?.id));
   return {
@@ -787,6 +931,45 @@ export function defectWriteBoundary(defects = [], { maxFiles = 12 } = {}) {
       + "Fix the named transitions there. Do not restate expected words as copy; change the handler, "
       + "state or conditional that failed.",
   };
+}
+
+/**
+ * "The previous attempt did not fix it."
+ *
+ * A round that leaves the same defect in place is discarded (the retained tree is restored), so the
+ * next round starts from the same code and, without being told, tends to make the same change. Each
+ * ledger entry records what a discarded round touched and which defects survived it; this turns the
+ * entries whose defect is still present into one explicit block for the next brief: what was
+ * changed, that it did not work, and (for a runtime crash) where the cause still is.
+ *
+ * @param {{attempts?: Array<{round:number, strategy:string, changedFiles:string[], persisted:string[]}>,
+ *   defects?: object[], tree?: object|null}} input
+ * @returns {string[]} brief lines; empty when no earlier round left a current defect in place
+ */
+export function previousAttemptNotes({ attempts = [], defects = [], tree = null } = {}) {
+  const current = new Map(actionableDefects(defects).map((defect) => [defectSignature(defect), defect]));
+  const lines = [];
+  for (const attempt of (attempts || []).slice(-2)) {
+    const survivors = (attempt.persisted || []).map((signature) => current.get(signature)).filter(Boolean);
+    if (!survivors.length) continue;
+    const first = survivors[0];
+    const crash = first.code === "fatal_runtime_crash"
+      ? crashSourceEvidence(tree, { message: first.evidence?.crash?.message || first.evidence?.observed,
+        sourceFiles: first.evidence?.crash?.sourceFiles || [] }) : null;
+    const changed = unique(attempt.changedFiles || []);
+    const stillThere = crash?.hits?.length
+      ? unique(crash.hits.map((hit) => `${hit.path}${hit.line ? `:${hit.line}` : ""}`)) : [];
+    const causeFiles = unique((crash?.files || []));
+    const untouched = causeFiles.filter((path) => !changed.includes(path));
+    lines.push(`PREVIOUS ATTEMPT DID NOT FIX THIS: round ${attempt.round} [${attempt.strategy}] changed `
+      + `[${changed.join(", ") || "no files"}] and the same defect (${first.code}`
+      + `${first.evidence?.observed ? `: ${JSON.stringify(String(first.evidence.observed).slice(0, 200))}` : ""}) `
+      + "persisted, so that change was discarded. Do not repeat it."
+      + (stillThere.length ? ` The cause is still present at ${stillThere.join(", ")}.` : "")
+      + (untouched.length ? ` The earlier round never modified [${untouched.join(", ")}]: change the offending code in ${untouched.length > 1 ? "them" : "it"} itself.` : "")
+      + (crash ? " Remove or replace the failing call rather than adjusting code around it." : ""));
+  }
+  return lines;
 }
 
 /** A stable identity for one defect, for comparing one repair round against the next. */

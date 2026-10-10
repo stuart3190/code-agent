@@ -63,6 +63,12 @@ export const BLOCKING_CODES = Object.freeze({
   contract_control_wrong_binding: "the mounted contracted control is proven to expose a different machine primitive than the contract requires",
   contracted_action_unwired: "a contracted action control carries its machine identity but no handler and is not a form submit; the browser would press a dead control",
 
+  // An entityStore("X") whose X is neither composed nor declared in the contract can only reach the
+  // composed in-memory fallback: the call "works" and its data is silently lost on reload. The
+  // name is a literal string in the source, so a static check proves it; a model correction costs
+  // nothing compared with the paid browser run that would not notice.
+  entity_store_call_unresolved: "entityStore() is called with an entity name that is neither composed nor declared in the contract, so its data lives only in a throwaway in-memory store",
+
   // ── platform ──
   runtime_configuration_invalid: "the generated runtime cannot reach its backend",
   required_runtime_dependency_missing: "the contract requires a runtime that is not present in the isolated compiler",
@@ -129,6 +135,7 @@ export const ADVISORY_CODES = Object.freeze({
   // The call patterns this recognises are not yet complete enough to reject a build: a correct
   // app may persist through a wrapper this walker does not follow. Reported, therefore, and not
   // enforced — promote to blocking only after builder-v2-false-rejection scores zero of these.
+  entity_store_call_transient: "entityStore() is called for a contract entity with no platform store (transient or not durable); the composed in-memory fallback keeps the page alive, but component state is the honest home for it",
   entity_store_unmounted: "a durable entity is missing from the composed schema or entityStores, or no reachable module calls its facade or store",
 });
 

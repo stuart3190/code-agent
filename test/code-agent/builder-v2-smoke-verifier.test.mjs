@@ -113,6 +113,37 @@ browserTest("a preview that renders nothing after a boot error is a fatal load f
   } finally { server.close(); }
 });
 
+// A module-scope throw in a generated source file: nothing mounts, so the smoke sees a blank page.
+const THROWING_MODULE_APP = `<!doctype html><html><body><div id="root"></div>
+<script type="module" src="/src/components/Flow.js"></script></body></html>`;
+const THROWING_MODULE = `const calculationStore = (name) => { throw new Error("No composed entity store for " + name); };
+export const flowStore = calculationStore("layoutCalculation");
+`;
+
+browserTest("a crash keeps its message, stack and the generated source file it names, on the verdict of every journey", async () => {
+  const { server, url } = await serve({ "/": THROWING_MODULE_APP, "/src/components/Flow.js": THROWING_MODULE });
+  server.removeAllListeners("request");
+  server.on("request", (req, res) => {
+    const type = req.url.endsWith(".js") ? "text/javascript" : "text/html";
+    const body = req.url === "/src/components/Flow.js" ? THROWING_MODULE : THROWING_MODULE_APP;
+    res.writeHead(200, { "content-type": type });
+    res.end(body);
+  });
+  try {
+    const result = await smokeVerifyJourneys({ previewUrl: url, contract: journeysOnly, timeoutMs: 30_000, browser });
+    assert.equal(result.pass, false);
+    const [crash] = result.smoke.crashes;
+    assert.equal(crash.phase, "load");
+    assert.equal(crash.message, "No composed entity store for layoutCalculation");
+    assert.ok(crash.stack.length > 0 && crash.stack.length <= 5, JSON.stringify(crash.stack));
+    assert.ok(crash.sourceFiles.includes("src/components/Flow.js"), JSON.stringify(crash));
+    assert.ok(result.journeys.every((journey) => journey.crash?.message === crash.message
+      && journey.crash.sourceFiles.includes("src/components/Flow.js")),
+    "the repair brief reads the crash from the journey verdict");
+    assert.match(result.fatalErrors[0], /No composed entity store for layoutCalculation/, "the one-line summary is unchanged");
+  } finally { server.close(); }
+});
+
 browserTest("an unreachable preview is UNAVAILABLE (platform), never an application failure", async () => {
   const { server, url } = await serve({ "/": WRONG_COUNTER });
   await new Promise((resolve) => server.close(resolve)); // the port is now closed

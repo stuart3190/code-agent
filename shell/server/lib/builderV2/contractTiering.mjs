@@ -62,6 +62,40 @@ export function contractUsesExplicitTransientState(contract) {
     ));
 }
 
+/**
+ * Entities the contract declares but the platform composes NO store for: every entity no durable
+ * operation touches (a transient calculation result, a `storage: "transient"` working record, an
+ * `owned: false` value). This is exactly the complement of the entity set the capability graph
+ * keeps for `capability:crud`, so the prompt and the composed `crud.js` cannot disagree about it.
+ */
+export function transientStateEntities(contract) {
+  const operations = contract?.operations || [];
+  const platform = new Set((contract?.entities || []).filter((entity) => entity?.platform)
+    .map((entity) => entity.name));
+  const durable = new Set((operations.length
+    ? operations.filter((operation) => operationUsesDurablePersistence(contract, operation))
+      .map((operation) => operation?.entity)
+    : (contract?.entities || []).map((entity) => entity?.name)).filter(Boolean));
+  return unique((contract?.entities || []).map((entity) => entity?.name))
+    .filter((name) => !durable.has(name) && !platform.has(name)).sort();
+}
+
+/**
+ * One generation-brief line for contracts that declare transient entities. Without it the
+ * PERSISTENCE OWNERSHIP section is omitted for an all-transient contract and the model gets no
+ * guidance either way: it saw "persistence goes through the capabilities" and wrote
+ * `entityStore("layoutCalculation")` for a value the platform deliberately gives no store.
+ */
+export function transientStateBrief(contract) {
+  const entities = transientStateEntities(contract);
+  if (!entities.length) return null;
+  return `TRANSIENT STATE: entities [${entities.join(", ")}] have no platform store (they are transient or not durable). `
+    + "Keep their values in local component state (useState / useMemo / plain functions). "
+    + "Do not call entityStore(), db.entity(), repository() or localStorage for them."
+    + (contractUsesDurablePersistence(contract) ? ""
+      : " This contract has no durable persistence at all: a purely client-side calculation needs no backend call.");
+}
+
 function capabilityBinding(name, configuration = null, methods = []) {
   return {
     name,

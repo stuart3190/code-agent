@@ -776,8 +776,11 @@ function facadeCallee(callee, locals) {
   return null;
 }
 
-/** Entity names a module passes to entityStore / db.entity / repository / useEntityMutation. */
-function entityFacadeCalls(source, file) {
+/**
+ * Every facade call a module makes with a statically known entity name: which facade
+ * (entityStore, db.entity, repository, useEntityMutation, or a store-map lookup) and where.
+ */
+function entityFacadeCallSites(source, file) {
   const ast = parseSource(source, file);
   if (!ast) return [];
   const constants = stringConstants(ast);
@@ -785,21 +788,80 @@ function entityFacadeCalls(source, file) {
   const found = [];
   const visit = (node) => {
     if (!node || typeof node.type !== "string") return;
-    if (["CallExpression", "OptionalCallExpression"].includes(node.type) && facadeCallee(node.callee, locals)) {
-      const entity = argumentEntity(node.arguments?.[0], constants);
-      if (entity) found.push(entity);
+    if (["CallExpression", "OptionalCallExpression"].includes(node.type)) {
+      const facade = facadeCallee(node.callee, locals);
+      if (facade) {
+        const entity = argumentEntity(node.arguments?.[0], constants);
+        if (entity) found.push({ facade, entity, line: node.loc?.start?.line || null });
+      }
     }
     if (["MemberExpression", "OptionalMemberExpression"].includes(node.type)
         && node.object?.type === "Identifier" && STORE_MAPS.has(node.object.name)) {
       const key = node.computed
         ? argumentEntity(node.property, constants)
         : node.property?.name || null;
-      if (key) found.push(key);
+      if (key) found.push({ facade: node.object.name, entity: key, line: node.loc?.start?.line || null });
     }
     for (const [, child] of childrenOf(node)) visit(child);
   };
   visit(ast.program);
   return found;
+}
+
+/** Entity names a module passes to entityStore / db.entity / repository / useEntityMutation. */
+function entityFacadeCalls(source, file) {
+  return entityFacadeCallSites(source, file).map((site) => site.entity);
+}
+
+/**
+ * `entityStore("X")` calls whose X has no composed store.
+ *
+ * The composed `entityStore()` resolves only entities the capability graph kept (those used by
+ * durable operations). Asked for any other name it used to throw while the importing module was
+ * being evaluated, which blanked the whole page (a calculator that stored its transient result in
+ * `entityStore("layoutCalculation")` never mounted). The composed store now falls back to an
+ * in-memory store instead, so a call can no longer crash the page, but it can still silently lose
+ * data. Two different findings follow from that:
+ *
+ *   - a name that is NOT in the contract at all (a typo, a case slip such as "Project" for
+ *     "project", an invented entity) is blocking `entity_store_call_unresolved`: the call can only
+ *     ever reach a throwaway store, and catching it before compile costs no browser run;
+ *   - a name the contract DOES declare but the platform composed no store for (transient or
+ *     not-owned entities) is advisory `entity_store_call_transient`: it works, but the value is
+ *     page-lifetime only and component state is the honest way to hold it.
+ *
+ * Only runs against a tree that carries the composed crud module; legacy trees are untouched.
+ */
+export function lintUnresolvedEntityStoreCalls(tree = {}, contract = null) {
+  if (typeof tree?.[COMPOSED_CRUD_PATH] !== "string") return [];
+  const composed = composedEntityNames(tree);
+  const declared = new Set((contract?.entities || []).map((entity) => entity?.name).filter(Boolean));
+  const findings = [];
+  for (const file of Object.keys(tree).sort()) {
+    if (!SOURCE.test(file) || PLATFORM.test(file) || typeof tree[file] !== "string") continue;
+    if (!/\bentityStore\b/.test(tree[file])) continue;
+    for (const site of entityFacadeCallSites(tree[file], file)) {
+      if (site.facade !== "entityStore" || composed.has(site.entity)) continue;
+      const where = `${file}${site.line ? `:${site.line}` : ""}`;
+      if (declared.has(site.entity)) {
+        findings.push({
+          code: "entity_store_call_transient", file, line: site.line, entity: site.entity,
+          message: `${where}: entityStore(${JSON.stringify(site.entity)}): this entity is declared in the contract `
+            + "but has no platform store (it is transient or not durable), so the call gets a throwaway in-memory store. "
+            + "Keep transient values in component state (useState) instead.",
+        });
+      } else {
+        const near = [...composed, ...declared].find((name) => name.toLowerCase() === site.entity.toLowerCase());
+        findings.push({
+          code: "entity_store_call_unresolved", file, line: site.line, entity: site.entity,
+          message: `${where}: entityStore(${JSON.stringify(site.entity)}): no entity with this name is composed `
+            + `or declared in the contract${near ? ` (did you mean ${JSON.stringify(near)}?)` : ""}, so the call can only reach a throwaway in-memory store `
+            + "and its data is lost on reload. Use a declared entity name, or keep transient values in component state (useState).",
+        });
+      }
+    }
+  }
+  return findings;
 }
 
 /**
@@ -929,6 +991,13 @@ export function runStaticApplicationGate(tree, { contract = null, modulePlan = [
   blocking.push(...integrityVerdict.blocking);
   checks.push({ name: "entity_store_integrity", ok: integrity.length === 0,
     detail: integrity.map((finding) => finding.message) });
+
+  const unresolvedStores = lintUnresolvedEntityStoreCalls(tree, contract);
+  const unresolvedVerdict = partitionFindings(unresolvedStores);
+  advisory.push(...unresolvedVerdict.advisory);
+  blocking.push(...unresolvedVerdict.blocking);
+  checks.push({ name: "entity_store_calls", ok: unresolvedVerdict.blocking.length === 0,
+    detail: unresolvedStores.map((finding) => finding.message) });
 
   return { ok: blocking.length === 0, active: true, blocking, advisory, checks,
     mountedSurface: surface, reachable: [...reachable].sort() };

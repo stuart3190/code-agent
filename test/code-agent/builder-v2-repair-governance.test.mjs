@@ -244,7 +244,7 @@ test("an operated bound control whose failing kinds are only values or computed_
   assert.equal(kept.defects[0].tier, REPAIR_TIER.REPAIR);
 });
 
-test("smoke is never repairable and a non-minimal policy is not repairable by default", () => {
+test("smoke step evidence is never repairable, a step-less smoke crash is, and a non-minimal policy is not repairable by default", () => {
   const contract = { journeys: [{ id: "calc", steps: [{ action: "add", expect: "4" }] }], operations: [] };
   const step = {
     action: "add", expect: "4", status: "fail", drove: true,
@@ -260,7 +260,18 @@ test("smoke is never repairable and a non-minimal policy is not repairable by de
       journeys: [{ id: "calc", status: "fail", owners: ["src/screens/Calc.jsx"], steps: [{ ...step, ...over }] }],
     },
   });
-  assert.equal(actionableDefects(defectsFor(SMOKE_VERIFIER_POLICY)).length, 0, "smoke never opens a repair");
+  assert.equal(actionableDefects(defectsFor(SMOKE_VERIFIER_POLICY)).length, 0,
+    "a smoke verdict that carries per-step comparisons never opens a repair");
+  // The smoke gate's own verdict is a crash with no steps: that IS the application's defect, so a
+  // repair is dispatched (it used to be tier none, which ended the build with no repair spent).
+  const crash = verificationDefects({
+    contract, interactionContract: { flows: [] },
+    journeyResults: { verifierPolicy: SMOKE_VERIFIER_POLICY, journeys: [{
+      id: "calc", status: "fail", classification: VERIFICATION_RESULT_CLASS.FATAL_RUNTIME_FAILURE,
+      detail: "fatal runtime error during load: boom", owners: ["src/screens/Calc.jsx"], steps: [] }] },
+  });
+  assert.deepEqual(actionableDefects(crash).map((defect) => [defect.code, defect.tier]),
+    [["fatal_runtime_crash", REPAIR_TIER.REPAIR]]);
   assert.equal(actionableDefects(defectsFor(BYPASSED_VERIFIER_POLICY)).length, 0);
   assert.equal(actionableDefects(defectsFor("future_policy_v9", {
     classification: VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE,
