@@ -344,6 +344,7 @@ async function main() {
 
   const filesystemIndex = [];
   const filesystemDirectories = [];
+  const filesystemSymlinks = [];
   const roots = [
     { name: "publish", source: process.env.PUBLISH_DIR || path.join(os.homedir(), "publish") },
     { name: "qa", source: process.env.QA_ARTIFACT_DIR || path.join(os.homedir(), "thrallo-qa") },
@@ -352,7 +353,8 @@ async function main() {
   for (const root of roots) {
     const rootStat = await stat(root.source).catch(() => null);
     if (!rootStat?.isDirectory()) throw new Error(`filesystem root missing or not a directory: ${root.source}`);
-    const inventory = await inventoryFilesystemRoot(root.source);
+    const inventory = await inventoryFilesystemRoot(root.source, { allowPublishPointers: root.name === "publish" });
+    filesystemSymlinks.push(...inventory.symlinks.map(link => ({ root: root.name, relativePath: link.relative, target: link.target })));
     const files = inventory.files;
     filesystemDirectories.push(...inventory.directories.map((directory) => ({
       root: root.name,
@@ -393,6 +395,13 @@ async function main() {
     sha256: sha256(filesystemDirectoriesGz),
   };
   manifest.bytes += filesystemDirectoriesGz.length;
+  const filesystemSymlinksGz = gzipSync(JSON.stringify(filesystemSymlinks));
+  await writeFile(path.join(dir, "filesystem_symlinks.json.gz"), filesystemSymlinksGz);
+  manifest.tables.filesystem_symlinks = filesystemSymlinks.length;
+  manifest.files["filesystem_symlinks.json.gz"] = {
+    bytes: filesystemSymlinksGz.length, sha256: sha256(filesystemSymlinksGz),
+  };
+  manifest.bytes += filesystemSymlinksGz.length;
 
   const ledgerGz = gzipSync(JSON.stringify(ledger));
   await writeFile(path.join(dir, "migration_ledger.json.gz"), ledgerGz);

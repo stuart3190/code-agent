@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { chmod, lstat, mkdir, open, readdir, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readdir, readlink, realpath, symlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 
@@ -10,7 +10,7 @@ import path from "node:path";
  * modes exactly. Files are opened with O_NOFOLLOW when available and their identity is checked
  * again before bytes are read; a concurrent file-to-symlink replacement therefore fails closed.
  */
-export async function inventoryFilesystemRoot(root) {
+export async function inventoryFilesystemRoot(root, { allowPublishPointers = false } = {}) {
   const resolvedRoot = path.resolve(root);
   const rootMetadata = await lstat(resolvedRoot);
   if (rootMetadata.isSymbolicLink() || !rootMetadata.isDirectory()) {
@@ -23,6 +23,7 @@ export async function inventoryFilesystemRoot(root) {
     mode: rootMetadata.mode & 0o777,
   }];
   const files = [];
+  const symlinks = [];
 
   async function visit(relative = "") {
     const current = path.join(resolvedRoot, relative);
@@ -31,7 +32,18 @@ export async function inventoryFilesystemRoot(root) {
       const absolute = path.join(resolvedRoot, child);
       const metadata = await lstat(absolute);
       if (metadata.isSymbolicLink()) {
-        throw new Error(`filesystem backup refuses symlink: ${absolute}`);
+        if (!allowPublishPointers) throw new Error(`filesystem backup refuses symlink: ${absolute}`);
+        const target = await readlink(absolute);
+        validatePublishPointer(child.split(path.sep).join("/"), target);
+        const actual = await realpath(absolute);
+        if (!actual.startsWith(`${resolvedRoot}${path.sep}`) || !(await lstat(actual)).isDirectory()) {
+          throw new Error(`publish pointer escapes root or is not a directory: ${child}`);
+        }
+        const after = await lstat(absolute);
+        if (!after.isSymbolicLink() || after.ino !== metadata.ino || after.dev !== metadata.dev
+            || await readlink(absolute) !== target) throw new Error(`publish pointer changed during backup: ${child}`);
+        symlinks.push({ relative: child.split(path.sep).join("/"), target });
+        continue;
       }
       if (metadata.isDirectory()) {
         directories.push({
@@ -58,6 +70,7 @@ export async function inventoryFilesystemRoot(root) {
   return {
     directories: directories.sort((a, b) => a.relative.localeCompare(b.relative)),
     files: files.sort((a, b) => a.relative.localeCompare(b.relative)),
+    symlinks: symlinks.sort((a, b) => a.relative.localeCompare(b.relative)),
   };
 }
 
@@ -75,7 +88,7 @@ export async function readInventoriedFile(item) {
   }
 }
 
-export async function restoreFilesystemLayout({ filesystemRoot, directories = [], files = [], readObject }) {
+export async function restoreFilesystemLayout({ filesystemRoot, directories = [], files = [], symlinks = [], readObject }) {
   if (!filesystemRoot) throw new Error("filesystem restore requires an isolated target root");
   if (typeof readObject !== "function") throw new Error("filesystem restore requires an object reader");
 
@@ -94,6 +107,21 @@ export async function restoreFilesystemLayout({ filesystemRoot, directories = []
     await writeFile(target, bytes, { flag: "wx" });
     if (Number.isInteger(object.mode)) await chmod(target, object.mode);
   }
+  // Restore immutable-site pointers before domain aliases. Never follow a pointer while writing
+  // artifact bytes, and never allow a manifest to create an arbitrary filesystem link.
+  for (const link of [...symlinks].sort((a, b) => Number(a.relativePath.startsWith("_domains/"))
+    - Number(b.relativePath.startsWith("_domains/")) || a.relativePath.localeCompare(b.relativePath))) {
+    if (link.root !== "publish") throw new Error("symlinks are only supported for publish pointers");
+    validatePublishPointer(link.relativePath, link.target);
+    const target = safeRestorePath(filesystemRoot, link.root, link.relativePath);
+    const resolved = await realpath(path.resolve(path.dirname(target), link.target));
+    const publishRoot = path.resolve(filesystemRoot, "publish");
+    if (!resolved.startsWith(`${publishRoot}${path.sep}`) || !(await lstat(resolved)).isDirectory()) {
+      throw new Error("restored publish pointer escapes its root or is not a directory");
+    }
+    await mkdir(path.dirname(target), { recursive: true });
+    await symlink(link.target, target, "dir");
+  }
   for (const directory of [...directories].sort((a, b) => b.relativePath.length - a.relativePath.length)) {
     const target = safeRestorePath(filesystemRoot, directory.root, directory.relativePath);
     if (Number.isInteger(directory.mode)) await chmod(target, directory.mode);
@@ -101,10 +129,22 @@ export async function restoreFilesystemLayout({ filesystemRoot, directories = []
 }
 
 function safeRestorePath(filesystemRoot, logicalRoot, relativePath) {
+  if (!/^[a-z][a-z0-9-]*$/.test(logicalRoot || "")) throw new Error("invalid logical filesystem root");
   const targetRoot = path.resolve(filesystemRoot, logicalRoot);
   const target = relativePath === "." ? targetRoot : path.resolve(targetRoot, relativePath);
   if (target !== targetRoot && !target.startsWith(`${targetRoot}${path.sep}`)) {
     throw new Error(`filesystem restore path escapes target root: ${relativePath}`);
   }
   return target;
+}
+
+export function validatePublishPointer(relative, target) {
+  const segment = "[a-zA-Z0-9_-]+";
+  const site = new RegExp(`^\\.thrallo/sites/${segment}/current$`);
+  const release = new RegExp(`^\\.\\./\\.\\./releases/${segment}/${segment}/${segment}$`);
+  const domain = /^_domains\/[a-z0-9.-]+$/;
+  const domainTarget = new RegExp(`^\\.\\./(?:\\.thrallo/sites/${segment}/current|${segment})$`);
+  if (!((site.test(relative) && release.test(target)) || (domain.test(relative) && domainTarget.test(target)))) {
+    throw new Error(`filesystem backup refuses unrecognized publish symlink: ${relative}`);
+  }
 }

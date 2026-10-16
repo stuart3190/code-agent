@@ -320,21 +320,21 @@ test("authoritative migration identity is line-ending independent without changi
   assert.equal(canonicalSqlHash(lf), canonicalSqlHash(crlf));
 });
 
-test("backup migration evidence overlays the authoritative base through production ledger row 87", async () => {
+test("backup migration evidence overlays the authoritative base through production ledger row 89", async () => {
   const ledger = await loadMigrationLedgerEvidence();
   // Rows 85-87 are the WP4, WP8 and WP12 migrations, applied to production on 2026-09-20. Each
   // went in under its own authored version, so none of them adds to the versionDrift list below.
-  assert.equal(ledger.migrations.length, 87);
+  assert.equal(ledger.migrations.length, 89);
   assert.deepEqual(ledger.migrations.slice(-2).map((migration) => migration.version), [
-    "20260918140000",
-    "20260919120000",
+    "20261006080000",
+    "20261016210929",
   ]);
-  assert.equal(ledger.migrations.at(-1).appliedOrder, 87);
+  assert.equal(ledger.migrations.at(-1).appliedOrder, 89);
   assert.ok(ledger.migrations.slice(-2).every((migration) => migration.localCanonicalSqlSha256));
   // appliedOrder must stay a gapless sequence, or the overlay has lost or double-counted a push.
   assert.deepEqual(
     ledger.migrations.map((migration) => migration.appliedOrder),
-    Array.from({ length: 87 }, (_, index) => index + 1),
+    Array.from({ length: 89 }, (_, index) => index + 1),
   );
 });
 
@@ -343,27 +343,19 @@ test("migration history validation reports the effective applied ledger, not the
     fileURLToPath(new URL("../../ops/validate-migration-history.mjs", import.meta.url)),
   ], { encoding: "utf8" }));
   assert.equal(result.authoritativeBase, 60);
-  assert.equal(result.appliedOverlay, 27);
-  assert.equal(result.effectiveApplied, 87);
-  assert.equal(result.active, 88);
-  // The overlay used to stop at 74 while production had gone on to 83, so this test asserted a
-  // pending list that its own comment admitted was already applied. Every entry was verified
-  // against supabase_migrations.schema_migrations on 2026-09-04 and recorded in the 2026-09-04
-  // overlay; row 84 was confirmed applied on 2026-09-19.
-  //
-  // WP4/WP8/WP12 were applied on 2026-09-20. The one pending row widens bv2_builds.verifier_policy
-  // and is deliberately not applied.
-  assert.deepEqual(result.pending, [
-    { version: "20261006080000", name: "bv2_widen_verifier_policy_smoke_bypassed" },
-  ]);
-  // Five were pushed under an apply-time version that differs from the authored filename. Their SQL
-  // is identical to the ledger; only the version differs, and it is reported rather than hidden.
+  assert.equal(result.appliedOverlay, 29);
+  assert.equal(result.effectiveApplied, 89);
+  assert.equal(result.active, 89);
+  // Both October migrations are confirmed in the live ledger. Historical authored/applied
+  // version differences remain visible rather than rewriting production history.
+  assert.deepEqual(result.pending, []);
   assert.deepEqual(result.versionDrift, [
     { version: "20260822160000", appliedVersion: "20260822234502", name: "bv2_contract_envelopes_recovery_settlement" },
     { version: "20260822223523", appliedVersion: "20260822234552", name: "fix_bv2_pipeline_retry_durable_payload" },
     { version: "20260823101752", appliedVersion: "20260823110830", name: "bv2_owner_connected_recovery_transport" },
     { version: "20260825105631", appliedVersion: "20260825120326", name: "add_bv2_minimal_verifier_policy" },
     { version: "20260916120000", appliedVersion: "20260916123552", name: "bv2_terminal_platform_failure_pool" },
+    { version: "20261006080000", appliedVersion: "20261006183159", name: "bv2_widen_verifier_policy_smoke_bypassed" },
   ]);
 });
 

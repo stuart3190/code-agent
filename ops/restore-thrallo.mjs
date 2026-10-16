@@ -297,6 +297,7 @@ async function main() {
   console.log(`storage: ${objects.length} objects restored to ${ARTIFACT_BUCKET}`);
   const filesystemObjects = await loadRows(dir, "filesystem_objects");
   const filesystemDirectories = await loadOptionalRows(dir, "filesystem_directories");
+  const filesystemSymlinks = await loadOptionalRows(dir, "filesystem_symlinks");
   const filesystemRoot = process.env.RESTORE_TARGET_FILESYSTEM_ROOT;
   if ((filesystemObjects.length || filesystemDirectories.length) && !filesystemRoot) {
     throw new Error("filesystem restore requires RESTORE_TARGET_FILESYSTEM_ROOT (an isolated empty namespace)");
@@ -305,6 +306,7 @@ async function main() {
     filesystemRoot,
     directories: filesystemDirectories,
     files: filesystemObjects,
+    symlinks: filesystemSymlinks,
     readObject: async (object) => gunzipSync(await readFile(path.join(dir, object.file))),
   });
   console.log(`filesystem: ${filesystemObjects.length} files and ${filesystemDirectories.length} directories restored under ${filesystemRoot}`);
