@@ -353,7 +353,7 @@ async function main() {
   for (const root of roots) {
     const rootStat = await stat(root.source).catch(() => null);
     if (!rootStat?.isDirectory()) throw new Error(`filesystem root missing or not a directory: ${root.source}`);
-    const inventory = await inventoryFilesystemRoot(root.source, { allowPublishPointers: root.name === "publish" });
+    const inventory = await inventoryFilesystemRoot(root.source, { allowPublishPointers: root.name === "publish", omitSandboxDependencies: root.name === "build-worker" });
     filesystemSymlinks.push(...inventory.symlinks.map(link => ({ root: root.name, relativePath: link.relative, target: link.target })));
     const files = inventory.files;
     filesystemDirectories.push(...inventory.directories.map((directory) => ({
@@ -375,6 +375,7 @@ async function main() {
     }
     manifest.filesystem.roots[root.name] = {
       source: root.source,
+      exclusions: inventory.exclusions,
       objects: files.length,
       directories: inventory.directories.length,
       bytes: rootBytes,

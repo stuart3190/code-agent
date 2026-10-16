@@ -10,7 +10,7 @@ import path from "node:path";
  * modes exactly. Files are opened with O_NOFOLLOW when available and their identity is checked
  * again before bytes are read; a concurrent file-to-symlink replacement therefore fails closed.
  */
-export async function inventoryFilesystemRoot(root, { allowPublishPointers = false } = {}) {
+export async function inventoryFilesystemRoot(root, { allowPublishPointers = false, omitSandboxDependencies = false } = {}) {
   const resolvedRoot = path.resolve(root);
   const rootMetadata = await lstat(resolvedRoot);
   if (rootMetadata.isSymbolicLink() || !rootMetadata.isDirectory()) {
@@ -24,6 +24,7 @@ export async function inventoryFilesystemRoot(root, { allowPublishPointers = fal
   }];
   const files = [];
   const symlinks = [];
+  const exclusions = [];
 
   async function visit(relative = "") {
     const current = path.join(resolvedRoot, relative);
@@ -32,6 +33,13 @@ export async function inventoryFilesystemRoot(root, { allowPublishPointers = fal
       const absolute = path.join(resolvedRoot, child);
       const metadata = await lstat(absolute);
       if (metadata.isSymbolicLink()) {
+        // The sandbox image owns this dependency tree; retained source/checkpoints remain backed up.
+        // Never follow the external link or omit arbitrary user links/directories.
+        if (omitSandboxDependencies && entry.name === "node_modules"
+            && await readlink(absolute) === "/opt/scaffold/node_modules") {
+          exclusions.push({ relative: child.split(path.sep).join("/"), reason: "sandbox_image_dependencies", target: "/opt/scaffold/node_modules" });
+          continue;
+        }
         if (!allowPublishPointers) throw new Error(`filesystem backup refuses symlink: ${absolute}`);
         const target = await readlink(absolute);
         validatePublishPointer(child.split(path.sep).join("/"), target);
@@ -70,6 +78,7 @@ export async function inventoryFilesystemRoot(root, { allowPublishPointers = fal
   return {
     directories: directories.sort((a, b) => a.relative.localeCompare(b.relative)),
     files: files.sort((a, b) => a.relative.localeCompare(b.relative)),
+    exclusions: exclusions.sort((a, b) => a.relative.localeCompare(b.relative)),
     symlinks: symlinks.sort((a, b) => a.relative.localeCompare(b.relative)),
   };
 }

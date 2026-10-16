@@ -55,3 +55,19 @@ test("publish pointer cannot hide an external directory behind a valid target sh
     await assert.rejects(inventoryFilesystemRoot(root, { allowPublishPointers: true }), /unrecognized|escapes root/);
   } finally { await rm(temp, { recursive: true, force: true }); }
 });
+
+
+test("worker backup records only image-owned dependency links as rebuildable exclusions", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "worker-backup-"));
+  try {
+    await mkdir(path.join(root, "project"));
+    await writeFile(path.join(root, "project/package.json"), "{}");
+    await symlink("/opt/scaffold/node_modules", path.join(root, "project/node_modules"));
+    await assert.rejects(inventoryFilesystemRoot(root), /refuses symlink/);
+    const inventory = await inventoryFilesystemRoot(root, { omitSandboxDependencies: true });
+    assert.equal(inventory.files.length, 1);
+    assert.deepEqual(inventory.exclusions, [{ relative: "project/node_modules", reason: "sandbox_image_dependencies", target: "/opt/scaffold/node_modules" }]);
+    await symlink("/etc", path.join(root, "project/secrets"));
+    await assert.rejects(inventoryFilesystemRoot(root, { omitSandboxDependencies: true }), /refuses symlink/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
