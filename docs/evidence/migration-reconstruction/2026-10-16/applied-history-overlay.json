@@ -1,0 +1,25 @@
+{
+  "source": "Connected Supabase list_migrations and read-only schema_migrations query on zczgvcsokfafuyognvwx",
+  "capturedAt": "2026-10-16T21:10:49.321866+00:00",
+  "baseVersion": "20260919120000",
+  "ledgerCount": 89,
+  "note": "October 6 policy already applied before this audit; October 16 trigger grants applied after isolated PostgreSQL proof. Existing version drift preserved. Local byte hashes identify reviewed files; remote statements were separately inspected.",
+  "migrations": [
+    {
+      "appliedOrder": 88,
+      "version": "20261006080000",
+      "name": "bv2_widen_verifier_policy_smoke_bypassed",
+      "filename": "20261006080000_bv2_widen_verifier_policy_smoke_bypassed.sql",
+      "localCanonicalSqlSha256": "161df6e244a3753a72326763f4e487d7b2df7b37e33d09bf99a4ca87fff90367",
+      "appliedVersion": "20261006183159"
+    },
+    {
+      "appliedOrder": 89,
+      "version": "20261016210929",
+      "name": "restrict_internal_audit_trigger_functions",
+      "filename": "20261016210929_restrict_internal_audit_trigger_functions.sql",
+      "localCanonicalSqlSha256": "60f9fcc83f53ba50472be98c71bcc4607767641d7fa01e4f673f65c830f4c32a",
+      "appliedVersion": "20261016210929"
+    }
+  ]
+}

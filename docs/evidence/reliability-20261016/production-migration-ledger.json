@@ -1,0 +1,360 @@
+{
+  "migrations": [
+    {
+      "version": "20260729164522",
+      "name": "code_agent_control_plane"
+    },
+    {
+      "version": "20260729164535",
+      "name": "github_app_installations"
+    },
+    {
+      "version": "20260729164721",
+      "name": "harden_code_agent_schema"
+    },
+    {
+      "version": "20260729165144",
+      "name": "lock_down_code_agent_anon_access"
+    },
+    {
+      "version": "20260729231426",
+      "name": "github_webhook_ledger"
+    },
+    {
+      "version": "20260729232141",
+      "name": "restrict_code_agent_policy_roles"
+    },
+    {
+      "version": "20260729234551",
+      "name": "ai_provider_connections"
+    },
+    {
+      "version": "20260729234651",
+      "name": "reject_anonymous_code_agent_access"
+    },
+    {
+      "version": "20260730001803",
+      "name": "repository_hybrid_index"
+    },
+    {
+      "version": "20260730063059",
+      "name": "repository_code_intelligence"
+    },
+    {
+      "version": "20260730083259",
+      "name": "model_routing_and_evaluations"
+    },
+    {
+      "version": "20260730091313",
+      "name": "subscriptions_budgets_telemetry"
+    },
+    {
+      "version": "20260730100937",
+      "name": "approval_policies_resume_artifacts"
+    },
+    {
+      "version": "20260730102731",
+      "name": "egress_command_policies_retention"
+    },
+    {
+      "version": "20260730104416",
+      "name": "api_tokens"
+    },
+    {
+      "version": "20260730110931",
+      "name": "review_runs"
+    },
+    {
+      "version": "20260730114324",
+      "name": "automations"
+    },
+    {
+      "version": "20260730203059",
+      "name": "conversation_platform"
+    },
+    {
+      "version": "20260730212120",
+      "name": "app_build_platform"
+    },
+    {
+      "version": "20260730233508",
+      "name": "app_publish_platform"
+    },
+    {
+      "version": "20260731100621",
+      "name": "owner_accounts"
+    },
+    {
+      "version": "20260731113457",
+      "name": "per_app_runtime"
+    },
+    {
+      "version": "20260731113533",
+      "name": "app_auth_support_tables"
+    },
+    {
+      "version": "20260731113608",
+      "name": "app_auth_schema_align"
+    },
+    {
+      "version": "20260731151901",
+      "name": "soft_delete"
+    },
+    {
+      "version": "20260801000408",
+      "name": "build_diagnostics"
+    },
+    {
+      "version": "20260801080238",
+      "name": "ai_requests"
+    },
+    {
+      "version": "20260801082604",
+      "name": "ai_requests_context"
+    },
+    {
+      "version": "20260801090748",
+      "name": "conversation_model_pref"
+    },
+    {
+      "version": "20260801120332",
+      "name": "diag_incidents"
+    },
+    {
+      "version": "20260801134602",
+      "name": "build_signals"
+    },
+    {
+      "version": "20260801140736",
+      "name": "ai_credentials_allow_xai"
+    },
+    {
+      "version": "20260801140806",
+      "name": "ai_preferences_allow_xai"
+    },
+    {
+      "version": "20260801160607",
+      "name": "repair_pipeline_hardening"
+    },
+    {
+      "version": "20260801162814",
+      "name": "persistent_build_checkpoints"
+    },
+    {
+      "version": "20260801180459",
+      "name": "provider_constraints_and_telemetry_grants"
+    },
+    {
+      "version": "20260801195851",
+      "name": "qa_runs_thrallo"
+    },
+    {
+      "version": "20260801202309",
+      "name": "app_notifications"
+    },
+    {
+      "version": "20260801202626",
+      "name": "app_notifications_source_is_trusted_only"
+    },
+    {
+      "version": "20260801203017",
+      "name": "app_notifications_column_grants"
+    },
+    {
+      "version": "20260802150108",
+      "name": "subscription_plan_changes"
+    },
+    {
+      "version": "20260802185336",
+      "name": "publish_lifecycle_unpublish"
+    },
+    {
+      "version": "20260802210939",
+      "name": "custom_domain_verification"
+    },
+    {
+      "version": "20260802211118",
+      "name": "custom_domain_verification_started"
+    },
+    {
+      "version": "20260802220217",
+      "name": "thrallo_analytics_foundation"
+    },
+    {
+      "version": "20260802223316",
+      "name": "health_monitoring"
+    },
+    {
+      "version": "20260802234247",
+      "name": "project_logs"
+    },
+    {
+      "version": "20260803005550",
+      "name": "analytics_logs_health_tables_reconcile"
+    },
+    {
+      "version": "20260803072805",
+      "name": "drift_helper_project_scoped"
+    },
+    {
+      "version": "20260803124509",
+      "name": "one_live_site_per_product"
+    },
+    {
+      "version": "20260803150144",
+      "name": "deployments"
+    },
+    {
+      "version": "20260803205904",
+      "name": "conversation_favourites_archive"
+    },
+    {
+      "version": "20260803233001",
+      "name": "account_notifications_cancellation"
+    },
+    {
+      "version": "20260804090105",
+      "name": "onboarding_state"
+    },
+    {
+      "version": "20260804103902",
+      "name": "analytics_country"
+    },
+    {
+      "version": "20260804201913",
+      "name": "diag_runs_implementation_contract"
+    },
+    {
+      "version": "20260804203403",
+      "name": "build_checkpoints_stage"
+    },
+    {
+      "version": "20260805072157",
+      "name": "ai_requests_provider_request_ids"
+    },
+    {
+      "version": "20260805190622",
+      "name": "builder_v2_foundation"
+    },
+    {
+      "version": "20260805212028",
+      "name": "bv2_verification_cache_nullable_snapshot"
+    },
+    {
+      "version": "20260806210321",
+      "name": "production_catalog_grants_reconciliation"
+    },
+    {
+      "version": "20260806221153",
+      "name": "bv2_atomic_graph_and_full_shadow"
+    },
+    {
+      "version": "20260806230625",
+      "name": "durable_build_work_queue"
+    },
+    {
+      "version": "20260807072455",
+      "name": "atomic_immutable_releases"
+    },
+    {
+      "version": "20260807174720",
+      "name": "c8_atomic_unpublish_deployment_retirement"
+    },
+    {
+      "version": "20260807213500",
+      "name": "bv2_runtime_model_reservations"
+    },
+    {
+      "version": "20260807221000",
+      "name": "bv2_runtime_composition"
+    },
+    {
+      "version": "20260808164259",
+      "name": "c8_nonretryable_stale_cas"
+    },
+    {
+      "version": "20260808180841",
+      "name": "platform_erasure_audit"
+    },
+    {
+      "version": "20260808180845",
+      "name": "shared_atomic_rate_limits"
+    },
+    {
+      "version": "20260808235700",
+      "name": "bv2_snapshot_asset_identity"
+    },
+    {
+      "version": "20260809155622",
+      "name": "bv2_repair_dispatch_limit"
+    },
+    {
+      "version": "20260813005422",
+      "name": "database_advisor_safe_remediations"
+    },
+    {
+      "version": "20260813005509",
+      "name": "reject_anonymous_owner_policies"
+    },
+    {
+      "version": "20260813095526",
+      "name": "v2_customer_accounting_and_approvals"
+    },
+    {
+      "version": "20260813183000",
+      "name": "retire_legacy_bv2_accounting_rpcs"
+    },
+    {
+      "version": "20260813194500",
+      "name": "enforce_v2_only_builder_contract"
+    },
+    {
+      "version": "20260815095256",
+      "name": "drop_v1_build_job_server_id"
+    },
+    {
+      "version": "20260820092621",
+      "name": "bv2_widen_repair_dispatch_limit"
+    },
+    {
+      "version": "20260822234502",
+      "name": "bv2_contract_envelopes_recovery_settlement"
+    },
+    {
+      "version": "20260822234552",
+      "name": "fix_bv2_pipeline_retry_durable_payload"
+    },
+    {
+      "version": "20260823110830",
+      "name": "bv2_owner_connected_recovery_transport"
+    },
+    {
+      "version": "20260825120326",
+      "name": "add_bv2_minimal_verifier_policy"
+    },
+    {
+      "version": "20260916123552",
+      "name": "bv2_terminal_platform_failure_pool"
+    },
+    {
+      "version": "20260918120000",
+      "name": "app_accounts_memberships"
+    },
+    {
+      "version": "20260918140000",
+      "name": "app_settings_audit"
+    },
+    {
+      "version": "20260919120000",
+      "name": "app_subscriptions"
+    },
+    {
+      "version": "20261006183159",
+      "name": "bv2_widen_verifier_policy_smoke_bypassed"
+    },
+    {
+      "version": "20261016210929",
+      "name": "restrict_internal_audit_trigger_functions"
+    }
+  ]
+}
