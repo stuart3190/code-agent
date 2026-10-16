@@ -6,7 +6,8 @@
 // activated without crashing the page. It reads no text, compares no numbers, checks no labels
 // and has no opinion about what a click should do. Anything it cannot activate is recorded as
 // skipped, never as a failure. A separate read-only mobile check rejects persistent content-panel
-// obstruction of visible controls. Console errors and failed requests are advisory evidence only.
+// obstruction or non-scrollable clipping of visible controls. Console errors and failed requests
+// are advisory evidence only.
 //
 // Verdict classes:
 //   pass        - loaded, rendered, controls activated, app still standing
@@ -283,7 +284,7 @@ export async function smokeVerifyJourneys({
       : obstructed ? VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE : VERIFICATION_RESULT_CLASS.PASS;
   const detail = unavailable ? error
     : fatal ? crashes.map((row) => `${row.control ? `${row.control}: ` : ""}${row.error}`).join("; ")
-      : obstructed ? responsive.findings.map(f => `Mobile ${f.width}px: control "${f.control}" is covered by ${f.blocker}; reflow the layout so the control is usable`).join("; ")
+      : obstructed ? responsive.findings.map(f => `Mobile ${f.width}px: control "${f.control}" is ${f.kind === 'clipped_control' ? 'cut off by' : 'covered by'} ${f.blocker}; reflow the layout so the control is usable`).join("; ")
       : `smoke passed: rendered, ${activated} of ${discovered} visible controls activated without a crash`;
   const fatalErrors = crashes.map((row) => `${row.control ? `${row.control}: ` : ""}${row.error}`);
   const journeys = (contract?.journeys || []).map((journey) => ({

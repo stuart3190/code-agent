@@ -1,6 +1,7 @@
 // Read-only mobile hit testing: no clicks, form submissions, or business-text expectations.
 // A modal may intentionally cover background controls, so only persistent non-modal obstruction
-// is an app defect. Two identical samples avoid treating transient animation as a failure.
+// or non-scrollable clipping is an app defect. Two identical samples avoid treating transient
+// animation as a failure.
 export async function probeResponsiveControls({ browser, page: existingPage = null, previewUrl, timeoutMs = 15_000 }) {
   const context = existingPage ? null : await browser.newContext();
   const page = existingPage || await context.newPage();
@@ -19,9 +20,31 @@ export async function probeResponsiveControls({ browser, page: existingPage = nu
         const style = getComputedStyle(el);
         if (style.display === 'none' || style.visibility === 'hidden' || style.pointerEvents === 'none' || Number(style.opacity) === 0) continue;
         const r = el.getBoundingClientRect();
-        // Only inspect controls visible in the initial viewport. Offscreen content requires an
-        // actual journey; clipping alone is not proof of an obstructing element.
-        if (r.width < 2 || r.height < 2 || r.top < 0 || r.bottom > innerHeight || r.left < 0 || r.right > innerWidth) continue;
+        if (r.width < 2 || r.height < 2 || r.top < 0 || r.bottom > innerHeight) continue;
+        // Root overflow clipping can hide broken layouts from scrollWidth. Prove a partially
+        // visible control is cut off by a non-scrollable ancestor, without rejecting carousels,
+        // scrollable boards, hidden drawers, or controls wholly outside the initial viewport.
+        let left = 0, right = innerWidth, scrollable = false, clips = false;
+        for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+          const s = getComputedStyle(parent), box = parent.getBoundingClientRect();
+          if (['auto', 'scroll'].includes(s.overflowX) && parent.scrollWidth > parent.clientWidth + 2) scrollable = true;
+          if (['hidden', 'clip'].includes(s.overflowX)) {
+            clips = true;
+            left = Math.max(left, box.left + parent.clientLeft);
+            right = Math.min(right, box.left + parent.clientLeft + parent.clientWidth);
+          }
+        }
+        const visibleLeft = Math.max(left, r.left), visibleRight = Math.min(right, r.right);
+        if (!scrollable && clips && visibleRight - visibleLeft >= 4
+          && (r.left < left - 2 || r.right > right + 2)) {
+          const hit = document.elementFromPoint((visibleLeft + visibleRight) / 2, r.top + r.height / 2);
+          if (hit && (hit === el || el.contains(hit))) {
+            findings.push({ control: (el.getAttribute('aria-label') || el.textContent || el.name || el.tagName).trim().slice(0,80),
+              kind: 'clipped_control', blocker: 'non-scrollable horizontal clipping', width:390 });
+          }
+          continue;
+        }
+        if (r.left < 0 || r.right > innerWidth) continue;
         const points = [[.5,.5],[.2,.2],[.8,.2],[.2,.8],[.8,.8]];
         const hits = points.map(([x,y]) => document.elementFromPoint(r.left+r.width*x,r.top+r.height*y));
         if (hits.some(hit => hit && (hit===el || el.contains(hit)))) continue;
