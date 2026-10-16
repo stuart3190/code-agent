@@ -65,7 +65,21 @@ export function deriveWorkflowPlan(contract, { entitySchema = null, families = n
     .filter((journey) => listOf(journey?.steps).length >= 2
       && (usesWizard || (listOf(journey.steps).length >= 3 && STEPPED_JOURNEY.test(textOf(journey)))))
     .map((journey) => {
-      const steps = listOf(journey.steps).map((step) => ({ id: String(step?.id), fields: fieldsOf(step) }));
+      // Contract step IDs are optional. Reserve explicit IDs first so generated identities
+      // are deterministic and cannot collide with a later declared step such as "step-1".
+      const declaredSteps = listOf(journey.steps);
+      const explicitId = step => String(step?.id ?? "").trim();
+      const reserved = new Set(declaredSteps.map(explicitId).filter(Boolean));
+      const steps = declaredSteps.map((step, index) => {
+        let id = explicitId(step);
+        if (!id) {
+          const base = `step-${index + 1}`;
+          id = base;
+          for (let suffix = 2; reserved.has(id); suffix += 1) id = `${base}-${suffix}`;
+          reserved.add(id);
+        }
+        return { id, fields: fieldsOf(step) };
+      });
       return {
         id: String(journey.id),
         title: String(journey.title || journey.id),
