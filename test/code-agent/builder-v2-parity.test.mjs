@@ -187,3 +187,13 @@ test("PARITY — the persisted graph answers exactly like the in-memory graph (r
   const tampered = { ...manifest, "src/App.jsx": "0".repeat(64) };
   await assert.rejects(supabaseGraph("owner-A", "proj", tampered, { client }), /stale — reindex/);
 });
+
+
+test("storage transport failure never becomes missing/corrupt blob evidence", async () => {
+  const c = fakeSupabase();
+  const storage = supabaseSnapshotStorage({ client: c });
+  await c.from("bv2_blobs").insert({ owner: "o", content_hash: "h", content: null, storage_path: "object" });
+  c.storage.from = () => ({ download: async () => ({ data: null, error: { message: "temporary 503", statusCode: 503 } }) });
+  await assert.rejects(storage.getBlob("o", "h"), error => error.code === "platform_blob_read_failed");
+  assert.equal(storage.supportsSafeBlobSweep, false);
+});

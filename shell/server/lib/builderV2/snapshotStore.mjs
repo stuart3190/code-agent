@@ -316,6 +316,9 @@ export function createSnapshotStore(storage = memorySnapshotStorage()) {
         await storage.deleteSnapshot(snapshot.id);
         removedSnapshots.push(snapshot.id);
       }
+      if (storage.supportsSafeBlobSweep === false) {
+        return { removedSnapshots, removedBlobs: [], blobSweepDeferred: true };
+      }
       // Blob sweep — this owner only, and referenced means referenced by ANY of the owner's
       // surviving snapshots in ANY project: per-owner dedup means two projects can share a
       // hash, and a per-project reference check would delete the other project's bytes.

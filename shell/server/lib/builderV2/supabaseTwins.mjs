@@ -167,6 +167,9 @@ export async function supabaseGraph(owner, projectId, manifest, { client = servi
  */
 export function supabaseSnapshotStorage({ client = serviceClient(), bucket = ARTIFACT_BUCKET } = {}) {
   return {
+    // A paginated client-side mark/sweep is not atomic with snapshot creation.
+    // Retain orphan bytes until a database-atomic collector with a grace period exists.
+    supportsSafeBlobSweep: false,
     async putBlob(owner, contentHash, content) {
       const body = String(content);
       if (sha256(body) !== contentHash) throw new Error("blob content does not match content hash");
@@ -215,7 +218,9 @@ export function supabaseSnapshotStorage({ client = serviceClient(), bucket = ART
       if (!row) return null;
       if (row.content !== null && row.content !== undefined) return row.content;
       const { data, error } = await client.storage.from(bucket).download(row.storage_path);
-      if (error) return null; // missing object = corrupt, caller marks the snapshot
+      if (error) throw Object.assign(new Error(`snapshot blob download failed: ${error.message}`), {
+        code: "platform_blob_read_failed", classification: "platform", retryable: true, cause: error,
+      });
       return Buffer.from(await data.arrayBuffer()).toString("utf8");
     },
 
