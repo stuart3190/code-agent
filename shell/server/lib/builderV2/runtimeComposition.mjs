@@ -411,18 +411,24 @@ export function createBuilderV2Runtime({
     }
   }
 
-  async function persistAndProveGraph({ owner, projectId, buildId, tree }) {
-    const expected = indexTree(tree);
-    const manifest = manifestOf(expected);
-    await persistIndex(owner, projectId, expected, { client });
-    const actual = await loadIndex(owner, projectId, manifest, { client });
-    const parity = compareGraphIndexes(expected, actual, { owner, projectId, buildId });
-    if (!parity.clean) {
-      throw Object.assign(new Error(`Builder V2 graph parity failed: ${JSON.stringify(parity.mismatches)}`), {
-        code: "graph_parity", parity,
+  async function persistAndProveGraph({ owner, projectId, buildId, tree, snapshot }) {
+    try {
+      const expected = indexTree(tree);
+      const manifest = manifestOf(expected);
+      await persistIndex(owner, projectId, expected, { client });
+      const actual = await loadIndex(owner, projectId, manifest, { client });
+      const parity = compareGraphIndexes(expected, actual, { owner, projectId, buildId });
+      if (!parity.clean) {
+        throw Object.assign(new Error(`Builder V2 graph parity failed: ${JSON.stringify(parity.mismatches)}`), {
+          code: "graph_parity", parity,
+        });
+      }
+      return parity;
+    } catch (cause) {
+      throw Object.assign(new Error("Application index could not be persisted", { cause }), {
+        code: "platform_graph_persistence_failed", classification: "platform", checkpointId: snapshot?.id || null,
       });
     }
-    return parity;
   }
 
   return {
