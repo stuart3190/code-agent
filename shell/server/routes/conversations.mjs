@@ -299,6 +299,22 @@ export async function handleConversationMessage(_req, res, { owner, conversation
   });
 }
 
+// Explicit preview recovery uses the verified source directly; no model call or build charge.
+export async function handleConversationPreview(_req, res, {
+  owner, conversationId, body = {}, store = conversationStore(), preview = null,
+}) {
+  const conversation = await store.getConversation(owner.id, conversationId);
+  if (!conversation) throw new CodeAgentInputError("Conversation not found", 404, "conversation_not_found");
+  if (body?.projectId != null && !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(body.projectId)) {
+    throw new CodeAgentInputError("Invalid project", 400, "invalid_project");
+  }
+  const show = preview || (await import("../lib/appBuild/appDeliveryService.mjs")).showPreview;
+  const result = await show({ owner: owner.id, conversation,
+    emit: (type, payload) => store.appendEvent(conversation, type, payload),
+  }, { projectId: body?.projectId || null, allowOwnerFallback: false });
+  return sendJson(res, 200, { url: result.url, projectId: result.projectId });
+}
+
 export async function handleConversationEvents(req, res, { owner, conversationId, url }) {
   const store = conversationStore();
   const conversation = await store.getConversation(owner.id, conversationId);

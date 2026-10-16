@@ -25,6 +25,7 @@ export function emptyConversationView() {
     items: [],          // ordered thread items: {kind, seq, ...}
     roster: [],         // [{agent, status, state: working|done|failed}] in spawn order
     previewUrl: null,
+    previewProjectId: null,
     previewVerified: true, // false when the build form bypassed the verifier
     thinking: false,    // Lead Agent mid-turn
     waiting: false,     // paused on a business question
@@ -111,6 +112,7 @@ export function applyEvent(view, event) {
       break;
     case "preview_ready":
       next.previewUrl = payload.url || next.previewUrl;
+      next.previewProjectId = payload.projectId || next.previewProjectId;
       next.previewVerified = payload.verified !== false;
       next.buildActivity = ACTIVITY_STATE.ready;
       next.activeBuild = null;

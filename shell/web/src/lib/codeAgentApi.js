@@ -480,3 +480,8 @@ export const exportLogs = (projectId, params = {}) => {
   const format = params.format === "csv" ? "csv" : "json";
   return downloadWithAuth(`/api/v1/projects/${projectId}/logs/export?${query}`, `thrallo-logs.${format}`);
 };
+
+export const reopenConversationPreview = (conversationId, projectId) => request(
+  `/api/v1/conversations/${encodeURIComponent(conversationId)}/preview`,
+  { method: "POST", body: JSON.stringify({ projectId: projectId || null }) },
+);

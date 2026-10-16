@@ -9,11 +9,11 @@ import { awaitPreviewReachable } from "../builderV2/verificationMode.mjs";
 
 // (Re)provision a preview from the authoritative verified snapshot. This heals reaped preview
 // containers and old conversations without trusting a mutable client/project tree.
-export async function showPreview(ctx, { productName = null } = {}) {
+export async function showPreview(ctx, { productName = null, projectId = null, allowOwnerFallback = true } = {}) {
   const client = serviceClient();
   const { resolveConversationProject } = await import("./projectScope.mjs");
   const { project } = await resolveConversationProject(ctx, {
-    productName,
+    productName, projectId, allowOwnerFallback,
     columns: "id, name, product_id, updated_at, builder_version, bv2_green_snapshot_id",
     client,
   });
@@ -21,6 +21,12 @@ export async function showPreview(ctx, { productName = null } = {}) {
     const error = new Error("There's no built app to preview yet — ask me to build something first.");
     error.code = "nothing_to_preview";
     throw error;
+  }
+  const { activeBuildsFor } = await import("../buildJobs.mjs");
+  if ((await activeBuildsFor(ctx.owner, [project.id], { client })).has(project.id)) {
+    throw Object.assign(new Error("This app is building. Its preview will refresh when the build finishes."), {
+      code: "preview_build_active", status: 409, retryable: true,
+    });
   }
   await ctx.emit("agent_spawned", { agent: "Publisher", status: "Bringing the preview up…" });
   try {
