@@ -22,6 +22,7 @@ if [[ ${4:-} != "--verify-only" && -e "$filesystem_root" ]]; then
 fi
 
 status=$(cd "$proof_dir" && npm exec -- supabase status -o env 2>/dev/null)
+database_url=$(printf '%s\n' "$status" | sed -n 's/^DB_URL=//p' | tr -d '"')
 api_url=$(printf '%s\n' "$status" | sed -n 's/^API_URL=//p' | tr -d '"')
 service_key=$(printf '%s\n' "$status" | sed -n 's/^SERVICE_ROLE_KEY=//p' | tr -d '"')
 anon_key=$(printf '%s\n' "$status" | sed -n 's/^ANON_KEY=//p' | tr -d '"')
@@ -33,6 +34,7 @@ if [[ ! "$api_url" =~ ^http://127\.0\.0\.1:[0-9]+$ ]] || [[ -z "$service_key" ]]
 fi
 
 if [[ ${4:-} != "--verify-only" ]]; then
+  RESTORE_TARGET_DATABASE_URL="$database_url" \
   RESTORE_TARGET_URL="$api_url" \
   RESTORE_TARGET_SERVICE_KEY="$service_key" \
   RESTORE_TARGET_FILESYSTEM_ROOT="$filesystem_root" \

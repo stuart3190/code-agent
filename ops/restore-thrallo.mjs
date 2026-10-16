@@ -18,6 +18,7 @@ import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { ARTIFACT_BUCKET } from "./backup-thrallo.mjs";
 import { validateBackupDirectory } from "../scripts/lib/backupValidation.mjs";
+import { IDENTITY_COLUMNS, restoreIdentityRows, isolatedDatabaseEnvironment } from "./lib/nativeIdentityRestore.mjs";
 import { restoreFilesystemLayout } from "./lib/filesystemBackup.mjs";
 import {
   canonicalRowsForRestoreComparison,
@@ -184,11 +185,11 @@ async function loadOptionalRows(dir, name) {
   return loadRows(dir, name);
 }
 
-export function prepareRowsForRestore(table, rows, deferredPatches = []) {
+export function prepareRowsForRestore(table, rows, deferredPatches = [], { preserveIdentity = false } = {}) {
   let prepared = canonicalRowsForRestoreComparison(table, rows);
   const identity = table === "ca_run_events" ? "id"
     : ["build_work_events", "data_erasure_events"].includes(table) ? "seq" : null;
-  if (identity && prepared.length > 0) {
+  if (identity && prepared.length > 0 && !preserveIdentity) {
     const sorted = [...prepared].sort((a, b) => Number(a[identity]) - Number(b[identity]));
     for (let index = 0; index < sorted.length; index += 1) {
       if (Number(sorted[index][identity]) !== index + 1) {
@@ -257,6 +258,12 @@ async function main() {
   if (!url || !key) {
     throw new Error("--confirm requires RESTORE_TARGET_URL and RESTORE_TARGET_SERVICE_KEY (never taken from shell/.env)");
   }
+  if (process.env.RESTORE_TARGET_DATABASE_URL) {
+    isolatedDatabaseEnvironment(process.env.RESTORE_TARGET_DATABASE_URL);
+    if (!["127.0.0.1", "[::1]"].includes(new URL(url).hostname)) {
+      throw new Error("native restore requires a loopback API target too");
+    }
+  }
   const svc = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 
   const users = await loadRows(dir, "auth_users");
@@ -275,8 +282,10 @@ async function main() {
   const deferredPatches = [];
   for (const table of activeOrder) {
     let rows = await loadRows(dir, table);
-    rows = prepareRowsForRestore(table, rows, deferredPatches);
-    await insertRows(svc, table, rows);
+    const nativeIdentity = Boolean(IDENTITY_COLUMNS[table] && process.env.RESTORE_TARGET_DATABASE_URL);
+    rows = prepareRowsForRestore(table, rows, deferredPatches, { preserveIdentity: nativeIdentity });
+    if (nativeIdentity) await restoreIdentityRows(table, rows, process.env.RESTORE_TARGET_DATABASE_URL);
+    else await insertRows(svc, table, rows);
     console.log(`  ${table}: ${rows.length} restored`);
   }
   for (const patch of deferredPatches) {
