@@ -24,6 +24,11 @@ const identity = (value) => value;
  * Re-renders when the store emits. `selector` narrows the slice you depend on.
  */
 export function useCapabilityState(store, selector = identity) {
+  if (store != null && (typeof store.getState !== "function" || typeof store.subscribe !== "function")) {
+    throw new TypeError("useCapabilityState requires a stateful store with getState() and subscribe(). "
+      + "Async entityStore/repository objects return promises, not state snapshots. Use useCollection(entity) "
+      + "from src/lib/app, or await store.list() into React state and refresh after mutations.");
+  }
   const subscribe = useCallback((listener) => {
     if (typeof store?.subscribe !== "function") return () => {};
     return store.subscribe(listener);

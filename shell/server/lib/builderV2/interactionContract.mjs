@@ -1735,6 +1735,10 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
         operationId: operation.operationId,
         entity: operation.entity || null,
         durableOperation: durablePersistence ? durablePersistence.capabilityMethod : null,
+        // A custom state transition can hand off to a deterministic repository. Its semantic
+        // owner stays custom; retain the separate persistence owner for cancellation validation.
+        durableCapability: durablePersistence
+          ? factoryFor(canonicalCapabilityId(durablePersistence.capabilityId) || durablePersistence.capabilityId) : null,
         durableLifecycle: durablePersistence
           ? `${durablePersistence.capabilityId || "crud"}:${operation.entity}` : flow.durableLifecycle,
         // Record inputs are not all instances of the first entity in the app.
@@ -2186,7 +2190,7 @@ export function validateInteractionContract(plan, { capabilityGraph = null, oper
     if (flow.kind === "mutation" && !(flow.reads || []).length) problems.push(`${flow.id} mutation consumes no contracted input state`);
     // Any bound durable capability may own cancellation; the registry decides which, not a
     // hardcoded factory name.
-    if (flow.kind === "cancellation" && !flow.capability) {
+    if (flow.kind === "cancellation" && !flow.capability && !flow.durableCapability) {
       problems.push(`${flow.id} cancellation has no durable operation owner`);
     }
     if (flow.control && (!flow.control.accessibleName || !(flow.control.roles || []).length)) {
@@ -2281,10 +2285,12 @@ export function assemblyNeeds(plan, bindings = []) {
     // Durable records are implied by what the journeys DO — a mutation, a lookup, a recovery or
     // a cancellation — not by which capability happens to declare an entity name.
     entities: ["mutation", "lookup", "recovery", "cancellation"].some((kind) => kinds.has(kind)),
-    // A store only holds screen state when there is in-progress state to hold or records to
-    // render. Every contract binds the generic entity store, so its mere presence proves nothing.
-    capabilityState: Boolean(draftStateOwner(bindings))
-      || ["mutation", "lookup", "recovery", "cancellation"].some((kind) => kinds.has(kind)),
+    // Async repositories expose records through promises, not getState snapshots. Recommending
+    // useCapabilityState for every mutation made successful saves render an empty list forever.
+    capabilityState: bindings.some((binding) => {
+      const methods = FACTORY_METHODS[factoryFor(binding.name)] || [];
+      return methods.includes("getState") && methods.includes("subscribe");
+    }),
     // A durable multi-step flow that can be completed or abandoned reaches a TERMINAL state its
     // store refuses to edit and restores on the next visit. A live run stalled on exactly that.
     terminalReset: Boolean(draftStateOwner(bindings))

@@ -408,7 +408,7 @@ const ASSEMBLY_PATTERNS = Object.freeze({
     lines: [
       "CAPABILITY STORE STATE — one source of truth, no local mirror of store state:",
       "  const state = useCapabilityState(<store>);           // or (<store>, (s) => s.values)",
-      "  // Re-renders on every store change. Never copy store state into useState.",
+      "  // Requires getState + subscribe; async entityStore/repository objects are not state stores. Never copy store state into useState.",
     ],
   },
   field: {
@@ -425,6 +425,8 @@ const ASSEMBLY_PATTERNS = Object.freeze({
     lines: [
       "ENTITY ACCESS — call the capability directly:",
       "  await store.create(values) / store.get(id) / store.list({ filters }) / store.update(id, values)",
+      "  // Await list() into React state; refresh after create/update/remove. Or useCollection(entity) from ./lib/app.",
+      "  // CRUD has no getState(): never useCapabilityState(entityStore(...)). entityStore returns flat records; repository returns { id, version, values } with fields under values.",
       "  // The runtime establishes the app's visitor session before any protected operation.",
       "  // Do NOT call ensureVisitorSession() first, and do NOT use db.entity() for a capability-owned type.",
     ],

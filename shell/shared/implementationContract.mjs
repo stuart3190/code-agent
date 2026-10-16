@@ -624,6 +624,19 @@ export function validateContract(contract) {
       } else if (expectedOutputs) {
         const reached = functionalOutputReach(c, step, journey.steps.slice(0, stepIndex));
         const fixtures = journeyFixtureKeys(journey.steps.slice(0, stepIndex + 1));
+        // Earlier asserted functional outputs are known values too (for example a confirmed
+        // status later consumed by cancellation). Requiring them as editable verificationValues
+        // contradicts the rule that verificationValues may only name operated input fields.
+        // Never use this step's own expected output to satisfy its input requirement.
+        for (let priorIndex = 0; priorIndex < stepIndex; priorIndex += 1) {
+          const prior = journey.steps[priorIndex];
+          const priorReach = functionalOutputReach(c, prior, journey.steps.slice(0, priorIndex));
+          for (const [field, value] of Object.entries(prior?.expectedOutputs || {})) {
+            if (isOutputPrimitive(value) && isDeclaredField(c, field) && priorReach.has(referenceKey(field))) {
+              fixtures.add(referenceKey(field));
+            }
+          }
+        }
         const missingInputs = new Map();
         for (const [field, value] of Object.entries(expectedOutputs)) {
           const key = referenceKey(field);
