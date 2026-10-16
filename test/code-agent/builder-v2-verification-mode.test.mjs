@@ -119,6 +119,25 @@ test("awaitPreviewReachable retries a 5xx/connection failure until the preview a
   }), (error) => error.code === "preview_unreachable" && error.classification === "platform");
 });
 
+test("preview reachability rejects proxy error pages and releases every response body", async () => {
+  for (const status of [301, 401, 403, 404, 429, 503]) {
+    let clock = 0;
+    let cancelled = 0;
+    await assert.rejects(awaitPreviewReachable("https://preview.test/", {
+      fetchImpl: async () => ({ status, body: { cancel: async () => { cancelled += 1; } } }),
+      timeoutMs: 2, intervalMs: 1,
+      now: () => clock, sleep: async (ms) => { clock += ms; },
+    }), error => error.code === "preview_unreachable" && error.message.includes(`HTTP ${status}`));
+    assert.ok(cancelled > 0, `HTTP ${status} body was released`);
+  }
+  let cancelled = false;
+  const result = await awaitPreviewReachable("https://preview.test/", {
+    fetchImpl: async () => ({ status: 200, body: { cancel: async () => { cancelled = true; } } }),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(cancelled, true);
+});
+
 test("the bypass journeys layer starts the preview, proves HTTP reachability and marks every verdict bypassed, not verified", async () => {
   const started = [];
   const fn = createBypassJourneysFn({
