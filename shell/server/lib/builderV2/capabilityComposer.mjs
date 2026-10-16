@@ -814,7 +814,7 @@ function capabilityFiles(graph, { moduleLock = null, identityPlan = null, identi
     files[`${COMPOSED_ROOT}/crud.js`] = `${banner("crud")}import { makeEntityStore } from "../crud.js";
 
 export const entityStores = Object.freeze({
-${entities.map((entity) => `  ${quote(entity)}: makeEntityStore(${quote(entity)}),`).join("\n")}
+${entities.map((entity) => `  ${entity === "__proto__" ? `[${quote(entity)}]` : quote(entity)}: makeEntityStore(${quote(entity)}),`).join("\n")}
 });
 
 // An entity with no composed store (transient, not owned by the platform, or simply not durable)
@@ -882,7 +882,7 @@ function makeEphemeralEntityStore(type) {
 
 export function entityStore(entityType) {
   const key = String(entityType);
-  const store = entityStores[key];
+  const store = Object.hasOwn(entityStores, key) ? entityStores[key] : null;
   if (store) return store;
   if (!ephemeralStores.has(key)) ephemeralStores.set(key, makeEphemeralEntityStore(key));
   return ephemeralStores.get(key);
