@@ -20,3 +20,11 @@ test('explicit empty string remains a deliberate supported edit; sibling valid e
  assert.equal(result.tree['src/index.css'],'.app{}');assert.equal(result.tree['src/theme.css'],'');assert.equal(result.tree['src/empty.css'],'');
  assert.equal(result.applied.length,2);assert.equal(result.rejected.length,1);
 });
+test('mixed targets cannot silently drop one edit or erase another file',()=>{
+ const tree={'src/index.css':'.app{}','src/Main.jsx':'export function Main(){return null;}'};
+ const result=applyPatches(tree,[{file:'src/Main.jsx',ops:[{op:'append',content:'// kept?'}],replaceFile:'src/index.css',content:null}]);
+ assert.deepEqual(result.tree,tree);assert.equal(result.applied.length,0);assert.match(result.rejected[0].reason,/exactly one operation target/);
+ for(const patch of [{newFile:'src/New.js',deleteFile:'src/Main.jsx',content:'export const x=1;'}, {replaceFile:'src/index.css',content:'.next{}',ops:[{op:'append',content:'x'}]}]) {
+  const verdict=applyPatches(tree,[patch]);assert.deepEqual(verdict.tree,tree);assert.equal(verdict.rejected.length,1);
+ }
+});

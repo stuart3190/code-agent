@@ -29,7 +29,9 @@ export const EMIT_PATCHES_SCHEMA = Object.freeze({
     + "the code index; a rejected op comes back with the exact reason. Use newFile for files "
     + "that do not exist yet; never rewrite a whole existing file through newFile. Files the "
     + "index cannot parse into symbols (CSS, config) can only change via replaceFile with the "
-    + "COMPLETE new content. For a very large symbol, replace_exact uses `symbol` as the exact "
+    + "COMPLETE new content on the SAME patch object. Each patch has exactly one non-null target "
+    + "(file, newFile, replaceFile, or deleteFile); all other targets are null. Never put a file path "
+    + "on one patch and its content on another. For a very large symbol, replace_exact uses `symbol` as the exact "
     + "old source excerpt and `content` as its replacement; the excerpt must occur exactly once.",
   strict: true,
   parameters: {
@@ -285,6 +287,12 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
   });
 
   for (const patch of patches || []) {
+    const targets = [patch.file, patch.newFile, patch.replaceFile, patch.deleteFile].filter(Boolean);
+    if (targets.length > 1 || (patch.ops?.length && !patch.file && targets.length)) {
+      reject(patch, null, "A patch must select exactly one operation target: file with ops, newFile with content, "
+        + "replaceFile with complete content, or deleteFile. Put each file edit in its own patch; keep its content on that same object.");
+      continue;
+    }
     // ── create ───────────────────────────────────────────────────────────────────────────
     if (patch.newFile) {
       if (patch.newFile in working) { reject(patch, null, `newFile: ${patch.newFile} already exists — use ops to modify it`, REJECTION.PATCH_NOT_APPLICABLE); continue; }
