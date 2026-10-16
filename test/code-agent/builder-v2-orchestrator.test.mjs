@@ -1474,3 +1474,29 @@ test("REPAIR GOVERNANCE — a control bound nowhere keeps the application as own
   assert.deepEqual(result.repairReclassified, []);
   assert.notEqual(result.stopReason, "repair_reclassified_undetermined");
 });
+
+
+test("lease loss after browser evidence retains the candidate and platform cause", async () => {
+  const controller = new AbortController();
+  const h = harness({ journeysFn: async ({ journeys }) => {
+    controller.abort(Object.assign(new Error("durable lease renewal deadline elapsed"), { code: "lease_lost" }));
+    return { journeys: journeys.map(j => ({ id: j.id, status: "pass" })) };
+  } });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "lease-loss", request: "booking site", signal: controller.signal });
+  assert.equal(result.state, "failed", JSON.stringify(result));
+  assert.equal(result.failureClassification, "platform_lease_lost");
+  assert.match(result.error, /durable lease renewal deadline elapsed/);
+  assert.ok(result.workingSnapshotId);
+  const tree = await h.snapshotStore.materialize("o", result.workingSnapshotId);
+  assert.ok(tree["src/screens/scaffold/BookingScreen.jsx"]);
+});
+
+test("explicit customer cancellation still stops as cancelled", async () => {
+  const controller = new AbortController();
+  const h = harness({ journeysFn: async ({ journeys }) => {
+    controller.abort(Object.assign(new Error("cancel requested"), { code: "cancelled" }));
+    return { journeys: journeys.map(j => ({ id: j.id, status: "pass" })) };
+  } });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "customer-cancel", request: "booking site", signal: controller.signal });
+  assert.equal(result.state, "cancelled", JSON.stringify(result));
+});

@@ -409,7 +409,16 @@ export function createOrchestrator({
   });
 
   const abortIfRequested = (signal) => {
-    if (signal?.aborted) throw Object.assign(new Error("Builder V2 build cancelled."), {
+    if (!signal?.aborted) return;
+    const reason = signal.reason;
+    // Lease loss and shutdown are platform interruptions, not a customer cancellation.
+    // Keep the candidate checkpoint and preserve the cause for settlement/recovery.
+    if (reason?.code && reason.code !== "cancelled") {
+      throw Object.assign(new Error(`Builder V2 interrupted: ${reason.message || reason.code}`, { cause: reason }), {
+        code: `platform_${reason.code}`, classification: "platform", retryable: true,
+      });
+    }
+    throw Object.assign(new Error("Builder V2 build cancelled.", { cause: reason }), {
       name: "AbortError", code: "cancelled",
     });
   };
@@ -2517,7 +2526,10 @@ export function createOrchestrator({
           parentSnapshotId: source.snapshotId, providerCalls: 0 });
       } catch (error) {
         const cancelled = error?.code === "cancelled" || error?.name === "AbortError";
-        return finish(cancelled ? "cancelled" : "failed", { error: error.message });
+        return finish(cancelled ? "cancelled" : "failed", {
+          error: describeErrorChain(error),
+          ...(!cancelled && error?.code ? { failureClassification: String(error.code) } : {}),
+        });
       }
     },
 
@@ -2608,7 +2620,10 @@ export function createOrchestrator({
           try { await snapshotStore.discardWorking(owner, projectId, buildId); }
           catch (cleanupError) { log(`cancelled edit checkpoint cleanup failed: ${cleanupError.message}`); }
         }
-        return finish(cancelled ? "cancelled" : "failed", { error: error.message });
+        return finish(cancelled ? "cancelled" : "failed", {
+          error: describeErrorChain(error),
+          ...(!cancelled && error?.code ? { failureClassification: String(error.code) } : {}),
+        });
       }
     },
   };
