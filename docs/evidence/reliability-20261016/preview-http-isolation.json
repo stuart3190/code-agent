@@ -14,13 +14,15 @@
     },
     {
       "name": "foreign project never exposed",
-      "status": 500,
-      "pass": false
+      "status": 404,
+      "code": "nothing_to_preview",
+      "pass": true
     },
     {
       "name": "empty own conversation reports no preview",
-      "status": 500,
-      "pass": false
+      "status": 404,
+      "code": "nothing_to_preview",
+      "pass": true
     }
   ],
   "failure": null,
