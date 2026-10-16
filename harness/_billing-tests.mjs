@@ -40,10 +40,10 @@ console.log("formula validates against REAL recorded spend:");
 console.log("model weights bound true cost-per-credit:");
 {
   check("Sonnet (anchor) weight == 1.00", near(modelWeight("claude-sonnet-4-6"), 1.0));
-  check("Haiku weight ≈ 0.333 (cheaper -> burns fewer credits)", near(modelWeight("claude-haiku-4-5"), 0.333, 0.005));
+  check("Haiku weight ≈ 0.333 (cheaper -> burns fewer credits)", near(modelWeight("claude-haiku-4-5-20251001"), 0.333, 0.005));
   check("Opus weight ≈ 1.667 (pricier -> burns more credits)", near(modelWeight("claude-opus-4-8"), 1.667, 0.005));
   // The whole point: cost per DEBITED credit is ~constant across models once weighted.
-  for (const model of ["claude-sonnet-4-6", "claude-haiku-4-5", "claude-opus-4-8"]) {
+  for (const model of ["claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4-8"]) {
     const perDebited = costPerCreditFromRates(ANTHROPIC_RATES[model]) / modelWeight(model);
     check(`per-debited-credit cost for ${model} ≈ Sonnet anchor £0.0398 (got ${perDebited.toFixed(4)})`,
       near(perDebited, RECORDED_COST_PER_CREDIT.sonnetUncached.gbp));
@@ -122,7 +122,7 @@ console.log("BYOK loss-leader is bounded by the slot cap (eyes-open, finite):");
 console.log("credit debit math:");
 {
   check("10k Sonnet tokens debit exactly 1.000 credit", near(creditsForTurn({ tokens: 10000, model: "claude-sonnet-4-6" }), 1.0));
-  check("10k Haiku tokens debit ~0.333 credit", near(creditsForTurn({ tokens: 10000, model: "claude-haiku-4-5" }), 0.333, 0.005));
+  check("10k Haiku tokens debit ~0.333 credit", near(creditsForTurn({ tokens: 10000, model: "claude-haiku-4-5-20251001" }), 0.333, 0.005));
   check("cached managed input is charged at the cache-read multiplier", near(creditsForUsage({
     usage: { input: 9000, output: 1000, cached: 8000, cacheWrite: 0, total: 10000 },
     model: "gpt-5.5",
