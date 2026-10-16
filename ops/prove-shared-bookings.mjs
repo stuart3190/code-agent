@@ -34,5 +34,14 @@ try{
  check('second cancellation is idempotent',()=>assert.equal(call(A,cancel()).reason,'already_cancelled'));
  check('other visitor can reserve released slot',()=>assert.equal(call(B,reserve('10000000-0000-4000-8000-000000000007')).result,'ok'));
  check('reused request key cannot reserve a different slot',()=>assert.equal(call(A,reserve('10000000-0000-4000-8000-000000000006','14:00')).result,'invalid'));
+ // Exercise an actual data-only export/restore, with dependencies loaded parent first.
+ const tables=['entities','app_booking_reservations','app_booking_request_keys'];
+ const counts=Object.fromEntries(tables.map(table=>[table,sql('select count(*) from '+table)]));
+ const dumps=tables.map(table=>execFileSync('docker',['exec',name,'pg_dump','-U','postgres','--data-only','--table=public.'+table],{encoding:'utf8',stdio:['pipe','pipe','pipe']}));
+ sql('truncate public.app_booking_request_keys, public.app_booking_reservations, public.entities;');
+ for(const dump of dumps) sql(dump);
+ check('reservation and retry-key backups restore exact row counts',()=>{for(const table of tables)assert.equal(sql('select count(*) from '+table),counts[table]);});
+ check('restored request key recovers the same booking identity',()=>assert.equal(call(A,reserve('10000000-0000-4000-8000-000000000006','11:00')).record.id,repeat[0].record.id));
+ check('restored capacity still excludes another visitor',()=>assert.equal(call(B,reserve('10000000-0000-4000-8000-000000000090','11:00')).result,'over_capacity'));
  console.log(JSON.stringify({passed:checks.length,checks}));
 }finally{if(started)execFileSync('docker',['rm','-f',name],{stdio:'pipe'});}
