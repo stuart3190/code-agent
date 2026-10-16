@@ -17,7 +17,14 @@ git -C $WT archive --format=tar.gz $SHA > $REL/source.tar.gz.tmp
 mv $REL/source.tar.gz.tmp $REL/source.tar.gz
 git -C $WT archive --format=tar.gz $SHA shell/package.json shell/server > $REL/shell.tar.gz.tmp
 mv $REL/shell.tar.gz.tmp $REL/shell.tar.gz
-[ -e $REL/web.tar.gz ] || ln $PREL/web.tar.gz $REL/web.tar.gz
+if [[ -n "${THRALLO_WEB_ARTIFACT:-}" ]]; then
+  git -C $WT show "$SHA:ops/stage-web-release.py" > "$REL/stage-web-release.py"
+  python3 "$REL/stage-web-release.py" "$THRALLO_WEB_ARTIFACT" "$REL/web-dist"
+  cp "$THRALLO_WEB_ARTIFACT" "$REL/web.tar.gz.tmp"
+  mv "$REL/web.tar.gz.tmp" "$REL/web.tar.gz"
+else
+  [ -e $REL/web.tar.gz ] || ln $PREL/web.tar.gz $REL/web.tar.gz
+fi
 IMGCOMMIT=$(node -e 'console.log(require("'$LIVE'/.deployment-provenance.json").sandboxImageSourceCommit)')
 if [ "$MODE" = image ]; then
   IMGCOMMIT=$SHA
@@ -52,6 +59,12 @@ install -o ubuntu -g ubuntu -m 444 $REL/DEPLOYMENT.json $LIVE/shell/DEPLOYMENT.j
 cp -p /etc/thrallo/build-worker.env /etc/thrallo/build-worker.env.pre-$S7
 (cd $LIVE && node ops/pin-build-sandbox-image.mjs --commit $SHA --image-commit $IMGCOMMIT --tag thrallo-build-sandbox:${IMGCOMMIT:0:12} --pin | tail -5)
 chown ubuntu:ubuntu $LIVE/DEPLOYED_COMMIT $LIVE/.deployment-provenance.json
+if [[ -d "$REL/web-dist" ]]; then
+  [ ! -e "$REL/live-web-before.tar.gz" ] || { echo "web rollback backup already exists"; exit 1; }
+  tar czf "$REL/live-web-before.tar.gz" -C "$LIVE/shell/web/dist" .
+  python3 "$REL/stage-web-release.py" "$REL/web.tar.gz" "$REL/web-dist" --install "$LIVE/shell/web/dist"
+  chown -R ubuntu:ubuntu "$LIVE/shell/web/dist"
+fi
 RESTARTED_AT=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart thrallo-build-worker thrallo-shell
 echo "activated $SHA (image $IMGCOMMIT); waiting for worker preflight"
