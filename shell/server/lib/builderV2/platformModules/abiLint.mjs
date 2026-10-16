@@ -10,6 +10,7 @@
 // existed and must keep judging exactly as they did.
 
 import path from "node:path";
+import { parse } from "@babel/parser";
 import { isProtectedPath } from "../patchEngine.mjs";
 
 export const ABI_LINT_VERSION = 1;
@@ -37,6 +38,56 @@ function lineOf(source, index) {
   return source.slice(0, index).split("\n").length;
 }
 
+// Only diagnose imported platform Links with literal path props. Unknown components,
+// dynamic destinations and locally shadowed names remain the browser's responsibility.
+function linkPathFindings(source, file) {
+  let ast;
+  try { ast = parse(source, { sourceType: "module", plugins: ["jsx", ...(/\.tsx?$/.test(file) ? ["typescript"] : [])] }); }
+  catch { return []; }
+  const nodes = [];
+  const visit = node => {
+    if (!node || typeof node.type !== "string") return;
+    nodes.push(node);
+    for (const [key, value] of Object.entries(node)) {
+      if (["loc", "comments", "tokens", "extra"].includes(key)) continue;
+      if (Array.isArray(value)) value.forEach(visit); else if (value && typeof value === "object") visit(value);
+    }
+  };
+  visit(ast);
+  const imported = new Set();
+  for (const node of ast.program.body) {
+    if (node.type !== "ImportDeclaration") continue;
+    const target = resolveRelative(file, node.source.value);
+    if (!/^src\/lib\/app(?:\/(?:index|routing)(?:\.js)?)?$/.test(target || "")) continue;
+    for (const spec of node.specifiers) if (spec.imported?.name === "Link") imported.add(spec.local.name);
+  }
+  // Conservatively abstain for any local binding that could shadow this import.
+  const bound = node => {
+    if (!node) return;
+    if (node.type === "Identifier") imported.delete(node.name);
+    else if (node.type === "AssignmentPattern") bound(node.left);
+    else if (node.type === "RestElement") bound(node.argument);
+    else if (node.type === "ObjectPattern") for (const p of node.properties) bound(p.value || p.argument);
+    else if (node.type === "ArrayPattern") node.elements.forEach(bound);
+  };
+  for (const node of nodes) {
+    if (/Function/.test(node.type)) (node.params || []).forEach(bound);
+    if (node.type === "VariableDeclarator" || node.type === "ClassDeclaration" || node.type === "FunctionDeclaration") bound(node.id);
+    if (node.type === "CatchClause") bound(node.param);
+  }
+  const findings = [];
+  for (const node of nodes) {
+    if (node.type !== "JSXOpeningElement" || !imported.has(node.name?.name)) continue;
+    const attr = node.attributes.find(a => a.type === "JSXAttribute" && a.name?.name === "to");
+    const value = attr?.value?.type === "StringLiteral" ? attr.value.value
+      : attr?.value?.expression?.type === "StringLiteral" ? attr.value.expression.value : null;
+    if (!value?.startsWith("/")) continue;
+    findings.push({ code: "platform_link_path", module: file, line: node.loc.start.line, target: value,
+      message: `${file}:${node.loc.start.line} passes path "${value}" to the platform Link, which expects a declared route ID. Use <Link to="routeId"> (and params for parameterised routes); a path here throws "no route" during render.` });
+  }
+  return findings;
+}
+
 /**
  * @param {Record<string,string>} tree
  * @param {{ locked?: boolean, identityInstalled?: boolean }} options
@@ -46,6 +97,7 @@ export function lintPlatformAbi(tree, { locked = false, identityInstalled = null
   const hasIdentity = identityInstalled ?? typeof tree?.["src/lib/capabilities/composed/identity.js"] === "string";
   for (const [file, source] of Object.entries(tree || {})) {
     if (!GENERATED_SOURCE.test(file) || isProtectedPath(file, { tree }) || typeof source !== "string") continue;
+    if (typeof tree?.["src/lib/app/routing.js"] === "string") findings.push(...linkPathFindings(source, file));
     IMPORT_SPECIFIER.lastIndex = 0;
     let match;
     while ((match = IMPORT_SPECIFIER.exec(source))) {
