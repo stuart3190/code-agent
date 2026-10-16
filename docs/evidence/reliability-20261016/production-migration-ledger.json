@@ -355,6 +355,10 @@
     {
       "version": "20261016210929",
       "name": "restrict_internal_audit_trigger_functions"
+    },
+    {
+      "version": "20261016215408",
+      "name": "scope_snapshot_identity_to_qualifying_build"
     }
   ]
 }

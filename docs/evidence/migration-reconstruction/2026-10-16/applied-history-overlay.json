@@ -1,9 +1,9 @@
 {
   "source": "Connected Supabase list_migrations and read-only schema_migrations query on zczgvcsokfafuyognvwx",
-  "capturedAt": "2026-10-16T21:10:49.321866+00:00",
+  "capturedAt": "2026-10-16T21:54:41.497345+00:00",
   "baseVersion": "20260919120000",
-  "ledgerCount": 89,
-  "note": "October 6 policy already applied before this audit; October 16 trigger grants applied after isolated PostgreSQL proof. Existing version drift preserved. Local byte hashes identify reviewed files; remote statements were separately inspected.",
+  "ledgerCount": 90,
+  "note": "October 6 policy already applied before this audit; October 16 trigger grants applied after isolated PostgreSQL proof. Existing version drift preserved. Local byte hashes identify reviewed files; remote statements were separately inspected. Build-scoped snapshot identity applied after isolated PostgreSQL unique-index proof; no data rewritten.",
   "migrations": [
     {
       "appliedOrder": 88,
@@ -20,6 +20,14 @@
       "filename": "20261016210929_restrict_internal_audit_trigger_functions.sql",
       "localCanonicalSqlSha256": "60f9fcc83f53ba50472be98c71bcc4607767641d7fa01e4f673f65c830f4c32a",
       "appliedVersion": "20261016210929"
+    },
+    {
+      "appliedOrder": 90,
+      "version": "20261016215408",
+      "name": "scope_snapshot_identity_to_qualifying_build",
+      "filename": "20261016215408_scope_snapshot_identity_to_qualifying_build.sql",
+      "localCanonicalSqlSha256": "6e79a6d11101749f64558f93514d3ba5e28b5ae3ce24725151e98b28eb097679",
+      "appliedVersion": "20261016215408"
     }
   ]
 }

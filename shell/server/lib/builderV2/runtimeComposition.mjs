@@ -965,7 +965,9 @@ export function createBuilderV2Runtime({
         p_owner: owner, p_project_id: projectId, p_build_id: activeBuildId,
         p_snapshot_id: result.snapshotId, p_preview_url: previewResult.url,
       });
-      if (projectError) throw new Error(`verified project projection: ${projectError.message}`);
+      if (projectError) throw Object.assign(new Error(`verified project projection: ${projectError.message}`, { cause: projectError }), {
+        code: "platform_projection_failed", classification: "platform", retryable: true, checkpointId: result.snapshotId,
+      });
       terminalSettled = true;
       const settlement = projection?.settlement || null;
       const customerStatus = customerBuildStatus({ internalState: "green",

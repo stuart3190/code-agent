@@ -88,10 +88,11 @@ export function memorySnapshotStorage() {
 }
 
 export function createSnapshotStore(storage = memorySnapshotStorage()) {
-  async function reusableReadySnapshot(owner, projectId, treeHash, entries, assetManifest) {
+  async function reusableReadySnapshot(owner, projectId, treeHash, entries, assetManifest, buildId) {
     const existing = (await storage.listSnapshots(owner, projectId))
       .find((snapshot) => snapshot.owner === owner && snapshot.project_id === projectId
         && snapshot.tree_hash === treeHash && snapshot.state === "ready"
+        && (snapshot.build_id || null) === (buildId || null)
         && canonicalJson(snapshot.asset_manifest || []) === canonicalJson(assetManifest || []));
     if (!existing) return null;
     const expected = entries.map((entry) => `${entry.path}:${entry.contentHash}`).sort();
@@ -128,10 +129,10 @@ export function createSnapshotStore(storage = memorySnapshotStorage()) {
       }
       const expectedTreeHash = treeHashFromPairs(entries.map((e) => [e.path, e.contentHash]));
 
-      // Snapshot identity is content-addressed per project. A repair that restores the exact
-      // previous green bytes must reuse that immutable row rather than fail its unique index or
-      // create duplicate history. Manifest and blob bytes are re-proven before reuse.
-      const existing = await reusableReadySnapshot(owner, projectId, expectedTreeHash, entries, assetManifest);
+      // Blob bytes are deduplicated per owner; snapshot qualification belongs to one build.
+      // A retry within that build reuses its byte-proven row. Another build gets a distinct
+      // snapshot so promotion cannot confuse historical qualification with current verification.
+      const existing = await reusableReadySnapshot(owner, projectId, expectedTreeHash, entries, assetManifest, buildId);
       if (existing) return existing;
 
       // 2. snapshot row is born INERT.
@@ -147,7 +148,7 @@ export function createSnapshotStore(storage = memorySnapshotStorage()) {
       } catch (error) {
         // Concurrent identical finalisation may have won after the first probe. Reuse only a fully
         // ready, byte-proven winner; an incomplete/broken row still fails loudly and is retryable.
-        const winner = await reusableReadySnapshot(owner, projectId, expectedTreeHash, entries, assetManifest);
+        const winner = await reusableReadySnapshot(owner, projectId, expectedTreeHash, entries, assetManifest, buildId);
         if (winner) return winner;
         throw error;
       }
