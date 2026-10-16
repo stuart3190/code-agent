@@ -6,6 +6,7 @@
 import { serviceClient } from "../supabase.mjs";
 import { previewProvider } from "../../preview/index.mjs";
 import { awaitPreviewReachable } from "../builderV2/verificationMode.mjs";
+import { BYPASSED_VERIFIER_POLICY } from "./verifierPolicy.mjs";
 
 // (Re)provision a preview from the authoritative verified snapshot. This heals reaped preview
 // containers and old conversations without trusting a mutable client/project tree.
@@ -33,6 +34,13 @@ export async function showPreview(ctx, { productName = null, projectId = null, a
     const { withRuntimeEnv } = await import("../runtimeEnv.mjs");
     const { resolveVerifiedProjectTree } = await import("../builderV2/projectSource.mjs");
     const source = await resolveVerifiedProjectTree(ctx.owner, project, { client, allowLegacy: false });
+    const { data: qualification, error: qualificationError } = await client.from("bv2_builds")
+      .select("verifier_policy").eq("owner", ctx.owner).eq("project_id", project.id)
+      .eq("final_snapshot", source.snapshotId).eq("state", "green").limit(1).maybeSingle();
+    if (qualificationError) throw Object.assign(new Error("The saved preview's verification status could not be checked. Please retry."), {
+      code: "preview_verification_unavailable", classification: "platform", retryable: true,
+    });
+    const verified = Boolean(qualification?.verifier_policy && qualification.verifier_policy !== BYPASSED_VERIFIER_POLICY);
     const previews = previewProvider();
     if (previews.mode !== "vps") {
       throw Object.assign(new Error("Builder V2 previews require the isolated production provisioner."), {
@@ -49,8 +57,8 @@ export async function showPreview(ctx, { productName = null, projectId = null, a
       code: "preview_projection_failed", classification: "platform", retryable: true,
     });
     await ctx.emit("agent_done", { agent: "Publisher", ok: true });
-    await ctx.emit("preview_ready", { url: preview.url, projectId: project.id, message: "Preview ready — take a look." });
-    return { url: preview.url, projectId: project.id, note: "The preview card is in the conversation — do not repeat the URL." };
+    await ctx.emit("preview_ready", { url: preview.url, projectId: project.id, verified, message: "Preview ready — take a look." });
+    return { url: preview.url, projectId: project.id, verified, note: "The preview card is in the conversation — do not repeat the URL." };
   } catch (error) {
     await ctx.emit("agent_done", { agent: "Publisher", ok: false });
     throw error;

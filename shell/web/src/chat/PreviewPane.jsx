@@ -18,7 +18,7 @@ export default function PreviewPane({ url, onPublish, onRefresh, building = fals
           <span className="ct-lock">●</span><span>{String(url).replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
         </a>
         {verified === false && (
-          <span className="ct-unverified" title="The verifier was bypassed for this build. The app compiled and started, but no browser check ran.">Not verified</span>
+          <span className="ct-unverified" title="This preview has no confirmed browser check.">Not verified</span>
         )}
         {onRefresh && <button className="ct-btn" onClick={refresh} disabled={refreshing || building}
           title={building ? "Wait for the current build to finish" : "Restart an expired preview from the saved app"}>
