@@ -172,3 +172,9 @@ browserTest("an intentional modal covering background controls is not a responsi
   const {server,url}=await serve({'/':html});
   try {const result=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});assert.equal(result.pass,true);assert.equal(result.smoke.responsive.findings.length,0);}finally{server.close();}
 });
+
+browserTest("mobile inspection preserves result state produced by desktop interactions", async () => {
+  const html=`<html><body><h1>Calculator</h1><button style="position:absolute;top:100px;left:20px;width:120px;height:50px">Metres</button><button id="calc" style="position:absolute;top:250px" onclick="document.querySelector('aside').hidden=false">Calculate</button><aside hidden aria-label="Result" style="position:absolute;top:90px;left:400px;width:200px;height:100px;background:white">9 lights</aside><style>@media(max-width:500px){aside{left:10px!important}}</style></body></html>`;
+  const {server,url}=await serve({'/':html});
+  try{const result=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});assert.equal(result.pass,false);assert.match(result.journeys[0].detail,/Mobile 390px.*Metres.*Result/);}finally{server.close();}
+});

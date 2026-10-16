@@ -1,12 +1,13 @@
 // Read-only mobile hit testing: no clicks, form submissions, or business-text expectations.
 // A modal may intentionally cover background controls, so only persistent non-modal obstruction
 // is an app defect. Two identical samples avoid treating transient animation as a failure.
-export async function probeResponsiveControls({ browser, previewUrl, timeoutMs = 15_000 }) {
-  const context = await browser.newContext();
-  const page = await context.newPage();
+export async function probeResponsiveControls({ browser, page: existingPage = null, previewUrl, timeoutMs = 15_000 }) {
+  const context = existingPage ? null : await browser.newContext();
+  const page = existingPage || await context.newPage();
   try {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto(previewUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+    if (!existingPage) await page.goto(previewUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+    await page.evaluate(() => scrollTo(0, 0));
     await page.waitForTimeout(500);
     const sample = () => page.evaluate(() => {
       const modal = document.querySelector('dialog[open], [aria-modal="true"], [role="dialog"]');
@@ -42,5 +43,5 @@ export async function probeResponsiveControls({ browser, previewUrl, timeoutMs =
     return { checked:true, width:390, findings:second.filter(f=>first.some(a=>JSON.stringify(a)===JSON.stringify(f))) };
   } catch (error) {
     return { checked:false, width:390, findings:[], unavailable:true, error:String(error.message || error).split('\n')[0].slice(0,200) };
-  } finally { await context.close().catch(()=>{}); }
+  } finally { if (context) await context.close().catch(()=>{}); }
 }

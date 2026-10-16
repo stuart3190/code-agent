@@ -258,7 +258,7 @@ export async function smokeVerifyJourneys({
     }
     if (load.ok && !crashes.length) {
       responsive = Date.now() < deadline - 2_000
-        ? await probeResponsiveControls({ browser, previewUrl, timeoutMs: Math.min(15_000, deadline - Date.now()) })
+        ? await probeResponsiveControls({ browser, page, previewUrl, timeoutMs: Math.min(15_000, deadline - Date.now()) })
         : { checked: false, unavailable: true, findings: [], error: "mobile probe budget exhausted" };
       if (responsive.unavailable) { unavailable = true; error = `mobile probe unavailable: ${responsive.error}`; }
     }
