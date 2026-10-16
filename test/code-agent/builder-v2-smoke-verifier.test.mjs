@@ -154,3 +154,21 @@ browserTest("an unreachable preview is UNAVAILABLE (platform), never an applicat
   assert.ok(result.journeys.every((j) => j.status === "undriveable" && j.classification === VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE));
   assert.equal(result.fatalErrors.length, 0);
 });
+
+
+browserTest("persistent mobile panel obstruction fails without comparing text or numbers", async () => {
+  const html=`<html><body><main><h1>Calculator</h1><button style="position:absolute;top:100px;left:20px;width:120px;height:50px">Metres</button><aside aria-label="Calculator status" style="display:none;position:absolute;top:90px;left:10px;width:200px;height:100px;background:white">Ready</aside></main><style>@media(max-width:500px){aside{display:block!important}}</style></body></html>`;
+  const {server,url}=await serve({'/':html});
+  try { const result=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});
+    assert.equal(result.pass,false); assert.equal(result.smoke.responsive.findings.length,1);
+    assert.ok(result.journeys.every(j=>j.classification===VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE));
+    assert.match(result.journeys[0].detail,/Mobile 390px.*Metres.*Calculator status/);
+    assert.equal(result.smoke.crashes.length,0);
+  } finally {server.close();}
+});
+
+browserTest("an intentional modal covering background controls is not a responsive defect", async () => {
+  const html=`<html><body><h1>App</h1><button style="position:absolute;top:100px;left:20px;width:120px;height:50px">Background</button><section role="dialog" aria-modal="true" style="position:absolute;inset:0;background:white"><h2>Confirm</h2><button>Close</button></section></body></html>`;
+  const {server,url}=await serve({'/':html});
+  try {const result=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});assert.equal(result.pass,true);assert.equal(result.smoke.responsive.findings.length,0);}finally{server.close();}
+});

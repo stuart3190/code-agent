@@ -5,7 +5,8 @@
 // renders without a fatal runtime error, and the visible interactive controls can be clicked or
 // activated without crashing the page. It reads no text, compares no numbers, checks no labels
 // and has no opinion about what a click should do. Anything it cannot activate is recorded as
-// skipped, never as a failure. Console errors and failed requests are advisory evidence only.
+// skipped, never as a failure. A separate read-only mobile check rejects persistent content-panel
+// obstruction of visible controls. Console errors and failed requests are advisory evidence only.
 //
 // Verdict classes:
 //   pass        - loaded, rendered, controls activated, app still standing
@@ -15,6 +16,7 @@
 //
 // Runs INSIDE the sandbox image (build-worker/sandbox.mjs) so it is part of the sandbox identity.
 
+import { probeResponsiveControls } from "./responsiveProbe.mjs";
 import { SMOKE_VERIFIER_POLICY, VERIFICATION_RESULT_CLASS } from "./verifierPolicy.mjs";
 
 export const DEFAULT_CONTROL_LIMIT = 40;
@@ -144,6 +146,7 @@ export async function smokeVerifyJourneys({
   let activated = 0;
   let unavailable = false;
   let error = null;
+  let responsive = null;
 
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -253,16 +256,25 @@ export async function smokeVerifyJourneys({
         }
       }
     }
+    if (load.ok && !crashes.length) {
+      responsive = Date.now() < deadline - 2_000
+        ? await probeResponsiveControls({ browser, previewUrl, timeoutMs: Math.min(15_000, deadline - Date.now()) })
+        : { checked: false, unavailable: true, findings: [], error: "mobile probe budget exhausted" };
+      if (responsive.unavailable) { unavailable = true; error = `mobile probe unavailable: ${responsive.error}`; }
+    }
   } finally {
     await context.close().catch(() => {});
   }
 
+  const obstructed = responsive?.findings?.length > 0;
   const fatal = crashes.length > 0;
-  const status = unavailable ? "undriveable" : fatal ? "fail" : "pass";
+  const status = unavailable ? "undriveable" : (fatal || obstructed) ? "fail" : "pass";
   const classification = unavailable ? VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE
-    : fatal ? VERIFICATION_RESULT_CLASS.FATAL_RUNTIME_FAILURE : VERIFICATION_RESULT_CLASS.PASS;
+    : fatal ? VERIFICATION_RESULT_CLASS.FATAL_RUNTIME_FAILURE
+      : obstructed ? VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE : VERIFICATION_RESULT_CLASS.PASS;
   const detail = unavailable ? error
     : fatal ? crashes.map((row) => `${row.control ? `${row.control}: ` : ""}${row.error}`).join("; ")
+      : obstructed ? responsive.findings.map(f => `Mobile ${f.width}px: control "${f.control}" is covered by ${f.blocker}; reflow the layout so the control is usable`).join("; ")
       : `smoke passed: rendered, ${activated} of ${discovered} visible controls activated without a crash`;
   const fatalErrors = crashes.map((row) => `${row.control ? `${row.control}: ` : ""}${row.error}`);
   const journeys = (contract?.journeys || []).map((journey) => ({
@@ -274,12 +286,12 @@ export async function smokeVerifyJourneys({
       phase: crashes[0].phase, control: crashes[0].control,
       message: crashes[0].message, stack: crashes[0].stack || [], sourceFiles: crashes[0].sourceFiles || [] } } : {}),
     // The smoke drives no contracted steps; it has nothing to say about any of them.
-    steps: [], failedSteps: fatal ? 1 : 0, verifiedBy: SMOKE_VERIFIER_POLICY,
+    steps: [], failedSteps: (fatal || obstructed) ? 1 : 0, verifiedBy: SMOKE_VERIFIER_POLICY,
   }));
   const durationMs = Date.now() - startedAt;
   log(`[smoke] ${status} in ${durationMs}ms: ${detail}`);
   return {
-    pass: unavailable ? null : !fatal,
+    pass: unavailable ? null : !(fatal || obstructed),
     unavailable,
     error,
     verifierPolicy: SMOKE_VERIFIER_POLICY,
@@ -294,6 +306,6 @@ export async function smokeVerifyJourneys({
     ].slice(0, 20),
     verifierDefects: [],
     mechanics: null,
-    smoke: { load, render, controls: { discovered, activated, skipped }, crashes, durationMs },
+    smoke: { load, render, responsive, controls: { discovered, activated, skipped }, crashes, durationMs },
   };
 }
