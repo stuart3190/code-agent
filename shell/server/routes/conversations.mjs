@@ -309,10 +309,26 @@ export async function handleConversationPreview(_req, res, {
     throw new CodeAgentInputError("Invalid project", 400, "invalid_project");
   }
   const show = preview || (await import("../lib/appBuild/appDeliveryService.mjs")).showPreview;
-  const result = await show({ owner: owner.id, conversation,
-    emit: (type, payload) => store.appendEvent(conversation, type, payload),
-  }, { projectId: body?.projectId || null, allowOwnerFallback: false });
-  return sendJson(res, 200, { url: result.url, projectId: result.projectId });
+  try {
+    const result = await show({ owner: owner.id, conversation,
+      emit: (type, payload) => store.appendEvent(conversation, type, payload),
+    }, { projectId: body?.projectId || null, allowOwnerFallback: false });
+    return sendJson(res, 200, { url: result.url, projectId: result.projectId });
+  } catch (error) {
+    // The global API handler intentionally hides arbitrary server errors. Preserve only these
+    // known recovery outcomes here; never expose raw database/provider messages.
+    const outcomes = {
+      nothing_to_preview: [404, "There is no built app available to preview here.", false],
+      preview_build_active: [409, "This app is building. Its preview will refresh when the build finishes.", true],
+      project_lookup_unavailable: [503, "Your project could not be checked. Please retry.", true],
+      preview_verification_unavailable: [503, "The saved preview could not be checked. Please retry.", true],
+      preview_projection_failed: [503, "The preview started but its address could not be saved. Please retry.", true],
+      preview_unreachable: [503, "The preview is not responding yet. Please retry.", true],
+    };
+    const known = Object.hasOwn(outcomes, error?.code) ? outcomes[error.code] : null;
+    if (!known) throw error;
+    return sendJson(res, known[0], { error: known[1], code: error.code, retryable: known[2] });
+  }
 }
 
 export async function handleConversationEvents(req, res, { owner, conversationId, url }) {

@@ -15,3 +15,9 @@ test('invalid project and provisioner failures cannot announce success',async()=
  await assert.rejects(handleConversationPreview(null,response(),{owner:{id:'owner'},conversationId:'thread',body:{projectId:'bad'},store,preview:()=>assert.fail('must not invoke')}),e=>e.code==='invalid_project');
  const res=response();await assert.rejects(handleConversationPreview(null,res,{owner:{id:'owner'},conversationId:'thread',store,preview:async()=>{throw Error('unavailable');}}),/unavailable/);assert.equal(res.status,undefined);
 });
+test('known recovery outcomes survive the HTTP boundary without leaking upstream detail',async()=>{
+ for(const [code,status,retryable] of [['nothing_to_preview',404,false],['preview_build_active',409,true],['project_lookup_unavailable',503,true],['preview_verification_unavailable',503,true],['preview_projection_failed',503,true],['preview_unreachable',503,true]]){
+  const res=response();await handleConversationPreview(null,res,{owner:{id:'owner'},conversationId:'thread',store:{getConversation:async()=>({id:'thread'})},preview:async()=>{throw Object.assign(Error('secret upstream detail'),{code});}});
+  assert.equal(res.status,status);assert.equal(res.body.code,code);assert.equal(res.body.retryable,retryable);assert.doesNotMatch(res.body.error,/secret upstream/);assert.equal(res.body.url,undefined);
+ }
+});
