@@ -67,7 +67,13 @@ gate. For a V2-only production release, activate the validated deployment manife
 compatible immutable sandbox through `ops/pin-build-sandbox-image.mjs`, then restart both runtime
 consumers of that release identity.
 
-The VPS `deploy.sh` is not in this repository. It must not default to `noimage` when the
+The VPS `deploy.sh` is not in this repository. Its activation path must first run
+`node ops/check-release-sandbox.mjs <git-repo> <previous-sha> <target-sha> <image|noimage>`.
+This extracts the immutable target release and runs its compatibility policy, so a stale
+operator checkout cannot accidentally approve image reuse. Exit 2 requires image mode;
+any other nonzero exit blocks activation before live files are changed.
+
+It must not default to `noimage` when the
 Dockerfile is unchanged if verdict-deciding files changed. Run
 `node ops/require-sandbox-image-rebuild.mjs --from <previous-release-sha> --to HEAD` first
 (exit 2 means rebuild or pass `--image`; exit 1 means the check failed closed). See
