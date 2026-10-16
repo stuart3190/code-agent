@@ -1,0 +1,102 @@
+[
+  {
+    "width": 1440,
+    "name": "honest empty state",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "required fields rejected",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "saved book visible",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "edit saved",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "edit persists",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "nonmatching filter hides book",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "matching filter restores book",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "no horizontal overflow",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "delete persists",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "no runtime errors",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "honest empty state",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "required fields rejected",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "saved book visible",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "edit saved",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "edit persists",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "nonmatching filter hides book",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "matching filter restores book",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "no horizontal overflow",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "delete persists",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "no runtime errors",
+    "ok": true
+  }
+]

@@ -80,12 +80,18 @@ export const PRODUCTION_PUBLIC_TABLES_107 = Object.freeze([...PRODUCTION_PUBLIC_
 export const PRODUCTION_PUBLIC_TABLES_107_SHA256 =
   "d8d73f8bc6a231abe9ca7cca8050c26198b05303367c9f82469ae1e3fd5b4ca0";
 
-// Ledger 87 is the live production count after WP12 (2026-09-20). On-disk #177
+export const PRODUCTION_PUBLIC_TABLES_109 = Object.freeze([...PRODUCTION_PUBLIC_TABLES_107,
+  "app_booking_reservations", "app_booking_request_keys",
+].sort());
+export const PRODUCTION_PUBLIC_TABLES_109_SHA256 = "22d60b26441367c19dec4af348e1695b01834f8d9e48bb86a9dd3d4c91d665b0";
+
+// Ledger87 was the production count after WP12 (2026-09-20). On-disk #177
 // (20261006080000, verifier_policy check only) becomes 88 once applied and adds no table.
-// The window runs through 96 so later catalog-neutral migrations do not break backup again.
+// Ledger91 adds shared reservation tables;87–90 retain their historical catalog.
+// The new window runs through96 for catalog-neutral changes only.
 // A migration that creates or drops a public table must open a new catalog instead of
 // extending this range.
-export const CURRENT_CATALOG_MIGRATION_RANGE = Object.freeze({ min: 87, max: 96 });
+export const CURRENT_CATALOG_MIGRATION_RANGE = Object.freeze({ min: 91, max: 96 });
 
 export const PRODUCTION_PUBLIC_TABLES_98_SHA256 =
   "7e055d0b204b6254d11c66da0f6dbf5e0b4bc99ea17faac4b1bda5c55ed70417";
@@ -154,6 +160,11 @@ export const PRODUCTION_PUBLIC_FK_PAIRS_99 = Object.freeze([...PRODUCTION_PUBLIC
 ].sort());
 export const PRODUCTION_PUBLIC_FK_PAIRS_99_SHA256 =
   "bb2622534c0d473562db30378cddd76d0255534d446a8c6a59f6d8051cf78379";
+export const PRODUCTION_PUBLIC_FK_PAIRS_103 = Object.freeze([...PRODUCTION_PUBLIC_FK_PAIRS_99,
+  "app_booking_reservations->projects", "app_booking_reservations->entities",
+  "app_booking_request_keys->projects", "app_booking_request_keys->app_booking_reservations",
+].sort());
+export const PRODUCTION_PUBLIC_FK_PAIRS_103_SHA256 = "2f8363ea4dacb171766744bd5b4a85ffa5dbdba57baccc997e0c7e722bd12368";
 export const PRODUCTION_PUBLIC_FK_PAIRS_68 = Object.freeze(PRODUCTION_PUBLIC_FK_PAIRS_70.filter((pair) =>
   pair !== "data_erasure_events->data_erasure_jobs"));
 export const PRODUCTION_PUBLIC_FK_PAIRS_68_SHA256 =
@@ -206,10 +217,14 @@ export function runtimeCatalogEvidence(migrationCount) {
     migrationCount, PRODUCTION_PUBLIC_TABLES_105, PRODUCTION_PUBLIC_TABLES_105_SHA256,
     PRODUCTION_PUBLIC_FK_PAIRS_99, PRODUCTION_PUBLIC_FK_PAIRS_99_SHA256,
   );
+  if (migrationCountInRange(migrationCount, 87, 90)) return catalogEvidence(
+    migrationCount, PRODUCTION_PUBLIC_TABLES_107, PRODUCTION_PUBLIC_TABLES_107_SHA256,
+    PRODUCTION_PUBLIC_FK_PAIRS_99, PRODUCTION_PUBLIC_FK_PAIRS_99_SHA256,
+  );
   if (migrationCountInRange(migrationCount, CURRENT_CATALOG_MIGRATION_RANGE.min, CURRENT_CATALOG_MIGRATION_RANGE.max)) {
     return catalogEvidence(
-      migrationCount, PRODUCTION_PUBLIC_TABLES_107, PRODUCTION_PUBLIC_TABLES_107_SHA256,
-      PRODUCTION_PUBLIC_FK_PAIRS_99, PRODUCTION_PUBLIC_FK_PAIRS_99_SHA256,
+      migrationCount, PRODUCTION_PUBLIC_TABLES_109, PRODUCTION_PUBLIC_TABLES_109_SHA256,
+      PRODUCTION_PUBLIC_FK_PAIRS_103, PRODUCTION_PUBLIC_FK_PAIRS_103_SHA256,
     );
   }
   throw new Error(`unsupported production migration count for backup/restore: ${migrationCount}`);
@@ -302,7 +317,7 @@ export function findCatalogCoverageGaps(liveTables, backedUpTables, ignoredTable
   };
 }
 
-export function validateRestoreOrder(order, pairs = PRODUCTION_PUBLIC_FK_PAIRS_99) {
+export function validateRestoreOrder(order, pairs = PRODUCTION_PUBLIC_FK_PAIRS_103) {
   const position = new Map(order.map((table, index) => [table, index]));
   const missingTables = [...new Set(pairs.flatMap((pair) => pair.split("->")))]
     .filter((table) => !position.has(table)).sort();

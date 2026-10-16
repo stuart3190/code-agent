@@ -27,6 +27,7 @@ import {
   PRODUCTION_PUBLIC_TABLES_102,
   PRODUCTION_PUBLIC_TABLES_105,
   PRODUCTION_PUBLIC_TABLES_107,
+  PRODUCTION_PUBLIC_TABLES_109,
   PRODUCTION_PUBLIC_FK_PAIRS_99,
   CURRENT_CATALOG_MIGRATION_RANGE,
   sha256Lines,
@@ -320,22 +321,23 @@ test("authoritative migration identity is line-ending independent without changi
   assert.equal(canonicalSqlHash(lf), canonicalSqlHash(crlf));
 });
 
-test("backup migration evidence overlays the authoritative base through production ledger row 90", async () => {
+test("backup migration evidence overlays the authoritative base through production ledger row 91", async () => {
   const ledger = await loadMigrationLedgerEvidence();
   // Rows 85-87 are the WP4, WP8 and WP12 migrations, applied to production on 2026-09-20. Each
   // went in under its own authored version, so none of them adds to the versionDrift list below.
-  assert.equal(ledger.migrations.length, 90);
-  assert.deepEqual(ledger.migrations.slice(-3).map((migration) => migration.version), [
+  assert.equal(ledger.migrations.length, 91);
+  assert.deepEqual(ledger.migrations.slice(-4).map((migration) => migration.version), [
     "20261006080000",
     "20261016210929",
     "20261016215408",
+    "20261016232358",
   ]);
-  assert.equal(ledger.migrations.at(-1).appliedOrder, 90);
+  assert.equal(ledger.migrations.at(-1).appliedOrder, 91);
   assert.ok(ledger.migrations.slice(-3).every((migration) => migration.localCanonicalSqlSha256));
   // appliedOrder must stay a gapless sequence, or the overlay has lost or double-counted a push.
   assert.deepEqual(
     ledger.migrations.map((migration) => migration.appliedOrder),
-    Array.from({ length: 90 }, (_, index) => index + 1),
+    Array.from({ length: 91 }, (_, index) => index + 1),
   );
 });
 
@@ -344,9 +346,9 @@ test("migration history validation reports the effective applied ledger, not the
     fileURLToPath(new URL("../../ops/validate-migration-history.mjs", import.meta.url)),
   ], { encoding: "utf8" }));
   assert.equal(result.authoritativeBase, 60);
-  assert.equal(result.appliedOverlay, 30);
-  assert.equal(result.effectiveApplied, 90);
-  assert.equal(result.active, 90);
+  assert.equal(result.appliedOverlay, 31);
+  assert.equal(result.effectiveApplied, 91);
+  assert.equal(result.active, 91);
   // All October migrations are confirmed in the live ledger. Historical authored/applied
   // version differences remain visible rather than rewriting production history.
   assert.deepEqual(result.pending, []);
@@ -407,7 +409,7 @@ test("the current runtime catalog and backup manifest are exactly aligned", () =
   // Tables whose migration has not been applied are reported as pending, not as a manifest that
   // names something production lacks: they must be in the manifest BEFORE the migration lands, or
   // the first snapshot after it silently omits them.
-  const coverage = findCatalogCoverageGaps(PRODUCTION_PUBLIC_TABLES_107, CA_TABLES, EPHEMERAL_RUNTIME_TABLES, PENDING_MIGRATION_TABLES);
+  const coverage = findCatalogCoverageGaps(PRODUCTION_PUBLIC_TABLES_109, CA_TABLES, EPHEMERAL_RUNTIME_TABLES, PENDING_MIGRATION_TABLES);
   assert.deepEqual({ missingFromBackup: coverage.missingFromBackup, missingFromCatalog: coverage.missingFromCatalog }, {
     missingFromBackup: [], missingFromCatalog: [],
   });
@@ -416,7 +418,7 @@ test("the current runtime catalog and backup manifest are exactly aligned", () =
   assert.deepEqual(coverage.pendingMigration, []);
   assert.deepEqual(PENDING_MIGRATION_TABLES, []);
   // A table nobody migrated and nobody backed up is still a gap, pending list or not.
-  assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_107, "ghost_table"], CA_TABLES, EPHEMERAL_RUNTIME_TABLES, PENDING_MIGRATION_TABLES).missingFromBackup,
+  assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_109, "ghost_table"], CA_TABLES, EPHEMERAL_RUNTIME_TABLES, PENDING_MIGRATION_TABLES).missingFromBackup,
     ["ghost_table"]);
   assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_98, "forgotten_runtime_table"], CA_TABLES, EPHEMERAL_RUNTIME_TABLES).missingFromBackup,
     ["forgotten_runtime_table"]);
@@ -461,8 +463,8 @@ test("backup/restore recognizes historical ledgers and the current production ca
   // The accepted window keeps headroom past that so the next constraint migration does not
   // take backup down again.
   assert.ok(CURRENT_CATALOG_MIGRATION_RANGE.max >= 96);
-  assert.ok(CURRENT_CATALOG_MIGRATION_RANGE.max - CURRENT_CATALOG_MIGRATION_RANGE.min >= 8);
-  for (const count of [87, 88, CURRENT_CATALOG_MIGRATION_RANGE.max]) {
+  assert.equal(CURRENT_CATALOG_MIGRATION_RANGE.min, 91);
+  for (const count of [87, 88, 89, 90]) {
     const evidence = runtimeCatalogEvidence(count);
     assert.equal(evidence.tables.length, 107, `ledger ${count}`);
     assert.equal(evidence.tablesSha256, sha256Lines(PRODUCTION_PUBLIC_TABLES_107));
@@ -471,6 +473,18 @@ test("backup/restore recognizes historical ledgers and the current production ca
     assert.equal(evidence.fkPairsSha256, sha256Lines(evidence.fkPairs));
   }
   assert.equal(PRODUCTION_PUBLIC_TABLES_107.length, 107);
+  for (const count of [91, CURRENT_CATALOG_MIGRATION_RANGE.max]) {
+    const evidence = runtimeCatalogEvidence(count);
+    assert.equal(evidence.tables.length, 109);
+    assert.equal(evidence.tablesSha256, sha256Lines(PRODUCTION_PUBLIC_TABLES_109));
+    assert.equal(evidence.fkPairs.length, 103);
+    assert.equal(evidence.fkPairsSha256, sha256Lines(evidence.fkPairs));
+    assert.ok(evidence.tables.includes("app_booking_reservations"));
+    assert.ok(evidence.tables.includes("app_booking_request_keys"));
+    assert.deepEqual(validateRestoreOrder(RESTORE_ORDER, evidence.fkPairs), { missingTables: [], violations: [] });
+    assert.ok(validateRestoreOrder(RESTORE_ORDER.filter(t => t !== "app_booking_reservations"), evidence.fkPairs).missingTables.includes("app_booking_reservations"));
+  }
+
   assert.throws(() => runtimeCatalogEvidence(CURRENT_CATALOG_MIGRATION_RANGE.max + 1), /unsupported production migration count/);
   assert.throws(() => runtimeCatalogEvidence(67), /unsupported production migration count/);
   assert.throws(() => runtimeCatalogEvidence("87-migrations"), /unsupported production migration count/);

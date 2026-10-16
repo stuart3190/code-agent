@@ -86,6 +86,8 @@ export const CA_TABLES = [
   "custom_domains",
   "ca_push_subscriptions",
   "entities",
+  "app_booking_reservations", // after projects/entities; records remain private
+  "app_booking_request_keys", // after reservations; preserve retry identities
   "app_users",
   "app_auth_events",
   "app_password_resets",

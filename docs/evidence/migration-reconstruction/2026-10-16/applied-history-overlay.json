@@ -1,9 +1,9 @@
 {
   "source": "Connected Supabase list_migrations and read-only schema_migrations query on zczgvcsokfafuyognvwx",
-  "capturedAt": "2026-10-16T21:54:41.497345+00:00",
+  "capturedAt": "2026-10-16T23:24:00Z",
   "baseVersion": "20260919120000",
-  "ledgerCount": 90,
-  "note": "October 6 policy already applied before this audit; October 16 trigger grants applied after isolated PostgreSQL proof. Existing version drift preserved. Local byte hashes identify reviewed files; remote statements were separately inspected. Build-scoped snapshot identity applied after isolated PostgreSQL unique-index proof; no data rewritten.",
+  "ledgerCount": 91,
+  "note": "October 6 policy already applied before this audit; October 16 trigger grants applied after isolated PostgreSQL proof. Existing version drift preserved. Local byte hashes identify reviewed files; remote statements were separately inspected. Build-scoped snapshot identity applied after isolated PostgreSQL unique-index proof; no data rewritten. Opt-in shared single-slot reservation tables applied after isolated concurrent PostgreSQL proof; existing rows unchanged.",
   "migrations": [
     {
       "appliedOrder": 88,
@@ -28,6 +28,14 @@
       "filename": "20261016215408_scope_snapshot_identity_to_qualifying_build.sql",
       "localCanonicalSqlSha256": "6e79a6d11101749f64558f93514d3ba5e28b5ae3ce24725151e98b28eb097679",
       "appliedVersion": "20261016215408"
+    },
+    {
+      "appliedOrder": 91,
+      "version": "20261016232358",
+      "name": "shared_single_slot_bookings",
+      "filename": "20261016232358_shared_single_slot_bookings.sql",
+      "localCanonicalSqlSha256": "48c641792d128d0e830f85aa132cb8520f27a44a73a3ae5a04e23d5e79c89581",
+      "appliedVersion": "20261016232358"
     }
   ]
 }

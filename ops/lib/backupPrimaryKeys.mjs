@@ -28,6 +28,8 @@ export const BACKUP_PRIMARY_KEYS = Object.freeze({
   "app_auth_events": [
     "id"
   ],
+  "app_booking_reservations": ["id"],
+  "app_booking_request_keys": ["app_id", "owner", "request_id"],
   "app_billing_events": [
     "app_id",
     "event_id"
