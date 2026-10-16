@@ -1,0 +1,114 @@
+[
+  {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "c": {
+      "unit": "feet",
+      "length": "12",
+      "width": "10",
+      "spacing": "4",
+      "expected": 9
+    },
+    "pass": true
+  },
+  {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "c": {
+      "unit": "metres",
+      "length": "6",
+      "width": "4",
+      "spacing": "1.5",
+      "expected": 12
+    },
+    "pass": true
+  },
+  {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "c": {
+      "unit": "metres",
+      "length": "5",
+      "width": "3",
+      "spacing": "",
+      "expected": 6
+    },
+    "pass": true
+  },
+  {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "c": {
+      "unit": "metres",
+      "length": "0",
+      "width": "3",
+      "spacing": "",
+      "expected": null
+    },
+    "pass": true
+  },
+  {
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "c": {
+      "unit": "feet",
+      "length": "12",
+      "width": "10",
+      "spacing": "4",
+      "expected": 9
+    },
+    "pass": true
+  },
+  {
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "c": {
+      "unit": "metres",
+      "length": "6",
+      "width": "4",
+      "spacing": "1.5",
+      "expected": 12
+    },
+    "pass": true
+  },
+  {
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "c": {
+      "unit": "metres",
+      "length": "5",
+      "width": "3",
+      "spacing": "",
+      "expected": 6
+    },
+    "pass": true
+  },
+  {
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "c": {
+      "unit": "metres",
+      "length": "0",
+      "width": "3",
+      "spacing": "",
+      "expected": null
+    },
+    "pass": true
+  }
+]

@@ -99,6 +99,7 @@ export const ADVISORY_CODES = Object.freeze({
   // WP5: the entities module owns identity and record shape. A generated wrapper that re-derives
   // them from raw rows still runs, so the browser decides; it is reported so repair can replace
   // the wrapper with the module's record instead of patching it.
+  typed_record_field_access: "typed repository domain fields must be read from record.values; inferred accesses are advisory until browser proof",
   generated_record_shape_wrapper: "generated code re-derives record shape from raw backend rows where the entities module owns it",
   // WP6: a literal ":param" destination navigates to the pattern rather than a record. Reported,
   // not enforced: the browser journey proves whether the link opens the right record.

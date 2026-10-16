@@ -162,7 +162,12 @@ export const entityDefinitions = Object.freeze(${jsObject(entitySchema.definitio
 export const entitySchema = compileSchema(entityDefinitions);
 export const repositories = createEntityRepositories({ db, schema: entitySchema });
 
-/** The typed repository for one declared entity: { create, get, update, remove, list, count, subscribe }. */
+/** The typed repository for one declared entity: { create, get, update, remove, list, count, subscribe }.
+ * get/create/update resolve { id, version, createdAt, updatedAt, values }; list resolves an ARRAY
+ * of these records (no data envelope). Read domain fields as record.values.title, never record.title.
+ * Pass plain domain values to create/update. Keep record.id for get/update/remove; keep version
+ * for optimistic concurrency. Use record.values for edit drafts and list filtering/display.
+ */
 export function repository(entity) {
   const found = repositories[String(entity)];
   if (!found) throw new Error(\`No entity "\${entity}" is declared for this application\`);
