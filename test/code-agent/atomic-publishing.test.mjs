@@ -119,7 +119,9 @@ test("C8-06b lost DB completion acknowledgement resolves from durable completed 
   };
   try {
     const result = await reconcileActivation({ id: id(62), owner: OWNER, slug: "proof-commit",
-      operation: "activate", desired_release_id: desired.id, previous_release_id: null }, { client });
+      operation: "activate", desired_release_id: desired.id, previous_release_id: null }, {
+      client, publicHealth: async slug => assert.equal(slug, "proof-commit"),
+    });
     assert.equal(result.state, "completed");
     assert.equal(rpcCalls.includes("fail_publish_activation"), false);
   } finally {
@@ -144,7 +146,7 @@ test("C8-08 reconciler can revert to the retained previous release", { skip: !li
   assert.equal((await releases.inspectPointer("proof-eight")).releaseId, id(8));
 });
 
-test("C8-08b post-switch health failure restores the previous pointer and records rollback", async () => {
+for (const failure of ["artifact", "public ingress"]) test(`C8-08b ${failure} health failure restores the previous pointer and records rollback`, async () => {
   const desired = { id: id(81), owner: OWNER, project_id: PROJECT, artifact_hash: "a".repeat(64), manifest_hash: "b".repeat(64) };
   const previous = { id: id(82), owner: OWNER, project_id: PROJECT, artifact_hash: "c".repeat(64), manifest_hash: "d".repeat(64) };
   const calls = [];
@@ -154,7 +156,8 @@ test("C8-08b post-switch health failure restores the previous pointer and record
     res.setHeader("Content-Type", "application/json");
     if (req.method === "GET") return res.end(JSON.stringify({ releaseId: desired.id }));
     if (req.url === "/releases/verify" && body.releaseId === desired.id) {
-      return res.end(JSON.stringify({ artifactHash: "0".repeat(64), manifestHash: desired.manifest_hash }));
+      return res.end(JSON.stringify({ artifactHash: failure === "artifact" ? "0".repeat(64) : desired.artifact_hash,
+        manifestHash: desired.manifest_hash }));
     }
     if (req.url === "/releases/verify" && body.releaseId === previous.id) {
       return res.end(JSON.stringify({ artifactHash: previous.artifact_hash, manifestHash: previous.manifest_hash }));
@@ -178,11 +181,17 @@ test("C8-08b post-switch health failure restores the previous pointer and record
   };
   try {
     const result = await reconcileActivation({ id: id(83), slug: "proof-health", operation: "activate",
-      desired_release_id: desired.id, previous_release_id: previous.id }, { client });
+      desired_release_id: desired.id, previous_release_id: previous.id }, {
+      client, publicHealth: async slug => {
+        assert.equal(slug, "proof-health");
+        throw new Error("public asset index.html returned HTTP 404");
+      },
+    });
     assert.equal(result.state, "rolled_back");
     assert.equal(calls.some((call) => call.releaseId === previous.id && call.expectedPreviousReleaseId === desired.id), true);
     assert.equal(calls.some((call) => call.name === "mark_publish_activation_rolled_back"
       && call.args.p_observed_release_id === previous.id), true);
+    assert.equal(calls.some(call => call.name === "complete_publish_activation"), false);
   } finally {
     if (oldUrl === undefined) delete process.env.PROVISIOND_URL; else process.env.PROVISIOND_URL = oldUrl;
     if (oldToken === undefined) delete process.env.PROVISIOND_TOKEN; else process.env.PROVISIOND_TOKEN = oldToken;
