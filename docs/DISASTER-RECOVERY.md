@@ -139,3 +139,11 @@ independent credentials/probe configuration has been supplied and tested.
 - After every schema change, the release pipeline runs fresh reset, lint, schema diff, catalog
   coverage and backup compatibility proofs.
 - Quarterly, rehearse the four-hour RTO from a clean host or namespace and record actual timing.
+
+External restore probe output is JSON Lines. Each sample must contain `host` (the requested
+host), numeric `port` (55320 through 55327), `checkedAt` (ISO timestamp), and `connected: false`.
+Emit each port's sample at least once per minute throughout the drill. Any reachable port,
+missing port, malformed/empty output, wrong host, stale sample or coverage gap fails the drill.
+A successful process exit alone is not isolation evidence. DR health reads the completed
+`result: "pass"` record after `startedAt` in `drill.json`; touching a file or starting a failed
+restore does not refresh the successful-drill timestamp.
