@@ -12,6 +12,7 @@ import { rm } from "node:fs/promises";
 
 import { clone, fromScaffold } from "../../../../src/engine/fileTree.mjs";
 import { REACT_VITE } from "../../../../src/scaffolds/reactVite.mjs";
+import { createCandidateFindingsRecorder } from "./candidateFindings.mjs";
 import { patchOutcomes } from "./patchEngine.mjs";
 import { classifyComplexity } from "../appBuild/buildProfile.mjs";
 import { createBudgetLedger } from "../appBuild/budgetLedger.mjs";
@@ -710,6 +711,7 @@ export function createBuilderV2Runtime({
           await recordFacts(eventOwner, eventProject, [{ kind, key, value, sourceBuild: buildId }]);
         },
       };
+      events.candidateFindings = createCandidateFindingsRecorder({ telemetry: events.telemetry, emit });
       const recordRetrieval = async ({ owner: eventOwner, buildId, step, query, included, omittedCount, tokens }) => {
         const { error } = await client.from("bv2_retrieval_traces").insert({
           owner: eventOwner, build_id: buildId, step, query, included,
