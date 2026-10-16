@@ -20,6 +20,7 @@ import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { loadEnv } from "../shell/server/lib/env.mjs";
 import { validateBackupDirectory } from "../scripts/lib/backupValidation.mjs";
+import { dumpTable } from "./lib/backupPagination.mjs";
 import { inventoryFilesystemRoot, readInventoriedFile } from "./lib/filesystemBackup.mjs";
 import {
   EPHEMERAL_RUNTIME_TABLES,
@@ -170,48 +171,6 @@ export const CA_TABLES = [
 
 export const ARTIFACT_BUCKET = process.env.CODE_AGENT_ARTIFACT_BUCKET || "thrallo-artifacts";
 const PAGE = 1000;
-// The floor for the adaptive page size. Below this a genuinely unservable row is the problem, not
-// the batch, and shrinking further would only turn one failure into a thousand.
-const MIN_PAGE = 10;
-
-/**
- * Every row of a table, in pages that shrink until the database can serve them.
- *
- * A fixed page size cannot work here, because row WEIGHT varies by three orders of magnitude
- * between tables: a subscription row is a few hundred bytes, an index chunk carries an embedding
- * and is ~40 KB. At PAGE=1000 that table asked for roughly 40 MB in one statement and Postgres
- * cancelled it — so the whole backup aborted, leaving 16 of 34 tables on disk and no manifest.
- *
- * It failed loudly in the service log and silently everywhere else, which is how Thrallo went from
- * a complete nightly backup on 3 August to a partial one on 4 August with nothing saying so.
- *
- * Halving on timeout self-tunes as tables grow, instead of needing a constant revisited whenever
- * one does.
- */
-async function dumpTable(svc, table) {
-  const rows = [];
-  let size = PAGE;
-  let from = 0;
-  for (;;) {
-    const { data, error } = await svc.from(table).select("*").range(from, from + size - 1);
-    if (error) {
-      // Only a timeout is worth retrying smaller; anything else is a real failure and must stop the
-      // backup rather than be quietly skipped, which would produce a plausible-looking short file.
-      const timedOut = /timeout|canceling statement/i.test(error.message || "");
-      if (timedOut && size > MIN_PAGE) {
-        size = Math.max(MIN_PAGE, Math.floor(size / 4));
-        console.log(`  ${table}: page too heavy, retrying at ${size} rows`);
-        continue;
-      }
-      throw new Error(`${table}: ${error.message}`);
-    }
-    rows.push(...(data || []));
-    if (!data || data.length < size) break;
-    from += data.length;
-  }
-  return rows;
-}
-
 async function dumpAuthUsers(svc) {
   const users = [];
   for (let page = 1; ; page += 1) {
