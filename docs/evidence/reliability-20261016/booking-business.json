@@ -1,0 +1,58 @@
+{
+  "checks": [
+    {
+      "width": 1440,
+      "name": "confirmation contains a real booking reference",
+      "pass": false
+    },
+    {
+      "width": 1440,
+      "name": "confirmation includes requested date and time",
+      "pass": false
+    },
+    {
+      "width": 1440,
+      "name": "no horizontal overflow",
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "name": "no browser errors",
+      "pass": true
+    },
+    {
+      "width": 390,
+      "name": "confirmation contains a real booking reference",
+      "pass": false
+    },
+    {
+      "width": 390,
+      "name": "confirmation includes requested date and time",
+      "pass": false
+    },
+    {
+      "width": 390,
+      "name": "no horizontal overflow",
+      "pass": true
+    },
+    {
+      "width": 390,
+      "name": "no browser errors",
+      "pass": true
+    }
+  ],
+  "results": [
+    {
+      "width": 1440,
+      "reference": null,
+      "confirmation": "Appointment confirmed\n\nYour consultation is confirmed for at .\n\nBooking reference:",
+      "errors": []
+    },
+    {
+      "width": 390,
+      "reference": null,
+      "confirmation": "Appointment confirmed\n\nYour consultation is confirmed for at .\n\nBooking reference:",
+      "errors": []
+    }
+  ]
+}

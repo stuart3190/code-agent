@@ -103,6 +103,7 @@ export const ADVISORY_CODES = Object.freeze({
   generated_record_shape_wrapper: "generated code re-derives record shape from raw backend rows where the entities module owns it",
   // WP6: a literal ":param" destination navigates to the pattern rather than a record. Reported,
   // not enforced: the browser journey proves whether the link opens the right record.
+  capability_call_shape: "a known capability call uses an incompatible literal argument shape; unknown wrappers and spreads abstain",
   platform_link_path: "a platform Link receives a path where its public ABI expects a route ID; retain source diagnosis for repair",
   route_parameter_literal: "a generated destination carries an unbound route parameter instead of a built href",
   // WP7: the query module refuses an undeclared field at runtime, which is the real boundary.

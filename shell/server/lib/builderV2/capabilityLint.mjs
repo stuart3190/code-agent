@@ -96,6 +96,27 @@ export function lintCapabilitySafety(tree, bindings = []) {
     }
   }
 
+  // A confirmed-looking live booking contained no reference: the model passed entity fields
+  // to a capability with a different call signature, then ignored its invalid result. Keep the
+  // source diagnosis advisory because provenance does not prove arbitrary mutation/wrappers.
+  for (const call of facts.get("makeBookingSystem")?.invocations || []) {
+    if (!call.argument || call.argument.spread) continue;
+    const keys = new Set(call.argument.keys);
+    let detail = null;
+    if (call.method === "createBooking") {
+      const missing = [];
+      if (!["date", "dateId", "bookingDate"].some(k => keys.has(k))) missing.push("date");
+      if (!keys.has("slotId")) missing.push("slotId");
+      if (!["name", "guestName"].some(k => keys.has(k))) missing.push("name");
+      if (!["email", "guestEmail"].some(k => keys.has(k))) missing.push("email");
+      if (missing.length) detail = `createBooking expects { date, slotId, name, email }; this literal lacks ${missing.join(", ")}. Map entity fields explicitly and only show confirmation when result === "ok" using response.booking`;
+    } else if (["getBooking", "cancelBooking"].includes(call.method)) {
+      detail = `${call.method} expects positional (reference, email), not an entity-shaped object. Check the returned booking/${call.method === "cancelBooking" ? "ok" : "null"} before displaying success`;
+    }
+    if (detail) findings.push({ code: "capability_call_shape", module: call.module, line: call.line,
+      factory: "makeBookingSystem", method: call.method, message: `${call.module}:${call.line}: ${detail}` });
+  }
+
   // `useSemanticField` normalises a browser change event to the field's semantic value before it
   // invokes generated code. Treating that value as a DOM event is a guaranteed runtime failure:
   // `value.target` is undefined, so `value.target.value` throws on the first keystroke. A live
@@ -526,7 +547,13 @@ export function aggregateCapabilityFacts(tree, bindings = []) {
           const property = (FACTORY_PROPERTIES[source.factory] || []).includes(method);
           if (known) {
             recordDirectSource(module, source, node.object);
-            module.capabilityMemberCalls.push({ source, method, invoked: isCalleeOf(node, parent) });
+            const argument = isCalleeOf(node, parent) ? unwrapExpression(parent.arguments?.[0]) : null;
+            module.capabilityMemberCalls.push({ source, method, invoked: isCalleeOf(node, parent),
+              line: node.loc?.start?.line || null,
+              argument: argument?.type === "ObjectExpression" ? {
+                type: "object", spread: argument.properties.some(p => p.type === "SpreadElement" || p.computed),
+                keys: argument.properties.filter(p => p.type === "ObjectProperty" && !p.computed).map(p => propertyName(p.key)),
+              } : null });
           } else if (!property && isCalleeOf(node, parent)) {
             // Calling something the capability does not expose is a guaranteed TypeError.
             module.unknownMemberCalls.push({ factory: source.factory, method });
@@ -625,7 +652,7 @@ export function aggregateCapabilityFacts(tree, bindings = []) {
       fact.bindings.push({ module: file, local: call.source.local, method: call.method, kind });
       if (call.invoked) {
         fact.invoked.add(call.method);
-        fact.invocations.push({ module: file, local: call.source.local, method: call.method, kind });
+        fact.invocations.push({ module: file, local: call.source.local, method: call.method, kind, line: call.line, argument: call.argument });
       } else {
         // `useSyncExternalStore(wizard.subscribe, wizard.getState)` — the platform's own store
         // contract. The reference IS the use; the consumer performs the call.
