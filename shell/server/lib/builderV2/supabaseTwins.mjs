@@ -27,6 +27,16 @@ function unwrap({ data, error }, what) {
   return data;
 }
 
+// PostgREST caps unpaginated results. Never infer a complete manifest/reference set from it.
+async function completeRows(query, key, label) {
+  const rows = []; const page = 250;
+  for (let offset = 0; ; offset += page) {
+    const batch = unwrap(await query().order(key).range(offset, offset + page - 1), label);
+    rows.push(...(batch || []));
+    if (!batch || batch.length < page) return rows;
+  }
+}
+
 // ── graph persistence (commit I) ──────────────────────────────────────────────────────────────
 
 /**
@@ -255,11 +265,11 @@ export function supabaseSnapshotStorage({ client = serviceClient(), bucket = ART
       return unwrap(await client.from("bv2_snapshots").select("*").eq("id", id).maybeSingle(), "snapshot read");
     },
     async listSnapshots(owner, projectId) {
-      return unwrap(await client.from("bv2_snapshots").select("*")
-        .eq("owner", owner).eq("project_id", projectId), "snapshot list");
+      return completeRows(() => client.from("bv2_snapshots").select("*")
+        .eq("owner", owner).eq("project_id", projectId), "id", "snapshot list");
     },
     async listOwnerSnapshots(owner) {
-      return unwrap(await client.from("bv2_snapshots").select("*").eq("owner", owner), "snapshot owner list");
+      return completeRows(() => client.from("bv2_snapshots").select("*").eq("owner", owner), "id", "snapshot owner list");
     },
     async deleteSnapshot(id) {
       unwrap(await client.from("bv2_snapshots").delete().eq("id", id), "snapshot delete");
@@ -271,8 +281,8 @@ export function supabaseSnapshotStorage({ client = serviceClient(), bucket = ART
         .insert(entries.map((e) => ({ snapshot_id: id, path: e.path, content_hash: e.contentHash }))), "manifest insert");
     },
     async getManifest(id) {
-      const rows = unwrap(await client.from("bv2_snapshot_files").select("path,content_hash")
-        .eq("snapshot_id", id), "manifest read");
+      const rows = await completeRows(() => client.from("bv2_snapshot_files").select("path,content_hash")
+        .eq("snapshot_id", id), "path", "manifest read");
       return rows.map((r) => ({ path: r.path, contentHash: r.content_hash }));
     },
 

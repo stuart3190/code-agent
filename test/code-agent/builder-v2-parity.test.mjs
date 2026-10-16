@@ -29,13 +29,14 @@ function fakeSupabase() {
   const rowsOf = (name) => { if (!tables.has(name)) tables.set(name, []); return tables.get(name); };
 
   function chain(tableName) {
-    const state = { filters: [], op: "select", payload: null, single: false, maybe: false, order: null, onConflict: null, selectAfter: false };
+    const state = { filters: [], op: "select", payload: null, single: false, maybe: false, order: null, range: null, onConflict: null, selectAfter: false };
     const matches = (row) => state.filters.every(([col, val]) => row[col] === val);
     const runQuery = () => {
       const rows = rowsOf(tableName);
       if (state.op === "select") {
         let out = rows.filter(matches).map((r) => ({ ...r }));
         if (state.order) out.sort((a, b) => (a[state.order] > b[state.order] ? 1 : -1));
+        if (state.range) out = out.slice(state.range[0], state.range[1] + 1);
         if (state.single || state.maybe) {
           if (state.single && out.length !== 1) return { data: null, error: { message: `expected 1 row, got ${out.length}` } };
           return { data: out[0] || null, error: null };
@@ -81,6 +82,7 @@ function fakeSupabase() {
       delete() { state.op = "delete"; return api; },
       eq(col, val) { state.filters.push([col, val]); return api; },
       order(col) { state.order = col; return api; },
+      range(from, to) { state.range = [from, to]; return api; },
       single() { state.single = true; return Promise.resolve(runQuery()); },
       maybeSingle() { state.maybe = true; return Promise.resolve(runQuery()); },
       then(resolve, reject) { return Promise.resolve(runQuery()).then(resolve, reject); },
@@ -196,4 +198,16 @@ test("storage transport failure never becomes missing/corrupt blob evidence", as
   c.storage.from = () => ({ download: async () => ({ data: null, error: { message: "temporary 503", statusCode: 503 } }) });
   await assert.rejects(storage.getBlob("o", "h"), error => error.code === "platform_blob_read_failed");
   assert.equal(storage.supportsSafeBlobSweep, false);
+});
+
+
+test("snapshot inventories and manifests read past the PostgREST 1000-row cap", async () => {
+  const c=createFakeBv2Supabase(); const storage=supabaseSnapshotStorage({client:c});
+  const rows=Array.from({length:1251},(_,i)=>({id:`s-${String(i).padStart(5,"0")}`,owner:"o",project_id:"p"}));
+  await c.from("bv2_snapshots").insert(rows);
+  await c.from("bv2_snapshot_files").insert(rows.map((r,i)=>({snapshot_id:"s",path:`src/${String(i).padStart(5,"0")}.js`,content_hash:r.id})));
+  assert.equal((await storage.listOwnerSnapshots("o")).length,1251);
+  assert.equal((await storage.listSnapshots("o","p")).length,1251);
+  assert.equal((await storage.getManifest("s")).length,1251);
+  assert.equal((await storage.listOwnerSnapshots("other")).length,0);
 });
