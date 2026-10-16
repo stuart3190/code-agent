@@ -7,7 +7,8 @@ Initial production installation, DNS activation, and TLS issuance completed on 2
 
 ## Topology
 
-- Repository: `/home/ubuntu/code-agent`
+- Deployed application copy: `/home/ubuntu/code-agent` (no Git metadata on the current VPS)
+- Resolve the source worktree and `DEPLOYED_COMMIT` before deployment.
 - Web and API service: `thrallo-shell.service`
 - Private listener: `10.83.7.1:8788`
 - Public application: `https://app.thrallo.com`
@@ -22,8 +23,9 @@ The tracked service definition is `ops/thrallo-shell.service`; the tracked proxy
 ## Secret custody
 
 Production secrets live only in `/home/ubuntu/code-agent/shell/.env`, owned by `ubuntu` with mode
-`600`. Browser configuration lives in `/home/ubuntu/code-agent/shell/web/.env` and contains only
-`VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. The legacy
+`600`. Browser configuration contains only `VITE_SUPABASE_URL` and
+`VITE_SUPABASE_PUBLISHABLE_KEY` and is embedded by the production web build. An optional
+`shell/web/.env` may supply these values, but it does not exist on the current VPS. The legacy
 `VITE_SUPABASE_ANON_KEY` name remains a fallback during key migration. Neither file is shipped
 through Git, and service-role/secret keys must never be added to the web environment.
 
@@ -83,7 +85,7 @@ Dockerfile is unchanged if verdict-deciding files changed. Run
 npm run build:web:production
 sudo systemctl restart thrallo-build-worker thrallo-shell
 npm run worker:release:verify
-node --env-file=shell/.env --env-file=shell/web/.env scripts/smoke-production.mjs \
+node --env-file=shell/.env scripts/smoke-production.mjs \
   --origin https://app.thrallo.com
 ```
 
@@ -101,3 +103,22 @@ Initial worker installation and sandbox replacement remain approval-gated in
 `docs/BUILD-WORKER-DEPLOYMENT.md`. Once V2-only is active, an ordinary source release must not
 restart only the shell: shell admission and the worker both consume the newly activated manifest,
 and the zero-model worker release gate must pass before the deployment is called green.
+
+## Idle-worker release and artifact paths
+
+After artifacts are ready and before changing live source, run `node ops/drain-worker-for-release.mjs`
+from the live application. It identifies the exact service worker, refuses active jobs or an
+operator pause, waits for a fresh drain acknowledgment and stops that worker. Only then copy the
+release and restart both consumers. If activation fails after drain, restore the backed-up source,
+manifest, image pin and environment before starting the worker. Never restart an active build.
+The external deployment helper implements this sequence; reviewed source is in
+`ops/drain-worker-for-release.mjs` and `ops/lib/drainIdleWorker.mjs`.
+
+Use `ops/create-deployment-manifest.mjs --ledger <fresh-applied-production-ledger.json>` whenever
+database history changed. Reusing `--previous-manifest` does not discover newly applied migrations.
+
+Set `QA_ARTIFACT_DIR=/var/lib/thrallo-build-worker/qa` consistently in the shell and worker
+environment on this VPS. Create it owned by `thrallo-build-worker:thrallo`, mode `2750`; the shell
+and backup user must belong to `thrallo`. This path is inside the worker service's writable root.
+Verify a real QA run and owner-scoped screenshot read after changing it. Missing filesystem roots
+must fail backup loudly; do not skip them to make a backup appear complete.
