@@ -178,3 +178,23 @@ browserTest("mobile inspection preserves result state produced by desktop intera
   const {server,url}=await serve({'/':html});
   try{const result=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});assert.equal(result.pass,false);assert.match(result.journeys[0].detail,/Mobile 390px.*Metres.*Result/);}finally{server.close();}
 });
+
+for (const [name, content, expectedPass, phase] of [
+  ["visible platform error boundary", '<main data-scaffold-boundary="error" role="alert">This screen could not load</main>', false, "load"],
+  ["platform boundary after activation", `<button onclick="document.getElementById('root').innerHTML='<main data-scaffold-boundary=error>This screen could not load</main>'">Open</button>`, false, "activate"],
+  ["hidden platform boundary", '<main hidden data-scaffold-boundary="error">This screen could not load</main><h1>Working app</h1>', true],
+  ["ordinary validation alert", '<main role="alert">Please enter a valid length</main>', true],
+]) {
+  browserTest(name + " is classified by platform marker visibility", async () => {
+    const { server, url } = await serve({ "/": `<html><body><div id="root">${content}</div></body></html>` });
+    try {
+      const result = await smokeVerifyJourneys({ previewUrl: url, contract: journeysOnly, timeoutMs: 20_000, browser });
+      assert.equal(result.pass, expectedPass, JSON.stringify(result.smoke));
+      if (!expectedPass) {
+        assert.equal(result.smoke.crashes[0].phase, phase);
+        assert.match(result.fatalErrors[0], /platform error boundary/);
+        assert.ok(result.journeys.every(j => j.classification === VERIFICATION_RESULT_CLASS.FATAL_RUNTIME_FAILURE));
+      }
+    } finally { server.close(); }
+  });
+}

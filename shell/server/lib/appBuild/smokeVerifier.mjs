@@ -40,7 +40,12 @@ function renderedState(page) {
     if (!root) return { rendered: false, text: 0, controls: 0 };
     const text = String(root.innerText || "").trim().length;
     const controls = root.querySelectorAll("button, input, select, textarea, a[href], canvas, svg, img, video, [role=button]").length;
-    return { rendered: text > 0 || controls > 0, text, controls };
+    const boundaryError = [...root.querySelectorAll('[data-scaffold-boundary="error"]')].some((node) => {
+      const box = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      return box.width > 0 && box.height > 0 && style.visibility !== "hidden" && style.visibility !== "collapse";
+    });
+    return { rendered: text > 0 || controls > 0, text, controls, boundaryError };
   }).catch(() => null); // navigation in flight: not a verdict, poll again
 }
 
@@ -48,7 +53,7 @@ async function waitForRender(page, deadline) {
   let last = null;
   while (Date.now() < deadline) {
     last = await renderedState(page);
-    if (last?.rendered) return last;
+    if (last?.rendered || last?.boundaryError) return last;
     await page.waitForTimeout(250);
   }
   return last || { rendered: false, text: 0, controls: 0 };
@@ -193,6 +198,10 @@ export async function smokeVerifyJourneys({
       render = await waitForRender(page, renderDeadline);
       if (crashed) {
         crashes.push({ phase: "load", control: null, error: "the page crashed while loading" });
+      } else if (render.boundaryError) {
+        crashes.push({ phase: "load", control: null,
+          error: "application screen failed inside platform error boundary",
+          ...crashEvidence(pageErrorDetails[0]) });
       } else if (!render.rendered) {
         crashes.push({ phase: "load", control: null,
           error: pageErrors[0] ? `fatal runtime error during load: ${pageErrors[0]}` : "nothing rendered in the preview",
@@ -247,9 +256,9 @@ export async function smokeVerifyJourneys({
           await page.waitForTimeout(SETTLE_MS);
         }
         const state = crashed ? { rendered: false } : await waitForRender(page, Date.now() + 3_000);
-        if (crashed || !state?.rendered) {
+        if (crashed || state?.boundaryError || !state?.rendered) {
           crashes.push({ phase: "activate", control: describeControl(info),
-            error: crashed ? "the page crashed" : pageErrors.at(-1)
+            error: crashed ? "the page crashed" : state?.boundaryError ? "application screen failed inside platform error boundary after activation" : pageErrors.at(-1)
               ? `fatal runtime error after activation: ${pageErrors.at(-1)}` : "the application went blank after activation",
             ...(crashed ? {} : crashEvidence(pageErrorDetails.at(-1))) });
           break;
