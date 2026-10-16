@@ -543,6 +543,30 @@ test("WP8 — machine-taught patch rejection: round 1 rejected op, round 2 recei
   assert.equal(patchCalls[1].rejections, 1, "round 2 was briefed with the rejection");
 });
 
+test("a valid replacement recovers a parser-rejected creation without another model dispatch", async () => {
+  const file = "src/lib/layoutCalculation.js";
+  let calls = 0;
+  const h = harness({ patchPlan: {
+    core: ({ rejections, tree }) => {
+      calls += 1;
+      if (calls === 1) return [{ newFile: file,
+        content: 'export function calculate(input, { operation: "calculate-layout" }) { return input; }' }];
+      assert.equal(Object.hasOwn(tree, file), false);
+      assert.ok(rejections.some(row => row.code === "source_parse_failed" && row.operation === "newFile"));
+      return [...CORE_PATCH.map(patch => ({ ...patch,
+        content: `import "../../lib/layoutCalculation.js";\n${patch.content}` })),
+      { replaceFile: file, content: "export function calculate(input, context) { return input; }" }];
+    },
+    "increment:newsletter-signup": () => NEWSLETTER_PATCH,
+    "increment:browse-info": () => BROWSE_PATCH,
+  } });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "proj-rejected-creation", request: "booking site" });
+  assert.equal(result.state, "green", JSON.stringify(result));
+  assert.equal(calls, 2, "one failed emission and one valid correction suffice");
+  assert.equal(h.patchCalls.filter(call => call.step === "correction").length, 0);
+  assert.ok(h.patchCalls.some(call => call.treeFiles.includes(file)), "accepted creation survives into subsequent steps");
+});
+
 test("the last candidate correction escalates a rejected file to complete replacement", async () => {
   const unsafe = `import { db } from "../lib/backend/index.js";
 export const create = (draft) => db.entity("booking").create(draft);

@@ -81,6 +81,16 @@ const CONTRACT = {
 };
 const TIERS = { essential: { journeys: ["send-message"], entities: [], operations: [] }, secondary: { journeys: [], entities: [], operations: [] } };
 
+test("whole-file escalation distinguishes missing rejected files from retained files", () => {
+  const prompt = renderPatchPrompt({ step: "core", contract: CONTRACT, tiers: TIERS,
+    tree: { "src/existing.js": "export const value = 1;" },
+    regenerateFiles: ["src/missing.js", "src/existing.js"],
+  });
+  assert.match(prompt, /src\/missing\.js: missing — use newFile/);
+  assert.match(prompt, /src\/existing\.js: exists — use replaceFile/);
+  assert.doesNotMatch(prompt, /Do not use newFile or symbol operations for these files/);
+});
+
 function fakePatchProvider({ usage = { input: 1000, output: 200, cached: 0, reasoning: 0, total: 1200 }, patches = [] } = {}) {
   const calls = [];
   return {

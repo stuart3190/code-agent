@@ -17,7 +17,7 @@ import path from "node:path";
 
 import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
-import { applyPatches, escalationPlan, patchOutcomes, REJECTION } from "./patchEngine.mjs";
+import { applyPatches, escalationPlan, normalizeMissingCreationCorrections, patchOutcomes, REJECTION } from "./patchEngine.mjs";
 import { completionEligibility } from "./contractTiering.mjs";
 import { deriveBuildSpec, journeysInMountedScreenUnit, scopeBuildSpec } from "./buildSpec.mjs";
 import { refreshAutoBuildProfile } from "../../../shared/buildProfile.mjs";
@@ -633,7 +633,7 @@ export function createOrchestrator({
         ...(protocolCorrectionDispatch ? protocolRegenerateFiles : []),
       ])];
       if (protocolCorrectionDispatch) protocolRegenerateFiles.clear();
-      const patches = await patchesFn({ step: dispatchStep, originalStep: step, owner, projectId, buildId, attempt,
+      const emittedPatches = await patchesFn({ step: dispatchStep, originalStep: step, owner, projectId, buildId, attempt,
         contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null,
         editRequest: repairScope?.instruction || contractCorrectionScope?.instruction || editRequest,
         modulePlan, moduleContracts, repairScope, moduleCorrectionScope: contractCorrectionScope, headroomScope,
@@ -642,6 +642,10 @@ export function createOrchestrator({
           : protocolCorrectionDispatch ? "final_patch_protocol_correction"
           : scopeRejectionCorrection ? "scope_rejection_correction" : null,
         spec: scoped, signal });
+      const { patches, conversions } = normalizeMissingCreationCorrections(emittedPatches, working, rejectionHistory);
+      for (const conversion of conversions) {
+        log(`${step}: corrected ${conversion.file} from replaceFile to newFile because its prior creation was rejected`);
+      }
       // The model lane may have split an oversized, not-yet-dispatched prompt into one bounded
       // continuation. Enforce that internal write boundary exactly like a validator-owned scope;
       // the following full-tree gates still decide whether more work is required.

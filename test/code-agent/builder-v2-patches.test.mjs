@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { applyPatches, escalationPlan, EMIT_PATCHES_SCHEMA } from "../../shell/server/lib/builderV2/patchEngine.mjs";
+import { applyPatches, escalationPlan, normalizeMissingCreationCorrections, EMIT_PATCHES_SCHEMA } from "../../shell/server/lib/builderV2/patchEngine.mjs";
 import { indexFile, indexTree, diffIndex } from "../../shell/server/lib/builderV2/indexerV0.mjs";
 import { preflightImports } from "../../shell/server/lib/appBuild/importPreflight.mjs";
 
@@ -15,6 +15,28 @@ const TREE = JSON.parse(readFileSync(path.join(FIXTURES, "run17b6513f-tree.json"
 const CONTRACT = JSON.parse(readFileSync(path.join(FIXTURES, "cf130c23", "contract.json"), "utf8"));
 
 const SELECTOR = "src/components/BookingSlotSelector.jsx";
+
+test("a missing creation repair is recovered only with matching prior syntax-rejection evidence", () => {
+  const file = "src/calculation.js";
+  const broken = applyPatches({}, [{ newFile: file, content: 'export function run(input, { operation: "calculate" }) {}' }]);
+  const replacements = [{ replaceFile: file, content: "export function run(input, context) { return input; }" }];
+  replacements.dispatchScope = { allowedFiles: [file] };
+  assert.equal(applyPatches({}, replacements).rejected[0].code, "patch_not_applicable");
+  const normalized = normalizeMissingCreationCorrections(replacements, {}, broken.rejected);
+  assert.equal(normalized.patches.dispatchScope, replacements.dispatchScope);
+  assert.equal(normalized.patches[0].newFile, file);
+  assert.equal(replacements[0].replaceFile, file, "original model emission remains unchanged");
+  assert.equal(applyPatches({}, normalized.patches).rejected.length, 0);
+  assert.equal(normalizeMissingCreationCorrections(replacements, {}, []).conversions.length, 0);
+  assert.equal(normalizeMissingCreationCorrections(replacements, { [file]: "export const value=1;" }, broken.rejected).conversions.length, 0);
+  assert.equal(normalizeMissingCreationCorrections([{ replaceFile: "src/unrelated.js", content: "x" }], {}, broken.rejected).conversions.length, 0);
+  const invalid = normalizeMissingCreationCorrections([{ replaceFile: file, content: "export function (" }], {}, broken.rejected);
+  assert.equal(applyPatches({}, invalid.patches).rejected[0].code, "source_parse_failed");
+  const protectedPath = "src/lib/capabilities/protected.js";
+  const protectedRepair = normalizeMissingCreationCorrections([{replaceFile: protectedPath, content: "export const x=1;"}], {},
+    [{code:"source_parse_failed",operation:"newFile",file:protectedPath}]);
+  assert.equal(applyPatches({}, protectedRepair.patches).rejected[0].code, "write_scope_violation");
+});
 
 test("WP2 — replace_symbol lands surgically: only the targeted symbol's hash changes", () => {
   const before = indexTree(TREE);

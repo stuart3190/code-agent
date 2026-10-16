@@ -235,6 +235,29 @@ export const REJECTION = Object.freeze({
   BATCH_ATOMIC_ROLLBACK: "batch_atomic_rollback",   // valid on its own; discarded with its batch
 });
 
+const parseFailureDetail = (probe) => probe.parseError
+  ? `${probe.parseError.message}${probe.parseError.code ? ` [${probe.parseError.code}]` : ""}`
+  : "the source could not be parsed";
+
+// A failed creation never enters the retained tree. A later complete replacement of
+// precisely that rejected path is still a creation repair. Correct the operation only;
+// normal scope, protected-path, syntax and compile gates remain authoritative.
+export function normalizeMissingCreationCorrections(patches, tree, rejectionHistory = []) {
+  const rejectedCreations = new Set(rejectionHistory.filter(row => row.code === REJECTION.SOURCE_PARSE_FAILED
+    && row.operation === "newFile").map(row => row.file));
+  const conversions = [];
+  const normalized = Object.assign([...patches], patches);
+  for (let i = 0; i < patches.length; i += 1) {
+    const patch = patches[i];
+    const file = patch.replaceFile;
+    if (!file || Object.hasOwn(tree, file) || !rejectedCreations.has(file)
+        || patch.newFile || patch.deleteFile || patch.file || patch.ops?.length) continue;
+    normalized[i] = { ...patch, replaceFile: null, newFile: file };
+    conversions.push({ file, from: "replaceFile", to: "newFile", reason: "prior_creation_rejected" });
+  }
+  return { patches: conversions.length ? normalized : patches, conversions };
+}
+
 /**
  * Apply a batch of patches to a tree, validating every operation against the CURRENT index
  * of the file it touches. Returns the new tree plus applied/rejected lists; the input tree
@@ -268,7 +291,7 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
       if (isProtectedPath(patch.newFile, { tree: working, contract })) { reject(patch, null, `newFile: ${patch.newFile} is protected platform infrastructure`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
       const probe = indexFile(patch.newFile, patch.content || "");
       if (probe.opaque && /\.(jsx?|tsx?|mjs|cjs)$/.test(patch.newFile)) {
-        reject(patch, null, `newFile: content for ${patch.newFile} does not parse (unbalanced braces or no structure)`, REJECTION.SOURCE_PARSE_FAILED);
+        reject(patch, null, `newFile: content for ${patch.newFile} does not parse: ${parseFailureDetail(probe)}`, REJECTION.SOURCE_PARSE_FAILED);
         continue;
       }
       working[patch.newFile] = String(patch.content || "");
@@ -283,7 +306,7 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
       const content = String(patch.content || "");
       if (/\.(jsx?|tsx?|mjs|cjs)$/.test(patch.replaceFile)) {
         const probe = indexFile(patch.replaceFile, content);
-        if (probe.opaque) { reject(patch, null, `replaceFile: content for ${patch.replaceFile} does not parse (unbalanced braces or no structure)`, REJECTION.SOURCE_PARSE_FAILED); continue; }
+        if (probe.opaque) { reject(patch, null, `replaceFile: content for ${patch.replaceFile} does not parse: ${parseFailureDetail(probe)}`, REJECTION.SOURCE_PARSE_FAILED); continue; }
       }
       working[patch.replaceFile] = content;
       applied.push({ signature: opSignature(patch, {}), file: patch.replaceFile, kind: "replaceFile" });

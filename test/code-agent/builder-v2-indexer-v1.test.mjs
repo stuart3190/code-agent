@@ -95,6 +95,21 @@ test("WP13 — error recovery still means OPAQUE: a broken file never gets a gue
   assert.equal(v0.indexFile("x.js", "function f() { const = 3; }").opaque, false, "…which v0 could not catch");
 });
 
+test("invalid literal destructuring retains actionable parser diagnostics for repair", () => {
+  // Exact failure shape from live downlight build 62e637a6, repeated after generic feedback.
+  const source = 'export function calculate(input, { operation: "calculate-layout" }) { return input; }';
+  const indexed = v1.indexFile("src/calculate.js", source);
+  assert.equal(indexed.opaque, true);
+  assert.equal(indexed.parseError.line, 1);
+  assert.ok(indexed.parseError.column > 0);
+  assert.ok(indexed.parseError.code);
+  const result = applyPatches({}, [{ newFile: "src/calculate.js", content: source }]);
+  assert.equal(result.applied.length, 0);
+  assert.ok(result.rejected[0].reason.includes(indexed.parseError.message));
+  assert.ok(result.rejected[0].reason.includes(indexed.parseError.code));
+  assert.doesNotMatch(result.rejected[0].reason, /unbalanced braces/);
+});
+
 test("WP13 — deterministic byte-for-byte, default exports named, facade serves v1", () => {
   const source = 'export default function HomePage() {\n  return <main>hi</main>;\n}\nexport const helper = () => 1;\n';
   const a = v1.indexFile("src/routes/HomePage.jsx", source);

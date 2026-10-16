@@ -1027,8 +1027,8 @@ export function renderPatchPrompt({
   }
   if (regenerateFiles.length) {
     parts.push("", "MANDATORY WHOLE-FILE ESCALATION — repeated symbol operations could not land:",
-      ...regenerateFiles.map((file) => `- ${file}`),
-      "For each listed file, emit exactly one replaceFile operation containing the COMPLETE current file plus the required fix. Do not use newFile or symbol operations for these files. Preserve all clean retained sibling work.");
+      ...regenerateFiles.map((file) => `- ${file}: ${Object.hasOwn(tree, file) ? "exists — use replaceFile" : "missing — use newFile"}`),
+      "For each listed existing file, emit exactly one replaceFile operation with COMPLETE corrected content. For each listed missing file, emit exactly one newFile operation. Do not use symbol operations. Preserve all clean retained sibling work.");
   }
   if (compactHeadroomProblems.length) {
     parts.push("", "VERIFICATION FAILED on your last tree — fix these and re-emit patches:",
