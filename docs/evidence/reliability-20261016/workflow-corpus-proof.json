@@ -1,0 +1,13 @@
+{
+  "source": "validated logical backup 2026-10-16T233203",
+  "contracts": 247,
+  "derivable": 247,
+  "uninterpretable": 0,
+  "contractsWithWorkflows": 43,
+  "workflows": 67,
+  "beforeInvalidWorkflows": 67,
+  "afterInvalidWorkflows": 0,
+  "fixedWorkflows": 67,
+  "regressedWorkflows": 0,
+  "remainingErrorClasses": {}
+}
