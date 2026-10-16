@@ -574,8 +574,8 @@ export function validateContract(contract) {
             problems.push(`${where} step ${stepIndex + 1} verificationValues names "${field}", which is not an operated entity field`);
           }
           if (!["string", "number", "boolean"].includes(typeof value)
-              || (typeof value === "string" && !value.trim())) {
-            problems.push(`${where} step ${stepIndex + 1} verificationValues.${field} must be a non-empty JSON primitive`);
+              || (typeof value === "string" && value !== "" && !value.trim())) {
+            problems.push(`${where} step ${stepIndex + 1} verificationValues.${field} must be a JSON primitive (use an explicit empty string to clear an input)`);
           }
         }
       }

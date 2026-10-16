@@ -375,6 +375,22 @@ test("expectedOutputs names a reached functional result and requires fixtures fo
   assert.ok(validateContract(shaped).problems.some((problem) => /expectedOutputs\.area must be a non-empty JSON primitive/.test(problem)));
 });
 
+test("explicit blank input fixtures can exercise optional defaults without accepting invisible outputs", () => {
+  const contract = areaContract();
+  contract.entities[0].fields.find(field => field.name === "width").required = false;
+  contract.journeys[0].steps[1].verificationValues.width = "";
+  const verdict = validateContract(contract);
+  assert.equal(verdict.ok, true, JSON.stringify(verdict.problems));
+  const blankOutput = structuredClone(contract);
+  blankOutput.journeys[0].steps[2].expectedOutputs.area = "";
+  assert.ok(validateContract(blankOutput).problems.some(problem => /expectedOutputs.area/.test(problem)));
+  for (const invalid of [null, [], {}, "   "]) {
+    const malformed = structuredClone(contract);
+    malformed.journeys[0].steps[1].verificationValues.width = invalid;
+    assert.ok(validateContract(malformed).problems.some(problem => /verificationValues.width/.test(problem)));
+  }
+});
+
 test("genuinely observable statements are not rejected for using unlisted verbs", () => {
   // Every one of these was rejected by the first version of isVague, in production, on a real
   // contract — which was then discarded whole, dropping the build back to uncontracted one-shot

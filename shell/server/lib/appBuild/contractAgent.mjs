@@ -124,6 +124,9 @@ Rules:
   as the step asks. Never put a real password, token, credential, customer record, or other secret
   in verificationValues. Ordinary names, emails, numbers and dates need no override when their
   native HTML constraints fully describe validity.
+- Use an explicit empty string in verificationValues to clear an input or test its optional
+  blank/default behavior. Empty expectedOutputs are not visible assertions: omit absent messages
+  and assert the actual computed result or a visible validation message instead.
 - A transient functional search/filter/query operation also needs verificationValues for EVERY
   operated search or filter field. Choose one exact combination that the generated sample data
   will match; use a non-empty all-options sentinel for optional filters rather than an empty value.

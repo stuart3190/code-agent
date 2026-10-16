@@ -66,6 +66,19 @@ async function run(html, step, flows = []) {
   });
 }
 
+test("an explicit blank fixture clears an optional numeric input instead of inventing spacing", needsBrowser, async () => {
+  const field = { ...control("preferredSpacing", "spacing", ["spinbutton"]),
+    valueType: "number", verificationValue: "" };
+  const result = await run('<main><label>Preferred spacing <input type="number" data-thrallo-control="spacing" value="4"></label></main>',
+    { action: "enter the preferred spacing", operates: ["preferredSpacing"],
+      verificationValues: { preferredSpacing: "" }, expect: "the input accepts the requested value" },
+    [{ kind: "input", valueWritten: "preferredSpacing", control: field }]);
+  assert.equal(result.journeys[0].steps[0].status, "pass", JSON.stringify(result));
+  const evidence = JSON.stringify(result.journeys[0].steps[0]);
+  assert.match(evidence, /"expectedValue":""/);
+  assert.match(evidence, /"observedValue":""/);
+});
+
 test("minimal_contract_v1 keeps only contract outcome evidence blocking", async () => {
   const visible = expectationOutcome({
     wanted: ["confirmation", "visible"], found: ["confirmation", "visible"], fresh: [],
