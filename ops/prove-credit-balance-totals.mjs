@@ -9,7 +9,7 @@ try {
  execFileSync('docker',['run','--rm','-d','--name',name,'--network','none','--memory','256m','--cpus','1','--pids-limit','128','-e','POSTGRES_PASSWORD=isolated-proof','postgres:17-alpine','-c','shared_buffers=16MB','-c','max_connections=20'],{stdio:'pipe'});started=true;
  let ready=false;for(let n=0;n<120;n++){try{sql('select 1');ready=true;break;}catch{await new Promise(r=>setTimeout(r,250));}}if(!ready)throw Error('Isolated PostgreSQL unavailable');
  sql(`create role anon;create role authenticated;create role service_role;create table public.credit_ledger(owner uuid,delta numeric(14,4),bucket text,kind text);insert into credit_ledger select '${A}',0.1250,'topup','topup' from generate_series(1,1500);insert into credit_ledger values('${A}',-20,'topup','debit'),('${A}',2.1234,'bundle','service_credit'),('${A}',0.25,'bundle','refund'),('${A}',999,'bundle','grant'),('${A}',-800,'bundle','debit'),('${B}',9000,'topup','topup'),('${B}',100,'bundle','service_credit');`);
- sql(await readFile(new URL('../supabase/migrations/20261017000100_credit_balance_totals.sql',import.meta.url),'utf8'));
+ sql(await readFile(new URL('../supabase/migrations/20261016235852_credit_balance_totals.sql',import.meta.url),'utf8'));
  const totals=owner=>JSON.parse(sql(`set role service_role;select row_to_json(t) from public.credit_balance_totals('${owner}') t;`));
  check('all 1501 purchased ledger rows counted exactly',()=>assert.equal(totals(A).topup,167.5));
  check('refunds/service credits counted, unrelated bundle kinds excluded',()=>assert.equal(totals(A).protected_credits,2.3734));

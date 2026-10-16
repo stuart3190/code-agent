@@ -363,6 +363,10 @@
     {
       "version": "20261016232358",
       "name": "shared_single_slot_bookings"
+    },
+    {
+      "version": "20261016235852",
+      "name": "credit_balance_totals"
     }
   ]
 }
