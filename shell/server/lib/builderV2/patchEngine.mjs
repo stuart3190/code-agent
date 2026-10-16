@@ -289,12 +289,16 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
     if (patch.newFile) {
       if (patch.newFile in working) { reject(patch, null, `newFile: ${patch.newFile} already exists — use ops to modify it`, REJECTION.PATCH_NOT_APPLICABLE); continue; }
       if (isProtectedPath(patch.newFile, { tree: working, contract })) { reject(patch, null, `newFile: ${patch.newFile} is protected platform infrastructure`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
-      const probe = indexFile(patch.newFile, patch.content || "");
+      if (typeof patch.content !== "string") {
+        reject(patch, null, `newFile: ${patch.newFile} requires an explicit string content; missing/null content cannot create an empty file`);
+        continue;
+      }
+      const probe = indexFile(patch.newFile, patch.content);
       if (probe.opaque && /\.(jsx?|tsx?|mjs|cjs)$/.test(patch.newFile)) {
         reject(patch, null, `newFile: content for ${patch.newFile} does not parse: ${parseFailureDetail(probe)}`, REJECTION.SOURCE_PARSE_FAILED);
         continue;
       }
-      working[patch.newFile] = String(patch.content || "");
+      working[patch.newFile] = patch.content;
       applied.push({ signature: opSignature(patch, {}), file: patch.newFile, kind: "newFile" });
       continue;
     }
@@ -303,7 +307,11 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
     if (patch.replaceFile) {
       if (!(patch.replaceFile in working)) { reject(patch, null, `replaceFile: ${patch.replaceFile} does not exist — use newFile to create files`, REJECTION.PATCH_NOT_APPLICABLE); continue; }
       if (isProtectedPath(patch.replaceFile, { tree: working, contract })) { reject(patch, null, `replaceFile: ${patch.replaceFile} is protected platform infrastructure`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
-      const content = String(patch.content || "");
+      if (typeof patch.content !== "string") {
+        reject(patch, null, `replaceFile: ${patch.replaceFile} requires the complete string content; missing/null content cannot erase an existing file`);
+        continue;
+      }
+      const content = patch.content;
       if (/\.(jsx?|tsx?|mjs|cjs)$/.test(patch.replaceFile)) {
         const probe = indexFile(patch.replaceFile, content);
         if (probe.opaque) { reject(patch, null, `replaceFile: content for ${patch.replaceFile} does not parse: ${parseFailureDetail(probe)}`, REJECTION.SOURCE_PARSE_FAILED); continue; }
