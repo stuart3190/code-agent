@@ -918,7 +918,7 @@ import { capabilityConfiguration } from "../../../extensions/capabilityConfigura
 
 const slots = Array.isArray(capabilityConfiguration.booking?.slots)
   ? capabilityConfiguration.booking.slots : [];
-export const bookingCapability = makeBookingSystem({ entity: ${quote(entity)}, slots });
+export const bookingCapability = makeBookingSystem({ entity: ${quote(entity)}, slots, shared: capabilityConfiguration.booking?.shared === true });
 `;
     interfaces.push({ module: `${COMPOSED_ROOT}/booking.js`, exports: ["bookingCapability"], owns: [entity], operations: booking.supportedOperations });
   }

@@ -398,10 +398,11 @@ test("WP9 — booking admits by deterministic rank under concurrency and cancels
   assert.equal((await system.cancelBooking("BK-NOPE")).reason, "not_found");
   assert.equal(await system.remaining("2026-10-01", "evening"), 1, "the seat is released");
 
-  // The 1.1.0 manifest states the concurrency the module actually has.
+  // Shared mode is atomic; legacy mode must not advertise nonexistent CAS.
   const manifest = moduleManifest("thrallo.booking");
-  assert.equal(manifest.version, "1.1.0");
-  assert.equal(manifest.provides.operations.find((row) => row.id === "cancelBooking").concurrency, "versioned");
+  assert.equal(manifest.version, "1.2.0");
+  assert.equal(manifest.provides.operations.find((row) => row.id === "cancelBooking").concurrency, null);
+  assert.equal(manifest.configSchema.properties.shared.default, false);
   assert.ok(manifest.requires.modules.some((row) => row.id === "thrallo.entities"));
   void repository;
 });

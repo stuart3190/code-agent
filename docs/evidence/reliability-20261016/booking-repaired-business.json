@@ -1,0 +1,65 @@
+{
+  "checks": [
+    {
+      "name": "1440 real reference visible",
+      "pass": true
+    },
+    {
+      "name": "wrong email cannot retrieve",
+      "pass": true
+    },
+    {
+      "name": "same visitor retrieves after navigation",
+      "pass": true
+    },
+    {
+      "name": "390 real reference visible",
+      "pass": true
+    },
+    {
+      "name": "shared capacity rejects second visitor same date/time",
+      "pass": false
+    },
+    {
+      "name": "mobile persisted retrieval works",
+      "pass": true
+    },
+    {
+      "name": "1440 cancellation confirmed",
+      "pass": true
+    },
+    {
+      "name": "1440 cancellation survives reload",
+      "pass": true
+    },
+    {
+      "name": "1440 cancellation releases own slot",
+      "pass": true
+    },
+    {
+      "name": "390 cancellation confirmed",
+      "pass": true
+    },
+    {
+      "name": "390 cancellation survives reload",
+      "pass": true
+    },
+    {
+      "name": "390 cancellation releases own slot",
+      "pass": true
+    }
+  ],
+  "failure": null,
+  "bookings": [
+    {
+      "reference": "BK-97ED8A",
+      "email": "reliability-first@example.com",
+      "width": 1440
+    },
+    {
+      "reference": "BK-15A236",
+      "email": "reliability-second@example.com",
+      "width": 390
+    }
+  ]
+}

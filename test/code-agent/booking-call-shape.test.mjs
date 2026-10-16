@@ -7,4 +7,4 @@ test('entity-shaped booking calls name the exact incompatible API inputs',()=>{
 test('valid canonical/legacy calls, unknown input objects, spreads and references abstain',()=>{
  for(const code of ['store.createBooking({date,slotId,name,email});','store.createBooking({bookingDate,slotId,guestName,guestEmail});','store.createBooking(values);','store.createBooking({...values,appointmentDate:date});','store.getBooking(reference,email);','store.cancelBooking(reference,email);','consume(store.createBooking);'])assert.equal(lint(code).length,0,code);
 });
-test('booking prompt describes outcomes and visitor-scope limits honestly',()=>{const brief=capabilityBrief(['booking']);assert.match(brief,/getBooking\(reference, email\)/);assert.match(brief,/only confirm result===/);assert.match(brief,/does not reserve capacity across different visitors/);});
+test('booking prompt describes outcomes and visitor-scope limits honestly',()=>{const brief=capabilityBrief(['booking']);assert.match(brief,/getBooking\(reference, email\)/);assert.match(brief,/only confirm result===/);assert.match(brief,/atomically across visitors/);assert.match(brief,/private to each visitor/);});

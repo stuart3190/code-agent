@@ -359,6 +359,10 @@
     {
       "version": "20261016215408",
       "name": "scope_snapshot_identity_to_qualifying_build"
+    },
+    {
+      "version": "20261016232358",
+      "name": "shared_single_slot_bookings"
     }
   ]
 }

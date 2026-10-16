@@ -320,6 +320,35 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
         },
       };
     },
+    // Private transport for the protected booking capability. Availability is aggregate-only;
+    // reservation/cancellation transactions authorize the app visitor inside PostgreSQL.
+    booking(type) {
+      if (!appId) throw new Error("Shared bookings require an app-scoped backend.");
+      const rpc = async (name, args) => {
+        await ensureEntitySession();
+        const parameters = { p_app_id: appId, p_entity_type: type, ...args };
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const request = client.rpc(name, parameters);
+          const response = await (typeof request.abortSignal === "function" && typeof globalThis.AbortSignal?.timeout === "function"
+            ? request.abortSignal(AbortSignal.timeout(10_000)) : request);
+          if (attempt === 0 && response.error && (response.status === 0 || response.status >= 500)) {
+            await new Promise(resolve => setTimeout(resolve, 200));
+            continue;
+          }
+          const data = unwrap(response);
+          // A lost cancellation response followed by an already-cancelled row is success.
+          return attempt > 0 && name === "app_booking_cancel" && data?.reason === "already_cancelled"
+            ? { ...data, ok: true } : data;
+        }
+      };
+      return {
+        reserve: ({ date, slotId, requestId, values }) => rpc("app_booking_reserve", {
+          p_date: date, p_slot_id: slotId, p_request_id: requestId, p_values: values,
+        }),
+        remaining: (date, slotId) => rpc("app_booking_remaining", { p_date: date, p_slot_id: slotId }),
+        cancel: (reference, email) => rpc("app_booking_cancel", { p_reference: reference, p_email: email }),
+      };
+    },
   };
 
   // Storage is namespaced per user: every object key lives under `<uid>/...`, and the bucket's

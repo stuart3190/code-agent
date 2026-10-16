@@ -1,0 +1,38 @@
+import {execFileSync,execFile} from 'node:child_process';import {promisify} from 'node:util';import {readFile} from 'node:fs/promises';import assert from 'node:assert/strict';
+const run=promisify(execFile), name=`thrallo-booking-proof-${process.pid}`;
+const sql=q=>execFileSync('docker',['exec','-i',name,'psql','-U','postgres','-qAt','-v','ON_ERROR_STOP=1'],{input:q,encoding:'utf8',stdio:['pipe','pipe','pipe']}).trim();
+const A='11111111-1111-4111-8111-111111111111',B='22222222-2222-4222-8222-222222222222',C='33333333-3333-4333-8333-333333333333',APP='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const identity=id=>`set role authenticated;set request.jwt.claim.sub='${id}';`;
+const reserve=(request,slot='09:00',app=APP)=>`public.app_booking_reserve('${app}','booking',current_date+3,'${slot}','${request}','{"name":"Proof Guest","email":"proof@example.com"}'::jsonb)`;
+const call=(id,expr)=>JSON.parse(sql(identity(id)+'select '+expr+';'));
+const checks=[];const check=(name,fn)=>{fn();checks.push(name);};let started=false;
+try{
+ execFileSync('docker',['run','--rm','-d','--name',name,'--network','none','--memory','256m','--cpus','1','--pids-limit','128','-e','POSTGRES_PASSWORD=isolated-proof','postgres:17-alpine','-c','shared_buffers=16MB','-c','max_connections=20'],{stdio:'pipe'});started=true;
+ let ready=false; for(let n=0;n<120;n++){try{sql('select 1');ready=true;break;}catch{await new Promise(r=>setTimeout(r,250));}} if(!ready) throw Error('Isolated PostgreSQL did not become ready: '+execFileSync('docker',['logs',name],{encoding:'utf8'}));
+ sql(`create role anon;create role authenticated;create role service_role;create schema auth;create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;grant usage on schema auth to authenticated;grant execute on function auth.uid() to authenticated;create table auth.users(id uuid primary key);create table public.projects(id uuid primary key);create table public.app_users(app_id text,auth_user_id uuid,status text default 'active');create table public.entities(id uuid primary key default gen_random_uuid(),owner uuid not null references auth.users(id),app_id text,type text,data jsonb,created_at timestamptz default now());alter table entities enable row level security;create policy own on entities for all to authenticated using(owner=auth.uid()) with check(owner=auth.uid());grant select,insert,update,delete on entities to authenticated;insert into auth.users values('${A}'),('${B}'),('${C}');insert into projects values('${APP}'),('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');insert into app_users(app_id,auth_user_id) values('${APP}','${A}'),('${APP}','${B}'),('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','${C}');`);
+ sql(await readFile(new URL('../supabase/migrations/20261016232358_shared_single_slot_bookings.sql',import.meta.url),'utf8'));
+ check('suspended visitor cannot reserve',()=>{sql("update app_users set status='suspended' where auth_user_id='"+B+"';");assert.throws(()=>call(B,reserve('10000000-0000-4000-8000-000000000088')),/App visitor authentication required/);sql("update app_users set status='active' where auth_user_id='"+B+"';");});
+ const first=call(A,reserve('10000000-0000-4000-8000-000000000001'));
+ check('valid booking stores exact authenticated owner',()=>{assert.equal(first.result,'ok');assert.equal(first.record.owner,A);});
+ check('idempotent retry returns same row',()=>assert.equal(call(A,reserve('10000000-0000-4000-8000-000000000001')).record.id,first.record.id));
+ check('same visitor recovers a lost response with a new request key',()=>assert.equal(call(A,reserve('10000000-0000-4000-8000-000000000099')).record.id,first.record.id));
+ check('recovered request alias cannot be reused for another slot',()=>assert.equal(call(A,reserve('10000000-0000-4000-8000-000000000099','14:00')).result,'invalid'));
+ check('other visitor sees only availability count',()=>assert.equal(sql(identity(B)+`select public.app_booking_remaining('${APP}','booking',current_date+3,'09:00');`),'0'));
+ check('RLS hides booking contact details from other visitors',()=>assert.equal(sql(identity(B)+'select count(*) from entities;'),'0'));
+ check('raw reservation table is inaccessible',()=>assert.throws(()=>sql(identity(B)+'select * from app_booking_reservations;'),/permission denied/));
+ check('cross-app actor cannot reserve',()=>assert.throws(()=>call(C,reserve('10000000-0000-4000-8000-000000000002')),/App visitor authentication required/));
+ check('unauthenticated RPC denied',()=>assert.throws(()=>sql(`set role anon;select ${reserve('10000000-0000-4000-8000-000000000003')};`),/permission denied/));
+ const concurrent=async(id,request,slot)=>{const q=`begin;${identity(id)}select ${reserve(request,slot)};select pg_sleep(0.2);commit;`;const {stdout}=await run('docker',['exec',name,'psql','-U','postgres','-qAt','-v','ON_ERROR_STOP=1','-c',q]);return JSON.parse(stdout.split('\n').find(x=>x.startsWith('{')));};
+ const race=await Promise.all([concurrent(A,'10000000-0000-4000-8000-000000000004','10:00'),concurrent(B,'10000000-0000-4000-8000-000000000005','10:00')]);
+ check('concurrent visitors admit exactly one booking',()=>assert.deepEqual(race.map(r=>r.result).sort(),['ok','over_capacity']));
+ const repeat=await Promise.all([concurrent(A,'10000000-0000-4000-8000-000000000006','11:00'),concurrent(A,'10000000-0000-4000-8000-000000000006','11:00')]);
+ check('concurrent identical retries make one record',()=>{assert.ok(repeat.every(x=>x.result==='ok'));assert.equal(repeat[0].record.id,repeat[1].record.id);});
+ const cancel=(email='proof@example.com')=>`public.app_booking_cancel('${APP}','booking','${first.record.data.reference}','${email}')`;
+ check('other visitor cannot cancel a known reference',()=>assert.equal(call(B,cancel()).reason,'not_found'));
+ check('wrong email cannot cancel',()=>assert.equal(call(A,cancel('wrong@example.com')).reason,'not_found'));
+ check('owner cancellation persists and releases slot atomically',()=>{const r=call(A,cancel());assert.equal(r.ok,true);assert.equal(r.record.data.status,'Cancelled');assert.equal(sql(identity(B)+`select public.app_booking_remaining('${APP}','booking',current_date+3,'09:00');`),'1');});
+ check('second cancellation is idempotent',()=>assert.equal(call(A,cancel()).reason,'already_cancelled'));
+ check('other visitor can reserve released slot',()=>assert.equal(call(B,reserve('10000000-0000-4000-8000-000000000007')).result,'ok'));
+ check('reused request key cannot reserve a different slot',()=>assert.equal(call(A,reserve('10000000-0000-4000-8000-000000000006','14:00')).result,'invalid'));
+ console.log(JSON.stringify({passed:checks.length,checks}));
+}finally{if(started)execFileSync('docker',['rm','-f',name],{stdio:'pipe'});}
