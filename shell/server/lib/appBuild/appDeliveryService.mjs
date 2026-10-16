@@ -5,6 +5,7 @@
 
 import { serviceClient } from "../supabase.mjs";
 import { previewProvider } from "../../preview/index.mjs";
+import { awaitPreviewReachable } from "../builderV2/verificationMode.mjs";
 
 // (Re)provision a preview from the authoritative verified snapshot. This heals reaped preview
 // containers and old conversations without trusting a mutable client/project tree.
@@ -34,8 +35,13 @@ export async function showPreview(ctx, { productName = null } = {}) {
     }
     const preview = await previews.start(project.id, withRuntimeEnv(source.tree, project.id));
     if (!preview?.url) throw new Error("The preview service returned no address.");
-    await client.from("projects").update({ preview_ref: preview.url, updated_at: new Date().toISOString() })
+    await awaitPreviewReachable(preview.url);
+    const { error: projectionError } = await client.from("projects")
+      .update({ preview_ref: preview.url, updated_at: new Date().toISOString() })
       .eq("id", project.id).eq("owner", ctx.owner);
+    if (projectionError) throw Object.assign(new Error("The preview started but its address could not be saved. Please retry."), {
+      code: "preview_projection_failed", classification: "platform", retryable: true,
+    });
     await ctx.emit("agent_done", { agent: "Publisher", ok: true });
     await ctx.emit("preview_ready", { url: preview.url, projectId: project.id, message: "Preview ready — take a look." });
     return { url: preview.url, projectId: project.id, note: "The preview card is in the conversation — do not repeat the URL." };
