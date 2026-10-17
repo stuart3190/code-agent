@@ -1,0 +1,17 @@
+{
+  "deployedCommit": "f4652de9069f4195f04dbb2476a842addee45f87",
+  "publicBuildId": "d6268646-caf6-4646-b744-0596e880a649",
+  "buildId": "f5f4e27a-c5da-40a0-bda4-8037594eab85",
+  "snapshotId": "41f72060-9c6b-49a0-8ea4-dcc692a2b355",
+  "contractId": "1145575c-1f20-4ad6-96c2-a4d4817f5a67",
+  "changedFiles": [
+    "src/layout/RouteStates.jsx"
+  ],
+  "authoredFrontendPreserved": true,
+  "knownUnmodifiedDefaultUpgraded": true,
+  "sourceContractDiagnosticBound": true,
+  "modelReservations": 0,
+  "credits": 0,
+  "durationMs": 82810,
+  "limitation": "Retained assisted app verification; not fresh generation."
+}

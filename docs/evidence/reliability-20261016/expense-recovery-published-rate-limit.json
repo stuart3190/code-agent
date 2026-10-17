@@ -1,0 +1,189 @@
+{
+  "initialBusinessChecks": [
+    {
+      "width": 1440,
+      "name": "date defaults to local today",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "new guest begins empty without signup",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "zero rejected without creating record",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "integer cents sum 0.10 and 0.20 to 0.30",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "other month excluded from current total",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "month selection uses real saved records",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "summary route preserves selected month",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "summary total matches ledger",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "category totals use same records",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "edit updates actual record and aggregate",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "saved edits survive reload",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "delete updates real records and aggregate",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "layout fits viewport",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "independent guest cannot see saved records",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "own tagged test records cleaned",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "date defaults to local today",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "new guest begins empty without signup",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "zero rejected without creating record",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "integer cents sum 0.10 and 0.20 to 0.30",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "other month excluded from current total",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "month selection uses real saved records",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "summary route preserves selected month",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "summary total matches ledger",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "category totals use same records",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "edit updates actual record and aggregate",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "saved edits survive reload",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "delete updates real records and aggregate",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "layout fits viewport",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "independent guest cannot see saved records",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "own tagged test records cleaned",
+      "ok": true
+    },
+    {
+      "width": 320,
+      "name": "proof completed",
+      "ok": false,
+      "error": "locator.waitFor: Timeout 15000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('heading', { name: 'Pocket Ledger', exact: true }) to be visible\u001b[22m\n"
+    }
+  ],
+  "diagnosis": {
+    "initial": "We could not load this page. Please try again.\n\nTry again",
+    "final": "We could not load this page. Please try again.\n\nTry again",
+    "retried": true,
+    "recovered": false,
+    "events": [
+      {
+        "event": "response",
+        "path": "/functions/v1/app-auth",
+        "status": 429,
+        "atMs": 1198,
+        "error": {
+          "error": "This app is getting a lot of signups right now \u2014 try again in a bit."
+        }
+      },
+      {
+        "event": "response",
+        "path": "/functions/v1/app-auth",
+        "status": 429,
+        "atMs": 7278,
+        "error": {
+          "error": "This app is getting a lot of signups right now \u2014 try again in a bit."
+        }
+      }
+    ]
+  },
+  "ownAppSignupsLastHour": 30,
+  "signupLimitUnchanged": true,
+  "limitation": "Explains this latest failure. Earlier uninstrumented blank loads remain unproven."
+}
