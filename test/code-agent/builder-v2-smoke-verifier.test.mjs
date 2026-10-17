@@ -266,3 +266,57 @@ browserTest('narrow mobile layout catches font-dependent controls that fit at 39
  const {server,url}=await serve({'/':'<html><body><main><h1>Tasks</h1><button style="margin-left:280px;width:85px">Clear search</button></main><style>html,body{margin:0;overflow-x:clip}main{min-width:366px}</style></body></html>'});
  try{const r=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});assert.equal(r.pass,false);assert.deepEqual(r.smoke.responsive.entry.widths,[390,320]);assert.equal(r.smoke.responsive.entry.samples[0].findings.length,0);assert.equal(r.smoke.responsive.entry.samples[1].findings[0].width,320);assert.equal(r.smoke.responsive.findings.length,1);assert.match(r.journeys[0].detail,/Mobile 320px/);}finally{server.close();}
 });
+
+browserTest("hidden DOM controls do not certify a blank preview as rendered", async () => {
+  const { server, url } = await serve({ "/": '<html><body><div id="root" style="display:none"><button>Invisible</button><input type="hidden" value="42"></div></body></html>' });
+  try {
+    const result = await smokeVerifyJourneys({ previewUrl: url, contract: journeysOnly, timeoutMs: 10_000, browser });
+    assert.equal(result.pass, false, JSON.stringify(result.smoke));
+    assert.equal(result.unavailable, false);
+    assert.equal(result.smoke.render.rendered, false);
+    assert.match(result.fatalErrors[0], /nothing rendered/);
+  } finally { server.close(); }
+});
+
+browserTest("a visible text-only preview remains valid without interactive controls", async () => {
+  const { server, url } = await serve({ "/": '<html><body><div id="root"><p>A readable portfolio</p></div></body></html>' });
+  try {
+    const result = await smokeVerifyJourneys({ previewUrl: url, contract: journeysOnly, timeoutMs: 30_000, browser });
+    assert.equal(result.pass, true, JSON.stringify(result.smoke));
+    assert.equal(result.smoke.render.controls, 0);
+  } finally { server.close(); }
+});
+
+for (const style of ['opacity:0', 'visibility:hidden', 'content-visibility:hidden']) {
+  browserTest(`invisible ancestor (${style}) cannot satisfy the render gate`, async () => {
+    const { server, url } = await serve({ '/': `<html><body><div style="${style}"><div id="root"><p>Hidden result</p><button>Hidden action</button></div></div></body></html>` });
+    try {
+      const result = await smokeVerifyJourneys({ previewUrl: url, contract: journeysOnly, timeoutMs: 10_000, browser });
+      assert.equal(result.pass, false, JSON.stringify(result.smoke));
+      assert.equal(result.smoke.render.rendered, false);
+    } finally { server.close(); }
+  });
+}
+
+for (const [name, content] of [
+  ['display contents text', '<div style="display:contents">Visible portfolio</div>'],
+  ['graphical canvas', '<canvas width="100" height="100"></canvas>'],
+  ['graphical SVG', '<svg width="100" height="100"><circle cx="50" cy="50" r="40" /></svg>'],
+]) {
+  browserTest(`${name} still satisfies the render gate`, async () => {
+    const { server, url } = await serve({ '/': `<html><body><div id="root">${content}</div></body></html>` });
+    try {
+      const result = await smokeVerifyJourneys({ previewUrl: url, contract: journeysOnly, timeoutMs: 30_000, browser });
+      assert.equal(result.pass, true, JSON.stringify(result.smoke));
+    } finally { server.close(); }
+  });
+}
+
+browserTest('a control hiding the root is a fatal activation failure', async () => {
+  const { server, url } = await serve({ '/': '<html><body><div id="root"><button onclick="this.parentElement.style.display=\'none\'">Hide application</button></div></body></html>' });
+  try {
+    const result = await smokeVerifyJourneys({ previewUrl: url, contract: journeysOnly, timeoutMs: 30_000, browser });
+    assert.equal(result.pass, false, JSON.stringify(result.smoke));
+    assert.equal(result.smoke.crashes[0].phase, 'activate');
+  } finally { server.close(); }
+});

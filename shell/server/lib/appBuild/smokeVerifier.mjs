@@ -39,8 +39,32 @@ function renderedState(page) {
   return page.evaluate(() => {
     const root = document.getElementById("root") || document.body;
     if (!root) return { rendered: false, text: 0, controls: 0 };
-    const text = String(root.innerText || "").trim().length;
-    const controls = root.querySelectorAll("button, input, select, textarea, a[href], canvas, svg, img, video, [role=button]").length;
+    // innerText falls back to textContent for a display:none root. Likewise, counting
+    // DOM controls certifies hidden templates as a rendered application. Require actual
+    // layout boxes and visible styles, including ancestor opacity. Text ranges preserve
+    // valid display:contents layouts whose parent has no box of its own.
+    const painted = (node, rects) => {
+      if (![...rects].some(rect => rect.width > 0 && rect.height > 0)) return false;
+      const style = getComputedStyle(node);
+      if (style.visibility === "hidden" || style.visibility === "collapse") return false;
+      for (let current = node; current; current = current.parentElement) {
+        const ancestorStyle = getComputedStyle(current);
+        if (ancestorStyle.display === "none" || ancestorStyle.contentVisibility === "hidden"
+          || Number(ancestorStyle.opacity) === 0) return false;
+      }
+      return true;
+    };
+    let text = 0;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const value = String(node.textContent || "").trim();
+      if (!value || node.parentElement?.closest("script, style, template, noscript")) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      if (node.parentElement && painted(node.parentElement, range.getClientRects())) text += value.length;
+    }
+    const controls = [...root.querySelectorAll("button, input, select, textarea, a[href], canvas, svg, img, video, [role=button]")]
+      .filter(node => painted(node, node.getClientRects())).length;
     const boundaryError = [...root.querySelectorAll('[data-scaffold-boundary="error"]')].some((node) => {
       const box = node.getBoundingClientRect();
       const style = getComputedStyle(node);
@@ -354,7 +378,7 @@ export async function smokeVerifyJourneys({
   const detail = unavailable ? error
     : fatal ? crashes.map((row) => `${row.control ? `${row.control}: ` : ""}${row.error}`).join("; ")
       : obstructed ? responsive.findings.map(f => `Mobile ${f.width}px: control "${f.control}" is ${f.kind === 'clipped_control' ? 'cut off by' : 'covered by'} ${f.blocker}; reflow the layout so the control is usable`).join("; ")
-      : `smoke passed: rendered, ${activated} of ${discovered} visible controls activated without a crash`;
+      : `smoke passed: rendered, ${activated} of ${discovered} discovered controls activated without a crash`;
   const fatalErrors = crashes.map((row) => `${row.control ? `${row.control}: ` : ""}${row.error}`);
   const journeys = (contract?.journeys || []).map((journey) => ({
     id: journey.id, title: journey.title, priority: journey.priority,
