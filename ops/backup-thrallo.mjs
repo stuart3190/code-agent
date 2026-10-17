@@ -15,6 +15,8 @@
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { gzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import os from "node:os";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
@@ -241,7 +243,7 @@ async function main() {
     product: "thrallo",
     formatVersion: 2,
     url: new globalThis.URL(URL_).host,
-    sourceCommit: process.env.THRALLO_BACKUP_SOURCE_COMMIT || await currentGitCommit(),
+    sourceCommit: process.env.THRALLO_BACKUP_SOURCE_COMMIT || await backupSourceCommit(),
     backupToolSha256: sha256(await readFile(new URL(import.meta.url))),
     startedAt: new Date().toISOString(),
     tables: {},
@@ -498,13 +500,18 @@ async function buildMigrationState(ledger) {
   return state;
 }
 
-async function currentGitCommit() {
-  const head = (await readFile(path.resolve(".git", "HEAD"), "utf8").catch(() => "")).trim();
-  if (/^[0-9a-f]{40}$/i.test(head)) return head;
-  const ref = /^ref: (.+)$/.exec(head)?.[1];
-  if (!ref) return null;
-  const value = (await readFile(path.resolve(".git", ref), "utf8").catch(() => "")).trim();
-  return /^[0-9a-f]{40}$/i.test(value) ? value : null;
+export async function backupSourceCommit(root = process.cwd()) {
+  // Production is an immutable deployment copy, not a Git checkout. Worktrees also
+  // use .git files and shared/packed refs, so let Git resolve those when applicable.
+  const deployed = (await readFile(path.join(root, "DEPLOYED_COMMIT"), "utf8").catch(() => "")).trim();
+  if (/^[0-9a-f]{40}$/i.test(deployed)) return deployed;
+  try {
+    const { stdout } = await promisify(execFile)("git", ["rev-parse", "HEAD"], {
+      cwd: root, timeout: 5000, maxBuffer: 4096,
+    });
+    const value = stdout.trim();
+    return /^[0-9a-f]{40}$/i.test(value) ? value : null;
+  } catch { return null; }
 }
 
 export function canonicalSqlHash(bytes) {
