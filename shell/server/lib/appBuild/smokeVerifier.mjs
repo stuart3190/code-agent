@@ -156,6 +156,24 @@ export async function smokeVerifyJourneys({
   let responsive = null;
   let initialResponsive = null;
 
+  const sampleMobileLayouts = async () => {
+    const samples = [];
+    for (const width of [390, 320]) {
+      if (Date.now() >= deadline - 2_000) {
+        samples.push({ checked:false, unavailable:true, width, findings:[], error:"mobile probe budget exhausted" });
+        break;
+      }
+      samples.push(await probeResponsiveControls({ browser, page, previewUrl, width, timeoutMs: Math.min(15_000, deadline - Date.now()) }));
+    }
+    const findings = new Map();
+    for (const sample of samples) for (const finding of sample.findings || []) {
+      const key = JSON.stringify([finding.controlId || finding.control, finding.kind || "obstruction", finding.blocker]);
+      if (!findings.has(key)) findings.set(key, finding);
+    }
+    return { checked:samples.every(s=>s.checked), width:390, widths:[390,320], findings:[...findings.values()],
+      unavailable:samples.some(s=>s.unavailable), error:samples.find(s=>s.error)?.error, samples };
+  };
+
   const context = await browser.newContext();
   const page = await context.newPage();
   // Popups opened by the app are closed; the listener is attached AFTER the smoke's own page exists.
@@ -230,7 +248,7 @@ export async function smokeVerifyJourneys({
       const desktopViewport = page.viewportSize();
       try {
         initialResponsive = Date.now() < deadline - 2_000
-          ? await probeResponsiveControls({ browser, page, previewUrl, timeoutMs: Math.min(15_000, deadline - Date.now()) })
+          ? await sampleMobileLayouts()
           : { checked: false, unavailable: true, findings: [], error: "entry mobile probe budget exhausted" };
       } finally { if (desktopViewport) await page.setViewportSize(desktopViewport); }
     }
@@ -310,7 +328,7 @@ export async function smokeVerifyJourneys({
     }
     if (load.ok && !crashes.length) {
       responsive = Date.now() < deadline - 2_000
-        ? await probeResponsiveControls({ browser, page, previewUrl, timeoutMs: Math.min(15_000, deadline - Date.now()) })
+        ? await sampleMobileLayouts()
         : { checked: false, unavailable: true, findings: [], error: "mobile probe budget exhausted" };
       if (initialResponsive) {
         const after = responsive;

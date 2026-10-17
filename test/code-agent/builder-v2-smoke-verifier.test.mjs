@@ -259,3 +259,8 @@ browserTest('working controls after a leading guide link are actually activated'
  const {server,url}=await serve({'/':'<html><body><h1>Calculator</h1><a href="/guide">Guide</a><input aria-label="Length"/><button>Calculate</button></body></html>','/guide':'<html><body><h1>Guide</h1><a href="/">Back</a></body></html>'});
  try{const r=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});assert.equal(r.pass,true);assert.equal(r.smoke.controls.activated,3);}finally{server.close();}
 });
+
+browserTest('narrow mobile layout catches font-dependent controls that fit at 390px',async()=>{
+ const {server,url}=await serve({'/':'<html><body><main><h1>Tasks</h1><button style="margin-left:280px;width:85px">Clear search</button></main><style>html,body{margin:0;overflow-x:clip}main{min-width:366px}</style></body></html>'});
+ try{const r=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});assert.equal(r.pass,false);assert.deepEqual(r.smoke.responsive.entry.widths,[390,320]);assert.equal(r.smoke.responsive.entry.samples[0].findings.length,0);assert.equal(r.smoke.responsive.entry.samples[1].findings[0].width,320);assert.equal(r.smoke.responsive.findings.length,1);assert.match(r.journeys[0].detail,/Mobile 320px/);}finally{server.close();}
+});

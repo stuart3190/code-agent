@@ -2,15 +2,16 @@
 // A modal may intentionally cover background controls, so only persistent non-modal obstruction
 // or non-scrollable clipping is an app defect. Two identical samples avoid treating transient
 // animation as a failure.
-export async function probeResponsiveControls({ browser, page: existingPage = null, previewUrl, timeoutMs = 15_000 }) {
+export async function probeResponsiveControls({ browser, page: existingPage = null, previewUrl, timeoutMs = 15_000, width = 390 }) {
+  const viewportWidth = Number.isInteger(width) && width >= 240 && width <= 1920 ? width : 390;
   const context = existingPage ? null : await browser.newContext();
   const page = existingPage || await context.newPage();
   try {
-    await page.setViewportSize({ width: 390, height: 844 });
+    await page.setViewportSize({ width: viewportWidth, height: 844 });
     if (!existingPage) await page.goto(previewUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
     await page.evaluate(() => scrollTo(0, 0));
     await page.waitForTimeout(500);
-    const sample = () => page.evaluate(() => {
+    const sample = () => page.evaluate((viewportWidth) => {
       const modal = document.querySelector('dialog[open], [aria-modal="true"], [role="dialog"]');
       const scope = modal || document;
       const findings = [];
@@ -41,7 +42,7 @@ export async function probeResponsiveControls({ browser, page: existingPage = nu
           if (hit && (hit === el || el.contains(hit))) {
             findings.push({ control: (el.getAttribute('aria-label') || el.textContent || el.name || el.tagName).trim().slice(0,80),
               controlId: el.getAttribute('data-thrallo-control') || el.getAttribute('data-thrallo-action') || null,
-              kind: 'clipped_control', blocker: 'non-scrollable horizontal clipping', width:390 });
+              kind: 'clipped_control', blocker: 'non-scrollable horizontal clipping', width:viewportWidth });
           }
           continue;
         }
@@ -58,15 +59,15 @@ export async function probeResponsiveControls({ browser, page: existingPage = nu
         if (!panel || panel.contains(el)) continue;
         findings.push({ control: (el.getAttribute('aria-label') || el.textContent || el.name || el.tagName).trim().slice(0,80),
           controlId: el.getAttribute('data-thrallo-control') || el.getAttribute('data-thrallo-action') || null,
-          blocker: panel.getAttribute('aria-label') || panel.getAttribute('role') || panel.tagName.toLowerCase(), width:390 });
+          blocker: panel.getAttribute('aria-label') || panel.getAttribute('role') || panel.tagName.toLowerCase(), width:viewportWidth });
       }
       return findings;
-    });
+    }, viewportWidth);
     const first = await sample();
     await page.waitForTimeout(300);
     const second = await sample();
-    return { checked:true, width:390, findings:second.filter(f=>first.some(a=>JSON.stringify(a)===JSON.stringify(f))) };
+    return { checked:true, width:viewportWidth, findings:second.filter(f=>first.some(a=>JSON.stringify(a)===JSON.stringify(f))) };
   } catch (error) {
-    return { checked:false, width:390, findings:[], unavailable:true, error:String(error.message || error).split('\n')[0].slice(0,200) };
+    return { checked:false, width:viewportWidth, findings:[], unavailable:true, error:String(error.message || error).split('\n')[0].slice(0,200) };
   } finally { if (context) await context.close().catch(()=>{}); }
 }
