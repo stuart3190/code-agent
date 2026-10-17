@@ -161,6 +161,16 @@ const NEGATED_CAPABILITY = new RegExp(
   "gi",
 );
 
+// A shared negative imperative also governs a conjoined action: "do not send email or take
+// payments". Keep the scope bounded and stop at sentence/adversative boundaries; a later
+// positive payment requirement must remain visible to inference.
+const NEGATED_PAYMENT_ACTION = new RegExp(
+  `\\b(?:do not|does not|don't|doesn't|must not|should not|will not|never)\\s+`
+  + `(?:${NEGATED_CLAUSE}{1,48}\\s+(?:or|nor)\\s+)?`
+  + `(?:implement|integrate|use|process|take|accept|enable|support)\\s+`
+  + `(?:real(?:-money|\\s+money)?\\s+)?(?:payments?|billing|checkout|subscriptions?)\\b`, "gi",
+);
+
 function withoutNegatedRequirements(value) {
   NEGATED_INFRASTRUCTURE.lastIndex = 0;
   NEGATED_CAPABILITY.lastIndex = 0;
@@ -172,7 +182,7 @@ function withoutNegatedRequirements(value) {
     // Verb forms ("do not use", "must not include", "never use") are the same exclusion.
     .replace(NEGATED_INFRASTRUCTURE, "")
     .replace(
-      /\b(?:do not|does not|don't|doesn't|must not|should not|will not|never)\s+(?:implement|integrate|use|process|take|accept|enable|support)\s+(?:real(?:-money|\s+money)?\s+)?(?:payments?|billing|checkout|subscriptions?)\b/gi,
+      NEGATED_PAYMENT_ACTION,
       "",
     )
     .replace(

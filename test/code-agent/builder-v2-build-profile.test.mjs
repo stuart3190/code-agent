@@ -725,3 +725,21 @@ test("the API intake persists one canonical DTO and supplies it to the Lead Agen
   assert.match(input.find((item) => item.role === "user")?.content || "", /AUTHORITATIVE BUILDER V2 PRODUCT PROFILE/);
   assert.equal(dispatches, 1, "only the injected zero-model fixture ran");
 });
+
+test("negative conjoined payment actions do not invent a payment journey", () => {
+  for (const prompt of [
+    "Build a portfolio. Save contact inquiries. Do not send email or take payments.",
+    "Do not require accounts or accept real payments. Save inquiries.",
+    "Never send notifications nor process billing. Save inquiries.",
+  ]) {
+    const signals = inferRequirementSignals(prompt);
+    assert.equal(signals.includes("payments"), false, prompt);
+    assert.equal(signals.includes("saved_data"), true, prompt);
+  }
+  for (const prompt of [
+    "Do not send email, but accept payments or subscriptions.",
+    "Do not send email. Accept payments or subscriptions.",
+    "Do not send email; accept payments or subscriptions.",
+    "Do not send email or take payments. On the separate store page enable checkout.",
+  ]) assert.equal(inferRequirementSignals(prompt).includes("payments"), true, prompt);
+});
