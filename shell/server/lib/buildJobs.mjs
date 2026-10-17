@@ -13,7 +13,6 @@ import {
 } from "./buildWorkQueue.mjs";
 
 const TERMINAL = new Set(["complete", "failed", "interrupted"]);
-const jobs = new Map();
 
 function db(client = null) { return (client || serviceClient()).from("build_jobs"); }
 
@@ -87,13 +86,6 @@ function rowToJob(row) {
   };
 }
 
-export function activeJobFor(ownerId, projectId) {
-  for (const job of jobs.values()) {
-    if (job.owner.id === ownerId && String(job.projectId) === String(projectId) && !TERMINAL.has(job.status)) return job;
-  }
-  return null;
-}
-
 export async function createJob({
   owner, projectId, mode, prompt, diag = null, trigger = "user", taskHint = null,
   budgetAllowance = null, byokCostLimit = null, providerOverride = null,
@@ -110,9 +102,6 @@ export async function createJob({
       code: "worker_required",
     });
   }
-
-  const live = activeJobFor(owner.id, projectId);
-  if (live) return { job: live, existing: true };
 
   const { data: durableExisting, error: existingError } = await db(client).select("*")
     .eq("owner", owner.id).eq("project_id", projectId)
@@ -141,8 +130,7 @@ export async function createJob({
     });
     if (dispatched.existing) return { job: rowToJob(dispatched.job), existing: true };
     job.workJobId = dispatched.work.id;
-    // Do not advertise a process-local queued job until both durable records exist.
-    jobs.set(job.id, job);
+    // The durable transaction is the authority, including after browser disconnects.
     return { job, existing: false };
   } catch (error) {
     // A database failure rolls back the whole dispatch. A lost response may have committed;
@@ -154,18 +142,16 @@ export async function createJob({
   }
 }
 
-export async function getJob(ownerId, jobId) {
-  const live = jobs.get(jobId);
-  if (live) return live.owner.id === ownerId ? live : null;
-  const { data } = await db().select("*").eq("id", jobId).maybeSingle();
+export async function getJob(ownerId, jobId, { client = null } = {}) {
+  const { data, error } = await db(client).select("*").eq("id", jobId).eq("owner", ownerId).maybeSingle();
+  if (error) throw new Error(`could not read build job: ${error.message}`);
   return data?.owner === ownerId ? rowToJob(data) : null;
 }
 
-export async function activeBuildFor(ownerId, projectId) {
-  const live = activeJobFor(ownerId, projectId);
-  if (live) return live;
-  const { data } = await db().select("*").eq("owner", ownerId).eq("project_id", projectId)
+export async function activeBuildFor(ownerId, projectId, { client = null } = {}) {
+  const { data, error } = await db(client).select("*").eq("owner", ownerId).eq("project_id", projectId)
     .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) throw new Error(`could not read project build: ${error.message}`);
   return data ? rowToJob(data) : null;
 }
 
@@ -173,12 +159,6 @@ export async function activeBuildsFor(ownerId, projectIds, { client = null } = {
   const ids = [...new Set((projectIds || []).filter(Boolean).map(String))];
   if (!ids.length) return new Map();
   const byProject = new Map();
-  for (const job of jobs.values()) {
-    if (job.owner.id !== ownerId || !ids.includes(String(job.projectId))
-        || !["queued", "running"].includes(job.status)) continue;
-    const prior = byProject.get(String(job.projectId));
-    if (!prior || job.createdAt > prior.createdAt) byProject.set(String(job.projectId), job);
-  }
   const { data, error } = await db(client).select("*").eq("owner", ownerId)
     .in("project_id", ids).in("status", ["queued", "running"])
     .order("created_at", { ascending: false });
@@ -191,11 +171,7 @@ export async function activeBuildsFor(ownerId, projectIds, { client = null } = {
 }
 
 export async function cancelJob(ownerId, jobId, { client = null } = {}) {
-  let job = jobs.get(jobId);
-  if (!job) {
-    const { data } = await db(client).select("*").eq("id", jobId).eq("owner", ownerId).maybeSingle();
-    if (data) job = rowToJob(data);
-  }
+  const job = await getJob(ownerId, jobId, { client });
   if (!job || job.owner.id !== ownerId) return { ok: false, error: "not found" };
   if (!job.workJobId) return { ok: false, error: TERMINAL.has(job.status) ? "already finished" : "work unavailable" };
   const work = await getBuildWork(ownerId, job.workJobId, { client, includeResult: false });
@@ -222,7 +198,6 @@ export function subscribe(job, fn) {
     if (TERMINAL.has(current.status)) {
       stopped = true;
       clearInterval(timer);
-      jobs.delete(job.id);
       fn("end", publicJob(current));
     }
   };

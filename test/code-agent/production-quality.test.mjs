@@ -307,7 +307,7 @@ test("no plan promises faster builds, because no plan delivers them", async () =
   assert.doesNotMatch(banner, /faster build/i,
     "this was a sentence a customer could pay for and never receive");
   const jobs = await readCode("../../shell/server/lib/buildJobs.mjs");
-  assert.match(jobs, /if \(live\) return \{ job: live, existing: true \}/,
+  assert.match(jobs, /if \(durableExisting\) return \{ job: rowToJob\(durableExisting\), existing: true \}/,
     "duplicate active requests reuse the durable build instead of buying queue priority");
   assert.doesNotMatch(jobs, /priority:[^\n]*(?:plan|tier)/i,
     "durable queue priority is not a paid-plan entitlement");

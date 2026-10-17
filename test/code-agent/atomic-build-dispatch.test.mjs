@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';
-import {createJob,activeJobFor} from '../../shell/server/lib/buildJobs.mjs';
+import {createJob} from '../../shell/server/lib/buildJobs.mjs';
 import {dispatchBuildPipeline} from '../../shell/server/lib/buildWorkQueue.mjs';
 function fixture(t){
  const before=process.env.THRALLO_BUILD_WORKER_ENABLED;process.env.THRALLO_BUILD_WORKER_ENABLED='1';
@@ -11,15 +11,15 @@ function fixture(t){
  return {owner,project,client,input,calls,getStored:()=>stored};
 }
 test('createJob makes one atomic dispatch and preserves retained/provider authority',async t=>{
- const f=fixture(t),r=await createJob(f.input);assert.equal(r.existing,false);assert.ok(r.job.workJobId);assert.equal(f.calls.length,1);const {name,p}=f.calls[0];assert.equal(name,'build_pipeline_dispatch');assert.equal(p.p_payload.input.sourceBuildId,'retained-source');assert.deepEqual(p.p_payload.providerSelection,f.input.providerSelection);assert.equal(p.p_resource_limits.memoryMb,3072);assert.equal(activeJobFor(f.owner,f.project),r.job);
+ const f=fixture(t),r=await createJob(f.input);assert.equal(r.existing,false);assert.ok(r.job.workJobId);assert.equal(f.calls.length,1);const {name,p}=f.calls[0];assert.equal(name,'build_pipeline_dispatch');assert.equal(p.p_payload.input.sourceBuildId,'retained-source');assert.deepEqual(p.p_payload.providerSelection,f.input.providerSelection);assert.equal(p.p_resource_limits.memoryMb,3072);assert.equal(f.getStored().id,r.job.id);
 });
 test('failed atomic transaction creates no local queued job or follow-up update',async t=>{
  const f=fixture(t);f.client.rpc=async()=>({data:null,error:{code:'23514',message:'queue constraint failed'}});
- await assert.rejects(createJob(f.input),e=>e.code==='build_job_create_failed');assert.equal(activeJobFor(f.owner,f.project),null);
+ await assert.rejects(createJob(f.input),e=>e.code==='build_job_create_failed');
 });
 test('lost response reconnects to committed work without another dispatch',async t=>{
  const f=fixture(t),rpc=f.client.rpc;f.client.rpc=async(...args)=>{await rpc(...args);throw Error('connection reset after commit')};
- await assert.rejects(createJob(f.input),/connection reset/);assert.equal(activeJobFor(f.owner,f.project),null);
+ await assert.rejects(createJob(f.input),/connection reset/);
  const retry=await createJob(f.input);assert.equal(retry.existing,true);assert.equal(retry.job.id,f.getStored().id);assert.equal(retry.job.workJobId,f.getStored().work_job_id);assert.equal(f.calls.length,1);
 });
 test('concurrent callers reconnect to a single atomic winner',async t=>{
