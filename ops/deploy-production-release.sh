@@ -3,6 +3,9 @@
 #   deploy.sh <new-sha> <previous-sha7> [image]     "image" rebuilds + re-pins the sandbox image
 set -euo pipefail
 [[ "${1:-}" =~ ^[0-9a-fA-F]{7,40}$ ]] || { echo "release requires an explicit immutable commit SHA"; exit 2; }
+# Serialize releases before inspecting or changing shared live state.
+exec 9>/run/lock/thrallo-release.lock
+flock -n 9 || { echo "another Thrallo release is active"; exit 2; }
 SHA=$(git -C /root/thrallo-codex-hotfix rev-parse "$1"); PREV7=$2; MODE=${3:-noimage}
 WT=/root/thrallo-codex-hotfix; LIVE=/home/ubuntu/code-agent; S7=${SHA:0:7}
 REL=/home/ubuntu/thrallo-release-$S7; PREL=/home/ubuntu/thrallo-release-$PREV7
@@ -12,6 +15,10 @@ PREVFULL=$(cat $LIVE/DEPLOYED_COMMIT)
 [ -z "$(git -C $WT status --porcelain --untracked-files=no)" ] || { echo "worktree dirty"; exit 1; }
 # Fail before creating artifacts or changing live files; policy comes from target SHA.
 node "$(dirname "$0")/check-release-sandbox.mjs" "$WT" "$PREVFULL" "$SHA" "$MODE"
+if [[ -n "${THRALLO_PREBUILT_SANDBOX_IMAGE:-}" ]]; then
+  [[ "$MODE" = image ]] || { echo "prebuilt image requires image release mode"; exit 2; }
+  node "$(dirname "$0")/verify-prebuilt-release-image.mjs" "$WT" "$SHA" "$THRALLO_PREBUILT_SANDBOX_IMAGE"
+fi
 mkdir -p $REL
 git -C $WT archive --format=tar.gz $SHA > $REL/source.tar.gz.tmp
 mv $REL/source.tar.gz.tmp $REL/source.tar.gz
@@ -28,9 +35,14 @@ fi
 IMGCOMMIT=$(node -e 'console.log(require("'$LIVE'/.deployment-provenance.json").sandboxImageSourceCommit)')
 if [ "$MODE" = image ]; then
   IMGCOMMIT=$SHA
-  rm -rf /tmp/thrallo-ctx-$S7 && mkdir /tmp/thrallo-ctx-$S7 && tar xzf $REL/source.tar.gz -C /tmp/thrallo-ctx-$S7
-  docker build -q --build-arg SOURCE_COMMIT=$SHA -t thrallo-build-sandbox:${SHA:0:12} -f /tmp/thrallo-ctx-$S7/build-worker/Dockerfile /tmp/thrallo-ctx-$S7
-  rm -rf /tmp/thrallo-ctx-$S7
+  if [[ -n "${THRALLO_PREBUILT_SANDBOX_IMAGE:-}" ]]; then
+    docker tag "$THRALLO_PREBUILT_SANDBOX_IMAGE" thrallo-build-sandbox:${SHA:0:12}
+    [[ "$(docker image inspect thrallo-build-sandbox:${SHA:0:12} --format '{{.Id}}')" = "$THRALLO_PREBUILT_SANDBOX_IMAGE" ]]
+  else
+    rm -rf /tmp/thrallo-ctx-$S7 && mkdir /tmp/thrallo-ctx-$S7 && tar xzf $REL/source.tar.gz -C /tmp/thrallo-ctx-$S7
+    docker build -q --build-arg SOURCE_COMMIT=$SHA -t thrallo-build-sandbox:${SHA:0:12} -f /tmp/thrallo-ctx-$S7/build-worker/Dockerfile /tmp/thrallo-ctx-$S7
+    rm -rf /tmp/thrallo-ctx-$S7
+  fi
   docker save thrallo-build-sandbox:${SHA:0:12} | gzip -1 > $REL/worker-image.tar.gz.tmp
   mv $REL/worker-image.tar.gz.tmp $REL/worker-image.tar.gz
 else
