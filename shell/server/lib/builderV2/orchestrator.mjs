@@ -17,7 +17,7 @@ import path from "node:path";
 
 import { indexTree } from "./indexer.mjs";
 import { memoryGraph } from "./graphStore.mjs";
-import { applyPatches, escalationPlan, normalizeMissingCreationCorrections, patchOutcomes, REJECTION } from "./patchEngine.mjs";
+import { applyPatches, escalationPlan, normalizeMissingCreationCorrections, patchOutcomes, REJECTION, isProtectedPath } from "./patchEngine.mjs";
 import { completionEligibility } from "./contractTiering.mjs";
 import { deriveBuildSpec, journeysInMountedScreenUnit, scopeBuildSpec } from "./buildSpec.mjs";
 import { refreshAutoBuildProfile } from "../../../shared/buildProfile.mjs";
@@ -569,6 +569,7 @@ export function createOrchestrator({
     // and would silently drop them — the first version of this did exactly that.
     const splitRequests = new Set();
     const splitFindings = [];
+    let stylesheetCorrectionRequested = false;
     // ONE derived specification, narrowed to this increment's journeys. Every view below —
     // module plan, interaction contract, per-module contracts, persistence ownership — is a
     // projection of the same object rather than an independent re-reading of the contract.
@@ -974,6 +975,30 @@ export function createOrchestrator({
       });
       await events.checkpoint?.({ owner, projectId, buildId, snapshot: latestCandidate,
         tree: applied.tree, reason: `candidate:${step}:${attempt}`, promotable: false });
+
+      // A rejected stylesheet can leave JSX perfectly runnable but entirely unstyled. Finish
+      // that explicitly attempted file once, retaining clean siblings and using the existing
+      // bounded correction allowance. This is patch completion, not a visual-style heuristic.
+      const rejectedStylesheets = [...new Set(retainedPatchRejections.map(row => row.file)
+        .filter(file => typeof file === 'string' && /^src\/.+\.css$/.test(file)
+          && !isProtectedPath(file, { tree: applied.tree, contract })))];
+      if (step === 'core' && retainedPartial && rejectedStylesheets.length
+        && !internalHeadroomSplit && !stylesheetCorrectionRequested && scheduleCorrectionRetry()) {
+        stylesheetCorrectionRequested = true;
+        working = applied.tree;
+        rejections = retainedPatchRejections.filter(row => rejectedStylesheets.includes(row.file));
+        problems = rejections.map(row => row.reason);
+        repairScope = { kind: 'stylesheet_patch_correction', files: rejectedStylesheets,
+          allowedFiles: rejectedStylesheets, allowedPrefixes: [],
+          instruction: `Finish the rejected stylesheet patch(es) [${rejectedStylesheets.join(', ')}]. `
+            + 'Emit the COMPLETE CSS as string content on the same replaceFile/newFile patch. '
+            + 'Keep existing scaffold directives and implement the styles used by the retained screens. '
+            + 'Every clean JSX/helper sibling is already retained; do not regenerate or edit it.' };
+        contractCorrectionScope = null;
+        log(`${step}: retained ${filesChanged.length} clean file(s); completing rejected stylesheet(s) `
+          + `[${rejectedStylesheets.join(', ')}] through bounded correction allowance`);
+        continue;
+      }
 
       if (internalHeadroomSplit && rejectedHeadroomScope) {
         working = applied.tree;

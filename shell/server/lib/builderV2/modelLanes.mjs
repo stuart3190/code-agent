@@ -111,6 +111,9 @@ against a code index. Rules:
   the passed identifier. Never reject that identifier against private module-local records unless
   those records are themselves a declared input, and never recreate a controller-owned domain
   collection independently inside an extension.
+- Custom behavior operations return plain value records containing their outputs, not React state
+  updater functions. Keep the updater in the UI: setState(current => ({ ...current, ...result })).
+  Compute result from the explicit current input values; do not spread a function as a result record.
 - Keep components small; compose unique screens and bounded helpers behind the mounted slots.
 - When a mounted screen's module plan names a shared journey controller, render that controller
   exactly once. It owns the screen's contracted controls and interaction state. Do not mount a

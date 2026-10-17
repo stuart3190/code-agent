@@ -1500,3 +1500,31 @@ test("explicit customer cancellation still stops as cancelled", async () => {
   const result = await h.orchestrator.runBuild({ owner: "o", projectId: "customer-cancel", request: "booking site", signal: controller.signal });
   assert.equal(result.state, "cancelled", JSON.stringify(result));
 });
+
+test('rejected core stylesheet is finished without regenerating clean screens', async()=>{
+ let correctionCalls=0;const css='@tailwind base;\n@tailwind components;\n@tailwind utilities;\nmain { max-width: 70rem; margin: auto; padding: 2rem; }\n';
+ const h=harness({patchPlan:{
+  core:()=>[...CORE_PATCH,{replaceFile:'src/index.css',content:null}],
+  correction:ctx=>{correctionCalls++;assert.equal(ctx.repairScope.kind,'stylesheet_patch_correction');assert.deepEqual(ctx.repairScope.allowedFiles,['src/index.css']);assert.equal(ctx.tree['src/screens/scaffold/BookingScreen.jsx'],CORE_PATCH[0].content);return [{replaceFile:'src/index.css',content:css}];},
+  'increment:newsletter-signup':()=>NEWSLETTER_PATCH,'increment:browse-info':()=>BROWSE_PATCH,
+ }});
+ const result=await h.orchestrator.runBuild({owner:'o',projectId:'style-recovery',request:'booking site'});
+ assert.equal(result.state,'green',JSON.stringify(result));assert.equal(correctionCalls,1);
+ assert.equal(h.patchCalls.filter(c=>c.step==='core').length,1);
+ const tree=await h.snapshotStore.materialize('o',result.snapshotId);assert.equal(tree['src/index.css'],css);
+});
+
+test('stylesheet completion never targets protected platform CSS',async()=>{
+ const h=harness({patchPlan:{core:()=>[...CORE_PATCH,{replaceFile:'src/lib/modules/platform.css',content:null}],
+ 'increment:newsletter-signup':()=>NEWSLETTER_PATCH,'increment:browse-info':()=>BROWSE_PATCH}});
+ const result=await h.orchestrator.runBuild({owner:'o',projectId:'protected-style',request:'booking site'});
+ assert.equal(result.state,'green',JSON.stringify(result));assert.equal(h.patchCalls.some(c=>c.step==='correction'),false);
+});
+test('repeated invalid stylesheet corrections stop within the existing allowance and retain clean source',async()=>{
+ let calls=0;const h=harness({patchPlan:{core:()=>[...CORE_PATCH,{replaceFile:'src/index.css',content:null}],
+ correction:()=>{calls++;return [{replaceFile:'src/index.css',content:null}];}}});
+ const result=await h.orchestrator.runBuild({owner:'o',projectId:'invalid-style',request:'booking site'});
+ assert.equal(result.state,'blocked',JSON.stringify(result));assert.equal(calls,2);
+ assert.ok(h.checkpoints.some(c=>c.tree['src/screens/scaffold/BookingScreen.jsx']===CORE_PATCH[0].content));
+ assert.equal(await h.snapshotStore.pointer('o','invalid-style','green'),null);
+});
