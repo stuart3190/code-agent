@@ -221,3 +221,18 @@ test("the deployment marker is generated from the pin, never hand-maintained", a
   assert.match(pinBlock, /endsWith\("-dark"\) \? "-dark" : ""/,
     "refreshing source identity preserves the explicit deployment channel");
 });
+
+test('identity includes dynamically embedded scaffold backend and routing bytes', async () => {
+  const root = await fixtureTree({'src/scaffolds/reactVite.mjs': 'const tree = { backend: sdk("lib/backend/supabaseBackend.js"), router: sdk("lib/modules/router.js") };'});
+  try {
+    for (const relative of ['lib/backend/supabaseBackend.js', 'lib/modules/router.js']) {
+      const file=path.join(root,'src/scaffolds/reactVite',relative);await mkdir(path.dirname(file),{recursive:true});await writeFile(file,'original');
+    }
+    const before=await computeSandboxIdentity({root,commit:'test'});
+    const file='src/scaffolds/reactVite/lib/backend/supabaseBackend.js';
+    assert.match(before.files[file] || '',/^[0-9a-f]{64}$/);
+    await writeFile(path.join(root,file),'changed auth timeout');
+    const after=await computeSandboxIdentity({root,commit:'test'});assert.notEqual(before.identity,after.identity);
+    await rm(path.join(root,file));assert.equal((await computeSandboxIdentity({root,commit:'test'})).files[file],'absent');
+  } finally { await rm(root,{recursive:true,force:true}); }
+});

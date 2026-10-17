@@ -110,12 +110,22 @@ const posixJoin = (from, specifier) => {
 };
 
 /**
- * Every repo-relative file the identity covers under `root`: the listed files plus the static
- * relative-import closure of the entrypoints (sorted, deterministic). A file that cannot be read is
+ * Every repo-relative file the identity covers under `root`: listed files, embedded scaffold SDK
+ * sources, and the static import closure of entrypoints (sorted, deterministic). An unreadable file is
  * still listed, so its absence is part of the identity.
  */
 export async function sandboxIdentityFiles(root = process.cwd()) {
   const seen = new Set(SANDBOX_IDENTITY_FILES);
+  // The scaffold embeds SDK files with readFileSync via sdk("relative/path"), so static
+  // imports alone cannot see auth, persistence or router changes. Cover every embedded file.
+  const scaffold = await readFile(path.join(root, "src/scaffolds/reactVite.mjs"), "utf8").catch(() => "");
+  for (const match of scaffold.matchAll(/\bsdk\(\s*["']([^"']+)["']\s*\)/g)) {
+    const relative = match[1];
+    if (relative.startsWith("/") || relative.includes("\\") || relative.split("/").includes("..")) {
+      throw new Error("invalid embedded scaffold source path");
+    }
+    seen.add(`src/scaffolds/reactVite/${relative}`);
+  }
   const queue = [...SANDBOX_IDENTITY_ENTRYPOINTS];
   while (queue.length) {
     const file = queue.shift();
@@ -131,8 +141,7 @@ export async function sandboxIdentityFiles(root = process.cwd()) {
 }
 
 /**
- * Hash every verdict-deciding file under `root`: the listed files and the entrypoints' whole static
- * import closure. A missing file is recorded as `absent` rather than throwing, so an image built
+ * Hash every verdict-deciding file under `root`, including embedded SDK sources and imports. A missing file is recorded as `absent` rather than throwing, so an image built
  * from a truncated context is reported as incompatible instead of crashing the check that exists
  * to catch exactly that.
  */
