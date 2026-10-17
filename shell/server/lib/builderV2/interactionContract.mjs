@@ -395,14 +395,27 @@ function actionKinds(step, context = {}) {
  *
  * A contracted negative-validation step ("enter an invalid email address") could not be driven:
  * value generation always produced a realistic, VALID value, so a correct application's validation
- * never fired and the step failed the app for working. Intent is read from the action alone —
- * never from the expectation, or every step mentioning a validation message would start entering
- * rubbish.
+ * never fired and the step failed the app for working. An explicit invalid action is authoritative. Concrete verification fixtures may also
+ * specify a negative test through an affirmative feedback expectation; expectation alone
+ * never invents an invalid value.
  */
 export function inputValidity(step) {
   const action = String(step?.action || "");
   if (/\binvalid\b/i.test(action)) return "invalid";
   if (/\bvalid\b/i.test(action)) return "valid";
+  // A concrete negative fixture can name the value ("enter zero") instead of the
+  // adjective "invalid". Require both the explicit fixture and affirmative feedback
+  // expectation; mentioning validation alone must not turn normal input into a negative test.
+  const fixtures = Object.values(step?.verificationValues || {});
+  if (fixtures.some(value => value === "" || typeof value === "number" || typeof value === "string")
+    && /\b(?:enter|type|fill|clear|set)\b/i.test(action)) {
+    const expectation = String(step?.expect || "");
+    const feedback = /\b(?:invalid|required|validation|error)(?:[- ]+[a-z]+){0,5} +(?:feedback|message)\b/ig;
+    for (const match of expectation.matchAll(feedback)) {
+      const prefix = expectation.slice(0, match.index);
+      if (!/\b(?:no|without|hide|clear|remove)(?: +[a-z]+){0,3} +$/i.test(prefix)) return "invalid";
+    }
+  }
   return "unspecified";
 }
 
