@@ -371,6 +371,10 @@
     {
       "version": "20261017004248",
       "name": "worker_command_state_authority"
+    },
+    {
+      "version": "20261017014446",
+      "name": "absorbed_transport_retry_headroom"
     }
   ]
 }

@@ -86,8 +86,10 @@ export function reservationBudget(rows, { owner, buildId, ceilingCredits, fundin
     }) === fundingPool));
   const consumedCredits = total(siblings, "settled", "actualCredits")
     + total(siblings.filter((row) => row.actualCredits == null), "settled", "actual_credits");
-  const reservedCredits = total(siblings, "held", "reservedCredits")
-    + total(siblings.filter((row) => row.reservedCredits == null), "held", "reserved_credits");
+  // Absorbed transport liabilities remain durable, but no longer reserve this build’s envelope.
+  const heldSiblings = siblings.filter((row) => (row.reconciliationState || row.reconciliation_state) !== "platform_assumed");
+  const reservedCredits = total(heldSiblings, "held", "reservedCredits")
+    + total(heldSiblings.filter((row) => row.reservedCredits == null), "held", "reserved_credits");
   const approvedCeilingCredits = Number(ceilingCredits);
   return {
     approvedCeilingCredits,
@@ -167,7 +169,7 @@ export function memoryModelReservations() {
         });
       }
       const spent = siblings.filter((row) => row.state === "settled").reduce((sum, row) => sum + row.actualCredits, 0);
-      const held = siblings.filter((row) => row.state === "held").reduce((sum, row) => sum + row.reservedCredits, 0);
+      const held = siblings.filter((row) => row.state === "held" && row.reconciliationState !== "platform_assumed").reduce((sum, row) => sum + row.reservedCredits, 0);
       if (spent + held + input.reservedCredits > input.ceilingCredits) {
         throw Object.assign(new Error("Builder V2 model-call ceiling exceeded"), {
           code: "budget_ceiling", spent, held, requested: input.reservedCredits, ceiling: input.ceilingCredits,
@@ -265,7 +267,7 @@ export function memoryModelReservations() {
           row.purchasedReservedCredits = 0;
           row.platformReservedCredits = row.billingLane === "managed" ? row.reservedCredits : 0;
           row.reconciliationState = "platform_assumed";
-        } else {
+        } else if (row.reconciliationState !== "platform_assumed") {
           row.reconciliationState = "provider_rejected";
         }
         released.push({ ...row });
@@ -293,7 +295,7 @@ export function supabaseModelReservations(client = serviceClient()) {
   return {
     async budget(owner, buildId, ceilingCredits, fundingPool = null) {
       const result = await client.from("bv2_model_reservations")
-        .select("owner,build_id,state,reserved_credits,actual_credits,funding_pool,usage_responsibility")
+        .select("owner,build_id,state,reserved_credits,actual_credits,funding_pool,usage_responsibility,reconciliation_state")
         .eq("owner", owner).eq("build_id", buildId);
       const rows = unwrap(result, "read Builder V2 reservation budget");
       return reservationBudget(rows, { owner, buildId, ceilingCredits, fundingPool });

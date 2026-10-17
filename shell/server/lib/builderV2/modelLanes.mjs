@@ -1703,7 +1703,18 @@ export async function runReservedDispatch({
           `transport interruption could not be absorbed: ${absorbError.message}`), { code: "billing_settlement_failed" }),
         { reservationId: hold.id, providerRequestId: error?.providerRequestId || null });
       }
-      return runReservedDispatch({ ...dispatchArguments, transportRetries: Number(transportRetries) + 1 });
+      try {
+        return await runReservedDispatch({ ...dispatchArguments, transportRetries: Number(transportRetries) + 1 });
+      } catch (retryError) {
+        if (["budget_ceiling", "step_budget_ceiling", "account_budget", "customer_envelope_exhausted",
+          "recovery_envelope_exhausted", "customer_completion_reserve", "recovery_completion_reserve"].includes(retryError.code)) {
+          retryError.cause ||= error;
+          retryError.classification = error.classification || "platform";
+          retryError.customerActionRequired = false;
+          retryError.transportRetryAdmissionFailed = true;
+        }
+        throw retryError;
+      }
     }
     throw replayUnsafe(error, { reservationId: hold.id, providerRequestId: error?.providerRequestId || null });
   }

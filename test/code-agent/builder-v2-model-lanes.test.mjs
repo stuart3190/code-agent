@@ -1629,3 +1629,41 @@ test("a second interruption, or an interruption that carried usage, still fails 
   assert.equal(usageCalls, 1, "usage means the turn happened: no replay");
   assert.equal(withUsage.rows()[0].state, "settled", "the usage that was reported is settled, not discarded");
 });
+
+test("transport retry fits the original recovery envelope while protecting completion reserve", async () => {
+  const reservations = memoryModelReservations();
+  let calls = 0;
+  const turn = await runReservedDispatch({
+    reservations, owner: "o", projectId: "p", buildId: "tight-retry", step: "contract", sequence: 1,
+    usageResponsibility: "thrallo_repair", fundingPool: "thrallo_recovery",
+    provider: { model: "gpt-5.5", provider: "codex", runTurn: async () => {
+      if (++calls === 1) throw socketClosed("original-tight");
+      return { text: "recovered", usage: { input: 100, output: 20, total: 120 } };
+    } },
+    decision: { provider: "codex", billingLane: "connected_allowance", estimatedCredits: 1.9955, callCeilingCredits: 1.9955, maxOutputTokens: 6000 },
+    options: { systemPrompt: "system", messages: [{ role: "user", content: "contract" }] },
+    ceilingCredits: 3.2911, completionReserveCredits: 1.2956,
+  });
+  assert.equal(turn.text, "recovered");
+  assert.equal(calls, 2);
+  assert.equal(reservations.rows()[0].reconciliationState, "platform_assumed");
+  assert.equal(reservations.rows()[1].state, "settled");
+});
+
+test("retry admission failure retains transport cause and platform classification", async () => {
+  const reservations = memoryModelReservations();
+  let reads = 0, calls = 0;
+  const budget = reservations.budget;
+  reservations.budget = async (...args) => ++reads === 1 ? budget(...args) : { remainingCredits: 0 };
+  await assert.rejects(runReservedDispatch({
+    reservations, owner: "o", projectId: "p", buildId: "retry-denied", step: "contract", sequence: 1,
+    usageResponsibility: "thrallo_repair",
+    provider: { model: "gpt-5.5", provider: "codex", runTurn: async () => { calls++; throw socketClosed("denied-original"); } },
+    decision: { provider: "codex", billingLane: "connected_allowance", estimatedCredits: 0.5, maxOutputTokens: 6000 },
+    options: { systemPrompt: "system", messages: [{ role: "user", content: "contract" }] },
+    ceilingCredits: 10, completionReserveCredits: 1,
+  }), error => error.code === "recovery_completion_reserve" && error.classification === "platform"
+    && error.customerActionRequired === false && error.transportRetryAdmissionFailed === true
+    && error.cause?.message === "terminated");
+  assert.equal(calls, 1);
+});
