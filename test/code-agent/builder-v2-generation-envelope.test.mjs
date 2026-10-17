@@ -30,12 +30,15 @@ const ENVELOPE_TOKENS = MEDIUM.callCeilingCredits * 10_000;
 // The estimator that fragmented the retained build, kept only to state what changed.
 const previousEstimate = (bytes) => Math.ceil((bytes / 3) * 1.2) + 512;
 
-// The exact wire the lane sent for a retained call: its system prompt, the user prompt and the
+// Historical calibration must retain the historical system/tool envelope. Current schemas
+// and prompts are tested against the live generation budget separately below.
+// The reconstructed wire for a retained call: its system prompt, the user prompt and the
 // tool schema. The retained table records the user prompt's bytes and which system prompt the
 // dispatch used; the provider's usage covers all three.
-const SYSTEM_PROMPTS = { core: coreSystemPrompt(), headroom_fragment: HEADROOM_FRAGMENT_SYSTEM_PROMPT };
+const MEASURED_ENVELOPE = JSON.parse(await readFile(new URL("measured-wire-envelope.json", RETAINED), "utf8"));
+const SYSTEM_PROMPTS = MEASURED_ENVELOPE.systemPrompts;
 const retainedWire = (call) => ({
-  systemPrompt: SYSTEM_PROMPTS[call.systemPrompt], messages: [{ role: "user", content: "x".repeat(call.bytes) }], tools: [EMIT_PATCHES_SCHEMA],
+  systemPrompt: SYSTEM_PROMPTS[call.systemPrompt], messages: [{ role: "user", content: "x".repeat(call.bytes) }], tools: [MEASURED_ENVELOPE.toolSchema],
 });
 const wireBytes = (options) => Buffer.byteLength(options.systemPrompt, "utf8") + Buffer.byteLength(options.messages[0].content, "utf8") + Buffer.byteLength(JSON.stringify(options.tools), "utf8");
 
