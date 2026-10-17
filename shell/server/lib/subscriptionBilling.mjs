@@ -362,7 +362,7 @@ async function changeExistingPlan({ client, store, owner, planId, subscription }
   }
 
   // Any pending change is superseded by an explicit new choice.
-  if (scheduleId) {
+  if (scheduleId && isUpgrade) {
     await client.subscriptionSchedules.release(scheduleId);
     await store.upsertSubscription(owner, { pending_plan: null, pending_plan_at: null, stripe_schedule_id: null });
   }
@@ -386,16 +386,45 @@ async function changeExistingPlan({ client, store, owner, planId, subscription }
   }
 
   // Downgrade: hold the current plan until the period ends, then switch.
-  const schedule = await client.subscriptionSchedules.create(
-    { from_subscription: subscription.id },
-    { idempotencyKey: `${idempotencyKey}:schedule` },
-  );
-  await client.subscriptionSchedules.update(schedule.id, {
+  let schedule;
+  if (scheduleId) {
+    schedule = await client.subscriptionSchedules.retrieve(scheduleId);
+  } else {
+    try {
+      schedule = await client.subscriptionSchedules.create(
+        { from_subscription: subscription.id },
+        { idempotencyKey: `${idempotencyKey}:schedule:${crypto.randomUUID()}` },
+      );
+    } catch (error) {
+      // Creation can commit before its response is lost. Resume the attached
+      // schedule instead of creating or releasing another one on retry.
+      const current = await client.subscriptions.retrieve(subscription.id);
+      const attached = typeof current?.schedule === "string" ? current.schedule : current?.schedule?.id;
+      if (!attached || current?.id !== subscription.id || String(current.customer) !== String(subscription.customer)) throw error;
+      schedule = await client.subscriptionSchedules.retrieve(attached);
+    }
+  }
+  if (!schedule?.id || ["released", "canceled", "completed"].includes(schedule.status)
+      || String(schedule.subscription?.id || schedule.subscription) !== subscription.id) {
+    throw billingError("The current billing schedule could not be confirmed. Please retry.", 503, "billing_schedule_unavailable");
+  }
+  const phaseStart = schedule.current_phase?.start_date ?? schedule.phases?.[0]?.start_date;
+  if (!Number.isFinite(phaseStart) || phaseStart <= 0) {
+    throw billingError("The current billing schedule could not be confirmed. Please retry.", 503, "billing_schedule_unavailable");
+  }
+  const phases = (schedule.phases || []).filter(phase => phase.start_date >= phaseStart);
+  const hasPrice = (phase, price) => phase?.items?.length === 1
+    && (phase.items[0].price?.id || phase.items[0].price) === price
+    && Number(phase.items[0].quantity ?? 1) === 1;
+  const alreadyScheduled = schedule.end_behavior === "release" && phases.length === 2
+    && phases[0].start_date === phaseStart && phases[0].end_date === periodEnd && hasPrice(phases[0], item.price.id)
+    && phases[1].start_date === periodEnd && hasPrice(phases[1], targetPrice);
+  if (!alreadyScheduled) await client.subscriptionSchedules.update(schedule.id, {
     end_behavior: "release",
     phases: [
       {
         items: [{ price: item.price.id, quantity: 1 }],
-        start_date: schedule.phases[0].start_date,
+        start_date: phaseStart,
         end_date: periodEnd,
         proration_behavior: "none",
       },
@@ -405,7 +434,7 @@ async function changeExistingPlan({ client, store, owner, planId, subscription }
         proration_behavior: "none",
       },
     ],
-  });
+  }, { idempotencyKey: `${idempotencyKey}:phases:${schedule.id}:${crypto.randomUUID()}` });
   const effectiveAt = unixIso(periodEnd);
   await store.upsertSubscription(owner, {
     pending_plan: planId, pending_plan_at: effectiveAt, stripe_schedule_id: schedule.id,
