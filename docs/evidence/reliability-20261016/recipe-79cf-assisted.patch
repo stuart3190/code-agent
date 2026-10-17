@@ -1,0 +1,33 @@
+--- a/src/components/scale-initial-recipe/ScaleInitialRecipeFlow.jsx
++++ b/src/components/scale-initial-recipe/ScaleInitialRecipeFlow.jsx
+@@ -36,7 +36,7 @@
+     const value = rawValue === "" ? "" : Number(rawValue);
+     const next = { ...recipe, [key]: value };
+     const hasValidScale = validate(next.originalServings, next.desiredServings);
+-    setRecipe({ ...next, hasValidScale });
++    setRecipe({ ...next, hasValidScale, activeList: hasValidScale ? "scaled" : next.activeList });
+     setNotice(hasValidScale ? `Scaled recipe updated for ${next.desiredServings} servings.` : value === "" ? "A serving count is required. Scaled ingredients are unavailable." : "Serving counts must be greater than zero. Scaled ingredients are unavailable.");
+   }
+   function addIngredient() {
+@@ -48,8 +48,13 @@
+   function updateDraft(id, key, value) { setDrafts(current => ({ ...current, [id]: { ...current[id], [key]: value } })); }
+   function saveIngredient(id) {
+     const draft = drafts[id];
++    if (!draft?.ingredientName.trim() || !draft.unit.trim() || draft.originalQuantity === "" || !Number.isFinite(Number(draft.originalQuantity)) || Number(draft.originalQuantity) <= 0) {
++      setNotice("Enter an ingredient name, positive quantity, and unit before saving.");
++      return;
++    }
+     const result = runAddAndRemoveDecimalIngredientCustomBehavior({ ingredientId: id, ingredientName: draft.ingredientName, originalQuantity: draft.originalQuantity, unit: draft.unit }, { operation: "edit-ingredient" });
+     setIngredients(current => current.map(item => item.ingredientId === id ? { ...item, ...result, originalQuantity: Number(result.originalQuantity) } : item));
++    setDrafts(current => { const next = { ...current }; delete next[id]; return next; });
+     setNotice(`${result.ingredientName || "Ingredient"} details saved.`);
+   }
+   function removeIngredient(id) {
+@@ -85,6 +90,6 @@
+ function IngredientRow({ item, showScaled, scaledQuantity, draft, onDraft, onSave, onRemove }) {
+   const isNew = Boolean(draft);
+   return <article style={{ padding: 16, border: "1px solid #ded7c9", background: "#fff", minWidth: 0 }}>
+-    {isNew ? <div aria-label="New ingredient row" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 8, minWidth: 0 }}><input aria-label="Ingredient name" data-thrallo-control="ctl_e0c194ad" value={draft.ingredientName} onChange={e => onDraft(item.ingredientId, "ingredientName", e.target.value)} placeholder="name" style={{ minWidth: 0, width: "100%" }}/><input aria-label="Original quantity" data-thrallo-control="ctl_8dd72cdb" type="number" step="0.1" value={draft.originalQuantity} onChange={e => onDraft(item.ingredientId, "originalQuantity", e.target.value)} placeholder="quantity" style={{ minWidth: 0, width: "100%" }}/><input aria-label="Unit" data-thrallo-control="ctl_e8b51a07" value={draft.unit} onChange={e => onDraft(item.ingredientId, "unit", e.target.value)} placeholder="unit" style={{ minWidth: 0, width: "100%" }}/><button data-thrallo-action="act_0fd6251b" onClick={() => onSave(item.ingredientId)} style={{ minWidth: 0 }}>Save</button></div> : <><strong>{item.ingredientName}</strong><span style={{ float: "right", fontSize: 20 }}>{showScaled ? `${quantity(scaledQuantity)} ${item.unit}` : `${quantity(item.originalQuantity)} ${item.unit}`}</span>{item.ingredientId !== "rice" && item.ingredientId !== "water" && item.ingredientId !== "salt" && <button aria-label={`${item.ingredientName} ingredient remove control`} data-thrallo-action="act_48c820ff" onClick={() => onRemove(item.ingredientId)} style={{ marginTop: 10 }}>Remove {item.ingredientName}</button>}</>}
++    {isNew ? <div aria-label="New ingredient row" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 8, minWidth: 0 }}><input aria-label="Ingredient name" data-thrallo-control="ctl_e0c194ad" value={draft.ingredientName} onChange={e => onDraft(item.ingredientId, "ingredientName", e.target.value)} placeholder="name" style={{ minWidth: 0, width: "100%" }}/><input aria-label="Original quantity" data-thrallo-control="ctl_8dd72cdb" type="number" step="0.1" value={draft.originalQuantity} onChange={e => onDraft(item.ingredientId, "originalQuantity", e.target.value)} placeholder="quantity" style={{ minWidth: 0, width: "100%" }}/><input aria-label="Unit" data-thrallo-control="ctl_e8b51a07" value={draft.unit} onChange={e => onDraft(item.ingredientId, "unit", e.target.value)} placeholder="unit" style={{ minWidth: 0, width: "100%" }}/><button data-thrallo-action="act_0fd6251b" onClick={() => onSave(item.ingredientId)} style={{ minWidth: 0 }}>Save</button></div> : <><strong>{item.ingredientName}</strong><span style={{ float: "right", fontSize: 20 }}>{showScaled ? `${quantity(scaledQuantity)} ${item.unit}` : `${quantity(item.originalQuantity)} ${item.unit}`}</span>{<button aria-label={`${item.ingredientName} ingredient remove control`} data-thrallo-action="act_48c820ff" onClick={() => onRemove(item.ingredientId)} style={{ marginTop: 10 }}>Remove {item.ingredientName}</button>}</>}
+   </article>;
+ }
