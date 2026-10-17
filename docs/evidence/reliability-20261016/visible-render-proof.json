@@ -1,6 +1,5 @@
 {
   "sourceCommit": "283451f5c174ba13299330bbf7aceff9085427e2",
-  "image": "sha256:bd851cc8bbc5ed98e050450ea86e964a55a795ca14ce9f26e10d55d296e3c6e7",
   "before": {
     "passed": 1,
     "failed": 1
@@ -327,5 +326,18 @@
         }
       }
     ]
+  },
+  "initialBuildImageReported": "sha256:bd851cc8bbc5ed98e050450ea86e964a55a795ca14ce9f26e10d55d296e3c6e7",
+  "releaseImage": "sha256:be49d4aac9186714b0318fc02ce65cfc80d084b46eb623a7f99d4ddc72573632",
+  "releaseExactImage": {
+    "passed": 65,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 201175.369963
+  },
+  "workerRecovery": {
+    "passed": 28,
+    "failed": 0,
+    "skipped": 0
   }
 }
