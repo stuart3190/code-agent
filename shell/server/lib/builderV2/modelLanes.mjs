@@ -96,7 +96,9 @@ against a code index. Rules:
   multiple journeys exercise the same operation, reuse one existing action control and preserve
   its machine identity; never replace it with a journey-specific action identity or duplicate it.
   With useSemanticAction, set name to the operationId and label to the journey-facing accessible
-  copy. A literal data-thrallo-action must equal the supplied control.machineId.
+  copy. Its buttonProps defaults to type="button": inside a form, put type="submit" AFTER
+  the spread to use onSubmit, or bind a real onActivate handler. Never leave both paths inert.
+  A literal data-thrallo-action must equal the supplied control.machineId.
 - A contracted control's verificationValue is the authoritative non-secret synthetic browser
   fixture for its domain rule. Configure sample data and validation so that exact value has the
   valid/invalid meaning stated by the journey. A selectable card/button/radio option must expose

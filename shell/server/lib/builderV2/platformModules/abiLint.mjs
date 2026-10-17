@@ -10,6 +10,7 @@
 // existed and must keep judging exactly as they did.
 
 import path from "node:path";
+import { lintSemanticFormActions } from "./semanticActionLint.mjs";
 import { parse } from "@babel/parser";
 import { isProtectedPath } from "../patchEngine.mjs";
 
@@ -110,6 +111,7 @@ export function lintPlatformAbi(tree, { locked = false, identityInstalled = null
   for (const [file, source] of Object.entries(tree || {})) {
     if (!GENERATED_SOURCE.test(file) || isProtectedPath(file, { tree }) || typeof source !== "string") continue;
     if (typeof tree?.["src/lib/app/routing.js"] === "string") findings.push(...linkPathFindings(source, file, staticPaths));
+    findings.push(...lintSemanticFormActions(source, file));
     IMPORT_SPECIFIER.lastIndex = 0;
     let match;
     while ((match = IMPORT_SPECIFIER.exec(source))) {
