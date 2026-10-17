@@ -78,3 +78,11 @@ test("the extension is marketplace-packagable: metadata and assets are present",
   const icon = await readFile(new URL("media/icon.png", root));
   assert.deepEqual([...icon.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47], "icon must be a real PNG");
 });
+
+test('API requests and event streams never follow redirects with a stored token',async()=>{
+ const seen=[];await withServer((req,res)=>{seen.push(req.url);res.writeHead(302,{Location:'/capture'});res.end();},async(base)=>{
+  const client=new ThralloClient({serverUrl:base,token:'synthetic-token'});
+  await assert.rejects(client.listAgents());await assert.rejects(client.streamRunEvents('run',()=>{}));
+  assert.deepEqual(seen,['/api/v1/agents','/api/v1/runs/run/events?after=0']);
+ });
+});

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 — candidate, pending distribution
+
+- Repository settings cannot redirect the API connection or a stored token. Configure the server in user settings.
+- Tokens are stored separately for each server origin. Legacy tokens remain usable only with the default Thrallo origin; custom servers require reconnection.
+- Require HTTPS except for loopback development; reject credential-bearing URLs and redirects.
+- Refresh the conversation when credentials change or the user disconnects.
+
 ## 0.2.0 — 2026-07-30
 
 - Marketplace-ready packaging: icon, license, categories, gallery banner.
