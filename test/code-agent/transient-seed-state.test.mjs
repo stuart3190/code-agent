@@ -1,10 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {transientSeedState} from '../../shell/shared/implementationContract.mjs';
+import {transientSeedState, contractBrief} from '../../shell/shared/implementationContract.mjs';
 import {buildInteractionContract} from '../../shell/server/lib/builderV2/interactionContract.mjs';
 const fixture=JSON.parse(await readFile(new URL('./fixtures/reliability-20261016/recipe-transient-seed-contract.json',import.meta.url)));
 const clone=()=>structuredClone(fixture);
+test('generation brief preserves the requested seed quantities, units and visible outcomes',()=>{
+ const brief=contractBrief(clone());
+ assert.match(brief,/"quantity":300,"unit":"g"/);
+ assert.match(brief,/"quantity":600,"unit":"ml"/);
+ assert.match(brief,/"quantity":2,"unit":"tsp"/);
+ assert.match(brief,/visible outcomes:/);
+ assert.match(brief,/transient state:/);
+ assert.doesNotMatch(brief,/PERSISTED DATA — these must go through/);
+});
 test('retained recipe contract uses its explicit initial seed without inventing additional input steps',()=>{
  const c=clone(),plan=buildInteractionContract(c);assert.equal(plan.valid,true,plan.problems.join('; '));
  assert.equal(plan.scenarios['scale-initial-recipe'].initialState.originalServings,4);

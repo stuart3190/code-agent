@@ -879,6 +879,9 @@ export function contractBrief(contract) {
           && Object.keys(step.expectedOutputs).length) {
         lines.push(`     computed outputs: ${JSON.stringify(step.expectedOutputs)}`);
       }
+      if (Array.isArray(step.visibleText) && step.visibleText.length) {
+        lines.push(`     visible outcomes: ${JSON.stringify(step.visibleText)}`);
+      }
       lines.push(`  ${i + 1}. ${step.action}${step.target ? ` (${step.target})` : ""} → ${step.expect}`);
     }
     lines.push("");
@@ -894,10 +897,15 @@ export function contractBrief(contract) {
   }
 
   if (contract.entities?.length) {
-    lines.push("PERSISTED DATA — these must go through db.entity(), never component state:");
+    lines.push("DATA MODELS — follow each entity's storage policy:");
     for (const entity of contract.entities) {
       const fields = (entity.fields || []).map((f) => `${f.name}:${f.type}${f.required ? "*" : ""}`).join(", ");
       lines.push(`  - ${entity.name}${entity.owned ? " (owned by the signed-in user)" : ""} { ${fields} }`);
+      lines.push(entityPersistencePolicy(contract, entity.name) === "transient"
+        ? "      transient state: keep it in the composed transient store or local UI state"
+        : "      persistent data: use the composed backend capability; never fake it with component state");
+      const seed = transientSeedState(contract, entity);
+      if (Object.keys(seed).length) lines.push(`      exact initial values (preserve quantities and units): ${JSON.stringify(seed)}`);
       for (const rel of entity.relationships || []) lines.push(`      ${rel}`);
     }
     lines.push("");

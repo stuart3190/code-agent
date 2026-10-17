@@ -6,7 +6,7 @@
 
 import { generateContract } from "../appBuild/contractAgent.mjs";
 import { entitiesForOperations } from "./entityScope.mjs";
-import { contractBrief } from "../../../shared/implementationContract.mjs";
+import { contractBrief, transientSeedState } from "../../../shared/implementationContract.mjs";
 import { managedUsageGuard } from "../buildJobs.mjs";
 import { expectationKeywords } from "../appBuild/journeyVerifier.mjs";
 import {
@@ -874,6 +874,9 @@ export function renderPatchPrompt({
         : scopedJourney.steps || [],
     })),
     entities: scopedContract.entities || [],
+    initialTransientState: Object.fromEntries((scopedContract.entities || [])
+      .map(entity => [entity.name, transientSeedState(scopedContract, entity)])
+      .filter(([, state]) => Object.keys(state).length)),
     operations: scopedOperations,
     routes: scopedContract.routes || [],
     dependencyPlan: scopedContract.dependencyPlan || null,
