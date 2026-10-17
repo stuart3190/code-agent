@@ -55,9 +55,9 @@ test("D1 lint — correct usage, enum property access and platform files all pas
 import { makeBookingSystem } from "../lib/capabilities";
 const bookings = makeBookingSystem({});
 async function go() {
-  const r = await bookings.createBooking({});
+  const r = await bookings.createBooking({ date: "2026-10-17", slotId: "morning", name: "Audit", email: "audit@example.test" });
   if (r.result === bookings.CREATE_RESULT) return; // property, not a call
-  await bookings.cancelBooking("ref");
+  await bookings.cancelBooking("ref", "audit@example.test");
 }
 `,
     // Platform library files are never linted — they ARE the implementation.
@@ -175,7 +175,9 @@ test("D1 lint — the capability brief carries the instance methods AND the Reac
   assert.match(brief, /submitContact\(fields\)/);
   assert.match(brief, /NOT \.submit/);
   assert.match(brief, /subscribe\(email\)/);
-  assert.match(brief, /createBooking, getBooking, listBookings, cancelBooking, remaining/);
+  for (const method of ["createBooking", "getBooking", "listBookings", "cancelBooking", "remaining"]) {
+    assert.ok(brief.includes(`${method}(`), `brief describes ${method} arguments`);
+  }
   // Assembly, not invention: the wiring the model used to have to reinvent every build.
   assert.match(brief, /useCapabilityState/);
   assert.match(brief, /useSyncExternalStore/);
