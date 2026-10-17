@@ -6,9 +6,9 @@ COPY src ./src
 # Scaffold dependencies depend on src, not the verifier/worker implementation. Keep this
 # installation cached when changing server code; provenance below still covers all runtime files.
 RUN mkdir -p /opt/scaffold \
-  && node --input-type=module -e "import {writeFile} from 'node:fs/promises'; import {REACT_VITE} from './src/scaffolds/reactVite.mjs'; await writeFile('/opt/scaffold/package.json', REACT_VITE['package.json'])" \
+  && node --input-type=module -e "import {writeFile} from 'node:fs/promises'; import {REACT_VITE} from './src/scaffolds/reactVite.mjs'; await writeFile('/opt/scaffold/package.json', REACT_VITE['package.json']); await writeFile('/opt/scaffold/package-lock.json', REACT_VITE['package-lock.json'])" \
   && cd /opt/scaffold \
-  && npm install --ignore-scripts --no-audit --no-fund
+  && npm ci --ignore-scripts --no-audit --no-fund
 COPY shell/server ./shell/server
 # shell/server modules import shared contract vocabulary from shell/shared; without it the
 # sandbox fails at import time (browser_verify exited 1 with ERR_MODULE_NOT_FOUND, 2026-09-07).

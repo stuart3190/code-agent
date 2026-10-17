@@ -34,6 +34,7 @@ export const SANDBOX_IDENTITY_FILES = Object.freeze([
   "shell/server/lib/appBuild/verificationIdentity.mjs",
   "shell/server/lib/builderV2/controlIdentity.mjs",
   "src/scaffolds/reactVite.mjs",
+  "src/scaffolds/reactVite/package-lock.json",
   // reactVite.mjs imports this catalogue to build package.json. A stale sandbox catalogue means
   // the host may approve a specialist runtime that the offline compiler does not actually have.
   "src/scaffolds/dependencyCatalog.mjs",

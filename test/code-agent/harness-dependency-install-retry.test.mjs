@@ -75,3 +75,21 @@ test('timed-out locked install stops npm and leaves a repairable cache', { skip:
   await f.run({ wallMs: 3000 });
   assert.equal(await readFile(path.join(f.deps, 'install-attempts'), 'utf8'), 'xx');
 });
+
+test('changed lockfile forces installation even when package manifest is unchanged', { skip: process.platform === 'win32' }, async t => {
+  const f = await fixture(t, false);
+  await writeFile(path.join(f.deps, 'permit-install'), '');
+  await f.run();
+  const lock = await readFile(path.join(f.deps, 'package-lock.json'), 'utf8');
+  await writeFile(path.join(f.deps, 'package-lock.json'), lock + '\n');
+  await f.run();
+  assert.equal(await readFile(path.join(f.deps, 'install-attempts'), 'utf8'), 'xx');
+  assert.equal(await readFile(path.join(f.deps, 'package-lock.json'), 'utf8'), lock);
+});
+
+test('scaffold installation uses frozen lock and disables package scripts', { skip: process.platform === 'win32' }, async t => {
+  const f = await fixture(t, false);
+  await writeFile(path.join(f.bin, 'npm'), '#!/bin/sh\nset -eu\nprintf "%s\\n" "$@" > install-arguments\nmkdir -p node_modules\n');
+  await f.run();
+  assert.deepEqual((await readFile(path.join(f.deps, 'install-arguments'), 'utf8')).trim().split('\n'), ['ci','--ignore-scripts','--no-audit','--no-fund']);
+});

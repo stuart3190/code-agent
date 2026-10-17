@@ -1,0 +1,11 @@
+# Frozen scaffold dependencies — 2026-10-17
+
+Owner-authorized continuation of the reliability mission. Isolated worktree `/home/ubuntu/thrallo-build-determinism`, branch `audit/build-determinism-20261017`, based on LIVE22038cc. Account repairs remain in `/home/ubuntu/thrallo-reliability-audit` at f4f90cf with two pending migrations; do not deploy those migrations or enable optional services as part of this release.
+
+Baseline: build image59e8e9b4 resolves244 packages from floating scaffold manifest; compiler Supabase2.118.0, preview base66a74b07 Supabase2.112.3. Thirteen direct package versions differ between compiler/preview. Legacy harness checks manifest only; no tracked scaffold lock. Rebuilding identical source can resolve new versions, affecting auth and UI behavior independently of code qualification.
+
+Changes: exact direct versions and lock copied from the qualified compiler; all244 resolved package metadata entries unchanged (version/resolution/integrity/platform metadata). Generated projects include the lock. Compiler, preview base and harness use npm ci --ignore-scripts; harness checks lock as well as manifest and retains incomplete marker/flock/cancellation protections. Preview image can be pinned by immutable THRALLO_PREVIEW_IMAGE digest without retagging the shared legacy image. Lock is protected from model patches and included in sandbox provenance.
+
+Tests:14/14 dependency-install/advanced-generation tests including real Three.js production compile;18/18 lock/preflight/provenance checks. New lock mismatch forces reinstall; frozen install command disallows lifecycle scripts. No fresh model call or customer mutation. Existing preview containers unchanged.
+
+Next: commit/build exact sandbox and separate preview candidate; qualify exact-image browser/auth and build tests; prove locked version inventory on both platforms; backup and deploy with98-migration ledger using existing pipeline. Change only Thrallo preview service pin after its candidate passes; preserve shared Caddy and all customer containers. Retained own full builds and preview/published business proof required after admission. Rollback sandbox to22038cc/59e8e9b4; preview pin to prior66a74b07. No99% claim; fresh quota still blocked.

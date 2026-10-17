@@ -37,16 +37,20 @@ export const depsNodeModules = () => process.env.THRALLO_SCAFFOLD_NODE_MODULES |
 async function installScaffoldDeps(log = console.log, options = {}) {
   const manifest = REACT_VITE["package.json"];
   const manifestPath = path.join(DEPS_DIR, "package.json");
+  const lockfile = REACT_VITE["package-lock.json"];
+  const lockPath = path.join(DEPS_DIR, "package-lock.json");
   const incompletePath = path.join(DEPS_DIR, ".install-incomplete");
   const current = existsSync(manifestPath) ? await readFile(manifestPath, "utf8").catch(() => "") : "";
-  if (existsSync(DEPS_NM) && current === manifest && !existsSync(incompletePath)) return;
+  const currentLock = await readFile(lockPath, "utf8").catch(() => "");
+  if (existsSync(DEPS_NM) && current === manifest && currentLock === lockfile && !existsSync(incompletePath)) return;
   log(`[deps] ${existsSync(DEPS_NM) ? "refreshing" : "installing"} shared scaffold dependencies...`);
   await mkdir(DEPS_DIR, { recursive: true });
   // npm can create node_modules and then fail. The manifest is an install input,
   // not proof of success; keep this marker across failure/abort/process death.
   await writeFile(incompletePath, "Scaffold dependency installation has not completed.\n", "utf8");
   await writeFile(manifestPath, manifest, "utf8");
-  const install = await runProcess(NPM, [...NPM_PREFIX, "install", "--no-audit", "--no-fund"], {
+  await writeFile(lockPath, lockfile, "utf8");
+  const install = await runProcess(NPM, [...NPM_PREFIX, "ci", "--ignore-scripts", "--no-audit", "--no-fund"], {
     // Inside the lock holder, npm must stay in the outer command's process group
     // so cancellation cannot release the lock while an orphan install continues.
     spawnImpl: options.inheritProcessGroup

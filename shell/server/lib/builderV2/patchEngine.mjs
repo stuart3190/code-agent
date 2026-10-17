@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 import { parse } from "@babel/parser";
 
 export const PROTECTED_PATHS = Object.freeze([
+  /^package-lock\.json$/,
   /^src\/lib\/backend\//,
   /^src\/lib\/visitorSession\.js$/,
   /^src\/lib\/capabilities\//,
