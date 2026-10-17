@@ -1,0 +1,546 @@
+{
+  "scope": "Assisted repair, not successful fresh generation",
+  "url": "https://reliability-recipe-assisted-20261017.app.thrallo.com/",
+  "results": {
+    "preview": {
+      "passed": 51,
+      "total": 51,
+      "checks": [
+        {
+          "width": 1440,
+          "name": "requested initial recipe",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "seed removal control available",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "changing servings visibly shows requested scaled quantities",
+          "ok": true,
+          "detail": "KITCHEN NOTE NO. 04\n\nRecipe scaler\n\nTurn the four-serving example into exactly the amount you need.\n\nHow it works \u2192\nOriginal servings\nDesired servings\nReset example\n\nScaled recipe updated for 6 servings.\n\nOriginal ingredientsScaled ingredients\nScaled ingredients \u2014 6 servings\nrice\n450 g\nRemove rice\nwater\n900 ml\nRemove water\nsalt\n3 tsp\nRemove salt\n+ Add ingredient\nCalculator state: success. No account, saved history, payment, or external recipe service is required."
+        },
+        {
+          "width": 1440,
+          "name": "manual scaled-list selection has correct arithmetic",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "invalid serving count \"0\"",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "invalid serving count \"-1\"",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "invalid serving count \"\"",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "reset restores requested recipe",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "seed removal changes original list",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "seed removal also changes scaled list",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "reset restores removed seed row",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "invalid draft remains editable with validation",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "added decimal ingredient has visible scaled output",
+          "ok": true,
+          "detail": "KITCHEN NOTE NO. 04\n\nRecipe scaler\n\nTurn the four-serving example into exactly the amount you need.\n\nHow it works \u2192\nOriginal servings\nDesired servings\nReset example\n\nCumin details saved.\n\nOriginal ingredientsScaled ingredients\nScaled ingredients \u2014 6 servings\nrice\n450 g\nRemove rice\nwater\n900 ml\nRemove water\nsalt\n3 tsp\nRemove salt\nCumin\n0.75 tsp\nRemove Cumin\n+ Add ingredient\nCalculator state: success. No account, saved history, payment, or external recipe service is required."
+        },
+        {
+          "width": 1440,
+          "name": "added ingredient can be removed",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "full-page mobile controls usable",
+          "ok": true,
+          "detail": []
+        },
+        {
+          "width": 1440,
+          "name": "guide explains usage",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "guide returns to calculator",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "requested initial recipe",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "seed removal control available",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "changing servings visibly shows requested scaled quantities",
+          "ok": true,
+          "detail": "KITCHEN NOTE NO. 04\n\nRecipe scaler\n\nTurn the four-serving example into exactly the amount you need.\n\nHow it works \u2192\nOriginal servings\nDesired servings\nReset example\n\nScaled recipe updated for 6 servings.\n\nOriginal ingredientsScaled ingredients\nScaled ingredients \u2014 6 servings\nrice\n450 g\nRemove rice\nwater\n900 ml\nRemove water\nsalt\n3 tsp\nRemove salt\n+ Add ingredient\nCalculator state: success. No account, saved history, payment, or external recipe service is required."
+        },
+        {
+          "width": 390,
+          "name": "manual scaled-list selection has correct arithmetic",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "invalid serving count \"0\"",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "invalid serving count \"-1\"",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "invalid serving count \"\"",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "reset restores requested recipe",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "seed removal changes original list",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "seed removal also changes scaled list",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "reset restores removed seed row",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "invalid draft remains editable with validation",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "added decimal ingredient has visible scaled output",
+          "ok": true,
+          "detail": "KITCHEN NOTE NO. 04\n\nRecipe scaler\n\nTurn the four-serving example into exactly the amount you need.\n\nHow it works \u2192\nOriginal servings\nDesired servings\nReset example\n\nCumin details saved.\n\nOriginal ingredientsScaled ingredients\nScaled ingredients \u2014 6 servings\nrice\n450 g\nRemove rice\nwater\n900 ml\nRemove water\nsalt\n3 tsp\nRemove salt\nCumin\n0.75 tsp\nRemove Cumin\n+ Add ingredient\nCalculator state: success. No account, saved history, payment, or external recipe service is required."
+        },
+        {
+          "width": 390,
+          "name": "added ingredient can be removed",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "full-page mobile controls usable",
+          "ok": true,
+          "detail": []
+        },
+        {
+          "width": 390,
+          "name": "guide explains usage",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "guide returns to calculator",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "requested initial recipe",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "seed removal control available",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "changing servings visibly shows requested scaled quantities",
+          "ok": true,
+          "detail": "KITCHEN NOTE NO. 04\n\nRecipe scaler\n\nTurn the four-serving example into exactly the amount you need.\n\nHow it works \u2192\nOriginal servings\nDesired servings\nReset example\n\nScaled recipe updated for 6 servings.\n\nOriginal ingredientsScaled ingredients\nScaled ingredients \u2014 6 servings\nrice\n450 g\nRemove rice\nwater\n900 ml\nRemove water\nsalt\n3 tsp\nRemove salt\n+ Add ingredient\nCalculator state: success. No account, saved history, payment, or external recipe service is required."
+        },
+        {
+          "width": 320,
+          "name": "manual scaled-list selection has correct arithmetic",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "invalid serving count \"0\"",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "invalid serving count \"-1\"",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "invalid serving count \"\"",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "reset restores requested recipe",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "seed removal changes original list",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "seed removal also changes scaled list",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "reset restores removed seed row",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "invalid draft remains editable with validation",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "added decimal ingredient has visible scaled output",
+          "ok": true,
+          "detail": "KITCHEN NOTE NO. 04\n\nRecipe scaler\n\nTurn the four-serving example into exactly the amount you need.\n\nHow it works \u2192\nOriginal servings\nDesired servings\nReset example\n\nCumin details saved.\n\nOriginal ingredientsScaled ingredients\nScaled ingredients \u2014 6 servings\nrice\n450 g\nRemove rice\nwater\n900 ml\nRemove water\nsalt\n3 tsp\nRemove salt\nCumin\n0.75 tsp\nRemove Cumin\n+ Add ingredient\nCalculator state: success. No account, saved history, payment, or external recipe service is required."
+        },
+        {
+          "width": 320,
+          "name": "added ingredient can be removed",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "full-page mobile controls usable",
+          "ok": true,
+          "detail": []
+        },
+        {
+          "width": 320,
+          "name": "guide explains usage",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "guide returns to calculator",
+          "ok": true
+        }
+      ]
+    },
+    "published": {
+      "passed": 51,
+      "total": 51,
+      "checks": [
+        {
+          "width": 1440,
+          "name": "requested initial recipe",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "seed removal control available",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "changing servings visibly shows requested scaled quantities",
+          "ok": true,
+          "detail": "KITCHEN NOTE NO. 04\n\nRecipe scaler\n\nTurn the four-serving example into exactly the amount you need.\n\nHow it works \u2192\nOriginal servings\nDesired servings\nReset example\n\nScaled recipe updated for 6 servings.\n\nOriginal ingredientsScaled ingredients\nScaled ingredients \u2014 6 servings\nrice\n450 g\nRemove rice\nwater\n900 ml\nRemove water\nsalt\n3 tsp\nRemove salt\n+ Add ingredient\nCalculator state: success. No account, saved history, payment, or external recipe service is required."
+        },
+        {
+          "width": 1440,
+          "name": "manual scaled-list selection has correct arithmetic",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "invalid serving count \"0\"",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "invalid serving count \"-1\"",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "invalid serving count \"\"",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "reset restores requested recipe",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "seed removal changes original list",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "seed removal also changes scaled list",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "reset restores removed seed row",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "invalid draft remains editable with validation",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "added decimal ingredient has visible scaled output",
+          "ok": true,
+          "detail": "KITCHEN NOTE NO. 04\n\nRecipe scaler\n\nTurn the four-serving example into exactly the amount you need.\n\nHow it works \u2192\nOriginal servings\nDesired servings\nReset example\n\nCumin details saved.\n\nOriginal ingredientsScaled ingredients\nScaled ingredients \u2014 6 servings\nrice\n450 g\nRemove rice\nwater\n900 ml\nRemove water\nsalt\n3 tsp\nRemove salt\nCumin\n0.75 tsp\nRemove Cumin\n+ Add ingredient\nCalculator state: success. No account, saved history, payment, or external recipe service is required."
+        },
+        {
+          "width": 1440,
+          "name": "added ingredient can be removed",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "full-page mobile controls usable",
+          "ok": true,
+          "detail": []
+        },
+        {
+          "width": 1440,
+          "name": "guide explains usage",
+          "ok": true
+        },
+        {
+          "width": 1440,
+          "name": "guide returns to calculator",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "requested initial recipe",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "seed removal control available",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "changing servings visibly shows requested scaled quantities",
+          "ok": true,
+          "detail": "KITCHEN NOTE NO. 04\n\nRecipe scaler\n\nTurn the four-serving example into exactly the amount you need.\n\nHow it works \u2192\nOriginal servings\nDesired servings\nReset example\n\nScaled recipe updated for 6 servings.\n\nOriginal ingredientsScaled ingredients\nScaled ingredients \u2014 6 servings\nrice\n450 g\nRemove rice\nwater\n900 ml\nRemove water\nsalt\n3 tsp\nRemove salt\n+ Add ingredient\nCalculator state: success. No account, saved history, payment, or external recipe service is required."
+        },
+        {
+          "width": 390,
+          "name": "manual scaled-list selection has correct arithmetic",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "invalid serving count \"0\"",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "invalid serving count \"-1\"",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "invalid serving count \"\"",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "reset restores requested recipe",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "seed removal changes original list",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "seed removal also changes scaled list",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "reset restores removed seed row",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "invalid draft remains editable with validation",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "added decimal ingredient has visible scaled output",
+          "ok": true,
+          "detail": "KITCHEN NOTE NO. 04\n\nRecipe scaler\n\nTurn the four-serving example into exactly the amount you need.\n\nHow it works \u2192\nOriginal servings\nDesired servings\nReset example\n\nCumin details saved.\n\nOriginal ingredientsScaled ingredients\nScaled ingredients \u2014 6 servings\nrice\n450 g\nRemove rice\nwater\n900 ml\nRemove water\nsalt\n3 tsp\nRemove salt\nCumin\n0.75 tsp\nRemove Cumin\n+ Add ingredient\nCalculator state: success. No account, saved history, payment, or external recipe service is required."
+        },
+        {
+          "width": 390,
+          "name": "added ingredient can be removed",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "full-page mobile controls usable",
+          "ok": true,
+          "detail": []
+        },
+        {
+          "width": 390,
+          "name": "guide explains usage",
+          "ok": true
+        },
+        {
+          "width": 390,
+          "name": "guide returns to calculator",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "requested initial recipe",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "seed removal control available",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "changing servings visibly shows requested scaled quantities",
+          "ok": true,
+          "detail": "KITCHEN NOTE NO. 04\n\nRecipe scaler\n\nTurn the four-serving example into exactly the amount you need.\n\nHow it works \u2192\nOriginal servings\nDesired servings\nReset example\n\nScaled recipe updated for 6 servings.\n\nOriginal ingredientsScaled ingredients\nScaled ingredients \u2014 6 servings\nrice\n450 g\nRemove rice\nwater\n900 ml\nRemove water\nsalt\n3 tsp\nRemove salt\n+ Add ingredient\nCalculator state: success. No account, saved history, payment, or external recipe service is required."
+        },
+        {
+          "width": 320,
+          "name": "manual scaled-list selection has correct arithmetic",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "invalid serving count \"0\"",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "invalid serving count \"-1\"",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "invalid serving count \"\"",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "reset restores requested recipe",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "seed removal changes original list",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "seed removal also changes scaled list",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "reset restores removed seed row",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "invalid draft remains editable with validation",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "added decimal ingredient has visible scaled output",
+          "ok": true,
+          "detail": "KITCHEN NOTE NO. 04\n\nRecipe scaler\n\nTurn the four-serving example into exactly the amount you need.\n\nHow it works \u2192\nOriginal servings\nDesired servings\nReset example\n\nCumin details saved.\n\nOriginal ingredientsScaled ingredients\nScaled ingredients \u2014 6 servings\nrice\n450 g\nRemove rice\nwater\n900 ml\nRemove water\nsalt\n3 tsp\nRemove salt\nCumin\n0.75 tsp\nRemove Cumin\n+ Add ingredient\nCalculator state: success. No account, saved history, payment, or external recipe service is required."
+        },
+        {
+          "width": 320,
+          "name": "added ingredient can be removed",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "full-page mobile controls usable",
+          "ok": true,
+          "detail": []
+        },
+        {
+          "width": 320,
+          "name": "guide explains usage",
+          "ok": true
+        },
+        {
+          "width": 320,
+          "name": "guide returns to calculator",
+          "ok": true
+        }
+      ]
+    }
+  }
+}
