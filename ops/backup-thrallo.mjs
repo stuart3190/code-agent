@@ -211,6 +211,15 @@ export async function listBucketObjects(svc, bucket, prefix = "") {
   return keys;
 }
 
+export async function createPrivateBackupDirectory(dir) {
+  await mkdir(path.dirname(dir), { recursive: true, mode: 0o700 });
+  // Reserve this run exclusively: never merge with a simultaneous export, a retained
+  // incomplete run, or a pre-existing symlink. Keep exported secrets private even
+  // when an operator chooses a backup root with broader permissions.
+  await mkdir(dir, { mode: 0o700 });
+  await mkdir(path.join(dir, "storage"), { mode: 0o700 });
+}
+
 async function main() {
   loadEnv();
   const URL_ = process.env.SUPABASE_URL;
@@ -226,7 +235,7 @@ async function main() {
   const stamp = new Date().toISOString().replace(/:/g, "").slice(0, 17);
   const finalDir = path.join(backupRoot, `thrallo-${stamp}`);
   const dir = path.join(backupRoot, `.incomplete-thrallo-${stamp}`);
-  await mkdir(path.join(dir, "storage"), { recursive: true });
+  await createPrivateBackupDirectory(dir);
 
   const manifest = {
     product: "thrallo",
