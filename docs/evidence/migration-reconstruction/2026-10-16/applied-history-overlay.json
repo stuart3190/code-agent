@@ -1,8 +1,8 @@
 {
   "source": "Connected Supabase list_migrations and read-only schema_migrations query on zczgvcsokfafuyognvwx",
-  "capturedAt": "2026-10-17T01:45:10.790455+00:00",
+  "capturedAt": "2026-10-17T01:59:09.148713+00:00",
   "baseVersion": "20260919120000",
-  "ledgerCount": 94,
+  "ledgerCount": 95,
   "note": "October 6 policy already applied before this audit; October 16 trigger grants applied after isolated PostgreSQL proof. Existing version drift preserved. Local byte hashes identify reviewed files; remote statements were separately inspected. Build-scoped snapshot identity applied after isolated PostgreSQL unique-index proof; no data rewritten. Opt-in shared single-slot reservation tables applied after isolated concurrent PostgreSQL proof; existing rows unchanged. Service-only credit aggregation applied after isolated >1000-row and role-grant proof; no ledger rows changed.",
   "migrations": [
     {
@@ -60,6 +60,14 @@
       "filename": "20261017014446_absorbed_transport_retry_headroom.sql",
       "localCanonicalSqlSha256": "2e332ac8aabe8947e931bc021063572bb27dd6ec07d681d6b3d704fda67c38eb",
       "appliedVersion": "20261017014446"
+    },
+    {
+      "appliedOrder": 95,
+      "version": "20261017015857",
+      "name": "customer_transport_liability_reconciliation",
+      "filename": "20261017015857_customer_transport_liability_reconciliation.sql",
+      "localCanonicalSqlSha256": "7dcff3818bdf868da3921718fb4ce677f82ed8faaa410fcfe10c9a99b0e717d5",
+      "appliedVersion": "20261017015857"
     }
   ]
 }

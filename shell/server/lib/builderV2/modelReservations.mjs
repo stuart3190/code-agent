@@ -245,7 +245,7 @@ export function memoryModelReservations() {
         throw new Error("pending Builder V2 reservation not found");
       }
       Object.assign(row, {
-        usageResponsibility: row.billingLane === "managed" && fundingPoolFor(row) === FUNDING_POOL.CUSTOMER
+        usageResponsibility: fundingPoolFor(row) === FUNDING_POOL.CUSTOMER
           ? "platform_failure" : row.usageResponsibility,
         includedReservedCredits: 0,
         purchasedReservedCredits: 0,

@@ -131,3 +131,21 @@ test("database budget rows exclude only absorbed holds, preserving settled usage
   assert.equal(result.consumedCredits, 0.5);
   assert.equal(result.remainingCredits, 1.5);
 });
+
+test("customer transport liability transfers to platform without changing the original pool or charging usage", async () => {
+  for (const billingLane of ["managed", "connected_allowance", "byok_api"]) {
+    const store = memoryModelReservations();
+    const args = input({ billingLane, fundingPool: "customer_generation", usageResponsibility: "customer_request" });
+    const first = await store.reserve(args);
+    await store.markAmbiguous(args.owner, first.id, { reason: "terminated" });
+    await store.absorbAmbiguous(args.owner, first.id, "transport retry");
+    await store.settle(args.owner, first.id, { actualCredits: 0.75, usage: { total: 20 } });
+    const row = store.rows()[0];
+    assert.equal(row.usageResponsibility, "platform_failure");
+    assert.equal(row.fundingPool, "customer_generation");
+    assert.equal(row.billingLane, billingLane);
+    assert.equal(row.includedActualCredits, 0);
+    assert.equal(row.purchasedActualCredits, 0);
+    assert.equal(row.platformActualCredits, billingLane === "managed" ? 0.75 : 0);
+  }
+});

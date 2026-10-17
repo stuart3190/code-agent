@@ -321,12 +321,12 @@ test("authoritative migration identity is line-ending independent without changi
   assert.equal(canonicalSqlHash(lf), canonicalSqlHash(crlf));
 });
 
-test("backup migration evidence overlays the authoritative base through production ledger row 94", async () => {
+test("backup migration evidence overlays the authoritative base through production ledger row 95", async () => {
   const ledger = await loadMigrationLedgerEvidence();
   // Rows 85-87 are the WP4, WP8 and WP12 migrations, applied to production on 2026-09-20. Each
   // went in under its own authored version, so none of them adds to the versionDrift list below.
-  assert.equal(ledger.migrations.length, 94);
-  assert.deepEqual(ledger.migrations.slice(-7).map((migration) => migration.version), [
+  assert.equal(ledger.migrations.length, 95);
+  assert.deepEqual(ledger.migrations.slice(-8).map((migration) => migration.version), [
     "20261006080000",
     "20261016210929",
     "20261016215408",
@@ -334,13 +334,14 @@ test("backup migration evidence overlays the authoritative base through producti
     "20261016235852",
     "20261017004248",
     "20261017014446",
+    "20261017015857",
   ]);
-  assert.equal(ledger.migrations.at(-1).appliedOrder, 94);
+  assert.equal(ledger.migrations.at(-1).appliedOrder, 95);
   assert.ok(ledger.migrations.slice(-3).every((migration) => migration.localCanonicalSqlSha256));
   // appliedOrder must stay a gapless sequence, or the overlay has lost or double-counted a push.
   assert.deepEqual(
     ledger.migrations.map((migration) => migration.appliedOrder),
-    Array.from({ length: 94 }, (_, index) => index + 1),
+    Array.from({ length: 95 }, (_, index) => index + 1),
   );
 });
 
@@ -349,9 +350,9 @@ test("migration history validation reports the effective applied ledger, not the
     fileURLToPath(new URL("../../ops/validate-migration-history.mjs", import.meta.url)),
   ], { encoding: "utf8" }));
   assert.equal(result.authoritativeBase, 60);
-  assert.equal(result.appliedOverlay, 34);
-  assert.equal(result.effectiveApplied, 94);
-  assert.equal(result.active, 94);
+  assert.equal(result.appliedOverlay, 35);
+  assert.equal(result.effectiveApplied, 95);
+  assert.equal(result.active, 95);
   // All October migrations are confirmed in the live ledger. Historical authored/applied
   // version differences remain visible rather than rewriting production history.
   assert.deepEqual(result.pending, []);

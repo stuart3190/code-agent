@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 const name = `thrallo-transport-proof-${process.pid}`;
-const sql = q => execFileSync('docker', ['exec', '-i', name, 'psql', '-U', 'postgres', '-qAt', '-v', 'ON_ERROR_STOP=1'], { input: q, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+const sql = q => execFileSync('docker', ['exec', '-i', name, 'psql', '-h', '127.0.0.1', '-U', 'postgres', '-qAt', '-v', 'ON_ERROR_STOP=1'], { input: q, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
 const owner = '81000000-0000-4000-8000-000000000001', project = '82000000-0000-4000-8000-000000000001';
 const build = n => `83000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const call = (n, key, amount=1.9955, pool='thrallo_recovery', responsibility='thrallo_repair', who=owner) => `select public.reserve_bv2_model_call_v4('${who}','${project}','${build(n)}','${key}','contract','codex','gpt-5.5','connected_allowance','${responsibility}','${pool}',${amount},3.2911);`;
@@ -44,5 +44,41 @@ try {
   // This known separate defect is deliberately reproduced, not hidden by weakening pool checks.
   sql(`insert into bv2_model_reservations(owner,project_id,build_id,call_key,step,provider,model,billing_lane,reserved_credits,included_reserved_credits,reconciliation_state,recovery_policy_version) values('${owner}','${project}','${build(5)}','managed-pending','contract','openai','gpt-5.5','managed',1,1,'pending','owner_connected_recovery_v1');`);
   check('separate managed absorption policy conflict reproduced',()=>assert.throws(()=>sql(`select public.absorb_ambiguous_bv2_model_call('${owner}',(select id from bv2_model_reservations where call_key='managed-pending'),'transport')`),/pool_responsibility_check/));
+  if (process.argv.includes("--reconcile-customer-liability")) {
+    sql(await readFile(new URL('../supabase/migrations/20261017015857_customer_transport_liability_reconciliation.sql',import.meta.url),'utf8'));
+    sql(`create schema extensions;create extension pgcrypto with schema extensions;
+      create table ca_model_call_identities(provider_request_fingerprint text primary key,provider text,reservation_kind text,reservation_id uuid,owner uuid);
+      grant all on ca_model_call_identities to service_role;grant usage on schema extensions to service_role;`);
+    sql(await readFile(new URL('../test/code-agent/fixtures/reliability-20261016/settle-model-call-v2.sql',import.meta.url),'utf8'));
+    // Grant mirrors service-only production authority after loading this fixture function.
+    sql('revoke execute on all functions in schema public from public,anon,authenticated;grant execute on all functions in schema public to service_role;');
+    let n=10;
+    for(const lane of ['managed','connected_allowance','byok_api']) {
+      for(const cleanup of ['release','release-pending','terminal','actual-usage']) {
+        n++;
+        sql(`insert into bv2_builds(id,owner,project_id,profile,request) values('${build(n)}','${owner}','${project}','proof','liability reconciliation');`);
+        const provider=lane==='connected_allowance'?'codex':'openai';
+        const r=JSON.parse(sql(`set role service_role;select public.reserve_bv2_model_call_v4('${owner}','${project}','${build(n)}','customer-original','contract','${provider}','gpt-5.5','${lane}','customer_request','customer_generation',1,3.2911,2,'2000-01-01',0);`)).reservation;
+        sql(`update bv2_model_reservations set reconciliation_state='pending',provider_request_ids='["original-${n}"]' where id='${r.id}';`);
+        if(!['terminal','release-pending'].includes(cleanup))sql(`set role service_role;select public.absorb_ambiguous_bv2_model_call('${owner}','${r.id}','transport interrupted');`);
+        if(['release','release-pending'].includes(cleanup))sql(`set role service_role;select public.release_held_bv2_model_calls('${owner}','${build(n)}');`);
+        if(cleanup==='terminal')sql(`set role service_role;select public.settle_bv2_build_terminal('${owner}','${build(n)}','failed','platform',false,true);`);
+        if(cleanup==='actual-usage')sql(`set role service_role;select public.settle_bv2_model_call_v2('${owner}','${r.id}',0.75,'{"input":10,"output":10}','["original-${n}"]');`);
+        const row=JSON.parse(sql(`select row_to_json(r) from bv2_model_reservations r where id='${r.id}'`));
+        check(`${lane} ${cleanup} preserves transport and assigns liability without customer charge`,()=>{
+          assert.equal(row.billing_lane,lane);assert.equal(row.provider,provider);assert.equal(row.funding_pool,'customer_generation');
+          assert.equal(row.usage_responsibility,'platform_failure');
+          assert.equal(row.included_reserved_credits,0);assert.equal(row.purchased_reserved_credits,0);
+          assert.equal(row.included_actual_credits||0,0);assert.equal(row.purchased_actual_credits||0,0);
+          assert.equal(row.reconciliation_state,cleanup==='actual-usage'?'provider_settled':'platform_assumed');
+          assert.equal(row.platform_actual_credits||0,cleanup==='actual-usage'&&lane==='managed'?0.75:0);
+        });
+      }
+    }
+    check('late authoritative usage produces no customer usage or debit',()=>{assert.equal(sql('select count(*) from ca_usage_records'),'0');assert.equal(sql('select count(*) from credit_ledger'),'0');});
+    check('reconciliation exception does not admit platform-failure customer dispatch',()=>assert.throws(()=>reserve(4,'forged-failure',1,'customer_generation','platform_failure'),/invalid Builder/));
+    check('managed recovery dispatch remains prohibited',()=>assert.throws(()=>sql(`set role service_role;select public.reserve_bv2_model_call_v4('${owner}','${project}','${build(4)}','managed-recovery','contract','openai','gpt-5.5','managed','thrallo_repair','thrallo_recovery',1,3);`),/invalid Builder/));
+    for(const role of ['anon','authenticated'])check(`${role} cannot absorb liabilities`,()=>assert.throws(()=>sql(`set role ${role};select public.absorb_ambiguous_bv2_model_call('${owner}','${original.id}','forged');`),/permission denied/));
+  }
   console.log(JSON.stringify({passed:checks.length,checks,scope:'isolated production-shaped tables and constraints; no production rows; external foreign keys omitted'},null,2));
 } finally { if(started)execFileSync('docker',['rm','-f',name],{stdio:'pipe'}); }
