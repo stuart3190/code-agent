@@ -220,3 +220,21 @@ for (const [name, css, expectedPass] of [
     }finally{server.close();}
   });
 }
+
+for (const phase of ['load','activate','console-only']) {
+  browserTest(`caught boundary exception retains its diagnostic (${phase})`,async()=>{
+    const effect=`console.error('scaffold screen render failed',new Error('recipe.ingredients.map is not a function'));${phase==='console-only'?'':`document.getElementById('root').innerHTML='<main data-scaffold-boundary="error">This screen could not load</main>';`}`;
+    const html=`<html><body><div id="root"><h1>Recipe</h1><button id="go">Scale</button></div><script>${phase==='load'?effect:`document.getElementById('go').onclick=()=>{${effect}};`}</script></body></html>`;
+    const {server,url}=await serve({'/':html});
+    try {
+      const result=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});
+      assert.equal(result.pass,phase==='console-only');
+      if(phase!=='console-only') {
+        assert.equal(result.smoke.crashes[0].phase,phase);
+        assert.match(result.smoke.crashes[0].message,/recipe.ingredients.map is not a function/);
+        assert.match(result.journeys[0].detail,/recipe.ingredients.map is not a function/);
+        assert.ok(result.smoke.crashes[0].stack.length>0);
+      }
+    }finally{server.close();}
+  });
+}

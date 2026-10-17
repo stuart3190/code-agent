@@ -141,6 +141,7 @@ export async function smokeVerifyJourneys({
   const deadline = startedAt + Math.max(10_000, Number(timeoutMs) || 120_000);
   const pageErrors = [];
   const pageErrorDetails = [];
+  const boundaryErrorDetails = [];
   const consoleErrors = [];
   const failedRequests = [];
   const crashes = [];
@@ -163,7 +164,18 @@ export async function smokeVerifyJourneys({
     pageErrors.push(described.message);
     pageErrorDetails.push(described);
   });
-  page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text().slice(0, 200)); });
+  page.on("console", (m) => {
+    if (m.type() !== "error") return;
+    const text = m.text();
+    consoleErrors.push(text.slice(0, 200));
+    // React catches screen errors, so they may never emit pageerror. Only the protected
+    // boundary's diagnostic supplies this evidence; console output alone is never a failure.
+    const prefix = "scaffold screen render failed ";
+    if (text.startsWith(prefix)) {
+      const detail = text.slice(prefix.length);
+      boundaryErrorDetails.push(describePageError({ message: detail.split('\n')[0], stack: detail }));
+    }
+  });
   page.on("dialog", (d) => { d.dismiss().catch(() => {}); });
   page.on("crash", () => { crashed = true; });
   page.on("response", (r) => {
@@ -200,9 +212,10 @@ export async function smokeVerifyJourneys({
       if (crashed) {
         crashes.push({ phase: "load", control: null, error: "the page crashed while loading" });
       } else if (render.boundaryError) {
+        const detail = boundaryErrorDetails.at(-1) || pageErrorDetails[0];
         crashes.push({ phase: "load", control: null,
-          error: "application screen failed inside platform error boundary",
-          ...crashEvidence(pageErrorDetails[0]) });
+          error: `application screen failed inside platform error boundary${detail?.message ? ': ' + detail.message : ''}`,
+          ...crashEvidence(detail) });
       } else if (!render.rendered) {
         crashes.push({ phase: "load", control: null,
           error: pageErrors[0] ? `fatal runtime error during load: ${pageErrors[0]}` : "nothing rendered in the preview",
@@ -258,10 +271,11 @@ export async function smokeVerifyJourneys({
         }
         const state = crashed ? { rendered: false } : await waitForRender(page, Date.now() + 3_000);
         if (crashed || state?.boundaryError || !state?.rendered) {
+          const detail = state?.boundaryError ? boundaryErrorDetails.at(-1) || pageErrorDetails.at(-1) : pageErrorDetails.at(-1);
           crashes.push({ phase: "activate", control: describeControl(info),
-            error: crashed ? "the page crashed" : state?.boundaryError ? "application screen failed inside platform error boundary after activation" : pageErrors.at(-1)
+            error: crashed ? "the page crashed" : state?.boundaryError ? `application screen failed inside platform error boundary after activation${detail?.message ? ': ' + detail.message : ''}` : pageErrors.at(-1)
               ? `fatal runtime error after activation: ${pageErrors.at(-1)}` : "the application went blank after activation",
-            ...(crashed ? {} : crashEvidence(pageErrorDetails.at(-1))) });
+            ...(crashed ? {} : crashEvidence(detail)) });
           break;
         }
       }
