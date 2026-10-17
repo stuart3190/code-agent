@@ -239,13 +239,22 @@ export function createSnapshotStore(storage = memorySnapshotStorage()) {
         await storage.updateSnapshot(id, { state: "corrupt" });
         throw new Error("snapshot corrupt: manifest file count mismatch");
       }
-      for (const entry of manifest) {
-        const content = await storage.getBlob(owner, entry.contentHash);
-        if (content === null || sha256(String(content)) !== entry.contentHash) {
-          await storage.updateSnapshot(id, { state: "corrupt" });
-          throw new Error(`snapshot corrupt: blob bytes do not match content hash for ${entry.path}`);
+      // Small batches reduce serial network latency without unbounded database fan-out.
+      // Settle every in-flight read before propagating a failure; never publish a partial tree.
+      for (let offset = 0; offset < manifest.length; offset += 4) {
+        const batch = manifest.slice(offset, offset + 4);
+        const results = await Promise.allSettled(batch.map(entry => storage.getBlob(owner, entry.contentHash)));
+        for (let i = 0; i < batch.length; i += 1) {
+          const entry = batch[i];
+          const result = results[i];
+          if (result.status === "rejected") throw result.reason;
+          const content = result.value;
+          if (content === null || sha256(String(content)) !== entry.contentHash) {
+            await storage.updateSnapshot(id, { state: "corrupt" });
+            throw new Error(`snapshot corrupt: blob bytes do not match content hash for ${entry.path}`);
+          }
+          tree[entry.path] = content;
         }
-        tree[entry.path] = content;
       }
       const materializedHash = treeHashFromPairs(manifest.map((entry) => [entry.path, sha256(String(tree[entry.path]))]));
       if (materializedHash !== snapshot.tree_hash) {
