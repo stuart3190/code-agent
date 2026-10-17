@@ -265,6 +265,7 @@ test("the scheduled downgrade lands via the webhook and clears the pending state
       type: "customer.subscription.updated",
       data: { object: subscription({ price: STARTER, schedule: "sched_1" }) },
     };
+    stripe.subs = [stripe.event.data.object];
 
     const result = await handleSubscriptionEvent("raw", "sig", { store, stripe });
 

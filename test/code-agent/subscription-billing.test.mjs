@@ -36,7 +36,7 @@ function fakeStripe(event, subscription) {
   const stripe = {
     webhooks: { constructEvent: () => event },
     // No live subscription by default, so plan selection takes the first-time Checkout path.
-    subscriptions: { retrieve: async () => subscription, list: async () => ({ data: [] }) },
+    subscriptions: { retrieve: async () => subscription || event?.data?.object, list: async () => ({ data: [] }) },
     // Models the customer surface the code actually uses. A fake that only implemented `create`
     // let a stale email survive unnoticed: the real code returns an existing customer, and the
     // whole point of the reconciliation is what it does to THAT one.
@@ -471,4 +471,86 @@ test('subscription update metadata cannot replace a different bound customer',as
   await handleSubscriptionEvent('raw','sig',{store,stripe:fakeStripe({type:'customer.subscription.updated',data:{object:subscription}})});
   const row=await store.getSubscription(OWNER);assert.equal(row.plan,'pro');assert.equal(row.stripe_customer_id,'cus_current');assert.equal(row.stripe_subscription_id,'sub_current');
  } finally {clearStripeEnv();}
+});
+
+for(const status of ['active','canceled'])test(`delayed subscription update uses current Stripe state (${status})`,async()=>{
+ configureStripeEnv();try{
+  const store=new MemoryCodeAgentStore();await store.upsertSubscription(OWNER,{plan:'pro',status:'active',stripe_customer_id:'cus_fresh',stripe_subscription_id:'sub_fresh'});
+  const old={id:'sub_fresh',customer:'cus_fresh',status:'active',items:{data:[{price:{id:'price_pro'}}]}};
+  const latest={...old,status,items:{data:[{price:{id:'price_starter'}}]}};
+  await handleSubscriptionEvent('raw','sig',{store,stripe:fakeStripe({type:'customer.subscription.updated',data:{object:old}},latest)});
+  assert.equal((await store.getSubscription(OWNER)).plan,status==='canceled'?'free':'starter');
+ }finally{clearStripeEnv();}
+});
+test('subscription update cannot acknowledge an unavailable authoritative read',async()=>{
+ configureStripeEnv();try{
+  const store=new MemoryCodeAgentStore();await store.upsertSubscription(OWNER,{plan:'pro',status:'active',stripe_customer_id:'cus_fresh',stripe_subscription_id:'sub_fresh'});
+  const event={type:'customer.subscription.updated',data:{object:{id:'sub_fresh',customer:'cus_fresh',status:'active',items:{data:[{price:{id:'price_starter'}}]}}}};
+  const stripe=fakeStripe(event);stripe.subscriptions.retrieve=async()=>{throw Error('temporary provider outage');};
+  await assert.rejects(handleSubscriptionEvent('raw','sig',{store,stripe}),/temporary provider outage/);assert.equal((await store.getSubscription(OWNER)).plan,'pro');
+ }finally{clearStripeEnv();}
+});
+
+for(const replaceIdentity of [false,true])test(`subscription reconciliation cannot overwrite concurrent change (${replaceIdentity})`,async()=>{
+ configureStripeEnv();try{
+  const store=new MemoryCodeAgentStore();await store.upsertSubscription(OWNER,{plan:'starter',status:'active',stripe_customer_id:'cus_race',stripe_subscription_id:'sub_race'});
+  const stamp=(await store.getSubscription(OWNER)).updated_at;
+  const latest={id:'sub_race',customer:'cus_race',status:'active',items:{data:[{price:{id:'price_starter'}}]}};
+  const stripe=fakeStripe({type:'customer.subscription.updated',data:{object:latest}});
+  stripe.subscriptions.retrieve=async()=>{await store.upsertSubscription(OWNER,{plan:'pro',stripe_subscription_id:replaceIdentity?'sub_new':'sub_race'});(await store.getSubscription(OWNER)).updated_at=stamp;return latest;};
+  await assert.rejects(handleSubscriptionEvent('raw','sig',{store,stripe}),/changed during reconciliation/);
+  assert.equal((await store.getSubscription(OWNER)).plan,'pro');assert.equal((await store.getSubscription(OWNER)).stripe_subscription_id,replaceIdentity?'sub_new':'sub_race');
+ }finally{clearStripeEnv();}
+});
+for(const newer of [false,true])test(`subscription duplicate reconciles newer live identity (${newer})`,async()=>{
+ configureStripeEnv();try{
+  const store=new MemoryCodeAgentStore();await store.upsertSubscription(OWNER,{plan:'pro',status:'active',stripe_customer_id:'cus_dupe',stripe_subscription_id:'sub_current'});
+  const current={id:'sub_current',customer:'cus_dupe',created:200,status:'active',items:{data:[{price:{id:'price_pro'}}]}};
+  const incoming={...current,id:'sub_incoming',created:newer?300:100,items:{data:[{price:{id:'price_starter'}}]}};
+  const stripe=fakeStripe({type:'customer.subscription.updated',data:{object:incoming}});stripe.subscriptions.retrieve=async id=>id==='sub_current'?current:incoming;
+  await handleSubscriptionEvent('raw','sig',{store,stripe});const row=await store.getSubscription(OWNER);assert.equal(row.plan,newer?'starter':'pro');assert.equal(row.stripe_subscription_id,newer?'sub_incoming':'sub_current');
+ }finally{clearStripeEnv();}
+});
+test('ended old subscription update cannot revoke a replacement',async()=>{
+ configureStripeEnv();try{
+  const store=new MemoryCodeAgentStore();await store.upsertSubscription(OWNER,{plan:'pro',status:'active',stripe_customer_id:'cus_dupe',stripe_subscription_id:'sub_current'});
+  const old={id:'sub_old',customer:'cus_dupe',status:'active',items:{data:[{price:{id:'price_starter'}}]}};
+  await handleSubscriptionEvent('raw','sig',{store,stripe:fakeStripe({type:'customer.subscription.updated',data:{object:old}},{...old,status:'canceled'})});
+  assert.equal((await store.getSubscription(OWNER)).stripe_subscription_id,'sub_current');assert.equal((await store.getSubscription(OWNER)).plan,'pro');
+ }finally{clearStripeEnv();}
+});
+test('authoritative subscription read must match the expected customer',async()=>{
+ configureStripeEnv();try{
+  const store=new MemoryCodeAgentStore();await store.upsertSubscription(OWNER,{plan:'pro',status:'active',stripe_customer_id:'cus_bound',stripe_subscription_id:'sub_bound'});
+  const old={id:'sub_bound',customer:'cus_bound',status:'active',items:{data:[{price:{id:'price_starter'}}]}};
+  await assert.rejects(handleSubscriptionEvent('raw','sig',{store,stripe:fakeStripe({type:'customer.subscription.updated',data:{object:old}},{...old,customer:'cus_other'})}),/identity could not be confirmed/);
+  assert.equal((await store.getSubscription(OWNER)).plan,'pro');
+ }finally{clearStripeEnv();}
+});
+
+test('late checkout for ended old subscription cannot revoke replacement',async()=>{
+ configureStripeEnv();try{
+  const store=new MemoryCodeAgentStore();await store.upsertSubscription(OWNER,{plan:'pro',status:'active',stripe_customer_id:'cus_late',stripe_subscription_id:'sub_new'});
+  const old={id:'sub_old',customer:'cus_late',status:'canceled',items:{data:[{price:{id:'price_starter'}}]}};
+  const event={type:'checkout.session.completed',data:{object:{client_reference_id:OWNER,customer:'cus_late',subscription:'sub_old'}}};
+  await handleSubscriptionEvent('raw','sig',{store,stripe:fakeStripe(event,old)});assert.equal((await store.getSubscription(OWNER)).plan,'pro');assert.equal((await store.getSubscription(OWNER)).stripe_subscription_id,'sub_new');
+ }finally{clearStripeEnv();}
+});
+test('checkout reconciliation cannot overwrite concurrent plan change',async()=>{
+ configureStripeEnv();try{
+  const store=new MemoryCodeAgentStore();await store.upsertSubscription(OWNER,{plan:'starter',status:'active',stripe_customer_id:'cus_late',stripe_subscription_id:'sub_same'});
+  const latest={id:'sub_same',customer:'cus_late',status:'active',items:{data:[{price:{id:'price_starter'}}]}};
+  const stripe=fakeStripe({type:'checkout.session.completed',data:{object:{client_reference_id:OWNER,customer:'cus_late',subscription:'sub_same'}}});
+  stripe.subscriptions.retrieve=async()=>{await store.upsertSubscription(OWNER,{plan:'pro'});return latest;};
+  await assert.rejects(handleSubscriptionEvent('raw','sig',{store,stripe}),/changed during reconciliation/);assert.equal((await store.getSubscription(OWNER)).plan,'pro');
+ }finally{clearStripeEnv();}
+});
+
+test('reconciled cancellation clears paid billing period dates',async()=>{
+ configureStripeEnv();try{
+  const store=new MemoryCodeAgentStore();await store.upsertSubscription(OWNER,{plan:'pro',status:'active',stripe_customer_id:'cus_end',stripe_subscription_id:'sub_end'});
+  const latest={id:'sub_end',customer:'cus_end',status:'canceled',current_period_start:1753000000,current_period_end:1755600000,items:{data:[{price:{id:'price_pro'}}]}};
+  await handleSubscriptionEvent('raw','sig',{store,stripe:fakeStripe({type:'customer.subscription.updated',data:{object:latest}},latest)});
+  const row=await store.getSubscription(OWNER);assert.equal(row.plan,'free');assert.equal(row.current_period_start,null);assert.equal(row.current_period_end,null);
+ }finally{clearStripeEnv();}
 });

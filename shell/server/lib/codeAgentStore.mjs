@@ -347,6 +347,14 @@ export class MemoryCodeAgentStore {
     return row;
   }
 
+  async updateSubscriptionFromSnapshot(owner, expected, patch) {
+    const row = this.subscriptions.get(owner);
+    const fields = new Set([...Object.keys(patch), "stripe_customer_id", "stripe_subscription_id", "updated_at"]);
+    if (!row || [...fields].some(key => (row[key] ?? null) !== (expected[key] ?? null))) return null;
+    Object.assign(row, patch, { owner, updated_at: now() });
+    return row;
+  }
+
   async usageTotalsSince(owner, sinceIso) {
     const rows = [...this.usageRecords.values()]
       .filter((x) => x.owner === owner && x.created_at >= sinceIso);
@@ -713,6 +721,15 @@ export class SupabaseCodeAgentStore {
       .update({ ...patch, updated_at: now() }).eq("owner", owner)
       .eq("stripe_customer_id", customerId).eq("stripe_subscription_id", subscriptionId)
       .select("*").maybeSingle());
+  }
+
+  async updateSubscriptionFromSnapshot(owner, expected, patch) {
+    let query = this.client.from("ca_subscriptions").update({ ...patch, updated_at: now() }).eq("owner", owner);
+    // Compare every overwritten field as well as the timestamp. Two writes can
+    // share a millisecond, so timestamp equality alone is not sufficient.
+    const fields = new Set([...Object.keys(patch), "stripe_customer_id", "stripe_subscription_id", "updated_at"]);
+    for (const key of fields) query = expected[key] == null ? query.is(key, null) : query.eq(key, expected[key]);
+    return unwrapMaybe(await query.select("*").maybeSingle());
   }
 
   async usageTotalsSince(owner, sinceIso) {

@@ -509,7 +509,7 @@ export async function handleSubscriptionEvent(rawBody, signature, {
       return { received: true, owner: contract.owner, creditsGranted: contract.credits };
     }
     if (!owner || !session.subscription) return { received: true, ignored: "no owner or subscription" };
-    const ownerRecord = await ownerSubscription(owner, { store });
+    const ownerRecord = { ...await store.getSubscription(owner) };
     if (!ownerRecord.stripe_customer_id || ownerRecord.stripe_customer_id !== String(session.customer || "")) {
       return { received: true, ignored: "subscription customer does not match owner" };
     }
@@ -520,7 +520,7 @@ export async function handleSubscriptionEvent(rawBody, signature, {
     if (String(subscription.customer || "") !== ownerRecord.stripe_customer_id) {
       return { received: true, ignored: "subscription customer mismatch" };
     }
-    return applySubscription(store, owner, subscription);
+    return reconcileSubscription(client, store, owner, subscription, ownerRecord, subscription);
   }
 
   if (["refund.created", "refund.updated"].includes(event.type)) {
@@ -597,10 +597,35 @@ export async function handleSubscriptionEvent(rawBody, signature, {
       if (!cleared) return { received: true, ignored: "subscription changed before deletion applied" };
       return { received: true, owner, plan: "free" };
     }
-    return applySubscription(store, owner, subscription);
+    return reconcileSubscription(client, store, owner, subscription, { ...existing });
   }
 
   return { received: true, ignored: event.type };
+}
+
+async function reconcileSubscription(client, store, owner, subscription, expected, latest = null) {
+  // Event snapshots can arrive out of order. Read Stripe's current object,
+  // and only write if the local entitlement still matches the observed row.
+  latest ||= await client.subscriptions.retrieve(subscription.id);
+  if (!latest || latest.id !== subscription.id || String(latest.customer) !== String(subscription.customer)) {
+    throw new Error("Subscription identity could not be confirmed");
+  }
+  if (expected.stripe_subscription_id && expected.stripe_subscription_id !== latest.id) {
+    if (!["active", "trialing", "past_due", "unpaid", "incomplete"].includes(latest.status)) {
+      return { received: true, ignored: "ended subscription is not current" };
+    }
+    const current = await client.subscriptions.retrieve(expected.stripe_subscription_id);
+    if (!current || current.id !== expected.stripe_subscription_id || String(current.customer) !== String(subscription.customer)) {
+      throw new Error("Current subscription identity could not be confirmed");
+    }
+    if (["active", "trialing", "past_due", "unpaid", "incomplete"].includes(current.status)) {
+      if (!Number.isFinite(current.created) || !Number.isFinite(latest.created)) {
+        throw new Error("Subscription ordering could not be confirmed");
+      }
+      if (current.created >= latest.created) latest = current;
+    }
+  }
+  return applySubscription(store, owner, latest, { expected });
 }
 
 async function validateTopupMetadata({ store, metadata = {}, customer }) {
@@ -649,7 +674,7 @@ async function topupReversalContract({ client, store, event }) {
   return { ...contract, credits: Math.min(contract.credits, contract.credits * (reversed / paid)) };
 }
 
-async function applySubscription(store, owner, subscription) {
+async function applySubscription(store, owner, subscription, { expected = null } = {}) {
   const priceId = subscription.items?.data?.[0]?.price?.id;
   const plan = priceToPlan(priceId);
   if (!plan) {
@@ -673,24 +698,28 @@ async function applySubscription(store, owner, subscription) {
   // arrival of the target plan is exactly what proves the pending change is no longer pending.
   const scheduleId = typeof subscription.schedule === "string"
     ? subscription.schedule : subscription.schedule?.id || null;
-  const existing = await store.getSubscription(owner).catch(() => null);
+  const existing = expected || await store.getSubscription(owner);
   const pendingSatisfied = existing?.pending_plan && existing.pending_plan === plan;
   const clearPending = pendingSatisfied || !scheduleId;
 
-  await store.upsertSubscription(owner, {
+  const patch = {
     plan: status === "cancelled" ? "free" : plan,
     status: status === "cancelled" ? "active" : status,
     stripe_customer_id: String(subscription.customer),
     stripe_subscription_id: status === "cancelled" ? null : subscription.id,
-    current_period_start: unixIso(subscription.current_period_start),
-    current_period_end: unixIso(subscription.current_period_end),
+    current_period_start: status === "cancelled" ? null : unixIso(subscription.current_period_start),
+    current_period_end: status === "cancelled" ? null : unixIso(subscription.current_period_end),
     // Stripe is the authority here too. Without it the billing panel told a customer who had
     // cancelled that their plan "renews" on the very date it was going to end.
     cancel_at_period_end: status === "cancelled" ? false : !!subscription.cancel_at_period_end,
     ...(clearPending
       ? { pending_plan: null, pending_plan_at: null, stripe_schedule_id: null }
       : { stripe_schedule_id: scheduleId }),
-  });
+  };
+  if (expected) {
+    const saved = await store.updateSubscriptionFromSnapshot(owner, expected, patch);
+    if (!saved) throw new Error("Subscription changed during reconciliation; retry delivery");
+  } else await store.upsertSubscription(owner, patch);
   return { received: true, owner, plan, status, ...(clearPending ? {} : { pendingPlan: existing?.pending_plan }) };
 }
 
