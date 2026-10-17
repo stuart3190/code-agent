@@ -2579,7 +2579,7 @@ export function surfaceIncludes(surface, value) {
 // Grouping separators and a trailing unit are not part of the value. The tolerance absorbs
 // binary float noise (0.1 + 0.2) and nothing a person would call a different result.
 function numberTokenPattern() {
-  return /(?<![\d.])[+-]?(?:[$£€¥]\s*)?(?:\d{1,3}(?:[,_\u00a0\u202f ]\d{3})+|\d+)(?:\.\d+)?(?:\s*[a-zA-Zµμ%][a-zA-Zµμ%0-9²³]*)?(?![\d])/gu;
+  return /(?<![\d.])[+-]?(?:[$£€¥]\s*)?(?:\d{1,3}(?:[,_\u00a0\u202f ]\d{3})+|\d+)(?:\.\d+)?(?:[eE][+-]?\d+)?(?:\s*[a-zA-Zµμ%][a-zA-Zµμ%0-9²³]*)?(?![\d])/gu;
 }
 
 function parseNumericToken(token) {
@@ -2589,10 +2589,12 @@ function parseNumericToken(token) {
   if (body.startsWith("+")) body = body.slice(1).trim();
   else if (body.startsWith("-")) { sign = -1; body = body.slice(1).trim(); }
   body = body.replace(/^[$£€¥]\s*/, "");
-  body = body.replace(/\s*[a-zA-Zµμ%][a-zA-Zµμ%0-9²³]*$/u, "");
   body = body.replace(/[,_\u00a0\u202f ]/g, "");
-  if (!/^\d+(?:\.\d+)?$/.test(body)) return null;
-  const value = sign * Number(body);
+  // Capture the exponent as part of the number before considering an optional
+  // unit suffix. Stripping letters first turns 1e3 into 1 and can falsely pass.
+  const match = body.match(/^(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?:[a-zA-Zµμ%][a-zA-Zµμ%0-9²³]*)?$/u);
+  if (!match) return null;
+  const value = sign * Number(match[1]);
   return Number.isFinite(value) ? value : null;
 }
 
@@ -2607,8 +2609,12 @@ function looseNumber(value) {
 }
 
 function numbersClose(expected, actual) {
-  const scale = Math.max(Math.abs(expected), Math.abs(actual), 1);
-  return Math.abs(expected - actual) <= Math.max(1e-6, scale * 1e-6);
+  if (expected === actual) return true;
+  // Counts and other integer outputs must not acquire a relative tolerance:
+  // a one-in-a-million off-by-one is still a different result.
+  if (Number.isInteger(expected) && Number.isInteger(actual)) return false;
+  const scale = Math.max(Math.abs(expected), Math.abs(actual), Number.MIN_VALUE);
+  return Math.abs(expected - actual) <= Number.EPSILON * scale * 4;
 }
 
 function surfaceHasNumber(surface, expected) {
@@ -2633,13 +2639,15 @@ function roundedOutputPresentation(surface, expected) {
   if (typeof expected !== "number" || !Number.isFinite(expected) || Number.isInteger(expected)) return null;
   const tokens = String(surface ?? "").normalize("NFKC").match(numberTokenPattern()) || [];
   for (const token of tokens) {
-    const decimals = token.match(/\.(\d+)/)?.[1]?.length;
+    const numericPrefix = token.match(/^[+-]?(?:[$£€¥]\s*)?(?:\d{1,3}(?:[,_\u00a0\u202f ]\d{3})+|\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?/u);
+    const decimals = numericPrefix?.[1]?.length;
+    const exponent = Number(numericPrefix?.[2] || 0);
     // Integer differences remain failures. A printed decimal can expose a missing
     // presentation-precision contract, but it must never silently widen numeric equality.
     if (!decimals || decimals > 12) continue;
     const actual = parseNumericToken(token);
     if (actual === null || numbersClose(expected, actual)) continue;
-    const roundingRadius = 0.5 * 10 ** -decimals;
+    const roundingRadius = 0.5 * 10 ** (exponent - decimals);
     if (Math.abs(expected - actual) <= roundingRadius + Number.EPSILON * Math.max(1, Math.abs(expected)) * 4) {
       return { observed: actual, decimalPlaces: decimals };
     }
