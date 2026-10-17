@@ -743,3 +743,21 @@ test("negative conjoined payment actions do not invent a payment journey", () =>
     "Do not send email or take payments. On the separate store page enable checkout.",
   ]) assert.equal(inferRequirementSignals(prompt).includes("payments"), true, prompt);
 });
+
+test("conjoined prohibitions remove the complete capability list while keeping affirmative clauses", () => {
+  const base="Do not rebuild unrelated features or add payments, authentication, or external services";
+  for (const suffix of [".", ", but save inquiries.", ", save inquiries."]) {
+    const signals=inferRequirementSignals(base+suffix);
+    assert.equal(signals.includes("payments"),false,base+suffix);
+    assert.equal(signals.includes("user_accounts"),false,base+suffix);
+    assert.equal(signals.includes("saved_data"),suffix!==".",base+suffix);
+  }
+  for(const prompt of [
+    "Do not rebuild unrelated features, but add payments and user accounts.",
+    "Do not disable billing or remove authentication.",
+    "Do not send email or take payments; include authentication.",
+  ]) {
+    const signals=inferRequirementSignals(prompt);
+    assert.equal(signals.includes("user_accounts"),true,prompt);
+  }
+});
