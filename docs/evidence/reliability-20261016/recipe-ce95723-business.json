@@ -1,0 +1,200 @@
+[
+  {
+    "width": 1440,
+    "name": "requested initial recipe",
+    "ok": false,
+    "detail": [
+      "rice2 cupsRemove",
+      "water3 cupsRemove",
+      "salt0.5 tspRemove"
+    ]
+  },
+  {
+    "width": 1440,
+    "name": "six-serving requested quantities",
+    "ok": false,
+    "detail": [
+      "rice3 cupsRemove",
+      "water4.5 cupsRemove",
+      "salt0.75 tspRemove"
+    ]
+  },
+  {
+    "width": 1440,
+    "name": "invalid servings \"0\"",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "invalid servings \"-1\"",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "invalid servings \"\"",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "reset restores requested example",
+    "ok": false
+  },
+  {
+    "width": 1440,
+    "name": "decimal ingredient scaling",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "remove ingredient",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "mobile controls usable",
+    "ok": true,
+    "detail": []
+  },
+  {
+    "width": 1440,
+    "name": "guide explains formula",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "guide returns to calculator",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "requested initial recipe",
+    "ok": false,
+    "detail": [
+      "rice2 cupsRemove",
+      "water3 cupsRemove",
+      "salt0.5 tspRemove"
+    ]
+  },
+  {
+    "width": 390,
+    "name": "six-serving requested quantities",
+    "ok": false,
+    "detail": [
+      "rice3 cupsRemove",
+      "water4.5 cupsRemove",
+      "salt0.75 tspRemove"
+    ]
+  },
+  {
+    "width": 390,
+    "name": "invalid servings \"0\"",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "invalid servings \"-1\"",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "invalid servings \"\"",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "reset restores requested example",
+    "ok": false
+  },
+  {
+    "width": 390,
+    "name": "decimal ingredient scaling",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "remove ingredient",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "mobile controls usable",
+    "ok": true,
+    "detail": []
+  },
+  {
+    "width": 390,
+    "name": "guide explains formula",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "guide returns to calculator",
+    "ok": true
+  },
+  {
+    "width": 320,
+    "name": "requested initial recipe",
+    "ok": false,
+    "detail": [
+      "rice2 cupsRemove",
+      "water3 cupsRemove",
+      "salt0.5 tspRemove"
+    ]
+  },
+  {
+    "width": 320,
+    "name": "six-serving requested quantities",
+    "ok": false,
+    "detail": [
+      "rice3 cupsRemove",
+      "water4.5 cupsRemove",
+      "salt0.75 tspRemove"
+    ]
+  },
+  {
+    "width": 320,
+    "name": "invalid servings \"0\"",
+    "ok": true
+  },
+  {
+    "width": 320,
+    "name": "invalid servings \"-1\"",
+    "ok": true
+  },
+  {
+    "width": 320,
+    "name": "invalid servings \"\"",
+    "ok": true
+  },
+  {
+    "width": 320,
+    "name": "reset restores requested example",
+    "ok": false
+  },
+  {
+    "width": 320,
+    "name": "decimal ingredient scaling",
+    "ok": true
+  },
+  {
+    "width": 320,
+    "name": "remove ingredient",
+    "ok": true
+  },
+  {
+    "width": 320,
+    "name": "mobile controls usable",
+    "ok": true,
+    "detail": []
+  },
+  {
+    "width": 320,
+    "name": "guide explains formula",
+    "ok": true
+  },
+  {
+    "width": 320,
+    "name": "guide returns to calculator",
+    "ok": true
+  }
+]

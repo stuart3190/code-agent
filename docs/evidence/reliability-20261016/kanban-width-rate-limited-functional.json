@@ -1,0 +1,32 @@
+[
+  {
+    "width": 1440,
+    "name": "required title rejected",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "proof completed",
+    "ok": false
+  },
+  {
+    "width": 390,
+    "name": "required title rejected",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "proof completed",
+    "ok": false
+  },
+  {
+    "width": 320,
+    "name": "required title rejected",
+    "ok": true
+  },
+  {
+    "width": 320,
+    "name": "proof completed",
+    "ok": false
+  }
+]
