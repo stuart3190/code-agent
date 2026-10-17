@@ -443,20 +443,42 @@ function formatDate(iso) {
  */
 export async function setCancellation(owner, cancel, { store = codeAgentStore(), stripe = null } = {}) {
   if (!optionalEnv("THRALLO_STRIPE_SECRET_KEY")) throw notConfigured();
-  const record = await ownerSubscription(owner, { store });
-  if (!record.stripe_subscription_id) {
-    throw billingError("There is no paid subscription to change", 409, "no_subscription");
-  }
   const client = stripe || stripeClient();
   return withOwnerLock(owner, async () => {
-    const updated = await client.subscriptions.update(record.stripe_subscription_id, {
-      cancel_at_period_end: !!cancel,
-    }, { idempotencyKey: `thrallo:cancel:${owner}:${record.stripe_subscription_id}:${cancel ? 1 : 0}` });
+    const record = { ...await store.getSubscription(owner) };
+    if (!record.stripe_subscription_id || !record.stripe_customer_id) {
+      throw billingError("There is no paid subscription to change", 409, "no_subscription");
+    }
+    const wanted = !!cancel;
+    const confirmed = value => value?.id === record.stripe_subscription_id
+      && String(value.customer) === record.stripe_customer_id
+      && typeof value.cancel_at_period_end === "boolean";
+    const current = await client.subscriptions.retrieve(record.stripe_subscription_id);
+    if (!confirmed(current)) throw billingError("Subscription identity could not be confirmed. Please retry.", 503, "cancellation_unconfirmed");
+    if (["canceled", "incomplete_expired"].includes(current.status)) {
+      throw billingError("There is no paid subscription to change", 409, "no_subscription");
+    }
+    // A repeated intent (including retry after a lost acknowledgement) needs no
+    // provider write. A genuine later toggle needs a new key, never a cached key
+    // from an earlier cancel/reactivate cycle. SDK retries retain this key.
+    const updated = current.cancel_at_period_end === wanted ? current
+      : await client.subscriptions.update(record.stripe_subscription_id, {
+        cancel_at_period_end: wanted,
+      }, { idempotencyKey: `thrallo:cancel:${owner}:${record.stripe_subscription_id}:${crypto.randomUUID()}` });
+    if (!confirmed(updated) || updated.cancel_at_period_end !== wanted) {
+      throw billingError("Cancellation state could not be confirmed. Please retry.", 503, "cancellation_unconfirmed");
+    }
     // Written through immediately as well as by the webhook. The webhook is authoritative, but it
     // arrives whenever it arrives — and a customer who has just cancelled must not be shown
     // "renews on the 12th" while they wait for it.
-    const endsAt = unixIso(subscriptionPeriod(updated).end) || record.current_period_end;
-    await store.upsertSubscription(owner, { cancel_at_period_end: !!cancel });
+    const period = subscriptionPeriod(updated);
+    const endsAt = unixIso(period.end) || record.current_period_end;
+    const saved = await store.updateSubscriptionFromSnapshot(owner, record, {
+      cancel_at_period_end: wanted,
+      ...(period.start ? { current_period_start: unixIso(period.start) } : {}),
+      ...(period.end ? { current_period_end: unixIso(period.end) } : {}),
+    });
+    if (!saved) throw billingError("Subscription changed during this request. Please retry.", 503, "cancellation_unconfirmed");
     return {
       cancelAtPeriodEnd: !!cancel,
       endsAt,

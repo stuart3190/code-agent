@@ -567,6 +567,32 @@ for(const legacy of [false,true])test(`item billing periods are authoritative ov
 
 test('cancellation confirmation uses item period end',async()=>{configureStripeEnv();try{
  const store=new MemoryCodeAgentStore();await store.upsertSubscription(OWNER,{plan:'pro',status:'active',stripe_customer_id:'cus_period',stripe_subscription_id:'sub_period',current_period_end:'2020-01-01T00:00:00.000Z'});
- const updated={id:'sub_period',customer:'cus_period',items:{data:[{current_period_end:1755600000}]}};
- const result=await setCancellation(OWNER,true,{store,stripe:{subscriptions:{update:async()=>updated}}});assert.equal(result.endsAt,new Date(1755600000*1000).toISOString());
+ const updated={id:'sub_period',customer:'cus_period',status:'active',cancel_at_period_end:true,items:{data:[{current_period_end:1755600000}]}};
+ const result=await setCancellation(OWNER,true,{store,stripe:{subscriptions:{retrieve:async()=>({...updated,cancel_at_period_end:false}),update:async()=>updated}}});assert.equal(result.endsAt,new Date(1755600000*1000).toISOString());
 }finally{clearStripeEnv();}});
+
+for(const first of [false,true])test(`cancellation toggles do not replay an earlier intent (${first})`,async()=>{
+ configureStripeEnv();try{
+  const store=new MemoryCodeAgentStore();await store.upsertSubscription(OWNER,{plan:'pro',status:'active',stripe_customer_id:'cus_toggle',stripe_subscription_id:'sub_toggle',cancel_at_period_end:!first});
+  let actual=!first;const cached=new Map();const current=()=>({id:'sub_toggle',customer:'cus_toggle',status:'active',cancel_at_period_end:actual,items:{data:[{current_period_end:1755600000}]}});
+  const stripe={subscriptions:{retrieve:async()=>current(),update:async(id,params,options)=>{assert.deepEqual(Object.keys(params),['cancel_at_period_end']);if(cached.has(options.idempotencyKey))return structuredClone(cached.get(options.idempotencyKey));actual=params.cancel_at_period_end;const row=current();cached.set(options.idempotencyKey,row);return structuredClone(row);}}};
+  for(const wanted of [first,!first,first])await setCancellation(OWNER,wanted,{store,stripe});
+  assert.equal(actual,first);assert.equal((await store.getSubscription(OWNER)).cancel_at_period_end,actual);
+ }finally{clearStripeEnv();}
+});
+
+async function cancellationFixture({lostAck=false,foreign=false,readFailure=false,replace=false,wrongReply=false}={}){
+ const store=new MemoryCodeAgentStore();await store.upsertSubscription(OWNER,{plan:'pro',status:'active',stripe_customer_id:'cus_guard',stripe_subscription_id:'sub_guard',cancel_at_period_end:false});
+ const state={actual:false,writes:0};const current=()=>({id:'sub_guard',customer:foreign?'cus_foreign':'cus_guard',status:'active',cancel_at_period_end:state.actual,items:{data:[{current_period_end:1755600000}]}});
+ const stripe={subscriptions:{retrieve:async()=>{if(readFailure)throw Error('temporary read failure');return current();},update:async(_id,params)=>{assert.deepEqual(Object.keys(params),['cancel_at_period_end']);state.writes++;state.actual=params.cancel_at_period_end;if(replace)await store.upsertSubscription(OWNER,{stripe_subscription_id:'sub_replacement'});if(lostAck)throw Error('lost acknowledgement');return wrongReply?{...current(),cancel_at_period_end:false}:current();}}};
+ return{store,stripe,state};
+}
+for(const concurrent of [false,true])test(`repeated cancellation intent avoids duplicate provider writes (${concurrent})`,async()=>{
+ configureStripeEnv();try{const f=await cancellationFixture();if(concurrent)await Promise.all([setCancellation(OWNER,true,f),setCancellation(OWNER,true,f)]);else{await setCancellation(OWNER,true,f);await setCancellation(OWNER,true,f);}assert.equal(f.state.writes,1);assert.equal((await f.store.getSubscription(OWNER)).cancel_at_period_end,true);}finally{clearStripeEnv();}
+});
+test('retry after cancellation lost acknowledgement confirms state without another provider write',async()=>{
+ configureStripeEnv();try{const f=await cancellationFixture({lostAck:true});await assert.rejects(setCancellation(OWNER,true,f),/lost acknowledgement/);assert.equal((await f.store.getSubscription(OWNER)).cancel_at_period_end,false);await setCancellation(OWNER,true,f);assert.equal(f.state.writes,1);assert.equal((await f.store.getSubscription(OWNER)).cancel_at_period_end,true);}finally{clearStripeEnv();}
+});
+for(const options of [{foreign:true},{readFailure:true},{wrongReply:true},{replace:true}])test(`uncertain cancellation does not overwrite local entitlement ${JSON.stringify(options)}`,async()=>{
+ configureStripeEnv();try{const f=await cancellationFixture(options);await assert.rejects(setCancellation(OWNER,true,f));const row=await f.store.getSubscription(OWNER);assert.equal(row.cancel_at_period_end,false);assert.equal(row.stripe_subscription_id,options.replace?'sub_replacement':'sub_guard');if(options.foreign||options.readFailure)assert.equal(f.state.writes,0);}finally{clearStripeEnv();}
+});
