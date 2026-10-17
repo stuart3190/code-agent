@@ -3,6 +3,14 @@
 ## Authority and preservation
 Owner authorizes inspection, repair, testing, safe deployment and measured reliability improvement. No customer deletion, security bypass or unrelated changes. Work in isolated branch `audit/reliability-20261016`, worktree `/home/ubuntu/thrallo-reliability-audit`, based on deployed `1aaf91817c37b4dea6e74f71d9dd6144a43496d7`. Production is a deployment copy, NOT a Git checkout. Existing dirty `/root/thrallo-downlight-audit` and other worktrees are preserved. Other Codex/Aria processes exist; no changes to their work. No 99% claim without representative measured evidence.
 
+## Current handoff (2026-10-17 01:04 UTC)
+- Mission remains active. Read the newest dated entries below for authoritative release and test evidence; the baseline and initial queue are historical.
+- Live source ce95723; worker729527 admitted01:09:43UTC. Migration ledger93. Production40/40 and exact-image browser24/24 passed.
+- Pending: normal task-board repair with320/390px gates (queuee65d6839), fresh unassisted recipe project961b9448 (queuec8faff53), refreshed full backup, and later release of backup run isolation.
+- Seven audit apps are published with independent business checks; all seven pass320px layout probes. Several required manual recovery. Task board remains unpublished due to a reproduced layout false green; latest fresh recipe passes business checks but has incomplete styling.
+- Last24h internal builds:21green,6blocked,3failed,2cancelled, all audit account. These mix fresh builds, resumptions and manual recovery; they are NOT customer success statistics or evidence of99% reliability.
+- External prerequisites still limit real-email delivery, real card/payment settlement, native Windows execution, custom-domain ownership setup and independent off-host DR exposure checks. Continue all locally testable work without weakening these boundaries.
+
 ## Observed baseline
 - Public `https://app.thrallo.com/api/health`: HTTP success; ok, supabase, provisiond, stripe, stripeWebhook, byok true. This is configuration/health evidence, not end-to-end certification.
 - Active systemd: thrallo-shell (PID 3072), thrallo-build-worker (3345), thrallo-provisiond (3275), all rooted in `/home/ubuntu/code-agent`. Shell reports 2 restarts since activation October 11; worker/provisiond zero.
@@ -340,3 +348,13 @@ Inspect current release health gates and sanitized logs, execute deterministic q
 - Managed OpenAI adapter was also discarding strict=true and forced toolChoice. Pending fix preserves explicitly strict tools/forced choice and disallows parallel calls for that constrained dispatch; legacy tools retain prior automatic behavior.19 managed-wire/request-ID/replay tests pass. Live provider schema acceptance proven on connected Codex only, not every external provider.
 
 - Mobile matrix full browser/defect suite28/28 passes; all seven published audit apps have zero detected clipped/obstructed controls at320px. Evidence published-mobile-320.json and kanban-font-layout-comparison.json. Matrix retains findings from completed widths if remaining probe budget expires. Next release includes strict schema and managed transport fixes; then normal task-board repair and fresh unassisted representative build. No99% claim.
+
+## Follow-up verification (2026-10-17 01:09 UTC)
+- ce95723 exact image11b7458fe41a79b040dd2cd0f48694a5d91405dce8e89e827edce9e1452ea284 browser24/24 passes. Image packaging/activation still running; no early live-version claim. Final mobile-only rerun7/7 after preserving partial-width evidence.
+- Broader deterministic qualification found two stale booking lint fixtures: empty createBooking inputs were labeled valid, and the prompt assertion required the superseded comma-only method list. Updated to actual date/slot/name/email inputs and method signatures; capability lint10/10 passes. Full qualification remains running; retain its original failures transparently.
+- Backup root is already0700 in production, but run directories inherited0755 and recursive mkdir allowed two runs in the same second to share a directory.4181106 reserves each run with exclusive mkdir0700 and refuses existing directories/symlinks; new concurrency/symlink tests plus backup coverage36/36 pass. Pending later release, not applied to running backup. Never chmod unrelated backup roots.
+
+## Release ce95723 active (2026-10-17 01:10 UTC)
+- LIVE ce95723ca6f89108369de8961e1b29dbff0c570a; image11b7458fe41a79b040dd2cd0f48694a5d91405dce8e89e827edce9e1452ea284; manifest17eee9619eb89979e249246d9d39f494eda6a470f96fbd898ad4baff77b96c12;93migrations. Worker712211 acknowledged drain before stop; new729527 passed startup01:09:43UTC, no drift. Production40/40, exact-image24/24. Backup release-ce95723 retains14changedfiles and prior configuration.
+- Deterministic qualification269tests:267pass,2stale booking fixture failures described above. Those two fixtures corrected inbb208b6 and entire affected lint suite10/10 passes; no other failures/skips. Do not report the original broad invocation as269/269.
+- Task-board resume public6c0d2644-3ca3-4361-8d4c-3aae685d21a4, queuee65d6839-0327-466a-8086-71f6a734fb7b. Fresh recipe project961b9448-7582-41db-a1a6-29391e398df3, publicaee1da66-e982-4dda-9fc2-0a377fd10479, queuec8faff53-5c77-430a-9380-063109841202. Both normal connected-provider pipeline; no manual source changes or green promotion.
