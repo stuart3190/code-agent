@@ -117,19 +117,35 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
   // app-scoped auth user and returns a REAL session — same email can register in many apps without
   // collision. The session is installed on this client, so db/storage/RLS behave identically.
   const appAuthPost = async (action, payload = {}) => {
-    const res = await fetchImpl(authUrl, {
-      method: "POST",
-      // A publishable API key belongs in `apikey`, not Authorization: Bearer. Authorization is for
-      // an end-user JWT; treating an opaque sb_publishable_ key as a JWT can be rejected before an
-      // Edge Function runs. app-auth is the seam that creates that user session, so none exists yet.
-      headers: { "Content-Type": "application/json", apikey: anonKey },
-      body: JSON.stringify({ action, appId, ...payload }),
-    });
-    const out = await res.json().catch(() => ({}));
-    if (!res.ok) throw Object.assign(new Error(out.error || `auth ${action} failed (${res.status})`), {
-      code: "app_auth_request_failed", status: res.status, action,
-    });
-    return out;
+    const controller = new AbortController();
+    // Bound both connection and response-body reads so the session error screen can retry.
+    // Visitor signup persists its credentials before this call and is idempotent on retry.
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    timer.unref?.();
+    try {
+      const res = await fetchImpl(authUrl, {
+        method: "POST",
+        // Publishable keys belong in apikey; no end-user session exists yet.
+        headers: { "Content-Type": "application/json", apikey: anonKey },
+        body: JSON.stringify({ action, appId, ...payload }),
+        signal: controller.signal,
+      });
+      const out = await res.json().catch((error) => {
+        if (controller.signal.aborted) throw error;
+        return {};
+      });
+      if (!res.ok) throw Object.assign(new Error(out.error || `auth ${action} failed (${res.status})`), {
+        code: "app_auth_request_failed", status: res.status, action,
+      });
+      return out;
+    } catch (error) {
+      if (controller.signal.aborted) throw Object.assign(new Error("The session request timed out. Please try again."), {
+        code: "app_auth_timeout", retryable: true, action,
+      });
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   };
   // Session-returning actions install the session on this client so db/storage/RLS just work.
   const appAuthCall = async (action, payload = {}) => {
