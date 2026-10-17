@@ -103,7 +103,47 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     );
   }
   if (typeof fetchImpl !== "function") throw new Error("createSupabaseBackend: a fetch implementation is required.");
-  const client = createClient(url, anonKey, { global: { fetch: fetchImpl } });
+  const sessionAuthUrl = `${String(url).replace(/\/$/, "")}/auth/v1`;
+  const sessionFetch = async (input, init = {}) => {
+    const rawUrl = String(input?.url || input);
+    const requestUrl = rawUrl.split("?")[0];
+    const method = String(init.method || input?.method || "GET").toUpperCase();
+    const isLookup = requestUrl === `${sessionAuthUrl}/user` && method === "GET";
+    const isRefresh = requestUrl === `${sessionAuthUrl}/token` && method === "POST"
+      && new URL(rawUrl).searchParams.get("grant_type") === "refresh_token";
+    // Bound this read through body consumption. A stalled existing-session check must
+    // settle the identity controller without replacing the user's persisted identity.
+    // Refresh can run before getUser during SDK initialization. Its transport failure
+    // remains retryable to the SDK, preserving the existing stored session. No new
+    // mutation retry is introduced here; other auth mutations are unchanged.
+    if (!isLookup && !isRefresh) return fetchImpl(input, init);
+    const controller = new AbortController();
+    const upstreamSignal = init.signal || input?.signal;
+    const forwardAbort = () => controller.abort(upstreamSignal.reason);
+    if (upstreamSignal?.aborted) forwardAbort();
+    else upstreamSignal?.addEventListener("abort", forwardAbort, { once: true });
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 30_000);
+    timer.unref?.();
+    try {
+      const response = await fetchImpl(input, { ...init, signal: controller.signal });
+      const bytes = await response.arrayBuffer();
+      return new Response([204, 205, 304].includes(response.status) ? null : bytes, {
+        status: response.status, statusText: response.statusText, headers: response.headers,
+      });
+    } catch (error) {
+      if (timedOut) throw Object.assign(new Error(isLookup
+        ? "The session lookup timed out. Please try again."
+        : "The session refresh timed out. Please try again in a minute."), {
+        code: isLookup ? "app_session_lookup_timeout" : "app_session_refresh_timeout", retryable: true,
+      });
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      upstreamSignal?.removeEventListener("abort", forwardAbort);
+    }
+  };
+  const client = createClient(url, anonKey, { global: { fetch: sessionFetch } });
 
   // Normalise a Supabase {data,error} reply into a value-or-throw, so app code can
   // `await` and use try/catch instead of threading error objects through the UI.
