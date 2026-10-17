@@ -1,0 +1,54 @@
+{
+  "checks": [
+    {
+      "name": "production conversation bundle mounts in desktop mode",
+      "pass": true
+    },
+    {
+      "name": "real owner-scoped conversation API crosses webview origin",
+      "pass": true
+    },
+    {
+      "name": "no uncaught JavaScript errors",
+      "pass": true
+    }
+  ],
+  "requests": [
+    {
+      "path": "/api/v1/downloads",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/onboarding",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/conversations/deleted",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/publish-state",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/billing",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/conversations",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/models",
+      "status": 200
+    }
+  ],
+  "errors": [],
+  "tokenRevoked": true,
+  "limitations": [
+    "Chromium webview-origin simulation using production API and own temporary token; not native Windows execution.",
+    "Runtime wait predicate erroneously required a query string and timed out; recorded bare conversation endpoint returned200. This proof validates the captured responses, not a claim that the original runner passed.",
+    "Earlier fixture root403 and1.5secondassertion failures retained; all temporary tokens revoked.",
+    "No message submitted, build started, or external communication sent."
+  ]
+}
