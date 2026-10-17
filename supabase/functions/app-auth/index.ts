@@ -349,12 +349,8 @@ Deno.serve(async (req: Request) => {
   }
   if (insertedMapping) {
     await logEvent("signup", ip, appId);
-      // WP4: an invitation for this address becomes an active membership with the invited role.
-      // Nothing else about authority changes at signup — an uninvited signup is an ordinary member.
-      await svc.from("app_memberships")
-        .update({ auth_user_id: signed.user.id, status: "active", updated_at: new Date().toISOString() })
-        .eq("app_id", appId).eq("email", email).eq("status", "invited")
-        .then(() => undefined, () => undefined);
+    // A self-entered real email is not proof of mailbox ownership. Invited roles
+    // require a separate verified acceptance flow; signup must not activate them.
     await notifyAppUser(appId, signed.user.id, "app_welcome", "Welcome",
       "Your account is ready. This is where you'll see updates.", { kind: "welcome" });
   }
