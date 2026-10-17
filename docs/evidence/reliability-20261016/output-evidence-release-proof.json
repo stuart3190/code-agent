@@ -1,0 +1,27 @@
+{
+  "commit": "841121126ee3a853d8703ff98872a73f2f9360bb",
+  "releaseImage": "sha256:39793f1fde04d043602f8f706bdc6be3c35e3d96dd14fd6f5eaf1961827d74f6",
+  "manifest": "4becc33bae460f17886602e633cc59630b8702feecbb2dc45aa6b43399be1497",
+  "exactReleaseImage": {
+    "passed": 147,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 324099.323521
+  },
+  "productionHealth": {
+    "passed": 40,
+    "total": 40
+  },
+  "worker": {
+    "pid": 1925682,
+    "admittedAt": "2026-10-17T18:27:02.480Z",
+    "configuredVersionDrift": false
+  },
+  "strictPolicyEnabled": false,
+  "limitations": [
+    "Shadow calibration does not establish fresh-build success.",
+    "Unbound state, editable-only values, and plausible display precision remain inconclusive rather than passing."
+  ],
+  "initialImageAlsoPassed147": true,
+  "finalImageSeparatelyQualifiedBeforeActivation": true
+}
