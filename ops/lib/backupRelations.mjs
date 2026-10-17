@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { treeHashFromPairs } from '../../shell/server/lib/builderV2/snapshotStore.mjs';
-import { prepareRowsForBackup } from './runtimeBackupSchema.mjs';
+import { prepareRowsForBackup, validateRuntimeBackupLinks } from './runtimeBackupSchema.mjs';
 
 const containerChildren = [
   ['bv2_file_revisions','bv2_symbols','revision_id','symbol_count'],
@@ -105,6 +105,15 @@ export async function reconcileBackupRelations(tables,catalog,{fetchRows,maxRoun
 }
 
 export function validateImmutableBackupContent(tables){
+  const runtimeProblems=validateRuntimeBackupLinks(Object.fromEntries(tables));
+  if(runtimeProblems.length)throw Error(`backup runtime links invalid: ${runtimeProblems.length} problems`);
+  const snapshots=new Map((tables.get('bv2_snapshots')||[]).map(row=>[row.id,row]));
+  for(const pointer of tables.get('bv2_project_pointers')||[]) {
+    if(['green','preview','published'].includes(pointer.label) && snapshots.get(pointer.snapshot_id)?.state !== 'ready') throw Error('backup promoted snapshot is not ready');
+  }
+  for(const project of tables.get('projects')||[]) {
+    if(project.bv2_green_snapshot_id && snapshots.get(project.bv2_green_snapshot_id)?.state !== 'ready') throw Error('backup project green snapshot is not ready');
+  }
   const hash=text=>createHash('sha256').update(text).digest('hex');
   if(tables.has('bv2_snapshots')){
     const filesBySnapshot=new Map();

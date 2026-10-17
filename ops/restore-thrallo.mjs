@@ -121,11 +121,13 @@ export const RESTORE_ORDER = [
   "bv2_shadow_run_files",
   "bv2_shadow_checks",
   "bv2_blobs",
+  // Preserve snapshot build identity: clearing it collides across identical builds.
+  // Defer builds.final_snapshot instead to break the build/snapshot cycle.
+  "bv2_contracts",
+  "bv2_builds",
   "bv2_snapshots",
   "bv2_snapshot_files",
   "bv2_project_pointers",
-  "bv2_contracts",
-  "bv2_builds",
   "bv2_build_envelopes",
   "bv2_build_progress",
   "bv2_recovery_approvals",

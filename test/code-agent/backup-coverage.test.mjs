@@ -717,3 +717,19 @@ test("every table this session added to production is now migrated AND backed up
     assert.ok(RESTORE_ORDER.includes(table), `${table} cannot be restored`);
   }
 });
+
+ test("restore preserves build-scoped snapshot uniqueness while breaking its FK cycle", () => {
+  const source = [
+    { id: "s1", project_id: "p", tree_hash: "same", asset_manifest: [], build_id: "b1", parent_snapshot: null },
+    { id: "s2", project_id: "p", tree_hash: "same", asset_manifest: [], build_id: "b2", parent_snapshot: "s1" },
+  ];
+  const prepared = collectDeferredRestorePatches("bv2_snapshots", source);
+  assert.deepEqual(prepared.rows.map(row => row.build_id), ["b1", "b2"]);
+  assert.deepEqual(prepared.patches, [{ table: "bv2_snapshots", id: "s2", field: "parent_snapshot", value: "s1" }]);
+  const builds = collectDeferredRestorePatches("bv2_builds", [{ id: "b1", final_snapshot: "s1" }]);
+  assert.deepEqual(builds.rows, [{ id: "b1", final_snapshot: null }]);
+  assert.deepEqual(builds.patches, [{ table: "bv2_builds", id: "b1", field: "final_snapshot", value: "s1" }]);
+  assert.ok(RESTORE_ORDER.indexOf("bv2_contracts") < RESTORE_ORDER.indexOf("bv2_builds"));
+  assert.ok(RESTORE_ORDER.indexOf("bv2_builds") < RESTORE_ORDER.indexOf("bv2_snapshots"));
+  assert.deepEqual(source.map(row => row.build_id), ["b1", "b2"]);
+});

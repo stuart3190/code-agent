@@ -71,3 +71,12 @@ test('checksum-valid backup cannot pass completion with a missing parent',async(
   delete manifest.relations;await save();await assert.rejects(validateBackupDirectory(dir),/relation evidence missing/);
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+test('captured promoted snapshot cannot retain an unfinished parent state',async()=>{
+ const {validateImmutableBackupContent}=await import('../../ops/lib/backupRelations.mjs');
+ const tables=new Map([['bv2_snapshots',[{id:'s',state:'building'}]],['bv2_project_pointers',[{label:'green',snapshot_id:'s'}]]]);
+ assert.throws(()=>validateImmutableBackupContent(tables),/promoted snapshot is not ready/);
+ tables.delete('bv2_project_pointers');tables.set('projects',[{id:'p',owner:'u',bv2_green_snapshot_id:'s'}]);
+ tables.get('bv2_snapshots')[0].owner='u';tables.get('bv2_snapshots')[0].project_id='p';
+ assert.throws(()=>validateImmutableBackupContent(tables),/green snapshot is not ready/);
+});
