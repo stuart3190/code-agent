@@ -8,7 +8,7 @@ const call=(id,expr)=>JSON.parse(sql(identity(id)+'select '+expr+';'));
 const checks=[];const check=(name,fn)=>{fn();checks.push(name);};let started=false;
 try{
  execFileSync('docker',['run','--rm','-d','--name',name,'--network','none','--memory','256m','--cpus','1','--pids-limit','128','-e','POSTGRES_PASSWORD=isolated-proof','postgres:17-alpine','-c','shared_buffers=16MB','-c','max_connections=20'],{stdio:'pipe'});started=true;
- let ready=false; for(let n=0;n<120;n++){try{sql('select 1');ready=true;break;}catch{await new Promise(r=>setTimeout(r,250));}} if(!ready) throw Error('Isolated PostgreSQL did not become ready: '+execFileSync('docker',['logs',name],{encoding:'utf8'}));
+ let ready=false; for(let n=0;n<120;n++){try{execFileSync('docker',['exec',name,'psql','-h','127.0.0.1','-U','postgres','-qAt','-c','select 1'],{stdio:'pipe'});ready=true;break;}catch{await new Promise(r=>setTimeout(r,250));}} if(!ready) throw Error('Isolated PostgreSQL did not become ready: '+execFileSync('docker',['logs',name],{encoding:'utf8'}));
  sql(`create role anon;create role authenticated;create role service_role;create schema auth;create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;grant usage on schema auth to authenticated;grant execute on function auth.uid() to authenticated;create table auth.users(id uuid primary key);create table public.projects(id uuid primary key);create table public.app_users(app_id text,auth_user_id uuid,status text default 'active');create table public.entities(id uuid primary key default gen_random_uuid(),owner uuid not null references auth.users(id),app_id text,type text,data jsonb,created_at timestamptz default now());alter table entities enable row level security;create policy own on entities for all to authenticated using(owner=auth.uid()) with check(owner=auth.uid());grant select,insert,update,delete on entities to authenticated;insert into auth.users values('${A}'),('${B}'),('${C}');insert into projects values('${APP}'),('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');insert into app_users(app_id,auth_user_id) values('${APP}','${A}'),('${APP}','${B}'),('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','${C}');`);
  sql(await readFile(new URL('../supabase/migrations/20261016232358_shared_single_slot_bookings.sql',import.meta.url),'utf8'));
  check('suspended visitor cannot reserve',()=>{sql("update app_users set status='suspended' where auth_user_id='"+B+"';");assert.throws(()=>call(B,reserve('10000000-0000-4000-8000-000000000088')),/App visitor authentication required/);sql("update app_users set status='active' where auth_user_id='"+B+"';");});
@@ -43,5 +43,13 @@ try{
  check('reservation and retry-key backups restore exact row counts',()=>{for(const table of tables)assert.equal(sql('select count(*) from '+table),counts[table]);});
  check('restored request key recovers the same booking identity',()=>assert.equal(call(A,reserve('10000000-0000-4000-8000-000000000006','11:00')).record.id,repeat[0].record.id));
  check('restored capacity still excludes another visitor',()=>assert.equal(call(B,reserve('10000000-0000-4000-8000-000000000090','11:00')).result,'over_capacity'));
+ check('project deletion cascades booking claims and retry keys without touching another app',()=>{
+   assert.equal(call(C,reserve('10000000-0000-4000-8000-000000000099','13:00','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')).result,'ok');
+   sql(`delete from public.projects where id='${APP}';`);
+   assert.equal(sql(`select count(*) from public.app_booking_reservations where app_id='${APP}';`),'0');
+   assert.equal(sql(`select count(*) from public.app_booking_request_keys where app_id='${APP}';`),'0');
+   assert.equal(sql("select count(*) from public.app_booking_reservations where app_id='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';"),'1');
+   assert.equal(sql("select count(*) from public.app_booking_request_keys where app_id='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';"),'1');
+ });
  console.log(JSON.stringify({passed:checks.length,checks}));
 }finally{if(started)execFileSync('docker',['rm','-f',name],{stdio:'pipe'});}

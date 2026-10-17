@@ -157,3 +157,18 @@ missing port, malformed/empty output, wrong host, stale sample or coverage gap f
 A successful process exit alone is not isolation evidence. DR health reads the completed
 `result: "pass"` record after `startedAt` in `drill.json`; touching a file or starting a failed
 restore does not refresh the successful-drill timestamp.
+
+
+## Latest isolated recovery evidence
+
+The 2026-10-17 format-3 archive `thrallo-2026-10-17T023702` passed a full isolated
+restore with 97 migrations: 108 tables, 359,387 rows, 446 auth users, 23 storage
+objects and 672 filesystem files. The verifier checked exact rows and content,
+1,795 snapshots, 6,261 graph revisions, runtime links and cross-owner isolation.
+See `docs/evidence/reliability-20261016/backup97-full-restore.json`.
+
+Restore must preserve `bv2_snapshots.build_id`: it participates in snapshot uniqueness.
+Restore contracts and builds before snapshots, defer `bv2_builds.final_snapshot`,
+and apply those links after all parents exist. Clearing snapshot build IDs makes
+identical source trees from different builds collide. This drill proves local logical
+recovery only; password recovery and independent off-host disaster recovery remain separate.
