@@ -1,8 +1,8 @@
 {
   "source": "Connected Supabase list_migrations and read-only schema_migrations query on zczgvcsokfafuyognvwx",
-  "capturedAt": "2026-10-17T02:17:08.630250+00:00",
+  "capturedAt": "2026-10-17T02:34:30.543397+00:00",
   "baseVersion": "20260919120000",
-  "ledgerCount": 96,
+  "ledgerCount": 97,
   "note": "October 6 policy already applied before this audit; October 16 trigger grants applied after isolated PostgreSQL proof. Existing version drift preserved. Local byte hashes identify reviewed files; remote statements were separately inspected. Build-scoped snapshot identity applied after isolated PostgreSQL unique-index proof; no data rewritten. Opt-in shared single-slot reservation tables applied after isolated concurrent PostgreSQL proof; existing rows unchanged. Service-only credit aggregation applied after isolated >1000-row and role-grant proof; no ledger rows changed.",
   "migrations": [
     {
@@ -76,6 +76,14 @@
       "filename": "20261017021631_graph_context_rebinding.sql",
       "localCanonicalSqlSha256": "fc618977f6eafff4c33cc02de6dac66d3d890fb9b5576fd664fea6cbe881c0fc",
       "appliedVersion": "20261017021631"
+    },
+    {
+      "appliedOrder": 97,
+      "version": "20261017023404",
+      "name": "backup_relation_catalog",
+      "filename": "20261017023404_backup_relation_catalog.sql",
+      "localCanonicalSqlSha256": "9fb864aaca3937538af1693d101561a14c41ad9c8e7cacc1bf07ac041743be8f",
+      "appliedVersion": "20261017023404"
     }
   ]
 }

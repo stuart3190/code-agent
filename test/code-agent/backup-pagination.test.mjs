@@ -5,9 +5,10 @@ import { cursorFilter, dumpTable } from '../../ops/lib/backupPagination.mjs';
 function client(pages) {
   const calls = [];
   return { calls, from(table) {
-    const call = { table, order: [] }; calls.push(call);
+    const call = { table, order: [], equals: [] }; calls.push(call);
     const q = { select: () => q, order: key => { call.order.push(key); return q; },
       or: filter => { call.filter = filter; return q; },
+      eq: (column,value) => { call.equals.push([column,value]); return q; },
       limit: size => { call.size = size; return Promise.resolve(pages.shift()); } };
     return q;
   } };
@@ -40,4 +41,11 @@ test('transport retries are bounded and preserve the exact page cursor', async (
   const down=client(Array.from({length:4},()=>({error:{message:'unavailable'},status:503})));
   await assert.rejects(dumpTable(down,'projects',{retryPause:async()=>{},log:()=>{}}),/unavailable/);
   assert.equal(down.calls.length,4);
+});
+
+test('parent reconciliation keeps owner filters on every page and transport retry', async () => {
+  const c=client([{data:[{id:1}]},{error:{message:'unavailable'},status:503},{data:[{id:2}]},{data:[]}]);
+  const filters=[['owner','audit-owner'],['project_id','audit-project']];
+  await dumpTable(c,'bv2_symbols',{filters,pageSize:1,pause:async()=>{},retryPause:async()=>{},log:()=>{}});
+  assert.ok(c.calls.length>2);for(const call of c.calls)assert.deepEqual(call.equals,filters);
 });

@@ -13,7 +13,7 @@
 // offline copy of shell/.env is part of the disaster-recovery kit.
 
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { gzipSync } from "node:zlib";
+import { gzipSync, gunzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -22,6 +22,7 @@ import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { loadEnv } from "../shell/server/lib/env.mjs";
 import { validateBackupDirectory } from "../scripts/lib/backupValidation.mjs";
+import { reconcileBackupRelations, relationCatalogHash } from "./lib/backupRelations.mjs";
 import { dumpTable } from "./lib/backupPagination.mjs";
 import { inventoryFilesystemRoot, readInventoriedFile } from "./lib/filesystemBackup.mjs";
 import {
@@ -241,7 +242,7 @@ async function main() {
 
   const manifest = {
     product: "thrallo",
-    formatVersion: 2,
+    formatVersion: 3,
     url: new globalThis.URL(URL_).host,
     sourceCommit: process.env.THRALLO_BACKUP_SOURCE_COMMIT || await backupSourceCommit(),
     backupToolSha256: sha256(await readFile(new URL(import.meta.url))),
@@ -256,6 +257,16 @@ async function main() {
   const ledger = await loadMigrationLedgerEvidence();
   const evidence = runtimeCatalogEvidence(ledger.migrations?.length);
   const catalog = await loadLiveCatalog(svc);
+  const readRelations = async () => {
+    const {data,error} = await svc.rpc("thrallo_backup_relation_catalog");
+    if(error || !data) throw new Error(`backup relation catalog unavailable: ${error?.message || "empty result"}`);
+    return data;
+  };
+  const relations = await readRelations();
+  const expectedVersions = ledger.migrations.map(row => row.appliedVersion || row.version).sort();
+  if(JSON.stringify(relations.migrationVersions) !== JSON.stringify(expectedVersions)) {
+    throw new Error("live migrations differ from the backup's authoritative ledger");
+  }
   const backupTables = CA_TABLES.filter((table) => catalog.includes(table));
   const coverage = findCatalogCoverageGaps(catalog, backupTables, EPHEMERAL_RUNTIME_TABLES);
   if (coverage.missingFromBackup.length || coverage.missingFromCatalog.length) {
@@ -294,7 +305,42 @@ async function main() {
   manifest.bytes += usersGz.length;
   console.log(`  auth_users: ${users.length} rows`);
 
+  // A live sequential export can observe a child after its parent's table was read.
+  // Add bounded referential closure and immutable container contents before storage inventory.
+  const relationTables = new Map();
+  for(const table of [...backupTables, "auth_users"]) relationTables.set(table,
+    JSON.parse(gunzipSync(await readFile(path.join(dir, `${table}.json.gz`))).toString("utf8")));
+  const closure = await reconcileBackupRelations(relationTables, relations, {fetchRows: async request => {
+    if(request.table === "auth_users") {
+      if(JSON.stringify(request.columns) !== '["id"]') throw new Error("unsupported auth parent identity");
+      const {data,error} = await svc.auth.admin.getUserById(request.values[0]);
+      if(error || !data?.user) throw new Error("backup referenced auth user unavailable");
+      return [data.user];
+    }
+    return dumpTable(svc, request.table, {filters: request.columns.map((column,i)=>[column,request.values[i]])});
+  }});
+  for(const table of closure.changedTables) {
+    const rows=relationTables.get(table), filename=`${table}.json.gz`, gz=gzipSync(JSON.stringify(rows));
+    manifest.bytes -= manifest.files[filename].bytes;
+    await writeFile(path.join(dir, filename),gz);
+    manifest.tables[table]=rows.length;
+    manifest.files[filename]={bytes:gz.length,sha256:sha256(gz)};
+    manifest.bytes += gz.length;
+  }
+  const requiredStorageKeys=new Set((relationTables.get("bv2_blobs") || [])
+    .filter(blob=>blob.content == null).map(blob=>blob.storage_path));
+  if(requiredStorageKeys.has(null) || requiredStorageKeys.has(undefined)) throw new Error("backup external blob has no storage path");
+  relationTables.clear();
+  const relationGz=gzipSync(JSON.stringify(relations));
+  await writeFile(path.join(dir,"backup_relations.json.gz"),relationGz);
+  manifest.files["backup_relations.json.gz"]={bytes:relationGz.length,sha256:sha256(relationGz)};
+  manifest.bytes += relationGz.length;
+  manifest.relations={...closure,file:"backup_relations.json.gz",source:"thrallo_backup_relation_catalog"};
+  console.log(`  referential closure: ${closure.addedRows} rows added across ${closure.changedTables.length} tables in ${closure.rounds} rounds`);
+
   const keys = await listBucketObjects(svc, ARTIFACT_BUCKET);
+  const availableStorageKeys=new Set(keys);
+  for(const key of requiredStorageKeys) if(!availableStorageKeys.has(key)) throw new Error("backup referenced blob storage object is missing");
   const objectIndex = [];
   for (const key of keys) {
     const { data, error } = await svc.storage.from(ARTIFACT_BUCKET).download(key);
@@ -393,6 +439,9 @@ async function main() {
   manifest.bytes += migrationStateGz.length;
   console.log(`  migration ledger: ${ledger.migrations.length} authoritative rows captured ${ledger.capturedAt}`);
 
+  if(relationCatalogHash(await readRelations()) !== relationCatalogHash(relations)) {
+    throw new Error("database schema or migration ledger changed during backup");
+  }
   manifest.finishedAt = new Date().toISOString();
   await writeFile(path.join(dir, "manifest.json"), JSON.stringify(manifest, null, 2));
 

@@ -88,10 +88,10 @@ export const PRODUCTION_PUBLIC_TABLES_109_SHA256 = "22d60b26441367c19dec4af348e1
 // Ledger87 was the production count after WP12 (2026-09-20). On-disk #177
 // (20261006080000, verifier_policy check only) becomes 88 once applied and adds no table.
 // Ledger91 adds shared reservation tables;87–90 retain their historical catalog.
-// The new window runs through96 for catalog-neutral changes only.
+// The new window runs through97 for catalog-neutral changes only.
 // A migration that creates or drops a public table must open a new catalog instead of
 // extending this range.
-export const CURRENT_CATALOG_MIGRATION_RANGE = Object.freeze({ min: 91, max: 96 });
+export const CURRENT_CATALOG_MIGRATION_RANGE = Object.freeze({ min: 91, max: 97 });
 
 export const PRODUCTION_PUBLIC_TABLES_98_SHA256 =
   "7e055d0b204b6254d11c66da0f6dbf5e0b4bc99ea17faac4b1bda5c55ed70417";

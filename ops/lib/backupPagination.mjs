@@ -14,7 +14,7 @@ export function cursorFilter(keys, row) {
 
 // Keyset pages avoid offset shifts when earlier rows are removed during a live backup.
 // This is a bounded logical export, not a cross-table point-in-time database snapshot.
-export async function dumpTable(svc, table, { pageSize = 100, minPage = 10,
+export async function dumpTable(svc, table, { pageSize = 100, minPage = 10, filters = [],
   pause = () => new Promise(resolve => setTimeout(resolve, 50)),
   retryPause = ms => new Promise(resolve => setTimeout(resolve, ms)), log = console.log } = {}) {
   const keys = BACKUP_PRIMARY_KEYS[table];
@@ -22,6 +22,7 @@ export async function dumpTable(svc, table, { pageSize = 100, minPage = 10,
   const rows = []; const seen = new Set(); let cursor = null; let size = pageSize; let transientRetries = 0;
   for (;;) {
     let query = svc.from(table).select('*');
+    for (const [column, value] of filters) query = query.eq(column, value);
     for (const key of keys) query = query.order(key, { ascending: true });
     if (cursor) query = query.or(cursorFilter(keys, cursor));
     const { data, error, status } = await query.limit(size);
