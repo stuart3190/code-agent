@@ -2638,9 +2638,16 @@ export function computedOutputFacts(surface, expectedOutputs) {
     ? Object.entries(expectedOutputs).filter(([, value]) => ["string", "number", "boolean"].includes(typeof value)
       && !(typeof value === "string" && !String(value).trim()))
     : [];
-  const computedOutputs = entries.map(([field, expected]) => ({ field, expected }));
+  // A boolean state flag does not declare its presentation: resultVisible=true does not
+  // require the word "true" on screen, and an unrelated "true" cannot prove that state.
+  // Until a contract supplies an observable binding, abstain rather than repairing the app
+  // to print internal state. An explicitly requested literal string remains verifiable.
+  const unobservableComputedOutputs = entries.filter(([, expected]) => typeof expected === "boolean")
+    .map(([field, expected]) => ({ field, expected }));
+  const computedOutputs = entries.filter(([, expected]) => typeof expected !== "boolean")
+    .map(([field, expected]) => ({ field, expected }));
   const missingComputedOutputs = computedOutputs.filter((row) => !surfaceHasPrimitive(surface, row.expected));
-  return { computedOutputs, missingComputedOutputs };
+  return { computedOutputs, missingComputedOutputs, unobservableComputedOutputs };
 }
 
 // Operation-transition copy such as "duplicated object disappears" proves the immediate action,
@@ -4618,6 +4625,11 @@ export function structuredStepVerdict({
         : `computed output wrong or missing: ${missing.slice(0, 4).map((row) => (
           `${row.field} expected ${JSON.stringify(row.expected)}`)).join(", ")}` });
   }
+  if (facts.unobservableComputedOutputs?.length) {
+    checks.push({ kind: "computed_output", ok: false, inconclusive: true, contractIncomplete: true,
+      detail: `boolean output state needs an observable binding: ${facts.unobservableComputedOutputs
+        .map(row => row.field).join(", ")}` });
+  }
   if (collectionStateRequired) {
     if (facts.memberStructured && facts.collectionRegionFound === false && !collectionStateSatisfied) {
       checks.push({ kind: "collection", ok: false, inconclusive: true,
@@ -4659,7 +4671,8 @@ export function structuredStepVerdict({
   // The contract's declared outcome (route, values, visible text, computed output, member,
   // removal, reset, next control) is the stronger evidence: when every declared outcome is
   // present, an action that repainted nothing still reached its contracted result.
-  const declaredOutcomeChecks = checks.filter((check) => ["route", "values", "visible_text", "computed_output", "collection", "removal", "reset"].includes(check.kind));
+  const declaredOutcomeChecks = checks.filter((check) => !check.contractIncomplete
+    && ["route", "values", "visible_text", "computed_output", "collection", "removal", "reset"].includes(check.kind));
   const declaredSatisfied = declaredOutcomeChecks.length > 0 && declaredOutcomeChecks.every((check) => check.ok);
   if (semanticNavigation) {
     const ok = changed || declaredSatisfied;
@@ -4721,6 +4734,10 @@ export function structuredStepVerdict({
       { drove, checks, advisories: [...proseAdvisory, ...undeclared] });
   }
   if (failing.every((check) => check.inconclusive)) {
+    if (failing.some((check) => check.contractIncomplete)) {
+      return verificationVerdict(VERIFICATION_RESULT_CLASS.CONTRACT_INCOMPLETE,
+        failing.map((check) => check.detail).join("; "), { drove, contractIncomplete: true, checks });
+    }
     return verificationVerdict(VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE,
       failing.map((check) => check.detail).join("; "), { drove, checks });
   }

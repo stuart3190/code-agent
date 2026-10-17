@@ -135,7 +135,11 @@ Rules:
   value. Keep the sentinel in a compound filter step where another field genuinely changes, choose
   a non-default option, or first change this field so the browser has a real transition to verify.
 - A step that calculates or otherwise transforms declared inputs states the exact result the
-  browser must see: "expectedOutputs": { "outputField": <number, string or boolean> }. Each key
+  browser must see: "expectedOutputs": { "outputField": <number or non-empty string> }.
+  Assert observable displayed results, not internal boolean flags such as resultVisible or
+  hasValidScale: the browser cannot infer a flag's presentation from its name. A typed boolean
+  has no observable binding and leaves verification incomplete; it does not require printing
+  "true" or "false". For a visible textual answer use its literal string. Each key
   is a field a functional responsibility writes, or a field this step produces, that this step
   reaches by operating that operation, producing the field, or reading it after an earlier step
   produced it. Each input it reads needs a known value: either a primitive verificationValues
