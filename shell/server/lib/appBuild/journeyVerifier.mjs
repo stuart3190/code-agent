@@ -2595,6 +2595,7 @@ function parseNumericToken(token) {
   const match = body.match(/^(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?:[a-zA-Zµμ%][a-zA-Zµμ%0-9²³]*)?$/u);
   if (!match) return null;
   const value = sign * Number(match[1]);
+  if (value === 0 && /[1-9]/.test(match[1].split(/[eE]/)[0])) return null;
   return Number.isFinite(value) ? value : null;
 }
 

@@ -14,3 +14,7 @@ test('scientific presentation uncertainty respects exponent precision',()=>{
  const plausible=computedOutputFacts('Result: 1.23e-3',{result:0.001234});assert.equal(plausible.precisionAmbiguousComputedOutputs.length,1);
  const wrong=computedOutputFacts('Result: 1.23e-3',{result:0.00124});assert.equal(wrong.missingComputedOutputs.length,1);assert.equal(wrong.precisionAmbiguousComputedOutputs.length,0);
 });
+test('an underflowed nonzero scientific token cannot certify zero',()=>{
+ assert.equal(computedOutputFacts('Result: 1e-400',{result:0}).missingComputedOutputs.length,1);
+ assert.equal(computedOutputFacts('Result: 0e-400',{result:0}).missingComputedOutputs.length,0);
+});
