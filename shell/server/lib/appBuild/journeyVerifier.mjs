@@ -43,6 +43,27 @@ const requireCjs = createRequire(import.meta.url);
 
 const STEP_TIMEOUT_MS = 15_000;
 
+// Repetition is an instruction, never a retry policy. Only an unambiguous transient
+// action can be repeated without creating duplicate durable effects.
+export function explicitActionRepetition(action, flows = []) {
+  const matches = [...String(action || "").matchAll(/\b(twice|thrice|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten) times)\b/gi)];
+  if (!matches.length) return { count: 1 };
+  const words = { twice: 2, thrice: 3, one: 1, two: 2, three: 3, four: 4, five: 5,
+    six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+  const token = matches[0][0].toLowerCase().split(" ")[0];
+  const count = words[token] ?? Number(token);
+  const flow = flows[0];
+  const safe = matches.length === 1 && Number.isInteger(count) && count >= 1 && count <= 10
+    && /\b(click|press|tap|activate|increase|decrease|increment|decrement)\b/i.test(action)
+    && !/\b(and|then|before|after|until)\b/i.test(action)
+    && flows.length === 1 && flow?.kind === "action" && flow.control
+    && !flow.persistenceHandoff && !flow.durableLifecycle
+    && !(flow.semanticResponsibilityTypes || []).includes("persistence")
+    && (flow.writes || []).length > 0
+    && flow.writes.every(path => /\.custom\./.test(String(path)) && !String(path).includes(".durable."));
+  return safe ? { count } : { count: null, reason: "explicit repetition has no single bounded transient action" };
+}
+
 // How many times ONE step may advance a step-gated flow to reach its contracted control. A
 // contracted step is one step: needing more than a couple of transitions to reach its own
 // control means the contract and the application disagree, which is a finding, not something to
@@ -3074,6 +3095,9 @@ async function runStep(page, step, {
   await waitForActiveSurface(page, 5_000);
   const action = String(step.action || "");
   const expect = String(step.expect || "");
+  const repetition = explicitActionRepetition(action, interactionFlows);
+  if (repetition.reason) return verificationVerdict(VERIFICATION_RESULT_CLASS.CONTRACT_INCOMPLETE,
+    repetition.reason, { drove: false, controlEvidence: { repetition } });
   const observationOnly = isObservationOnlyStep(step, interactionFlows, { verifierPolicy });
   let drove = false;
   // Set when a CONTRACTED action kind has already driven this step, so the generic keyword click
@@ -3858,6 +3882,20 @@ async function runStep(page, step, {
           || Boolean(removalSpec) || resetExpected,
         preferredMemberMarker: removalBaseline.targetPresent ? removalBaseline.marker : null,
       });
+      if (repetition.count > 1) {
+        activation.requestedActivations = repetition.count;
+        activation.completedActivations = activated ? 1 : 0;
+        while (activated && activation.completedActivations < repetition.count) {
+          activated = await activateContractedControl(page, contractedAction.control, {
+            verifierPolicy, evidence: activation,
+          });
+          if (activated) activation.completedActivations += 1;
+        }
+        // Never let a partial sequence qualify through an implicit-operation fallback.
+        if (!activated) return { drove: activation.completedActivations > 0, status: "undriveable",
+          detail: `completed ${activation.completedActivations} of ${repetition.count} explicit activations`,
+          controlEvidence: { ...(controlEvidence || {}), activation } };
+      }
       // Hand-wired generated forms may carry the contracted FIELD identity without carrying the
       // companion action identity. The only safe fallback is that field's own form submit; never
       // another form and never a keyword-selected page button.

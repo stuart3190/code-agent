@@ -1,0 +1,54 @@
+{
+  "policy": "minimal_contract_v1",
+  "productionGateUnchanged": true,
+  "results": [
+    {
+      "slug": "reliability-counter-20261016",
+      "sourceHash": "b39ce41b0f27040c0578274491c2697175331fe278e1692150f12fd0ed071606",
+      "contractProvenance": {
+        "via": "source_build",
+        "sourceSnapshotId": "42ed3bed-388c-4084-acd3-24c0459051f1",
+        "contractSnapshotId": "42ed3bed-388c-4084-acd3-24c0459051f1"
+      },
+      "pass": true,
+      "primaryStatus": "pass",
+      "journeys": [
+        {
+          "id": "use-counter",
+          "status": "pass",
+          "classification": "PASS",
+          "steps": [
+            {
+              "action": "open the counter page",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted route / is open · the contract's declared visible text is present"
+            },
+            {
+              "action": "increase the counter",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "1 computed output(s) match · the contracted action fired through its control and changed the surface"
+            },
+            {
+              "action": "decrease the counter twice",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "1 computed output(s) match · the contracted action fired through its control and changed the surface"
+            },
+            {
+              "action": "reset the counter",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "1 computed output(s) match · the contracted reset changed the surface (no native control carries the value) · the contracted action fired through its control and changed the surface"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Shadow evaluation of one existing published app, not fresh-generation success.",
+    "Historical edit/verify runtime contracts were unrecorded; selected contracts follow source snapshot ancestry. Published captured source hashes are checked before execution."
+  ]
+}
