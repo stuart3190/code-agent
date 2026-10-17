@@ -16,6 +16,7 @@ import { describeErrorChain } from "./buildFailure.mjs";
 import path from "node:path";
 
 import { indexTree } from "./indexer.mjs";
+import { mountDeclaredControllers } from "./controllerMount.mjs";
 import { memoryGraph } from "./graphStore.mjs";
 import { applyPatches, escalationPlan, normalizeMissingCreationCorrections, patchOutcomes, REJECTION, isProtectedPath } from "./patchEngine.mjs";
 import { completionEligibility } from "./contractTiering.mjs";
@@ -727,10 +728,15 @@ export function createOrchestrator({
       }
       let deterministicEntryChanges = [];
       if (!applied.modularityFailed && applied.tree) {
+        const mounted = mountDeclaredControllers(applied.tree, { modulePlan: scoped.modulePlan,
+          scaffoldGraph: scoped.scaffoldGraph });
+        applied.tree = mounted.tree;
+        deterministicEntryChanges.push(...mounted.changes);
+        if (mounted.changes.length) log(`${step}: mounted declared controllers in ${mounted.changes.map(row => row.file).join(", ")}`);
         const alignedEntry = transformWizardEntryState(applied.tree, { contract });
         if (alignedEntry.changes.length) {
           applied.tree = alignedEntry.tree;
-          deterministicEntryChanges = alignedEntry.changes;
+          deterministicEntryChanges.push(...alignedEntry.changes);
           log(`${step}: deterministic flow-entry identity — ${wizardEntryTransformSummary(alignedEntry)}`);
         }
       }
