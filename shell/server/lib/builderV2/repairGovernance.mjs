@@ -15,8 +15,22 @@
 // prose, nothing consults a model.
 
 import { parseImports } from "../appBuild/importPreflight.mjs";
+import { isProtectedPath } from "./patchEngine.mjs";
 import { SEVERITY, verifierCheckSeverity } from "./validationSeverity.mjs";
 import { DEFECT_CLASS, DEFECT_OWNER, REPAIR_TIER, actionableDefects } from "./verificationDefects.mjs";
+
+export function causalRepairBoundary({ owners = [], graph, tree = {}, contract = null, maxFiles = 18 }) {
+  const neighbors = [...new Set(owners.flatMap(path => [path,
+    ...graph.neighbors(path, { depth: 1, direction: "both" }),
+  ]))].filter(path => typeof tree[path] === "string").sort();
+  const allowedFiles = neighbors.filter(path => !isProtectedPath(path, { tree, contract })).slice(0, maxFiles);
+  if (!allowedFiles.length) return null;
+  return { kind: "browser_repair_dependency_boundary", allowedFiles, allowedPrefixes: [],
+    contextFiles: neighbors.filter(path => isProtectedPath(path, { tree, contract })),
+    instruction: "The exact owner repair did not resolve the structural defect. Repair only the "
+      + "evidence-supported direct owner, caller, or dependency files in this boundary. Protected platform dependencies are read-only context.",
+  };
+}
 
 export const REPAIR_OWNERSHIP = Object.freeze({
   GENERATED_APP: "generated_app",           // the generated application is wrong: an app repair may fix it

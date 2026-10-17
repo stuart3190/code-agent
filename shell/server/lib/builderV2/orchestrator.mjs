@@ -41,7 +41,7 @@ import {
   defectEvidence, defectWriteBoundary, previousAttemptNotes, defectProgress, defectSignature, mergeDefectAttribution,
   verificationDefectRecords,
 } from "./verificationDefects.mjs";
-import { REPAIR_OWNERSHIP, governRepairRound, reclassifyStalledDefects } from "./repairGovernance.mjs";
+import { REPAIR_OWNERSHIP, governRepairRound, reclassifyStalledDefects, causalRepairBoundary } from "./repairGovernance.mjs";
 import { createSnapshotStore } from "./snapshotStore.mjs";
 import { serviceClient } from "../supabase.mjs";
 import { generationPolicyFor } from "./generationPolicy.mjs";
@@ -1697,14 +1697,7 @@ export function createOrchestrator({
             if (mode === "causal_dependency_repair") {
               const graph = memoryGraph(owner, projectId, indexTree(currentTree));
               const owners = [...new Set(actionable.flatMap((defect) => defect.modules || []))];
-              const allowedFiles = [...new Set(owners.flatMap((path) => [path,
-                ...graph.neighbors(path, { depth: 1, direction: "both" }),
-              ]))].filter((path) => typeof currentTree[path] === "string").sort().slice(0, 18);
-              boundary = allowedFiles.length ? {
-                kind: "browser_repair_dependency_boundary", allowedFiles, allowedPrefixes: [],
-                instruction: "The exact owner repair did not resolve the structural defect. Repair only the "
-                  + "evidence-supported direct owner, caller, or dependency files in this boundary.",
-              } : null;
+              boundary = causalRepairBoundary({ owners, graph, tree: currentTree, contract });
             } else if (mode === "owner_module_regeneration" && regenerate.length) {
               boundary = { kind: "browser_owner_regeneration_boundary", allowedFiles: regenerate,
                 allowedPrefixes: [], instruction: "Regenerate only the proven owner modules." };
@@ -1713,7 +1706,7 @@ export function createOrchestrator({
             // whatever it may write; a fix that cannot see the consumer of the export it changes
             // is not a feasible fix.
             if (boundary && governance.contextFiles.length) {
-              boundary = { ...boundary, contextFiles: governance.contextFiles
+              boundary = { ...boundary, contextFiles: [...new Set([...(boundary.contextFiles || []), ...governance.contextFiles])]
                 .filter((path) => !(boundary.allowedFiles || []).includes(path)) };
             }
             rounds += 1;
