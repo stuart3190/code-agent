@@ -2633,7 +2633,7 @@ function surfaceHasPrimitive(surface, expected) {
  * Contract-policy facts for a step's expectedOutputs. Numbers are compared as numbers.
  * Exported so a verdict can be proven without a browser.
  */
-export function computedOutputFacts(surface, expectedOutputs) {
+export function computedOutputFacts(surface, expectedOutputs, { inputSurface = "" } = {}) {
   const entries = expectedOutputs && typeof expectedOutputs === "object" && !Array.isArray(expectedOutputs)
     ? Object.entries(expectedOutputs).filter(([, value]) => ["string", "number", "boolean"].includes(typeof value)
       && !(typeof value === "string" && !String(value).trim()))
@@ -2644,10 +2644,16 @@ export function computedOutputFacts(surface, expectedOutputs) {
   // to print internal state. An explicitly requested literal string remains verifiable.
   const unobservableComputedOutputs = entries.filter(([, expected]) => typeof expected === "boolean")
     .map(([field, expected]) => ({ field, expected }));
-  const computedOutputs = entries.filter(([, expected]) => typeof expected !== "boolean")
+  const candidates = entries.filter(([, expected]) => typeof expected !== "boolean")
     .map(([field, expected]) => ({ field, expected }));
+  // A value present only in an editable input proves what was entered, not what the
+  // application computed. Without an output binding this is a contract gap, not a
+  // reason to rewrite a potentially valid editable-result interface.
+  const inputOnlyComputedOutputs = candidates.filter(row => !surfaceHasPrimitive(surface, row.expected)
+    && surfaceHasPrimitive(inputSurface, row.expected));
+  const computedOutputs = candidates.filter(row => !inputOnlyComputedOutputs.includes(row));
   const missingComputedOutputs = computedOutputs.filter((row) => !surfaceHasPrimitive(surface, row.expected));
-  return { computedOutputs, missingComputedOutputs, unobservableComputedOutputs };
+  return { computedOutputs, missingComputedOutputs, unobservableComputedOutputs, inputOnlyComputedOutputs };
 }
 
 // Operation-transition copy such as "duplicated object disappears" proves the immediate action,
@@ -4173,11 +4179,11 @@ async function runStep(page, step, {
       ? Object.values(step.verificationValues).map((value) => String(value ?? "")) : []),
   ].filter(Boolean));
   const structuredFacts = async () => {
-    const surface = await page.evaluate(() => {
+    const { surface, outputSurface, inputSurface } = await page.evaluate(() => {
       // Values are useful for visible read-only outputs and driven controls, but a hidden
       // field must never satisfy a promise that a result is visible to the visitor.
       const visibleControl = (el) => {
-        if (el.type === "hidden" || !el.getClientRects().length
+        if (el.type === "hidden" || ![...el.getClientRects()].some(rect => rect.width > 0 && rect.height > 0)
           || ["hidden", "collapse"].includes(getComputedStyle(el).visibility)) return false;
         for (let node = el; node instanceof Element; node = node.parentElement) {
           const style = getComputedStyle(node);
@@ -4186,10 +4192,44 @@ async function runStep(page, step, {
         }
         return true;
       };
-      return [document.body?.innerText || "",
-        ...[...document.querySelectorAll("input, textarea, select")]
-          .filter(visibleControl).map((el) => String(el.value ?? ""))].join("\n");
-    }).catch(() => "");
+      const text = [];
+      let previousRect = null;
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const value = String(node.textContent || "");
+        const parent = node.parentElement;
+        if (!value.trim() || !parent || parent.closest("script,style,template,noscript,input,textarea,select")) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        // A display:contents parent has no box, but its text range can still be painted.
+        const rects = [...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0);
+        if (!rects.length) continue;
+        if (["hidden", "collapse"].includes(getComputedStyle(parent).visibility)) continue;
+        let hidden = false;
+        for (let ancestor = parent; ancestor; ancestor = ancestor.parentElement) {
+          const style = getComputedStyle(ancestor);
+          if (style.display === "none" || Number(style.opacity) === 0 || style.contentVisibility === "hidden") { hidden = true; break; }
+        }
+        if (!hidden) {
+          const first = rects[0];
+          const contiguous = previousRect && Math.abs(first.left - previousRect.right) <= 1
+            && first.top < previousRect.bottom && first.bottom > previousRect.top;
+          // Preserve a number split across adjacent inline spans, without merging separate
+          // quantities from different rows/columns into an invented number.
+          if (text.length && !contiguous) text.push("\n");
+          text.push(value);
+          previousRect = rects.at(-1);
+        }
+      }
+      const controls = [...document.querySelectorAll("input, textarea, select")].filter(visibleControl);
+      const values = elements => elements.map(el => String(el.value ?? ""));
+      const outputs = controls.filter(el => el.readOnly || el.disabled);
+      return {
+        surface: [text.join(""), ...values(controls)].join("\n"),
+        outputSurface: [text.join(""), ...values(outputs)].join("\n"),
+        inputSurface: values(controls.filter(el => !el.readOnly && !el.disabled)).join("\n"),
+      };
+    }).catch(() => ({ surface: "", outputSurface: "", inputSurface: "" }));
     return {
       route, routeReached: route ? routeMatchesCurrent(page.url(), route, previewUrl) : false, currentPath: new URL(page.url()).pathname,
       expectedValues: expectedVisibleValues,
@@ -4215,7 +4255,7 @@ async function runStep(page, step, {
       explicitVisibleText: Array.isArray(step.visibleText) ? step.visibleText.map(String) : [],
       explicitVisibleTextMissing: (Array.isArray(step.visibleText) ? step.visibleText.map(String) : [])
         .filter((text) => !surfaceIncludes(surface, text)),
-      ...computedOutputFacts(surface, step.expectedOutputs),
+      ...computedOutputFacts(outputSurface, step.expectedOutputs, { inputSurface }),
       observedStateChanged,
       observationOnly: observationOnly || selectionOnlyEstablished,
     };
@@ -4664,6 +4704,11 @@ export function structuredStepVerdict({
       detail: `boolean output state needs an observable binding: ${facts.unobservableComputedOutputs
         .map(row => row.field).join(", ")}` });
   }
+  if (facts.inputOnlyComputedOutputs?.length) {
+    checks.push({ kind: "computed_output", ok: false, inconclusive: true, contractIncomplete: true,
+      detail: `expected output matches only editable input; needs an observable output binding: ${facts.inputOnlyComputedOutputs
+        .map(row => row.field).join(", ")}` });
+  }
   if (collectionStateRequired) {
     if (facts.memberStructured && facts.collectionRegionFound === false && !collectionStateSatisfied) {
       checks.push({ kind: "collection", ok: false, inconclusive: true,
@@ -4722,7 +4767,8 @@ export function structuredStepVerdict({
         : "the contracted mutation fired through its control but nothing on the surface changed and no entered value or new reference rendered" });
   } else if (facts.actionDeclared) {
     const ok = Boolean(changed || mutationWithValues || facts.nextControlVisible || facts.actionAutoApplied || declaredSatisfied);
-    const outcomeUnbound = !ok && !declaredOutcomeChecks.length && facts.unobservableComputedOutputs?.length > 0;
+    const outcomeUnbound = !ok && !declaredOutcomeChecks.length
+      && (facts.unobservableComputedOutputs?.length > 0 || facts.inputOnlyComputedOutputs?.length > 0);
     checks.push({ kind: "action", ok, ...(outcomeUnbound ? { inconclusive: true, contractIncomplete: true } : {}),
       detail: ok ? "the contracted action fired through its control and changed the surface"
         : outcomeUnbound ? "the action's only declared output has no observable binding"
