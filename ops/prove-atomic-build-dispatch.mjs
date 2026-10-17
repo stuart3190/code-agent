@@ -1,0 +1,40 @@
+#!/usr/bin/env node
+import assert from 'node:assert/strict';
+import {execFileSync,spawn} from 'node:child_process';
+import {randomUUID} from 'node:crypto';
+if(process.env.ATOMIC_DISPATCH_PROOF!=='1')throw Error('ATOMIC_DISPATCH_PROOF=1 required');
+const container=process.env.ATOMIC_DISPATCH_CONTAINER||'thrallo-dispatch-gap-proof-20261017';
+if(!/^thrallo-dispatch-[a-z0-9-]*proof[a-z0-9-]*$/.test(container))throw Error('requires a disposable dispatch proof container');
+const config=JSON.parse(execFileSync('docker',['inspect','--format','{{json .HostConfig}}',container],{encoding:'utf8'}));
+assert.equal(config.NetworkMode,'none');assert.equal(Object.keys(config.PortBindings||{}).length,0);
+const args=['exec','-i',container,'psql','-U','postgres','-v','ON_ERROR_STOP=1','-At'];
+const sql=s=>execFileSync('docker',args,{input:s,encoding:'utf8',stdio:['pipe','pipe','pipe']}).trim();
+const asyncSql=s=>new Promise((resolve,reject)=>{const child=spawn('docker',args,{stdio:['pipe','pipe','pipe']});let out='',error='';child.stdout.on('data',v=>out+=v);child.stderr.on('data',v=>error+=v);child.on('error',reject);child.on('close',code=>code===0?resolve(out.trim()):reject(Error(error)));child.stdin.end(s);});
+const result=s=>JSON.parse(s.split('\n').find(line=>line.startsWith('{')));
+const owner=randomUUID(),other=randomUUID(),project=randomUUID();
+sql(`insert into auth.users(id)values('${owner}'),('${other}');insert into projects(id,owner)values('${project}','${owner}');`);
+const call=(id,proj=project,who=owner,priority=10)=>`select public.build_pipeline_dispatch('${who}','${proj}','${id}','build',null,null,'{"input":{"prompt":"synthetic atomic dispatch proof"}}'::jsonb,${priority}::smallint,'{"wallSeconds":60}'::jsonb);`;
+const checks=[];const check=(name,fn)=>{fn();checks.push(name);};
+const firstId=randomUUID();const first=result(sql('set role service_role;'+call(firstId)));
+check('public build and execution payload commit together',()=>{assert.equal(first.existing,false);assert.equal(first.job.id,firstId);assert.equal(first.job.work_job_id,first.work.id);assert.equal(first.work.build_id,firstId);assert.equal(first.work.state,'queued');assert.ok(first.work.payload_ref);});
+const retry=result(sql('set role service_role;'+call(randomUUID())));
+check('retry after lost response returns original authority',()=>{assert.equal(retry.existing,true);assert.equal(retry.job.id,firstId);assert.equal(retry.work.id,first.work.id);assert.equal(sql(`select count(*) from build_work_jobs where project_id='${project}'`),'1');});
+const failedProject=randomUUID(),failedId=randomUUID();sql(`insert into projects(id,owner)values('${failedProject}','${owner}');`);
+check('queue constraint failure rolls back public build and payload',()=>{assert.throws(()=>sql('set role service_role;'+call(failedId,failedProject,owner,101)),/priority/);assert.equal(sql(`select count(*) from build_jobs where id='${failedId}'`),'0');assert.equal(sql(`select count(*) from build_work_payloads where project_id='${failedProject}'`),'0');});
+const recovered=result(sql('set role service_role;'+call(failedId,failedProject)));
+check('failed dispatch leaves project available for retry',()=>assert.equal(recovered.existing,false));
+check('foreign owner cannot dispatch another project',()=>assert.throws(()=>sql('set role service_role;'+call(randomUUID(),project,other)),/project not owned/));
+for(const role of ['anon','authenticated'])check(`${role} cannot call dispatch`,()=>assert.throws(()=>sql(`set role ${role};`+call(randomUUID())),/permission denied/));
+const raceProject=randomUUID();sql(`insert into projects(id,owner)values('${raceProject}','${owner}');`);
+const raced=await Promise.all(Array.from({length:8},()=>asyncSql('set role service_role;'+call(randomUUID(),raceProject)).then(result)));
+check('eight concurrent requests create exactly one build and queue payload',()=>{assert.equal(raced.filter(r=>!r.existing).length,1);assert.equal(new Set(raced.map(r=>r.job.id)).size,1);assert.equal(new Set(raced.map(r=>r.work.id)).size,1);assert.equal(sql(`select count(*) from build_work_payloads where project_id='${raceProject}'`),'1');});
+// Terminate only the backend belonging to this synthetic open transaction, after the
+// function has run and before commit. PostgreSQL must roll back every related record.
+const interruptedProject=randomUUID(),interruptedId=randomUUID();sql(`insert into projects(id,owner)values('${interruptedProject}','${owner}');`);
+const child=spawn('docker',args,{stdio:['pipe','pipe','pipe']});let output='',errors='';
+const closed=new Promise(resolve=>child.on('close',code=>resolve(code)));child.stderr.on('data',v=>errors+=v);
+const ready=new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('fault transaction did not become ready')),10000);child.on('error',reject);child.stdout.on('data',v=>{output+=v;const match=output.match(/FAULT_READY:(\d+)/);if(match){clearTimeout(timer);resolve(Number(match[1]));}});});
+child.stdin.end(`begin;set local role service_role;${call(interruptedId,interruptedProject)}select 'FAULT_READY:'||pg_backend_pid();select pg_sleep(60);commit;`);
+const pid=await ready;assert.ok(Number.isInteger(pid)&&pid>0);sql(`select pg_terminate_backend(${pid})`);await closed;
+check('connection loss before commit leaves no stranded build or payload',()=>{assert.equal(sql(`select count(*) from build_jobs where id='${interruptedId}'`),'0');assert.equal(sql(`select count(*) from build_work_payloads where project_id='${interruptedProject}'`),'0');});
+console.log(JSON.stringify({passed:checks.length,checks,environment:'isolated PostgreSQL; synthetic identities; network none; no ports',productionMutation:false},null,2));

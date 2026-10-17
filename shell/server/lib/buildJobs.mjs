@@ -9,7 +9,7 @@ import crypto from "node:crypto";
 import { creditsForUsage } from "../../../src/billing/costModel.mjs";
 import { serviceClient } from "./supabase.mjs";
 import {
-  BUILD_WORK_TERMINAL, buildWorkerEnabled, enqueueBuildWork, getBuildWork, requestBuildWorkCancel,
+  BUILD_WORK_TERMINAL, buildWorkerEnabled, dispatchBuildPipeline, getBuildWork, requestBuildWorkCancel,
 } from "./buildWorkQueue.mjs";
 
 const TERMINAL = new Set(["complete", "failed", "interrupted"]);
@@ -98,7 +98,7 @@ export async function createJob({
   owner, projectId, mode, prompt, diag = null, trigger = "user", taskHint = null,
   budgetAllowance = null, byokCostLimit = null, providerOverride = null,
   pipelineVersion = null, manualModel = null, providerSelection = null, routingMode = null,
-  v2Input = null, budgetApprovalId = null,
+  v2Input = null, budgetApprovalId = null, client = null,
 }) {
   if (pipelineVersion !== "v2") {
     throw Object.assign(new Error("Builder V1 dispatch is retired; only Builder V2 jobs are accepted."), {
@@ -114,7 +114,7 @@ export async function createJob({
   const live = activeJobFor(owner.id, projectId);
   if (live) return { job: live, existing: true };
 
-  const { data: durableExisting, error: existingError } = await db().select("*")
+  const { data: durableExisting, error: existingError } = await db(client).select("*")
     .eq("owner", owner.id).eq("project_id", projectId)
     .in("status", ["queued", "running"]).order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (existingError) throw new Error(`could not inspect active Builder V2 jobs: ${existingError.message}`);
@@ -129,46 +129,28 @@ export async function createJob({
     manualModel, providerSelection, routingMode,
     subscribers: new Set(), createdAt: Date.now(), workJobId: null,
   };
-  const { error } = await db().insert({
-    id: job.id, owner: owner.id, project_id: projectId, mode,
-    status: "queued", phase: "queued", pipeline_version: "v2",
-    diag_run_id: diag?.sessionId || null, budget_approval_id: budgetApprovalId,
-  });
-  if (error) {
-    if (error.code === "23505") {
-      const { data: winner } = await db().select("*").eq("owner", owner.id).eq("project_id", projectId)
-        .in("status", ["queued", "running"])
-        .order("created_at", { ascending: false }).limit(1).maybeSingle();
-      if (winner) return { job: rowToJob(winner), existing: true };
-    }
-    throw Object.assign(new Error(`could not create build job: ${error.message}`), {
-      code: "build_job_create_failed",
-      publicMessage: "The approval was saved, but Thrallo could not create its durable build job.",
-    });
-  }
-
-  jobs.set(job.id, job);
   try {
-    const work = await enqueueBuildWork({
-      owner: owner.id, projectId, buildId: job.id, jobType: "builder_pipeline",
+    const dispatched = await dispatchBuildPipeline({
+      owner: owner.id, projectId, buildId: job.id, mode,
+      diagRunId: diag?.sessionId || null, budgetApprovalId,
       payload: {
         input: job.input, mode, trigger, taskHint, budgetAllowance, byokCostLimit, providerOverride,
         diagSessionId: diag?.sessionId || null, pipelineVersion: "v2", manualModel, providerSelection, routingMode,
       },
-      idempotencyKey: `builder-pipeline:${job.id}`,
-      priority: trigger === "user" ? 20 : 10,
-      maxAttempts: 2,
+      priority: trigger === "user" ? 20 : 10, client,
     });
-    job.workJobId = work.id;
+    if (dispatched.existing) return { job: rowToJob(dispatched.job), existing: true };
+    job.workJobId = dispatched.work.id;
+    // Do not advertise a process-local queued job until both durable records exist.
+    jobs.set(job.id, job);
     return { job, existing: false };
-  } catch (queueError) {
-    jobs.delete(job.id);
-    const { error: markError } = await db().update({
-      status: "failed", phase: "failed", error: "Build work could not be queued.",
-      stop_reason: "worker_enqueue_failed", updated_at: new Date().toISOString(),
-    }).eq("id", job.id).eq("owner", owner.id);
-    if (markError) throw new AggregateError([queueError, markError], "Build enqueue and failure persistence both failed.");
-    throw queueError;
+  } catch (error) {
+    // A database failure rolls back the whole dispatch. A lost response may have committed;
+    // never mark that potentially executing job failed. A retry reads its durable authority.
+    throw Object.assign(new Error(`could not dispatch build job: ${error.message}`, { cause: error }), {
+      code: "build_job_create_failed",
+      publicMessage: "Thrallo could not confirm the build was queued. Retry to reconnect safely.",
+    });
   }
 }
 
