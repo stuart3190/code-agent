@@ -526,7 +526,7 @@ export function createOrchestrator({
    * Returns { ok, tree } or { ok:false, problems }.
    */
   async function buildIncrement({ step, owner, projectId, buildId, contract, tiers, bindings, tree, assets, journeys,
-    editRequest = null, initialProblems = [], checkpointReason = `working:${step}`,
+    editRequest = null, originalRequest = null, initialProblems = [], checkpointReason = `working:${step}`,
     parentSnapshotId = null, signal = null, spec = null, attemptPolicy = null, initialRepairScope = null,
     protocolRetryLimit = maxNoOpRetries,
     // Which ALLOWANCE this increment draws on, when the caller already knows. The reservation
@@ -645,6 +645,7 @@ export function createOrchestrator({
       if (protocolCorrectionDispatch) protocolRegenerateFiles.clear();
       const emittedPatches = await patchesFn({ step: dispatchStep, originalStep: step, owner, projectId, buildId, attempt,
         contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null,
+        originalRequest,
         editRequest: repairScope?.instruction || contractCorrectionScope?.instruction || editRequest,
         modulePlan, moduleContracts, repairScope, moduleCorrectionScope: contractCorrectionScope, headroomScope,
         repairBoundary, regenerateFiles, advisory: [...splitFindings, ...advisory],
@@ -1489,7 +1490,7 @@ export function createOrchestrator({
         // 4. CORE: every journey in the essential product screen's model-owned write unit.
         await setState("core");
         const core = await buildIncrement({
-          step: "core", owner, projectId, buildId, contract, tiers: coreGenerationTiers,
+          step: "core", originalRequest: request, owner, projectId, buildId, contract, tiers: coreGenerationTiers,
           bindings, tree, assets: resolved, journeys: coreJourneys, checkpointReason: "working:core",
           parentSnapshotId: workingSnapshot.id, signal, spec,
           attemptPolicy: buildAttemptPolicy,
@@ -1759,7 +1760,7 @@ export function createOrchestrator({
             let repair;
             try {
               repair = await buildIncrement({
-                step: "repair", owner, projectId, buildId, contract,
+                step: "repair", originalRequest: request, owner, projectId, buildId, contract,
                 tiers: generationTiers, bindings,
                 tree: currentTree, assets: resolved, journeys: repairJourneys,
                 initialProblems: evidence, checkpointReason: `working:${label}:${rounds}`,
@@ -1971,7 +1972,7 @@ export function createOrchestrator({
           let corrected;
           try {
             corrected = await buildIncrement({
-              step: "repair", owner, projectId, buildId, contract, tiers: coreGenerationTiers,
+              step: "repair", originalRequest: request, owner, projectId, buildId, contract, tiers: coreGenerationTiers,
               bindings, tree, assets: resolved, journeys: coreJourneys, initialProblems: evidence,
               checkpointReason: `working:mechanics:${mechanicsCorrections}`,
               parentSnapshotId: workingSnapshot?.id || null, signal, spec,
@@ -2108,7 +2109,7 @@ export function createOrchestrator({
           await setState(step);
           const startTree = await snapshotStore.materialize(owner, candidate.id);
           const increment = await buildIncrement({
-            step, owner, projectId, buildId, contract, tiers, bindings, tree: startTree, assets: resolved,
+            step, originalRequest: request, owner, projectId, buildId, contract, tiers, bindings, tree: startTree, assets: resolved,
             journeys: [journey], checkpointReason: `working:${step}`, parentSnapshotId: candidate.id,
             signal, spec,
             attemptPolicy: buildAttemptPolicy,

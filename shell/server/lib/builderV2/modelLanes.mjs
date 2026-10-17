@@ -682,7 +682,24 @@ function renderHeadroomScreenMountPrompt({
   return parts.join("\n");
 }
 
-export function renderPatchPrompt({
+export function renderPatchPrompt(options) {
+  const prompt = renderScopedPatchPrompt(options);
+  const original = typeof options.originalRequest === "string" ? options.originalRequest.trim() : "";
+  if (!original) return prompt;
+  // Keep the user's requirements as source evidence alongside the lossy derived contract.
+  // The actual rendered prompt is still measured by reservation/headroom admission.
+  return [
+    "ORIGINAL PRODUCT REQUEST (requirement fidelity):",
+    original,
+    "Apply these requirements only within this dispatch's contracted journeys and writable modules. "
+      + "Do not expand the approved capability or repair scope. Preserve defaults, exclusions and "
+      + "behavioral details that a contract summary may omit. Verification fixtures are test inputs, "
+      + "not production defaults or the only allowed values; explicit user seed data is distinct.",
+    "", prompt,
+  ].join("\n");
+}
+
+function renderScopedPatchPrompt({
   step, originalStep = step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null,
   projectKnowledge = null, onRetrieval = null, modulePlan = [], moduleContracts = null,
   repairScope = null, moduleCorrectionScope = null, headroomScope = null, repairBoundary = null,
@@ -1934,7 +1951,7 @@ export function createModelLanes({
       return outcome.contract;
     },
 
-    patchesFn: async ({ owner, projectId, buildId, step, originalStep, attempt = 1, contract, tiers, tree, journey, rejections, problems, editRequest,
+    patchesFn: async ({ owner, projectId, buildId, step, originalStep, attempt = 1, contract, tiers, tree, journey, rejections, problems, editRequest, originalRequest = null,
       modulePlan = [], moduleContracts = null, repairScope = null, moduleCorrectionScope = null,
       headroomScope: requestedHeadroomScope = null, repairBoundary = null,
       regenerateFiles = [], advisory = [], spec = null, signal = null }) => {
@@ -1975,7 +1992,7 @@ export function createModelLanes({
             ? HEADROOM_FRAGMENT_SYSTEM_PROMPT
             : compileScoped ? COMPILE_CORRECTION_SYSTEM_PROMPT : fullSystemPrompt;
           prompt = renderPatchPrompt({
-            step, originalStep, contract, tiers, tree, journey, rejections, problems: dispatchProblems, editRequest,
+            step, originalStep, contract, tiers, tree, journey, rejections, problems: dispatchProblems, editRequest, originalRequest,
             projectKnowledge: headroomScope ? null : projectKnowledge, modulePlan, moduleContracts,
             repairScope, moduleCorrectionScope, headroomScope, repairBoundary, regenerateFiles, advisory,
             capabilityGraph: spec?.capabilityGraph || contract?.capabilityGraph || null,

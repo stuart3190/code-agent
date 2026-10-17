@@ -197,7 +197,7 @@ function harness({ contract = CONTRACT, contractFn = null, failJourneys = [], pa
   const orchestrator = createOrchestrator({
     contractFn: contractFn || (async () => contract),
     patchesFn: async (ctx) => {
-      patchCalls.push({ step: ctx.step, originalStep: ctx.originalStep, dispatchReason: ctx.dispatchReason,
+      patchCalls.push({ step: ctx.step, originalStep: ctx.originalStep, originalRequest: ctx.originalRequest, dispatchReason: ctx.dispatchReason,
         rejections: ctx.rejections.length, problems: ctx.problems, regenerateFiles: ctx.regenerateFiles,
         journeyIds: (ctx.spec?.journeys || []).map((journey) => journey.id),
         repairBoundary: ctx.repairBoundary, treeFiles: Object.keys(ctx.tree || {}) });
@@ -1527,4 +1527,14 @@ test('repeated invalid stylesheet corrections stop within the existing allowance
  assert.equal(result.state,'blocked',JSON.stringify(result));assert.equal(calls,2);
  assert.ok(h.checkpoints.some(c=>c.tree['src/screens/scaffold/BookingScreen.jsx']===CORE_PATCH[0].content));
  assert.equal(await h.snapshotStore.pointer('o','invalid-style','green'),null);
+});
+
+test("fresh generation carries the original requirements through core and later increments", async () => {
+  const h = harness();
+  const request = "Booking site. Default the date to today, allow any future date, and keep initial records editable.";
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "source-fidelity", request });
+  assert.equal(result.state, "green", JSON.stringify(result));
+  assert.ok(h.patchCalls.some(call => call.step === "core"));
+  assert.ok(h.patchCalls.some(call => call.step.startsWith("increment:")));
+  for (const call of h.patchCalls) assert.equal(call.originalRequest, request);
 });
