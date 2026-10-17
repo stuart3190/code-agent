@@ -3,8 +3,23 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {transientSeedState, contractBrief} from '../../shell/shared/implementationContract.mjs';
 import {buildInteractionContract} from '../../shell/server/lib/builderV2/interactionContract.mjs';
+import {deriveBuildSpec} from '../../shell/server/lib/builderV2/buildSpec.mjs';
+import {headroomDispatchScope, renderPatchPrompt} from '../../shell/server/lib/builderV2/modelLanes.mjs';
 const fixture=JSON.parse(await readFile(new URL('./fixtures/reliability-20261016/recipe-transient-seed-contract.json',import.meta.url)));
 const clone=()=>structuredClone(fixture);
+test('actual core and bounded generation prompts retain exact seeded quantities and units',()=>{
+ const spec=deriveBuildSpec(clone());
+ const selected=spec.modulePlan.find(module=>module.journeyIds?.length || module.ownedJourneys?.length);
+ assert.ok(selected);
+ const headroomScope=headroomDispatchScope({tree:{},modulePlan:spec.modulePlan,moduleContracts:spec.moduleContracts,
+   repairScope:{files:[selected.path],allowedFiles:[selected.path]},logicalStep:'core'});
+ for(const scope of [null,headroomScope]) {
+   const prompt=renderPatchPrompt({step:'core',contract:spec.contract,tiers:spec.tiers,tree:{},
+     modulePlan:spec.modulePlan,moduleContracts:spec.moduleContracts,headroomScope:scope});
+   assert.match(prompt,/"quantity":\s*300/);assert.match(prompt,/"unit":\s*"g"/);
+   assert.match(prompt,/"quantity":\s*600/);assert.match(prompt,/"unit":\s*"ml"/);
+ }
+});
 test('generation brief preserves the requested seed quantities, units and visible outcomes',()=>{
  const brief=contractBrief(clone());
  assert.match(brief,/"quantity":300,"unit":"g"/);
