@@ -445,6 +445,17 @@ export function createOrchestrator({
   // declared deployment availability.
   const deriveSpec = (contract, options = {}) => deriveBuildSpec(contract, { ...options, availability: moduleAvailability });
 
+  const retainDerivedContract = async ({ owner, projectId, buildId, spec, retained = false }) => {
+    try {
+      const stored = await events.contract?.({ owner, projectId, buildId, contract: spec.contract,
+        tiers: spec.tiers, bindings: spec.bindings, intents: spec.intents || [], retained });
+      if (stored?.id) await buildStore.update(buildId, { contract_id: stored.id });
+    } catch (cause) {
+      throw Object.assign(new Error("Unable to retain the build's exact implementation contract", { cause }),
+        { code: "platform_contract_persistence_failed" });
+    }
+  };
+
   const refreshDeterministicFoundation = (tree, spec) => {
     // A resumed snapshot may carry an older module lock. The refresh below still adopts the
     // worker's runtime (the audited behaviour is preserved until the versioned upgrade path
@@ -1408,12 +1419,7 @@ export function createOrchestrator({
             });
           }
         }
-        const persistedContract = await events.contract?.({ owner, projectId, buildId, contract, tiers,
-          bindings, intents });
-        if (persistedContract?.id) {
-          try { await buildStore.update(buildId, { contract_id: persistedContract.id }); }
-          catch (error) { log(`contract id update failed: ${error.message}`); }
-        }
+        await retainDerivedContract({ owner, projectId, buildId, spec });
 
         // Capability proof is proportional to the validated contract. Static sites stop after the
         // zero-network runtime/config proof; account and entity probes run only when contracted.
@@ -2365,6 +2371,7 @@ export function createOrchestrator({
         const spec = deriveSpec(contract, { userCritical });
         source.tree = refreshDeterministicFoundation(source.tree, spec);
         contract = spec.contract;
+        await retainDerivedContract({ owner, projectId, buildId, spec, retained: true });
         const { tiers, bindings } = spec;
         const attemptPolicy = generationPolicyFor(sourceBuild?.profile || "simple", {
           simpleAttempts: maxCoreAttempts, simpleCorrections: maxPrecompileCorrections,
@@ -2483,8 +2490,10 @@ export function createOrchestrator({
           try { await snapshotStore.discardWorking(owner, projectId, buildId); }
           catch (cleanupError) { log(`cancelled repair checkpoint cleanup failed: ${cleanupError.message}`); }
         }
-        return finish(cancelled ? "cancelled" : "failed",
-          { error: error.message });
+        return finish(cancelled ? "cancelled" : "failed", {
+          error: describeErrorChain(error).replace(/\n\s*/g, " <- "),
+          ...(!cancelled && error?.code ? { failureClassification: String(error.code) } : {}),
+        });
       }
     },
 
@@ -2514,6 +2523,7 @@ export function createOrchestrator({
         const spec = deriveSpec(contract, { userCritical });
         const tree = refreshDeterministicFoundation(source.tree, spec);
         contract = spec.contract;
+        await retainDerivedContract({ owner, projectId, buildId, spec, retained: true });
         const journeys = contract.journeys || [];
         const conformance = validateModuleConformance(tree, {
           contract, modulePlan: spec.modulePlan, moduleContracts: spec.moduleContracts,
@@ -2573,7 +2583,7 @@ export function createOrchestrator({
      * contract call, no asset search: everything persistent is simply resumed.
      */
     async runEdit({ owner, projectId, request, contract, maxRepairs = maxJourneyRepairs,
-      userCritical = [], signal = null }) {
+      userCritical = [], sourceSnapshotId = null, signal = null }) {
       const buildId = await buildStore.create({
         owner, project_id: projectId, profile: "edit", request, state: "created",
         verifier_policy: verifierPolicy,
@@ -2596,6 +2606,11 @@ export function createOrchestrator({
         contract = spec.contract;
         const ctx = await this.resumeContext(owner, projectId);
         if (!ctx) return finish("blocked", { error: "no green snapshot to edit — run a build first" });
+        if (sourceSnapshotId && ctx.snapshotId !== sourceSnapshotId) return finish("blocked", {
+          error: "The verified source changed while its implementation contract was being resolved. Retry the edit against the current source.",
+          failureClassification: "platform_source_changed",
+        });
+        await retainDerivedContract({ owner, projectId, buildId, spec, retained: true });
         // Capability/backend modules are platform-owned and upgrade on iterate. Legacy adoption
         // gains new reliable behaviours without asking a model to recreate protected code.
         ctx.tree = refreshDeterministicFoundation(ctx.tree, spec);
