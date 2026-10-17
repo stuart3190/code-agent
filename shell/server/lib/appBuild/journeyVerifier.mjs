@@ -4088,9 +4088,23 @@ async function runStep(page, step, {
       ? Object.values(step.verificationValues).map((value) => String(value ?? "")) : []),
   ].filter(Boolean));
   const structuredFacts = async () => {
-    const surface = await page.evaluate(() => [document.body?.innerText || "",
-      ...[...document.querySelectorAll("input, textarea, select")].map((el) => String(el.value ?? ""))].join("\n"))
-      .catch(() => "");
+    const surface = await page.evaluate(() => {
+      // Values are useful for visible read-only outputs and driven controls, but a hidden
+      // field must never satisfy a promise that a result is visible to the visitor.
+      const visibleControl = (el) => {
+        if (el.type === "hidden" || !el.getClientRects().length
+          || ["hidden", "collapse"].includes(getComputedStyle(el).visibility)) return false;
+        for (let node = el; node instanceof Element; node = node.parentElement) {
+          const style = getComputedStyle(node);
+          if (style.display === "none"
+            || Number(style.opacity) === 0 || style.contentVisibility === "hidden") return false;
+        }
+        return true;
+      };
+      return [document.body?.innerText || "",
+        ...[...document.querySelectorAll("input, textarea, select")]
+          .filter(visibleControl).map((el) => String(el.value ?? ""))].join("\n");
+    }).catch(() => "");
     return {
       route, routeReached: route ? routeMatchesCurrent(page.url(), route, previewUrl) : false, currentPath: new URL(page.url()).pathname,
       expectedValues: expectedVisibleValues,
