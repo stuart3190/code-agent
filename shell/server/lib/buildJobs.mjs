@@ -180,28 +180,44 @@ export async function cancelJob(ownerId, jobId, { client = null } = {}) {
   return { ok: true };
 }
 
-export function subscribe(job, fn) {
+export function subscribe(job, fn, { client = null, pollMs = 750 } = {}) {
   if (!job.workJobId || TERMINAL.has(job.status)) return () => {};
   let previous = `${job.status}:${job.phase}`;
   let stopped = false;
+  let reading = false;
   const tick = async () => {
-    if (stopped) return;
-    const { data } = await db().select("*").eq("id", job.id).eq("owner", job.owner.id).maybeSingle();
-    if (!data) return;
-    const current = rowToJob(data);
-    Object.assign(job, current, { subscribers: job.subscribers });
-    const key = `${current.status}:${current.phase}`;
-    if (key !== previous) {
-      previous = key;
-      fn("phase", { jobId: job.id, status: current.status, phase: current.phase });
-    }
-    if (TERMINAL.has(current.status)) {
+    if (stopped || reading) return;
+    reading = true;
+    try {
+      let response;
+      try {
+        response = await db(client).select("*").eq("id", job.id).eq("owner", job.owner.id).maybeSingle();
+      } catch {
+        // A lost observation is not a build failure. Retry on the next poll.
+        return;
+      }
+      if (stopped || response.error || !response.data) return;
+      const current = rowToJob(response.data);
+      Object.assign(job, current, { subscribers: job.subscribers });
+      const key = `${current.status}:${current.phase}`;
+      if (key !== previous) {
+        previous = key;
+        fn("phase", { jobId: job.id, status: current.status, phase: current.phase });
+      }
+      if (!stopped && TERMINAL.has(current.status)) {
+        stopped = true;
+        clearInterval(timer);
+        fn("end", publicJob(current));
+      }
+    } catch {
+      // A closed/throwing consumer must not take down detached builds or the shell.
       stopped = true;
       clearInterval(timer);
-      fn("end", publicJob(current));
+    } finally {
+      reading = false;
     }
   };
-  const timer = setInterval(tick, 750);
+  const timer = setInterval(tick, pollMs);
   timer.unref?.();
   void tick();
   return () => { stopped = true; clearInterval(timer); };
