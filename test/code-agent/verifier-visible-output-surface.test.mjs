@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import {verifyJourneys} from '../../shell/server/lib/appBuild/journeyVerifier.mjs';
 for (const [name,markup,expected,expectedOutputs={quantity:450}] of [
+ ['currency before heading','<output>£216.00</output><h2>Total estimate</h2>','PASS',{paintCost:216}],
  ['scientific notation','<output>1.25e3 W</output>','PASS',{power:1250}],
  ['scientific mantissa is not result','<output>1.25e3 W</output>','APP_FUNCTIONAL_FAILURE',{power:1.25}],
  ['large count off by one','<output>1000001</output>','APP_FUNCTIONAL_FAILURE',{count:1000000}],

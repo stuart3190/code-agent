@@ -18,3 +18,7 @@ test('an underflowed nonzero scientific token cannot certify zero',()=>{
  assert.equal(computedOutputFacts('Result: 1e-400',{result:0}).missingComputedOutputs.length,1);
  assert.equal(computedOutputFacts('Result: 0e-400',{result:0}).missingComputedOutputs.length,0);
 });
+for(const surface of ['Paint cost £216.00\nTotal estimate','Paint cost £216.00\r\nTotal estimate','Paint cost £216.00\tTotal estimate'])test(`numeric value before whitespace and a label remains observable: ${JSON.stringify(surface)}`,()=>{
+ assert.equal(computedOutputFacts(surface,{paintCost:216}).missingComputedOutputs.length,0);
+});
+test('whitespace normalization does not concatenate separate numeric lines',()=>{assert.equal(computedOutputFacts('12\n345',{total:12345}).missingComputedOutputs.length,1);});

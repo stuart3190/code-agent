@@ -2589,7 +2589,7 @@ function parseNumericToken(token) {
   if (body.startsWith("+")) body = body.slice(1).trim();
   else if (body.startsWith("-")) { sign = -1; body = body.slice(1).trim(); }
   body = body.replace(/^[$£€¥]\s*/, "");
-  body = body.replace(/[,_\u00a0\u202f ]/g, "");
+  body = body.replace(/[,_\s]/g, "");
   // Capture the exponent as part of the number before considering an optional
   // unit suffix. Stripping letters first turns 1e3 into 1 and can falsely pass.
   const match = body.match(/^(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?:[a-zA-Zµμ%][a-zA-Zµμ%0-9²³]*)?$/u);
