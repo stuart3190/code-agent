@@ -239,3 +239,14 @@ for (const phase of ['load','activate','console-only']) {
     }finally{server.close();}
   });
 }
+
+browserTest('entry mobile clipping cannot be hidden by an activation that opens a modal', async () => {
+  const html=`<html><body><main><h1>Tasks</h1><button style="margin-left:330px;width:150px" onclick="document.querySelector('dialog').showModal()">Clear search</button></main><dialog><h2>Details</h2></dialog><style>@media(max-width:500px){html,body{overflow-x:clip}main{width:500px}}</style></body></html>`;
+  const {server,url}=await serve({'/':html});
+  try {const result=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});
+    assert.equal(result.pass,false);assert.equal(result.smoke.responsive.entry.findings.length,1);
+    assert.equal(result.smoke.responsive.afterInteraction.findings.length,0);
+    assert.equal(result.smoke.responsive.findings.length,1);
+    assert.match(result.journeys[0].detail,/Clear search.*cut off/);
+  }finally{server.close();}
+});

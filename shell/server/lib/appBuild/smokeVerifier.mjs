@@ -154,6 +154,7 @@ export async function smokeVerifyJourneys({
   let unavailable = false;
   let error = null;
   let responsive = null;
+  let initialResponsive = null;
 
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -223,6 +224,17 @@ export async function smokeVerifyJourneys({
       }
     }
 
+    // Inspect the entry layout before activation can open a modal, navigate away, or hide
+    // broken controls. Keep the post-interaction sample too: results can introduce overlap.
+    if (load.ok && !crashes.length) {
+      const desktopViewport = page.viewportSize();
+      try {
+        initialResponsive = Date.now() < deadline - 2_000
+          ? await probeResponsiveControls({ browser, page, previewUrl, timeoutMs: Math.min(15_000, deadline - Date.now()) })
+          : { checked: false, unavailable: true, findings: [], error: "entry mobile probe budget exhausted" };
+      } finally { if (desktopViewport) await page.setViewportSize(desktopViewport); }
+    }
+
     // 3. Visible controls can be activated without crashing the app.
     if (load.ok && !crashes.length) {
       const origin = new URL(previewUrl).origin;
@@ -284,6 +296,15 @@ export async function smokeVerifyJourneys({
       responsive = Date.now() < deadline - 2_000
         ? await probeResponsiveControls({ browser, page, previewUrl, timeoutMs: Math.min(15_000, deadline - Date.now()) })
         : { checked: false, unavailable: true, findings: [], error: "mobile probe budget exhausted" };
+      if (initialResponsive) {
+        const after = responsive;
+        responsive = { ...after, checked: initialResponsive.checked && after.checked,
+          unavailable: Boolean(initialResponsive.unavailable || after.unavailable),
+          error: initialResponsive.error || after.error,
+          findings: [...new Map([...(initialResponsive.findings || []), ...(after.findings || [])]
+            .map(finding => [JSON.stringify(finding), finding])).values()],
+          entry: initialResponsive, afterInteraction: after };
+      }
       if (responsive.unavailable) { unavailable = true; error = `mobile probe unavailable: ${responsive.error}`; }
     }
   } finally {
