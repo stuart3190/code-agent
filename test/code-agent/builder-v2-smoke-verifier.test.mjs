@@ -207,13 +207,14 @@ for (const [name, css, expectedPass] of [
   ['fully offscreen drawer is not a clipping finding', 'html,body{overflow-x:clip}button{margin-left:600px!important}', true],
 ]) {
   browserTest(name, async () => {
-    const html=`<html><head><style>body{margin:0}button{margin-left:320px;width:160px;height:50px}@media(max-width:500px){${css}}</style></head><body><h1>Task board</h1><main><button>Create task</button></main></body></html>`;
+    const html=`<html><head><style>body{margin:0}button{margin-left:320px;width:160px;height:50px}@media(max-width:500px){${css}}</style></head><body><h1>Task board</h1><main><button data-thrallo-action="act_create">Create task</button></main></body></html>`;
     const {server,url}=await serve({'/':html});
     try {
       const result=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});
       assert.equal(result.pass,expectedPass,JSON.stringify(result.smoke));
       if(!expectedPass) {
         assert.equal(result.smoke.responsive.findings[0].kind,'clipped_control');
+        assert.equal(result.journeys[0].responsiveFindings[0].controlId,'act_create');
         assert.match(result.journeys[0].detail,/Create task.*cut off by.*clipping/);
         assert.equal(result.journeys[0].classification,VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE);
       }

@@ -40,6 +40,7 @@ export async function probeResponsiveControls({ browser, page: existingPage = nu
           const hit = document.elementFromPoint((visibleLeft + visibleRight) / 2, r.top + r.height / 2);
           if (hit && (hit === el || el.contains(hit))) {
             findings.push({ control: (el.getAttribute('aria-label') || el.textContent || el.name || el.tagName).trim().slice(0,80),
+              controlId: el.getAttribute('data-thrallo-control') || el.getAttribute('data-thrallo-action') || null,
               kind: 'clipped_control', blocker: 'non-scrollable horizontal clipping', width:390 });
           }
           continue;
@@ -56,6 +57,7 @@ export async function probeResponsiveControls({ browser, page: existingPage = nu
         const panel = blocker.closest('aside,[role="status"],article,section');
         if (!panel || panel.contains(el)) continue;
         findings.push({ control: (el.getAttribute('aria-label') || el.textContent || el.name || el.tagName).trim().slice(0,80),
+          controlId: el.getAttribute('data-thrallo-control') || el.getAttribute('data-thrallo-action') || null,
           blocker: panel.getAttribute('aria-label') || panel.getAttribute('role') || panel.tagName.toLowerCase(), width:390 });
       }
       return findings;

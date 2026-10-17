@@ -304,6 +304,7 @@ export async function smokeVerifyJourneys({
   const journeys = (contract?.journeys || []).map((journey) => ({
     id: journey.id, title: journey.title, priority: journey.priority,
     status, classification, detail,
+    ...(obstructed ? { responsiveFindings: responsive.findings } : {}),
     // The first crash's message and stack travel with every journey verdict so the repair brief
     // can name the failing identifier and the files that contain it.
     ...(fatal && crashes[0]?.message ? { crash: {
