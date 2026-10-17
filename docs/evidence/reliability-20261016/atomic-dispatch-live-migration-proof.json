@@ -1,0 +1,10 @@
+{
+  "rpcAvailableThroughProductionPostgrest": true,
+  "invalidIdentityRejectedBeforeMutation": true,
+  "errorCode": "22023",
+  "productionMigrationCount": 98,
+  "serviceExecute": true,
+  "anonExecute": false,
+  "authenticatedExecute": false,
+  "callerDeploymentPending": true
+}

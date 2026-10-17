@@ -1,0 +1,17 @@
+{
+  "source": "Connected Supabase apply_migration and read-only schema_migrations/privilege verification",
+  "capturedAt": "2026-10-17T18:44:17.273623+00:00",
+  "baseVersion": "20261017023404",
+  "ledgerCount": 98,
+  "note": "Additive atomic dispatch RPC; full-schema isolated9checks and54Node checks passed. No customer/queue data rewritten. Supabase assigned the applied timestamp; local reviewed file/hash retained.",
+  "migrations": [
+    {
+      "appliedOrder": 98,
+      "version": "20261017181200",
+      "name": "atomic_builder_dispatch",
+      "filename": "20261017181200_atomic_builder_dispatch.sql",
+      "localCanonicalSqlSha256": "d8c2471af130581e8dbe0e9a3c06367216eb2ee26b07f42c4fe5c373ab35314f",
+      "appliedVersion": "20261017184245"
+    }
+  ]
+}
