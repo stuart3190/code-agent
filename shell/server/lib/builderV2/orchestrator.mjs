@@ -449,7 +449,7 @@ export function createOrchestrator({
   const retainDerivedContract = async ({ owner, projectId, buildId, spec, retained = false }) => {
     try {
       const stored = await events.contract?.({ owner, projectId, buildId, contract: spec.contract,
-        tiers: spec.tiers, bindings: spec.bindings, intents: spec.intents || [], retained });
+        tiers: spec.tiers, bindings: spec.bindings, intents: spec.imageIntents || [], retained });
       if (stored?.id) await buildStore.update(buildId, { contract_id: stored.id });
     } catch (cause) {
       throw Object.assign(new Error("Unable to retain the build's exact implementation contract", { cause }),

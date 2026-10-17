@@ -2,6 +2,7 @@ import {test} from 'node:test';import assert from 'node:assert/strict';import {r
 import {createOrchestrator,memoryBuildStore} from '../../shell/server/lib/builderV2/orchestrator.mjs';
 import {createSnapshotStore} from '../../shell/server/lib/builderV2/snapshotStore.mjs';
 import {REACT_VITE} from '../../src/scaffolds/reactVite.mjs';
+import {deriveBuildSpec} from '../../shell/server/lib/builderV2/buildSpec.mjs';
 const fixture=JSON.parse(readFileSync(new URL('./fixtures/reliability-20261016/expense-unmounted-controller.json',import.meta.url)));
 for(const mode of ['runEdit','runVerifyFromCheckpoint','runRepairFromCheckpoint'])test(`${mode} retains the exact derived contract before any generation or verification`,async()=>{
  const builds=memoryBuildStore(),snapshots=createSnapshotStore(),retained=[];let calls=0;
@@ -14,6 +15,7 @@ for(const mode of ['runEdit','runVerifyFromCheckpoint','runRepairFromCheckpoint'
  const initial=await orchestrator.runBuild({owner:'o',projectId:mode,request:'Expense ledger'});assert.equal(initial.state,'green',JSON.stringify(initial));
  const next=await orchestrator[mode]({owner:'o',projectId:mode,sourceBuildId:initial.buildId,request:'Check the retained ledger',contract:fixture.contract});
  assert.equal(retained.length,2,JSON.stringify({mode,next,calls}));
+ assert.deepEqual(retained[1].intents,deriveBuildSpec(retained[1].contract).imageIntents, 'retained event must carry the actual derived asset intents');
  assert.equal(retained[1].buildId,next.buildId);assert.equal(retained[1].retained,true);
  assert.equal((await builds.get(next.buildId)).contract_id,'contract-2');
  assert.deepEqual(retained[1].contract.journeys.map(j=>j.id),fixture.contract.journeys.map(j=>j.id));
