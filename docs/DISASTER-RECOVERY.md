@@ -22,6 +22,16 @@ persistent) and writes `~/thrallo-backups/thrallo-<stamp>/` containing:
 - authoritative production migration-ledger evidence plus the local/applied-state map; and
 - `manifest.json` with per-file row counts, sizes and SHA-256 checksums.
 
+Format 3 captures service-only column-level FK/PK metadata in `backup_relations.json.gz`.
+Before completion, bounded reconciliation adds missing referenced parents and complete immutable
+snapshot/graph children without deleting or replacing captured rows. Snapshot tree hashes, blob
+content, storage coverage and all captured foreign keys must validate. Missing/deleted parents,
+changed identities, exhausted reconciliation bounds or schema/migration changes leave the run
+in its private `.incomplete-*` directory and prevent pruning. The relation catalog and live migration
+identities are checked before and after export. This is still a time-spanning logical export, not
+an MVCC snapshot or point-in-time recovery. A full isolated restore remains required evidence.
+Historical format 2 checksums prove file integrity only; they do not prove cross-table consistency.
+
 Every run is validated immediately after writing. Runs older than
 `THRALLO_BACKUP_KEEP_DAYS` (14) are pruned. Buildr101 backups are separate and untouched.
 
