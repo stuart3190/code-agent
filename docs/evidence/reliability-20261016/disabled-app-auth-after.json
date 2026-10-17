@@ -1,0 +1,20 @@
+{
+  "at": "2026-10-17T19:27:41.807Z",
+  "ownAuditAppOnly": true,
+  "accountStatusRestored": true,
+  "results": [
+    {
+      "action": "signin",
+      "status": 403,
+      "sessionIssued": false,
+      "testSessionRevoked": false
+    },
+    {
+      "action": "signup",
+      "status": 403,
+      "sessionIssued": false,
+      "testSessionRevoked": false
+    }
+  ],
+  "limitation": "Existing controlled audit visitor; no customer account or data access attempted."
+}

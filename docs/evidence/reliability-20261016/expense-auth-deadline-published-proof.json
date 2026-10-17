@@ -1,0 +1,11 @@
+{
+  "deployedCommit": "0ec83e436eb2532b69e64760a76691a5256e764e",
+  "buildId": "856be196-5281-47d2-8bb5-c2e7dfe67fae",
+  "timeoutMs": 30834,
+  "requestWaitMs": 30185,
+  "networkRequestAborted": true,
+  "retryRecovered": true,
+  "existingVisitorCredentialsUnchanged": true,
+  "newSignupRequired": false,
+  "width": 390
+}
