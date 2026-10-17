@@ -130,3 +130,36 @@ test("no identifier is invented when the backend provides none", async () => {
   telemetry.record(usage);
   assert.deepEqual(telemetry.summary().providerRequestIds, []);
 });
+
+ test("a spent Codex allowance preserves quota diagnosis and forbids automatic replay", async () => {
+  const { structuredBuildFailure } = await import("../../shell/server/lib/builderV2/buildFailure.mjs");
+  const { providerCondition } = await import("../../shell/server/lib/appBuild/endState.mjs");
+  for (const type of ["usage_limit_reached", "insufficient_quota", "quota_exceeded"]) {
+    let calls = 0;
+    const provider = createCodexProvider({ tokenProvider: token, fetchImpl: async () => {
+      calls++;
+      return { ...fakeResponse({ ok: false, status: 429 }), text: async () => JSON.stringify({
+        error: { type, message: "The usage limit has been reached", resets_at: 1792654592 },
+      }) };
+    } });
+    await assert.rejects(provider.runTurn({ systemPrompt: "s", messages: [] }), error => {
+      assert.equal(error.code, "provider_quota_blocked");
+      assert.equal(error.dispatchState, "provider_rejected");
+      assert.equal(error.retrySafe, false);
+      assert.equal(error.retryable, false);
+      assert.equal(error.providerResetAt, 1792654592);
+      assert.equal(structuredBuildFailure(error).classification, "provider_customer");
+      assert.equal(providerCondition(error.message), "provider_quota_blocked");
+      return true;
+    });
+    assert.equal(calls, 1);
+  }
+});
+ test("a generic Codex 429 retains bounded transport retry eligibility", async () => {
+  await assert.rejects(providerFor([fakeResponse({ ok: false, status: 429 })]).runTurn({ systemPrompt: "s", messages: [] }), error => {
+    assert.equal(error.code, "provider_http_rejected");
+    assert.equal(error.retrySafe, true);
+    assert.equal(error.providerResetAt, undefined);
+    return true;
+  });
+});

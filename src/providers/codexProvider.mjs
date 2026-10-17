@@ -145,10 +145,25 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
         continue;
       }
       const error = new Error(`Codex responses HTTP ${res.status}${providerRequestId ? ` (${providerRequestId})` : ""}: ${errBody}`);
+      // A usage-window exhaustion is not a transient 429. Preserve a machine-readable
+      // cause through orchestration so it cannot become a generated-app repair attempt.
+      let providerError = null;
+      try { providerError = JSON.parse(errBody)?.error; } catch { /* retain original body */ }
+      const quotaExhausted = res.status === 429
+        && ["usage_limit_reached", "insufficient_quota", "quota_exceeded"].includes(providerError?.type);
+      error.status = res.status;
+      error.code = quotaExhausted ? "provider_quota_blocked" : "provider_http_rejected";
+      if (quotaExhausted) {
+        error.retryable = false;
+        error.classification = "provider_customer";
+        if (Number.isSafeInteger(providerError.resets_at) && providerError.resets_at > 0) {
+          error.providerResetAt = providerError.resets_at;
+        }
+      }
       // A failed call that the backend received still has an identity — keep it for incident logs.
       error.providerRequestId = providerRequestId;
       throw providerFailure(error, { state: res.status < 500 ? DISPATCH_STATES.rejected : DISPATCH_STATES.ambiguous,
-        providerRequestId, retrySafe: [408, 409, 425, 429].includes(res.status) });
+        providerRequestId, retrySafe: !quotaExhausted && [408, 409, 425, 429].includes(res.status) });
     }
 
     // Parse SSE. Accumulate text from deltas (final output[] can be empty); collect
