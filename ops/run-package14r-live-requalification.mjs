@@ -1,3 +1,5 @@
+// New runs require THRALLO_QUALIFICATION_OWNER; resumes retain their recorded account.
+import { resolveQualificationOwner } from './lib/qualificationOwner.mjs';
 // Package 14R live requalification. This operator is deliberately resumable and stage-oriented:
 // every provider-bearing stage is exactly-once in its evidence directory, AUTO routing is pinned
 // per job without changing owner preferences, and aggregate settled usage is capped at 12 credits.
@@ -69,18 +71,6 @@ const load = async () => {
   }
 };
 
-async function codexOwner() {
-  const preferences = unwrap(await client.from("ca_ai_preferences")
-    .select("owner,active_provider,routing_mode,preferred_model").eq("active_provider", "codex")
-    .order("updated_at", { ascending: false }), "Codex preferences") || [];
-  for (const preference of preferences) {
-    const credential = unwrap(await client.from("ca_ai_credentials")
-      .select("owner,status,provider,auth_mode").eq("owner", preference.owner)
-      .eq("provider", "codex").eq("status", "connected").maybeSingle(), "Codex credential");
-    if (credential) return { owner: preference.owner, preference };
-  }
-  throw new Error("Package 14R requires an active connected Codex owner");
-}
 
 async function reservations(projectIds) {
   if (!projectIds.length) return [];
@@ -272,7 +262,7 @@ async function cleanup(state) {
 
 await mkdir(evidenceDir, { recursive: true, mode: 0o700 });
 const state = await load();
-const owner = await codexOwner();
+const owner = await resolveQualificationOwner({ client, requestedOwner: process.env.THRALLO_QUALIFICATION_OWNER, retainedOwner: state.owner });
 if (state.owner && state.owner !== owner.owner) throw new Error("Package 14R owner changed");
 state.owner = owner.owner;
 state.ownerHash = hash(owner.owner).slice(0, 16);
