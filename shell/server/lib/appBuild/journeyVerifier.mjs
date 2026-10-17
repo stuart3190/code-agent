@@ -4641,6 +4641,15 @@ export function structuredStepVerdict({
     checks.push({ kind: "visible_text", ok: !missing.length,
       detail: !missing.length ? "the contract's declared visible text is present"
         : `declared visible text missing: ${missing.slice(0, 3).map((text) => JSON.stringify(text)).join(", ")}` });
+    const numericMissing = missing.filter(text => /\p{N}/u.test(String(text)));
+    if (numericMissing.length) {
+      // Copy is advisory, but dropping an unseen quantity can certify an app that never
+      // displays its computed results. Do not guess whether alternate wording/rounding is
+      // correct: require a structured output assertion before this step can qualify.
+      checks.push({ kind: "computed_output", ok: false, inconclusive: true, contractIncomplete: true,
+        detail: `unobserved numeric text needs structured output evidence: ${numericMissing.slice(0, 3)
+          .map(text => JSON.stringify(text)).join(", ")}` });
+    }
   }
   const computedOutputs = Array.isArray(facts.computedOutputs) ? facts.computedOutputs : [];
   if (computedOutputs.length) {
@@ -4760,13 +4769,15 @@ export function structuredStepVerdict({
     return verificationVerdict(VERIFICATION_RESULT_CLASS.PASS, checks.map((check) => check.detail).join(" · "),
       { drove, checks, advisories: [...proseAdvisory, ...undeclared] });
   }
-  if (failing.every((check) => check.inconclusive)) {
-    if (failing.some((check) => check.contractIncomplete)) {
+  const blockingFailures = failing.filter(check => check.inconclusive
+    || verifierCheckSeverity(check.kind) !== SEVERITY.ADVISORY);
+  if (blockingFailures.length && blockingFailures.every((check) => check.inconclusive)) {
+    if (blockingFailures.some((check) => check.contractIncomplete)) {
       return verificationVerdict(VERIFICATION_RESULT_CLASS.CONTRACT_INCOMPLETE,
-        failing.map((check) => check.detail).join("; "), { drove, contractIncomplete: true, checks });
+        blockingFailures.map((check) => check.detail).join("; "), { drove, contractIncomplete: true, checks });
     }
     return verificationVerdict(VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE,
-      failing.map((check) => check.detail).join("; "), { drove, checks });
+      blockingFailures.map((check) => check.detail).join("; "), { drove, checks });
   }
   if ((!drove || !actionProven) && !facts.observationOnly) {
     return verificationVerdict(VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE,

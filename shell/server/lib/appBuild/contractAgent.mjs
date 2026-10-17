@@ -113,6 +113,10 @@ Rules:
   for a pure observation ("visibleText": ["Pendant Light", "Wall Sconce"]), or "expectedOutputs"
   for a computed result. The verifier never matches the "expect" sentence literally; a step with
   none of those is rejected as unverifiable.
+- Put computed numeric results in expectedOutputs, not only in visibleText or expect. Missing
+  numeric copy alone cannot prove whether the calculation or its presentation is wrong and
+  leaves verification incomplete. Declare the actual displayed value, including requested
+  display precision, rather than an unrounded internal intermediate result.
 - Add "primitive": "selection" or "textbox" only when the verb leaves it ambiguous.
 - A keyboard-focus or tab-navigation step is a control interaction, not a passive observation. It
   MUST name the focused entity field(s) in "operates" and declare "primitive". Split text-entry
