@@ -15,7 +15,7 @@ import { ensureSession as defaultEnsureSession } from "./session.js";
 export const BOOKING_STATUS = Object.freeze({ ACTIVE: "Active", CANCELLED: "Cancelled" });
 export const CREATE_RESULT = Object.freeze({ OK: "ok", INVALID: "invalid", OVER_CAPACITY: "over_capacity" });
 
-const flatten = (row) => (row ? { id: row.id, createdAt: row.created_at, ...(row.data || {}) } : null);
+const flatten = (row) => (row ? { createdAt: row.created_at, ...(row.data || {}), id: row.id } : null);
 const emailOk = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
 const bookingResult = (result, booking) => ({ ...(booking || {}), result, booking });
 
