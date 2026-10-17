@@ -10,3 +10,13 @@ export function isKeyboardFocusOnlyStep(step = {}) {
   const action = String(step?.action || "");
   return KEYBOARD_FOCUS.test(action) && !VALUE_OR_ACTION_CHANGE.test(action);
 }
+
+// A pure, explicitly requested route link is navigation, not a second button on the
+// destination. Composite value/mutation steps must retain their existing execution.
+export function isExplicitRouteLinkStep(step = {}) {
+  const target = String(step.route || step.target || '');
+  return /^\/(?!\/)/.test(target)
+    && ![...(step.operates || []), ...(step.produces || [])].length
+    && /^(?:use|click|follow|tap)\s+(?:the\s+)?[^\n]+\s+(?:navigation\s+)?link\.?$/i.test(String(step.action || '').trim())
+    && !/\b(?:and|then|before|after|submit|save|delete|create|enter|fill)\b/i.test(String(step.action || ''));
+}

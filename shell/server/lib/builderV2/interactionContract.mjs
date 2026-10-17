@@ -26,7 +26,7 @@ import {
 } from "../../../shared/implementationContract.mjs";
 import { AUTH_CREDENTIAL_FIELDS, contractUsesPlatformAuthentication } from "../../../shared/implementationContract.mjs";
 import { isSessionOperation } from "../../../shared/implementationContract.mjs";
-import { isKeyboardFocusOnlyStep } from "./interactionSemantics.mjs";
+import { isKeyboardFocusOnlyStep, isExplicitRouteLinkStep } from "./interactionSemantics.mjs";
 import { operationReadEntityNames } from "./entityScope.mjs";
 
 export const INTERACTION_CONTRACT_VERSION = 2;
@@ -344,6 +344,7 @@ export function structuredRouteTarget(value = "") {
 }
 
 function actionKinds(step, context = {}) {
+  if (isExplicitRouteLinkStep(step)) return ["navigation"];
   const intents = actionIntents(step);
   const kinds = [];
   if (intents.has(ACTION_INTENT.SELECTION)) kinds.push("selection");

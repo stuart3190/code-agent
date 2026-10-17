@@ -37,7 +37,7 @@ import {
   verificationVerdict,
 } from "./verifierPolicy.mjs";
 import { SEVERITY, verifierCheckSeverity } from "../builderV2/validationSeverity.mjs";
-import { isKeyboardFocusOnlyStep } from "../builderV2/interactionSemantics.mjs";
+import { isKeyboardFocusOnlyStep, isExplicitRouteLinkStep } from "../builderV2/interactionSemantics.mjs";
 
 const requireCjs = createRequire(import.meta.url);
 
@@ -3249,8 +3249,33 @@ async function runStep(page, step, {
   const actionRoute = action.match(/(?:^|\s)(\/[^\s,;]+)/)?.[1] || null;
   // `step.route` is the resolved declared route (routeResolution.mjs); it outranks the prose target.
   const route = concreteRouteTarget(step.route) || concreteRouteTarget(step.target) || concreteRouteTarget(actionRoute);
+  const routeLink = minimal && isExplicitRouteLinkStep(step) && interactionFlows.every(flow =>
+    flow.kind === "navigation" || (flow.kind === "action" && !flow.operationId
+      && !flow.reads?.length && !flow.writes?.length));
   let routeNavigated = false;
-  if (route) {
+  if (route && routeLink) {
+    // Exercise the offered hyperlink from the current surface. Opening the destination
+    // directly would conceal a missing/dead navigation control.
+    const destination = new URL(route, previewUrl).href;
+    const links = page.getByRole("link");
+    let offered = null;
+    for (let index = 0, count = await links.count(); index < count; index += 1) {
+      const link = links.nth(index);
+      if (!await link.isVisible().catch(() => false)) continue;
+      const href = await link.getAttribute("href");
+      if (!href) continue;
+      try { if (new URL(href, page.url()).href === destination) { offered = link; break; } } catch {}
+    }
+    if (!offered) return verificationVerdict(VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
+      `no visible navigation link targets the contracted route ${route}`, { drove: false });
+    try { await offered.click({ timeout: 5_000 }); } catch {
+      return verificationVerdict(VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
+        `the navigation link to ${route} could not be activated`, { drove: false });
+    }
+    await waitForActiveSurface(page);
+    drove = true;
+    routeNavigated = true;
+  } else if (route) {
     await page.goto(new URL(route, previewUrl).href, { waitUntil: "domcontentloaded" }).catch(() => {});
     drove = true;
     routeNavigated = true;
@@ -3294,7 +3319,7 @@ async function runStep(page, step, {
   // A routed composite step must continue after opening its destination. Treat only a pure
   // navigation/recovery step as completed by the route change; value and action flows on that
   // destination still have to be driven and proved.
-  const routedComposite = routeNavigated && interactionFlows.some((flow) => (
+  const routedComposite = routeNavigated && !routeLink && interactionFlows.some((flow) => (
     !["navigation", "recovery"].includes(flow.kind)
   ));
   const navigated = drove && !routedComposite;
@@ -4688,8 +4713,10 @@ export function structuredStepVerdict({
         : "the contracted mutation fired through its control but nothing on the surface changed and no entered value or new reference rendered" });
   } else if (facts.actionDeclared) {
     const ok = Boolean(changed || mutationWithValues || facts.nextControlVisible || facts.actionAutoApplied || declaredSatisfied);
-    checks.push({ kind: "action", ok,
+    const outcomeUnbound = !ok && !declaredOutcomeChecks.length && facts.unobservableComputedOutputs?.length > 0;
+    checks.push({ kind: "action", ok, ...(outcomeUnbound ? { inconclusive: true, contractIncomplete: true } : {}),
       detail: ok ? "the contracted action fired through its control and changed the surface"
+        : outcomeUnbound ? "the action's only declared output has no observable binding"
         : "the contracted action fired through its control but produced no observable state change" });
   }
   if (facts.flowStartDeclared) {

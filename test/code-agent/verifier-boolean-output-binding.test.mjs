@@ -23,3 +23,12 @@ test('unbound boolean defects cannot consume generated-app repair allowance', as
  assert.equal(defects[0].owner,'platform');assert.equal(defects[0].tier,'none');
  assert.deepEqual(actionableDefects(defects),[]);
 });
+
+test('an unchanged action with only an unbound flag is inconclusive, never an invented app defect',()=>{
+ const result=structuredStepVerdict({structured:{...computedOutputFacts('No results',{resultVisible:false}),actionDeclared:true,observedStateChanged:false},drove:true,actionProven:true});
+ assert.equal(result.classification,'CONTRACT_INCOMPLETE');
+});
+test('a declared numeric failure still blocks an unchanged action with an unbound flag',()=>{
+ const result=structuredStepVerdict({structured:{...computedOutputFacts('8 downlights',{count:9,resultVisible:true}),actionDeclared:true,observedStateChanged:false},drove:true,actionProven:true});
+ assert.equal(result.classification,'APP_FUNCTIONAL_FAILURE');
+});
