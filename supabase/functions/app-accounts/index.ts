@@ -60,23 +60,35 @@ const toRow = (row: Row) => ({
   updated_at: row.updatedAt ?? new Date().toISOString(),
 });
 
+// A failed query is not an absent policy, membership, or profile. In particular,
+// never authorize default membership or overwrite a profile after an uncertain read.
+async function readStorage(query: PromiseLike<{ data: any; error: unknown }>) {
+  try {
+    const result = await query;
+    if (result.error) throw result.error;
+    return result;
+  } catch {
+    throw new AccountError("storage_unavailable", "Account data is temporarily unavailable. Try again.", 503);
+  }
+}
+
 /** Supabase storage twin over the service-role client. */
 function supabaseAccountStorage(appIdFilter: string) {
   return {
     async getMapping(appId: string, { authUserId = null, email = null }: { authUserId?: string | null; email?: string | null }) {
       let query = svc.from("app_users").select("email,status,auth_user_id").eq("app_id", appId);
       query = authUserId ? query.eq("auth_user_id", authUserId) : query.eq("email", String(email).toLowerCase());
-      const { data } = await query.maybeSingle();
+      const { data } = await readStorage(query.maybeSingle());
       return data ? { authUserId: data.auth_user_id, email: data.email, status: data.status } : null;
     },
     async getMembership(appId: string, { authUserId = null, email = null }: { authUserId?: string | null; email?: string | null }) {
       let query = svc.from("app_memberships").select("*").eq("app_id", appId);
       query = authUserId ? query.eq("auth_user_id", authUserId) : query.eq("email", String(email).toLowerCase());
-      const { data } = await query.maybeSingle();
+      const { data } = await readStorage(query.maybeSingle());
       return fromRow(data as Row | null);
     },
     async listMemberships(appId: string) {
-      const { data } = await svc.from("app_memberships").select("*").eq("app_id", appId);
+      const { data } = await readStorage(svc.from("app_memberships").select("*").eq("app_id", appId));
       return (data || []).map((row) => fromRow(row as Row));
     },
     async upsertMembership(row: Row) {
@@ -85,7 +97,7 @@ function supabaseAccountStorage(appIdFilter: string) {
       return fromRow(data as Row);
     },
     async getProfile(appId: string, authUserId: string) {
-      const { data } = await svc.from("app_profiles").select("data").eq("app_id", appId).eq("auth_user_id", authUserId).maybeSingle();
+      const { data } = await readStorage(svc.from("app_profiles").select("data").eq("app_id", appId).eq("auth_user_id", authUserId).maybeSingle());
       return (data?.data as Row) || null;
     },
     async setProfile(appId: string, authUserId: string, value: Row) {
@@ -103,7 +115,7 @@ function supabaseAccountStorage(appIdFilter: string) {
     },
     async getPolicy(appId: string) {
       if (appId !== appIdFilter) return null;
-      const { data } = await svc.from("app_account_policies").select("policy").eq("app_id", appId).maybeSingle();
+      const { data } = await readStorage(svc.from("app_account_policies").select("policy").eq("app_id", appId).maybeSingle());
       return data?.policy ? buildPolicy(data.policy as Record<string, unknown>) : null;
     },
   };
@@ -113,8 +125,8 @@ function supabaseAccountStorage(appIdFilter: string) {
 function supabasePlatformStateStorage() {
   return {
     async getSettings(appId: string, scope: string, target: string | null) {
-      const { data } = await svc.from("app_settings").select("key,value")
-        .eq("app_id", appId).eq("scope", scope).eq("scope_target", target || "");
+      const { data } = await readStorage(svc.from("app_settings").select("key,value")
+        .eq("app_id", appId).eq("scope", scope).eq("scope_target", target || ""));
       return (data || []).reduce((all: Row, row: Row) => ({ ...all, [String(row.key)]: row.value }), {} as Row);
     },
     async setSetting(row: Row) {
@@ -139,10 +151,10 @@ function supabasePlatformStateStorage() {
       if (resource) query = query.eq("resource", resource);
       if (resourceId) query = query.eq("resource_id", resourceId);
       if (cursor) {
-        const { data: at } = await svc.from("app_audit_events").select("created_at").eq("id", cursor).maybeSingle();
+        const { data: at } = await readStorage(svc.from("app_audit_events").select("created_at").eq("app_id", appId).eq("id", cursor).maybeSingle());
         if (at?.created_at) query = query.lt("created_at", at.created_at);
       }
-      const { data } = await query;
+      const { data } = await readStorage(query);
       const rows = (data || []).map((row: Row) => ({
         id: row.id, action: row.action, resource: row.resource, resourceId: row.resource_id,
         actorUserId: row.actor_user_id, actorEmail: row.actor_email,
@@ -152,7 +164,7 @@ function supabasePlatformStateStorage() {
       return { events: page, nextCursor: rows.length > Number(limit) ? page.at(-1)?.id || null : null };
     },
     async getAuditConfig(appId: string) {
-      const { data } = await svc.from("app_audit_config").select("enabled,sensitive_fields").eq("app_id", appId).maybeSingle();
+      const { data } = await readStorage(svc.from("app_audit_config").select("enabled,sensitive_fields").eq("app_id", appId).maybeSingle());
       return data ? { enabled: data.enabled === true, sensitiveFields: (data.sensitive_fields as string[]) || [] } : null;
     },
   };
@@ -183,22 +195,22 @@ Deno.serve(async (req: Request) => {
   if (!uuid(appId)) return json(400, { error: "Valid appId is required." }, origin);
   if (!COMMANDS.includes(command)) return json(400, { error: `command must be one of ${COMMANDS.join(", ")}` }, origin);
 
-  const { data: authed, error: authError } = await svc.auth.getUser(token);
-  if (authError || !authed.user) return json(401, { error: "Sign in to this app first.", code: "unauthenticated" }, origin);
-
-  const storage = supabaseAccountStorage(appId);
-  const policy = await storage.getPolicy(appId);
-  const service = createAccountService({ storage, policy, profileFields: (policy as unknown as { profileFields?: string[] })?.profileFields || ["displayName"] });
-  const actor = await service.actorFor(appId, authed.user.id);
-  if (!actor) return json(401, { error: "Sign in to this app first.", code: "unauthenticated" }, origin);
-  const platformState = createPlatformStateService({
-    storage: supabasePlatformStateStorage(),
-    policy: policy || undefined,
-    settingsSchema: (policy as unknown as { settings?: Record<string, unknown> })?.settings || null,
-    sensitiveFields: (policy as unknown as { sensitiveFields?: string[] })?.sensitiveFields || [],
-  });
-
   try {
+    const { data: authed, error: authError } = await svc.auth.getUser(token);
+    if (authError || !authed.user) return json(401, { error: "Sign in to this app first.", code: "unauthenticated" }, origin);
+
+    const storage = supabaseAccountStorage(appId);
+    const policy = await storage.getPolicy(appId);
+    const service = createAccountService({ storage, policy, profileFields: (policy as unknown as { profileFields?: string[] })?.profileFields || ["displayName"] });
+    const actor = await service.actorFor(appId, authed.user.id);
+    if (!actor) return json(401, { error: "Sign in to this app first.", code: "unauthenticated" }, origin);
+    const platformState = createPlatformStateService({
+      storage: supabasePlatformStateStorage(),
+      policy: policy || undefined,
+      settingsSchema: (policy as unknown as { settings?: Record<string, unknown> })?.settings || null,
+      sensitiveFields: (policy as unknown as { sensitiveFields?: string[] })?.sensitiveFields || [],
+    });
+
     switch (command) {
       case "me": return json(200, await service.me(appId, actor), origin);
       case "updateMe": return json(200, await service.updateMe(appId, actor, (body.values as Row) || {}), origin);
@@ -228,6 +240,6 @@ Deno.serve(async (req: Request) => {
     if (error instanceof AccountError || error instanceof PlatformStateError) {
       return json(error.status, { error: error.message, code: error.code, ...(error.details ? { details: error.details } : {}) }, origin);
     }
-    return json(500, { error: String((error as Error)?.message || error).slice(0, 300) }, origin);
+    return json(500, { error: "Account service could not complete this request.", code: "internal_error" }, origin);
   }
 });
