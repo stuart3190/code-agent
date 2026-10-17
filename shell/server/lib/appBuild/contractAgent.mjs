@@ -141,12 +141,14 @@ Rules:
   produced it. Each input it reads needs a known value: either a primitive verificationValues
   fixture on a step that actually operates that field, an earlier asserted computed output,
   or an untouched value in one explicitly declared transient sampleData row at route entry.
-  Use sampleData: { "EntityName": [{ ...initialValues }] } for initial scalar and collection
+  Use TOP-LEVEL sampleData: { "EntityName": [{ ...initialValues }] } (never step.sampleData) for initial scalar and collection
   values, preserving the requested quantities and units. NEVER place arrays or objects in
   verificationValues, and never add an untouched seed field to verificationValues just because
   a calculation reads it. Persisted records, multiple seed rows, or values changed earlier still
   require an explicit producer or operated input fixture. Never put authEmail, authPassword,
   or any other secret in expectedOutputs.
+- Example or seeded records remain subject to the requested edit/remove operations unless the user
+  explicitly makes them read-only. Do not restrict those operations to newly created records.
 - EXACTLY ONE journey has priority "primary".
 - A journey that starts from records another journey created names that journey in "dependsOn".
   When two journeys could each be the creator, "dependsOn" names exactly one of them; the

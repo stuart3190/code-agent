@@ -92,6 +92,8 @@ against a code index. Rules:
   contains Pexels assets, render a visible footer link to Pexels and link each available
   photographer name to that asset's photoUrl.
 - Every user-visible outcome named in the journeys must appear as real, reachable UI text.
+- Apply requested edit/remove operations to initial example records as well as newly added records.
+  Only make example records read-only when the contract or user explicitly requires that restriction.
 - A declared operation has one stable machine action identity across every assigned journey. When
   multiple journeys exercise the same operation, reuse one existing action control and preserve
   its machine identity; never replace it with a journey-specific action identity or duplicate it.
