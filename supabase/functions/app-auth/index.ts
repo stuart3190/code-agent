@@ -95,14 +95,18 @@ function callerIp(req: Request): string {
 }
 
 // Count rows of `kind` for this key in the last hour, pruning that key's stale (>24h) rows first.
-async function eventCount(kind: string, key: string): Promise<number> {
-  const dayAgo = new Date(Date.now() - 24 * 3600e3).toISOString();
-  await svc.from("app_auth_events").delete().eq("kind", kind).eq("key", key).lt("created_at", dayAgo);
-  const hourAgo = new Date(Date.now() - 3600e3).toISOString();
-  const { count } = await svc
-    .from("app_auth_events").select("id", { count: "exact", head: true })
-    .eq("kind", kind).eq("key", key).gte("created_at", hourAgo);
-  return count ?? 0;
+async function eventCount(kind: string, key: string): Promise<number | null> {
+  try {
+    const dayAgo = new Date(Date.now() - 24 * 3600e3).toISOString();
+    await svc.from("app_auth_events").delete().eq("kind", kind).eq("key", key).lt("created_at", dayAgo);
+    const hourAgo = new Date(Date.now() - 3600e3).toISOString();
+    const { count, error } = await svc
+      .from("app_auth_events").select("id", { count: "exact", head: true })
+      .eq("kind", kind).eq("key", key).gte("created_at", hourAgo);
+    return !error && Number.isInteger(count) && Number(count) >= 0 ? count : null;
+  } catch {
+    return null;
+  }
 }
 
 async function logEvent(kind: string, key: string, appId: string) {
@@ -171,14 +175,19 @@ Deno.serve(async (req: Request) => {
   // ── reset: email a one-time code. 200 no matter what — never reveal whether an account exists.
   if (action === "reset") {
     if (!RESEND_API_KEY || !RESET_PEPPER) return reply(503, { error: "Password reset isn't available yet for this app." });
-    if (await eventCount("reset", ip) >= LIMIT_RESET_PER_IP_H) {
+    const ipRecent = await eventCount("reset", ip);
+    if (ipRecent === null) return reply(503, { error: "Password reset is temporarily unavailable. Try again." });
+    if (ipRecent >= LIMIT_RESET_PER_IP_H) {
       return reply(429, { error: "Too many reset requests — try again later." });
     }
     const hourAgo = new Date(Date.now() - 3600e3).toISOString();
-    const { count: recent } = await svc
+    const { count: recent, error: recentError } = await svc
       .from("app_password_resets").select("id", { count: "exact", head: true })
       .eq("app_id", appId).eq("email", email).gte("created_at", hourAgo);
-    if ((recent ?? 0) >= LIMIT_RESET_PER_TARGET_H) {
+    if (recentError || !Number.isInteger(recent) || Number(recent) < 0) {
+      return reply(503, { error: "Password reset is temporarily unavailable. Try again." });
+    }
+    if (Number(recent) >= LIMIT_RESET_PER_TARGET_H) {
       return reply(429, { error: "Too many reset requests — try again later." });
     }
     await logEvent("reset", ip, appId);
@@ -261,14 +270,21 @@ Deno.serve(async (req: Request) => {
   if (action === "signup" && !existing) {
     // Abuse guards: a promo spike is fine; a signup script is not. The platform's own
     // egress (preview verification) skips ONLY the per-IP cap; every other guard applies.
-    if (!platformCaller && await eventCount("signup", ip) >= LIMIT_SIGNUP_PER_IP_H) {
-      return reply(429, { error: "Too many signups from this network — try again later." });
+    if (!platformCaller) {
+      const ipRecent = await eventCount("signup", ip);
+      if (ipRecent === null) return reply(503, { error: "Signup is temporarily unavailable. Try again." });
+      if (ipRecent >= LIMIT_SIGNUP_PER_IP_H) {
+        return reply(429, { error: "Too many signups from this network — try again later." });
+      }
     }
     const hourAgo = new Date(Date.now() - 3600e3).toISOString();
-    const { count: appRecent } = await svc
+    const { count: appRecent, error: appCountError } = await svc
       .from("app_users").select("id", { count: "exact", head: true })
       .eq("app_id", appId).gte("created_at", hourAgo);
-    if ((appRecent ?? 0) >= LIMIT_SIGNUP_PER_APP_H) {
+    if (appCountError || !Number.isInteger(appRecent) || Number(appRecent) < 0) {
+      return reply(503, { error: "Signup is temporarily unavailable. Try again." });
+    }
+    if (Number(appRecent) >= LIMIT_SIGNUP_PER_APP_H) {
       return reply(429, { error: "This app is getting a lot of signups right now — try again in a bit." });
     }
 
