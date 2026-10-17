@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { loadEnv } from "../../shell/server/lib/env.mjs";
 
 import { MemoryCodeAgentStore } from "../../shell/server/lib/codeAgentStore.mjs";
 import {
@@ -10,6 +11,10 @@ import {
 } from "../../shell/server/lib/subscriptionBilling.mjs";
 
 const OWNER = "22222222-2222-4222-8222-222222222222";
+
+// Initialize the lazy loader before fixtures remove configuration. Otherwise the
+// first optionalEnv() call reloads a host .env and invalidates the absent-key test.
+loadEnv();
 
 function configureStripeEnv() {
   process.env.THRALLO_STRIPE_SECRET_KEY = "sk_test_thrallo";
