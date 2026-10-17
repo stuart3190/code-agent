@@ -418,3 +418,52 @@ test("no Stripe price identifier is hardcoded anywhere in the shipped app", asyn
   await Promise.all(roots.map((r) => walk(fileURLToPath(new URL(r, import.meta.url)))));
   assert.deepEqual(offenders, [], `Stripe price IDs must come from the environment:\n${offenders.join("\n")}`);
 });
+
+for(const scenario of ['old subscription','unknown customer metadata','concurrent replacement'])test(`subscription deletion preserves current entitlement: ${scenario}`,async()=>{
+ configureStripeEnv();
+ try {
+  const store=new MemoryCodeAgentStore();
+  await store.upsertSubscription(OWNER,{plan:'pro',status:'active',stripe_customer_id:'cus_current',stripe_subscription_id:scenario==='concurrent replacement'?'sub_old':'sub_current'});
+  if(scenario==='concurrent replacement'){
+   const lookup=store.findSubscriptionByStripeCustomer.bind(store);
+   store.findSubscriptionByStripeCustomer=async id=>{const row={...await lookup(id)};await store.upsertSubscription(OWNER,{stripe_subscription_id:'sub_current'});return row;};
+  }
+  const event={type:'customer.subscription.deleted',data:{object:{id:'sub_old',customer:scenario==='unknown customer metadata'?'cus_unbound':'cus_current',metadata:{thrallo_owner:OWNER}}}};
+  await handleSubscriptionEvent('raw','sig',{store,stripe:fakeStripe(event)});
+  const row=await store.getSubscription(OWNER);assert.equal(row.plan,'pro');assert.equal(row.stripe_subscription_id,'sub_current');assert.equal(row.stripe_customer_id,'cus_current');
+ } finally {clearStripeEnv();}
+});
+
+test('real Stripe signatures reject tampering before subscription writes',async()=>{
+ configureStripeEnv();
+ try {
+  const {default:Stripe}=await import('stripe');const stripe=new Stripe('sk_test_fixture');const store=new MemoryCodeAgentStore();
+  await store.upsertSubscription(OWNER,{plan:'pro',status:'active',stripe_customer_id:'cus_signature',stripe_subscription_id:'sub_signature'});
+  const payload=JSON.stringify({id:'evt_fixture',type:'customer.subscription.deleted',data:{object:{id:'sub_signature',customer:'cus_signature'}}});
+  const signature=stripe.webhooks.generateTestHeaderString({payload,secret:process.env.THRALLO_STRIPE_WEBHOOK_SECRET});
+  await assert.rejects(handleSubscriptionEvent(payload.replace('sub_signature','sub_tampered'),signature,{store,stripe}));
+  assert.equal((await store.getSubscription(OWNER)).plan,'pro');
+  await handleSubscriptionEvent(payload,signature,{store,stripe});assert.equal((await store.getSubscription(OWNER)).plan,'free');
+  await handleSubscriptionEvent(payload,signature,{store,stripe});assert.equal((await store.getSubscription(OWNER)).plan,'free');
+ } finally {clearStripeEnv();}
+});
+
+test('subscription cancellation storage failure propagates for webhook retry',async()=>{
+ configureStripeEnv();
+ try {
+  const store=new MemoryCodeAgentStore();await store.upsertSubscription(OWNER,{plan:'pro',status:'active',stripe_customer_id:'cus_retry',stripe_subscription_id:'sub_retry'});
+  store.updateSubscriptionIfCurrent=async()=>{throw Error('temporary storage outage');};
+  await assert.rejects(handleSubscriptionEvent('raw','sig',{store,stripe:fakeStripe({type:'customer.subscription.deleted',data:{object:{id:'sub_retry',customer:'cus_retry'}}})}),/temporary storage outage/);
+  assert.equal((await store.getSubscription(OWNER)).plan,'pro');
+ } finally {clearStripeEnv();}
+});
+
+test('subscription update metadata cannot replace a different bound customer',async()=>{
+ configureStripeEnv();
+ try {
+  const store=new MemoryCodeAgentStore();await store.upsertSubscription(OWNER,{plan:'pro',status:'active',stripe_customer_id:'cus_current',stripe_subscription_id:'sub_current'});
+  const subscription={id:'sub_unbound',customer:'cus_unbound',status:'active',metadata:{thrallo_owner:OWNER},items:{data:[{price:{id:'price_starter'}}]}};
+  await handleSubscriptionEvent('raw','sig',{store,stripe:fakeStripe({type:'customer.subscription.updated',data:{object:subscription}})});
+  const row=await store.getSubscription(OWNER);assert.equal(row.plan,'pro');assert.equal(row.stripe_customer_id,'cus_current');assert.equal(row.stripe_subscription_id,'sub_current');
+ } finally {clearStripeEnv();}
+});

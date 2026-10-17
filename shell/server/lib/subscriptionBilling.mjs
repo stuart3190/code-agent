@@ -571,10 +571,17 @@ export async function handleSubscriptionEvent(rawBody, signature, {
   if (["customer.subscription.updated", "customer.subscription.deleted"].includes(event.type)) {
     const subscription = event.data.object;
     const existing = await store.findSubscriptionByStripeCustomer(String(subscription.customer));
-    const owner = existing?.owner || subscription.metadata?.thrallo_owner;
+    // Customer binding is established during authenticated checkout. Metadata
+    // alone must not attach an unrelated Stripe customer to an existing owner.
+    const owner = existing?.owner;
     if (!owner) return { received: true, ignored: "unknown customer" };
     if (event.type === "customer.subscription.deleted") {
-      await store.upsertSubscription(owner, {
+      // Cancelling an older duplicate must not revoke a newer subscription.
+      // Match again in the write, since checkout can replace it after this read.
+      if (!existing || !subscription.id || existing.stripe_subscription_id !== subscription.id) {
+        return { received: true, ignored: "deleted subscription is not current" };
+      }
+      const cleared = await store.updateSubscriptionIfCurrent(owner, String(subscription.customer), subscription.id, {
         plan: "free",
         status: "active",
         stripe_subscription_id: null,
@@ -587,6 +594,7 @@ export async function handleSubscriptionEvent(rawBody, signature, {
         pending_plan_at: null,
         stripe_schedule_id: null,
       });
+      if (!cleared) return { received: true, ignored: "subscription changed before deletion applied" };
       return { received: true, owner, plan: "free" };
     }
     return applySubscription(store, owner, subscription);

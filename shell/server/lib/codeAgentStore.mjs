@@ -340,6 +340,13 @@ export class MemoryCodeAgentStore {
       .find((x) => x.stripe_customer_id === customerId) || null;
   }
 
+  async updateSubscriptionIfCurrent(owner, customerId, subscriptionId, patch) {
+    const row = this.subscriptions.get(owner);
+    if (!row || row.stripe_customer_id !== customerId || row.stripe_subscription_id !== subscriptionId) return null;
+    Object.assign(row, patch, { owner, updated_at: now() });
+    return row;
+  }
+
   async usageTotalsSince(owner, sinceIso) {
     const rows = [...this.usageRecords.values()]
       .filter((x) => x.owner === owner && x.created_at >= sinceIso);
@@ -699,6 +706,13 @@ export class SupabaseCodeAgentStore {
   async findSubscriptionByStripeCustomer(customerId) {
     return unwrapMaybe(await this.client.from("ca_subscriptions").select("*")
       .eq("stripe_customer_id", customerId).maybeSingle());
+  }
+
+  async updateSubscriptionIfCurrent(owner, customerId, subscriptionId, patch) {
+    return unwrapMaybe(await this.client.from("ca_subscriptions")
+      .update({ ...patch, updated_at: now() }).eq("owner", owner)
+      .eq("stripe_customer_id", customerId).eq("stripe_subscription_id", subscriptionId)
+      .select("*").maybeSingle());
   }
 
   async usageTotalsSince(owner, sinceIso) {
