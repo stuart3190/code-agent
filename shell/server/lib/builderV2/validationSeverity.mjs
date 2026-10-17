@@ -54,6 +54,7 @@ export const BLOCKING_CODES = Object.freeze({
   // generated application source is responsible for. Requiring it here rejected working code.
 
   // ── capability integrity: provably broken at runtime, not merely unusual ──
+  semantic_form_action_noop: "a semantic form action has neither a submit type nor a nonempty activation handler",
   capability_method_unknown: "a method is called that the capability demonstrably does not export",
   semantic_field_event_handler_invalid: "useSemanticField passes a value, so dereferencing its callback argument as a DOM event is guaranteed to fail",
   unknown_capability_factory: "an unrecognised capability factory is bound",

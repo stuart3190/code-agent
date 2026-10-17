@@ -45,11 +45,16 @@ export function lintSemanticFormActions(source, file) {
     actions.add(n.id.name);
   }
   const findings=[];
+  // Direct DOM listeners or reassignment can supply behavior outside JSX. Abstain.
+  if (nodes.some(n => n.type === "MemberExpression" && !n.computed && n.property?.name === "addEventListener")) return findings;
+  if (nodes.some(n => n.type === "AssignmentExpression" && n.left?.type === "MemberExpression"
+    && (actions.has(n.left.object?.name) || actions.has(n.left.object?.object?.name)))) return findings;
   for (const n of nodes) {
     if(n.type!=='JSXOpeningElement'||n.name?.name!=='button')continue;
     const parents=ancestors.get(n)||[];
     const form=[...parents].reverse().find(p=>p.type==='JSXElement'&&p.openingElement.name?.name==='form');
     if(!form?.openingElement.attributes.some(a=>a.name?.name==='onSubmit'))continue;
+    if(parents.some(p=>p.type==='JSXElement'&&/^[A-Z]/.test(p.openingElement.name?.name || '')))continue;
     if(parents.some(p=>p.type==='JSXElement'&&p.openingElement.attributes.some(a=>['onClick','onClickCapture'].includes(a.name?.name))))continue;
     const attrs=n.attributes;
     const spreads=attrs.filter(a=>a.type==='JSXSpreadAttribute');
