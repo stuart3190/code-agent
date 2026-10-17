@@ -422,8 +422,8 @@ export function renderScaffoldFoundation(graph, { routePlan = graph?.routePlan |
   };
   const screenFiles = Object.fromEntries((graph?.screens || []).map((screen) => [screen.module,
     screenSlotSource(screen, graph)]));
-  // The layout and the route-state presentation are model-owned slots, created once and never
-  // overwritten — exactly like a mounted screen.
+  // Layout and route-state presentation are model-owned. Recomposition preserves authored
+  // bytes; only the exact known, unmodified historical route default can be upgraded.
   if (routed) {
     screenFiles[APP_LAYOUT_PATH] = appLayoutSource();
     screenFiles[ROUTE_STATES_PATH] = routeStatesSource();
@@ -451,14 +451,22 @@ export function scaffoldCompositionPlan(graph, { routePlan = graph?.routePlan ||
   };
 }
 
-/** Apply/refresh deterministic files. Existing model-owned screens are never overwritten. */
+// Exact platform default before recoverable session errors. Never pattern-rewrite authored UI.
+const LEGACY_ROUTE_STATES_SHA256 = "8c3cf2c3f117ed84fc273081f7ed318c709bb17781991e5f1790d59367c65ce4";
+
+/** Refresh deterministic files and known untouched defaults; preserve authored presentation. */
 export function composeScaffoldFoundation(tree, graph, { routePlan = (routingInstalled(tree) ? graph?.routePlan || null : null) } = {}) {
   const rendered = renderScaffoldFoundation(graph, { routePlan });
   const next = { ...(tree || {}), ...rendered.protectedFiles };
+  const defaultSlotsUpgraded = [];
   for (const [path, source] of Object.entries(rendered.screenFiles)) {
     if (typeof next[path] !== "string") next[path] = source;
+    else if (path === ROUTE_STATES_PATH && digest(next[path]) === LEGACY_ROUTE_STATES_SHA256) {
+      next[path] = source;
+      defaultSlotsUpgraded.push(path);
+    }
   }
-  return { tree: next, plan: scaffoldCompositionPlan(graph, { routePlan }), deterministicFilesCreated: Object.keys(rendered.protectedFiles),
+  return { tree: next, plan: scaffoldCompositionPlan(graph, { routePlan }), defaultSlotsUpgraded, deterministicFilesCreated: Object.keys(rendered.protectedFiles),
     screenSlotsCreated: Object.keys(rendered.screenFiles).filter((path) => typeof tree?.[path] !== "string") };
 }
 
