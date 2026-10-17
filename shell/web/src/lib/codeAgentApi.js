@@ -51,7 +51,7 @@ export async function downloadWithAuth(path, fallbackName = "thrallo-download") 
 }
 
 export async function capabilities() {
-  const response = await fetch("/api/v1/capabilities");
+  const response = await fetch(`${apiBase()}/api/v1/capabilities`);
   if (!response.ok) throw new Error("Control plane is unavailable");
   return response.json();
 }
@@ -95,7 +95,7 @@ export const updateAgent = (agentId, body) => request(`/api/v1/agents/${agentId}
 });
 export async function artifactContent(runId, artifactId) {
   const token = await accessToken();
-  const response = await fetch(`/api/v1/runs/${runId}/artifacts/${artifactId}/content`, {
+  const response = await fetch(`${apiBase()}/api/v1/runs/${runId}/artifacts/${artifactId}/content`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) throw new Error(`Artifact content failed (${response.status})`);
