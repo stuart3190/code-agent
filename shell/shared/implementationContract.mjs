@@ -410,6 +410,43 @@ function journeyFixtureKeys(steps) {
   return keys;
 }
 
+// A single declared transient seed is an input fixture too: list-valued initial recipe
+// data cannot be typed into verificationValues (which describes primitive UI inputs).
+// Do not borrow persisted records, ambiguous rows, or a seed changed earlier in the journey.
+function initialTransientFixtureKeys(contract, steps) {
+  const keys = new Set();
+  const first = steps?.[0];
+  if (!first || typeof first.target !== "string" || !first.target.startsWith("/")
+    || first.target.startsWith("//") || (first.operates || []).length) return keys;
+  const changed = new Set();
+  for (const step of steps || []) {
+    for (const field of [...(step.operates || []), ...(step.produces || [])]) changed.add(referenceKey(field));
+    const operations = new Set((step.operates || []).map(normaliseReference));
+    for (const operation of contract.operations || []) {
+      if (!operationKeys(operation).some(key => operations.has(key))) continue;
+      for (const responsibility of operation.responsibilities || []) {
+        for (const field of responsibility.writes || []) changed.add(referenceKey(field));
+      }
+    }
+  }
+  for (const entity of contract.entities || []) {
+    if (entity.storage !== "transient") continue;
+    const rows = contract.sampleData?.[entity.name];
+    if (!Array.isArray(rows) || rows.length !== 1 || !rows[0] || typeof rows[0] !== "object") continue;
+    for (const field of entity.fields || []) {
+      const key = referenceKey(field.name), value = rows[0][field.name];
+      if (changed.has(key) || !Object.hasOwn(rows[0], field.name) || value === null || value === undefined) continue;
+      const owners = (contract.entities || []).filter(other => (other.fields || []).some(f => referenceKey(f.name) === key));
+      if (owners.length !== 1) continue;
+      const valid = field.type === "json" ? typeof value === "object"
+        : field.type === "number" ? typeof value === "number" && Number.isFinite(value)
+        : field.type === "boolean" ? typeof value === "boolean" : field.type === "string" && typeof value === "string";
+      if (valid) keys.add(key);
+    }
+  }
+  return keys;
+}
+
 function isOutputPrimitive(value) {
   return ["string", "number", "boolean"].includes(typeof value)
     && !(typeof value === "string" && !value.trim());
@@ -624,6 +661,7 @@ export function validateContract(contract) {
       } else if (expectedOutputs) {
         const reached = functionalOutputReach(c, step, journey.steps.slice(0, stepIndex));
         const fixtures = journeyFixtureKeys(journey.steps.slice(0, stepIndex + 1));
+        for (const key of initialTransientFixtureKeys(c, journey.steps.slice(0, stepIndex))) fixtures.add(key);
         // Earlier asserted functional outputs are known values too (for example a confirmed
         // status later consumed by cancellation). Requiring them as editable verificationValues
         // contradicts the rule that verificationValues may only name operated input fields.

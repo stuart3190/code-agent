@@ -422,3 +422,26 @@ test("the per-job recorder forwards the contract to the run", async () => {
   assert.equal(typeof nulled.setContract, "function", "the no-op session must implement it too");
   assert.doesNotThrow(() => nulled.setContract({ journeys: [] }));
 });
+
+function seededAreaContract() {
+ const c=areaContract();c.entities[0].storage='transient';
+ c.sampleData={[c.entities[0].name]:[{length:30,width:40}]};
+ c.journeys[0].steps.splice(1,1);
+ return c;
+}
+test('a single declared transient seed supplies untouched computed input fixtures',()=>{
+ const c=seededAreaContract();assert.equal(validateContract(c).ok,true,JSON.stringify(validateContract(c).problems));
+});
+for(const [name,mutate] of [
+ ['persisted records',c=>c.entities[0].storage='persistent'],
+ ['ambiguous rows',c=>c.sampleData[c.entities[0].name].push({length:2,width:3})],
+ ['wrong value types',c=>c.sampleData[c.entities[0].name][0].width='forty'],
+ ['missing values',c=>delete c.sampleData[c.entities[0].name][0].width],
+ ['non-entry journey',c=>c.journeys[0].steps[0].target='existing workspace'],
+ ['unfixtureed edits',c=>c.journeys[0].steps.splice(1,0,{action:'change the width',operates:['width'],expect:'width changes'})],
+ ['prior computed mutation',c=>{c.operations.push({id:'change-width',responsibilities:[{type:'functional',writes:['width']}]});c.journeys[0].steps.splice(1,0,{action:'change width',operates:['change-width'],expect:'width changes'});}]
+])test(`seed cannot invent known inputs from ${name}`,()=>{const c=seededAreaContract();mutate(c);assert.ok(validateContract(c).problems.some(p=>/requires verificationValues\.(length|width).*computed/.test(p)));});
+test('JSON initial collection fixture is not demanded as an impossible primitive textbox value',()=>{
+ const c=seededAreaContract();c.entities[0].fields.push({name:'ingredients',type:'json'});c.sampleData[c.entities[0].name][0].ingredients=[{quantity:300}];c.operations[0].responsibilities[0].reads.push('ingredients');assert.equal(validateContract(c).ok,true,JSON.stringify(validateContract(c).problems));
+ delete c.sampleData[c.entities[0].name][0].ingredients;assert.ok(validateContract(c).problems.some(p=>/requires verificationValues.ingredients/.test(p)));
+});
