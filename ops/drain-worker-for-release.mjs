@@ -11,9 +11,9 @@ const currentPid = () => Number(execFileSync("systemctl", ["show", "thrallo-buil
 const registry = {
   async list() { return unwrap(await client.from("build_worker_nodes")
     .select("worker_id,state,current_job_id,heartbeat_at,metadata").in("state", ["active", "paused", "draining"])); },
-  async drain(id) { unwrap(await client.from("build_worker_nodes").update({ state: "draining" })
-    .eq("worker_id", id).eq("state", "active").is("current_job_id", null)); },
-  async get(id) { return unwrap(await client.from("build_worker_nodes").select("state,current_job_id,heartbeat_at")
+  async drain(id) { return Boolean(unwrap(await client.from("build_worker_nodes").update({ state: "draining" })
+    .eq("worker_id", id).eq("state", "active").is("current_job_id", null).select("worker_id").maybeSingle())); },
+  async get(id) { return unwrap(await client.from("build_worker_nodes").select("state,current_job_id,heartbeat_at,metadata")
     .eq("worker_id", id).single()); },
   async resume(id) { unwrap(await client.from("build_worker_nodes").update({ state: "active" })
     .eq("worker_id", id).eq("state", "draining")); },

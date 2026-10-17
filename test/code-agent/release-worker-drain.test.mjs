@@ -10,8 +10,8 @@ function fixture({ state = "active", job = null, fresh = {}, pid = 42 } = {}) {
     stop: async () => { calls.push("stop"); },
     registry: {
       list: async () => [node],
-      drain: async () => { calls.push("drain"); },
-      get: async () => ({ state: "draining", current_job_id: null, heartbeat_at: new Date(2_000).toISOString(), ...fresh }),
+      drain: async () => { calls.push("drain"); return true; },
+      get: async () => ({ state: "draining", current_job_id: null, heartbeat_at: new Date(2_000).toISOString(), metadata: { observedState: "draining" }, ...fresh }),
       resume: async () => { calls.push("resume"); },
     },
   } };
@@ -29,4 +29,11 @@ for (const options of [{ fresh: { current_job_id: "racing-job" } }, { pid: 43 },
   { fresh: { heartbeat_at: new Date(1_000).toISOString() } }]) test(`release drain fails safely on race or missing acknowledgment ${JSON.stringify(options)}`, async () => {
   const f = fixture(options); await assert.rejects(drainIdleWorker(f.args));
   assert.deepEqual(f.calls, ["drain", "resume"]);
+});
+
+for (const metadata of [{}, {observedState:"active"}]) test(`operator state without process acknowledgement is insufficient ${JSON.stringify(metadata)}`, async()=>{
+ const f=fixture({fresh:{metadata}});await assert.rejects(drainIdleWorker(f.args),/acknowledge/);assert.deepEqual(f.calls,["drain","resume"]);
+});
+test("a failed compare-and-set never resumes another operator's command",async()=>{
+ const f=fixture();f.args.registry.drain=async()=>{f.calls.push("drain");return false;};await assert.rejects(drainIdleWorker(f.args),/changed before drain/);assert.deepEqual(f.calls,["drain"]);
 });

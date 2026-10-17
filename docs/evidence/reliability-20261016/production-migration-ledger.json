@@ -367,6 +367,10 @@
     {
       "version": "20261016235852",
       "name": "credit_balance_totals"
+    },
+    {
+      "version": "20261017004248",
+      "name": "worker_command_state_authority"
     }
   ]
 }

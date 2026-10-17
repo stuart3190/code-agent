@@ -1,5 +1,5 @@
 // Drain only an idle, positively identified worker. A concurrent build or operator pause
-// postpones deployment instead of terminating work. A fresh heartbeat acknowledges the command.
+// postpones deployment instead of terminating work. The heartbeat must explicitly acknowledge the command.
 export async function drainIdleWorker({ registry, pid, hostname, currentPid, stop,
   now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), polls = 30 }) {
   if (!pid) throw new Error("Worker is not running; inspect release state before deployment");
@@ -11,13 +11,15 @@ export async function drainIdleWorker({ registry, pid, hostname, currentPid, sto
     throw new Error("Worker is busy or already under operator control; deployment postponed");
   }
   const started = now();
+  let acquired = false;
   try {
-    await registry.drain(node.worker_id);
+    acquired = await registry.drain(node.worker_id);
+    if (acquired !== true) throw new Error("Worker changed before drain; deployment postponed");
     for (let i = 0; i < polls; i += 1) {
       await sleep(1_000);
       const fresh = await registry.get(node.worker_id);
       if (fresh.current_job_id) throw new Error("A job raced with drain; leave it running and postpone deployment");
-      if (fresh.state === "draining" && Date.parse(fresh.heartbeat_at) > started + 500) {
+      if (fresh.state === "draining" && fresh.metadata?.observedState === "draining" && Date.parse(fresh.heartbeat_at) > started + 500) {
         if (await currentPid() !== pid) throw new Error("Worker process changed during drain");
         await stop();
         return { workerId: node.worker_id, drained: true, stopped: true };
@@ -25,7 +27,7 @@ export async function drainIdleWorker({ registry, pid, hostname, currentPid, sto
     }
     throw new Error("Worker did not acknowledge drain");
   } catch (error) {
-    await registry.resume(node.worker_id);
+    if (acquired) await registry.resume(node.worker_id);
     throw error;
   }
 }
