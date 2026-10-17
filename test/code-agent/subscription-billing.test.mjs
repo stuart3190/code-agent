@@ -6,7 +6,7 @@ import { loadEnv } from "../../shell/server/lib/env.mjs";
 
 import { MemoryCodeAgentStore } from "../../shell/server/lib/codeAgentStore.mjs";
 import {
-  handleSubscriptionEvent, startPlanCheckout, startTopupCheckout, thralloStripeConfigured,
+  handleSubscriptionEvent, startPlanCheckout, startTopupCheckout, setCancellation, thralloStripeConfigured,
   thralloTopupConfigured, stripeConfigMistake,
 } from "../../shell/server/lib/subscriptionBilling.mjs";
 
@@ -554,3 +554,19 @@ test('reconciled cancellation clears paid billing period dates',async()=>{
   const row=await store.getSubscription(OWNER);assert.equal(row.plan,'free');assert.equal(row.current_period_start,null);assert.equal(row.current_period_end,null);
  }finally{clearStripeEnv();}
 });
+
+for(const legacy of [false,true])test(`item billing periods are authoritative over legacy subscription fields (${legacy})`,async()=>{
+ configureStripeEnv();try{
+  const store=new MemoryCodeAgentStore();await store.upsertSubscription(OWNER,{plan:'pro',status:'active',stripe_customer_id:'cus_period',stripe_subscription_id:'sub_period'});
+  const item={id:'si_period',price:{id:'price_pro'},current_period_start:1753000000,current_period_end:1755600000};
+  const latest={id:'sub_period',customer:'cus_period',status:'active',items:{data:[item]},...(legacy?{current_period_start:1700000000,current_period_end:1702600000}:{})};
+  await handleSubscriptionEvent('raw','sig',{store,stripe:fakeStripe({type:'customer.subscription.updated',data:{object:latest}},latest)});
+  const row=await store.getSubscription(OWNER);assert.equal(row.current_period_start,new Date(item.current_period_start*1000).toISOString());assert.equal(row.current_period_end,new Date(item.current_period_end*1000).toISOString());
+ }finally{clearStripeEnv();}
+});
+
+test('cancellation confirmation uses item period end',async()=>{configureStripeEnv();try{
+ const store=new MemoryCodeAgentStore();await store.upsertSubscription(OWNER,{plan:'pro',status:'active',stripe_customer_id:'cus_period',stripe_subscription_id:'sub_period',current_period_end:'2020-01-01T00:00:00.000Z'});
+ const updated={id:'sub_period',customer:'cus_period',items:{data:[{current_period_end:1755600000}]}};
+ const result=await setCancellation(OWNER,true,{store,stripe:{subscriptions:{update:async()=>updated}}});assert.equal(result.endsAt,new Date(1755600000*1000).toISOString());
+}finally{clearStripeEnv();}});

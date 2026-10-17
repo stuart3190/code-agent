@@ -355,13 +355,18 @@ async function changeExistingPlan({ client, store, owner, planId, subscription }
     return { plan: planId, applied: "unchanged", message: `You are already on ${planName(planId)}.` };
   }
 
+  const isUpgrade = PLAN_RANK[planId] > PLAN_RANK[currentPlan];
+  const periodEnd = subscriptionPeriod(subscription).end;
+  if (!isUpgrade && (!Number.isFinite(periodEnd) || periodEnd <= 0)) {
+    throw billingError("The current billing period could not be confirmed. Please retry.", 503, "billing_period_unavailable");
+  }
+
   // Any pending change is superseded by an explicit new choice.
   if (scheduleId) {
     await client.subscriptionSchedules.release(scheduleId);
     await store.upsertSubscription(owner, { pending_plan: null, pending_plan_at: null, stripe_schedule_id: null });
   }
 
-  const isUpgrade = PLAN_RANK[planId] > PLAN_RANK[currentPlan];
   // Same intent twice (a double click) is one Stripe operation, not two invoices.
   const idempotencyKey = `thrallo:plan:${owner}:${subscription.id}:${item.price.id}->${targetPrice}`;
 
@@ -381,7 +386,6 @@ async function changeExistingPlan({ client, store, owner, planId, subscription }
   }
 
   // Downgrade: hold the current plan until the period ends, then switch.
-  const periodEnd = subscription.current_period_end;
   const schedule = await client.subscriptionSchedules.create(
     { from_subscription: subscription.id },
     { idempotencyKey: `${idempotencyKey}:schedule` },
@@ -451,7 +455,7 @@ export async function setCancellation(owner, cancel, { store = codeAgentStore(),
     // Written through immediately as well as by the webhook. The webhook is authoritative, but it
     // arrives whenever it arrives — and a customer who has just cancelled must not be shown
     // "renews on the 12th" while they wait for it.
-    const endsAt = unixIso(updated.current_period_end) || record.current_period_end;
+    const endsAt = unixIso(subscriptionPeriod(updated).end) || record.current_period_end;
     await store.upsertSubscription(owner, { cancel_at_period_end: !!cancel });
     return {
       cancelAtPeriodEnd: !!cancel,
@@ -702,13 +706,14 @@ async function applySubscription(store, owner, subscription, { expected = null }
   const pendingSatisfied = existing?.pending_plan && existing.pending_plan === plan;
   const clearPending = pendingSatisfied || !scheduleId;
 
+  const period = subscriptionPeriod(subscription);
   const patch = {
     plan: status === "cancelled" ? "free" : plan,
     status: status === "cancelled" ? "active" : status,
     stripe_customer_id: String(subscription.customer),
     stripe_subscription_id: status === "cancelled" ? null : subscription.id,
-    current_period_start: status === "cancelled" ? null : unixIso(subscription.current_period_start),
-    current_period_end: status === "cancelled" ? null : unixIso(subscription.current_period_end),
+    current_period_start: status === "cancelled" ? null : unixIso(period.start),
+    current_period_end: status === "cancelled" ? null : unixIso(period.end),
     // Stripe is the authority here too. Without it the billing panel told a customer who had
     // cancelled that their plan "renews" on the very date it was going to end.
     cancel_at_period_end: status === "cancelled" ? false : !!subscription.cancel_at_period_end,
@@ -721,6 +726,16 @@ async function applySubscription(store, owner, subscription, { expected = null }
     if (!saved) throw new Error("Subscription changed during reconciliation; retry delivery");
   } else await store.upsertSubscription(owner, patch);
   return { received: true, owner, plan, status, ...(clearPending ? {} : { pendingPlan: existing?.pending_plan }) };
+}
+
+function subscriptionPeriod(subscription) {
+  // Basil and later API versions put the billing period on the subscribed item.
+  // Root fields remain a compatibility fallback for historical event fixtures.
+  const item = subscription.items?.data?.[0];
+  return {
+    start: item?.current_period_start ?? subscription.current_period_start,
+    end: item?.current_period_end ?? subscription.current_period_end,
+  };
 }
 
 function unixIso(seconds) {

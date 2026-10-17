@@ -44,8 +44,7 @@ async function withBilling(run) {
 function subscription({ id = "sub_1", price = STARTER, status = "active", schedule = null } = {}) {
   return {
     id, status, customer: "cus_1", created: 1_000, schedule, metadata: {},
-    current_period_start: PERIOD_END - 2_592_000, current_period_end: PERIOD_END,
-    items: { data: [{ id: "si_1", price: { id: price } }] },
+    items: { data: [{ id: "si_1", price: { id: price }, current_period_start: PERIOD_END - 2_592_000, current_period_end: PERIOD_END }] },
   };
 }
 
@@ -350,3 +349,8 @@ test("past_due subscriptions are repaired, never duplicated", async () => {
     assert.ok(stripe.calls.some((c) => c.startsWith("subscriptions.update:sub_1")));
   });
 });
+
+test('unknown downgrade boundary fails before releasing or creating schedules',async()=>{await withBilling(async()=>{
+ const store=new MemoryCodeAgentStore();await seed(store,{plan:'pro'});const sub=subscription({price:PRO,schedule:'sched_existing'});delete sub.items.data[0].current_period_end;
+ const stripe=fakeStripe({subs:[sub]});await assert.rejects(startPlanCheckout(OWNER,'starter',{store,stripe}),error=>error.code==='billing_period_unavailable');assert.equal(stripe.calls.some(call=>call.startsWith('schedules.')),false);
+});});
