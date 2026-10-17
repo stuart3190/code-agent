@@ -252,7 +252,7 @@ Deno.serve(async (req: Request) => {
   const synth = await syntheticEmail(appId, email);
   const { data: existing, error: lookupErr } = await svc
     .from("app_users").select("id, auth_user_id, status").eq("app_id", appId).eq("email", email).maybeSingle();
-  if (lookupErr) return reply(500, { error: `lookup failed: ${lookupErr.message}` });
+  if (lookupErr) return reply(503, { error: "Account lookup is temporarily unavailable. Try again." });
   // Idempotent signup must honor the same account suspension as ordinary sign-in.
   if (existing && existing.status !== "active") {
     return reply(403, { error: "This account has been disabled by the app owner." });
@@ -289,31 +289,8 @@ Deno.serve(async (req: Request) => {
       if (createErr && /already.*(regist|exist)/i.test(createErr.message)) { createErr = null; break; }
       if (createErr && attempt === 0) await new Promise((r) => setTimeout(r, 400));
     }
-    if (createErr) return reply(500, { error: `signup failed: ${createErr.message}` });
+    if (createErr) return reply(503, { error: "Account creation could not be confirmed. Try again." });
 
-    if (created) {
-      const { error: mapErr } = await svc.from("app_users").insert({
-        app_id: appId, email, auth_user_id: created.user.id,
-      });
-      if (mapErr && !/duplicate|unique|conflict|23505/i.test(mapErr.message)) {
-        // A real mapping failure: roll back the auth user so a retry works.
-        await svc.auth.admin.deleteUser(created.user.id).catch(() => {});
-        return reply(500, { error: `signup failed: ${mapErr.message}` });
-      }
-      // A duplicate mapping row = we lost the race after user creation; the winner's rows
-      // stand and the sign-in below resolves the session either way.
-      await logEvent("signup", ip, appId);
-      // WP4: an invitation for this address becomes an active membership with the invited role.
-      // Nothing else about authority changes at signup — an uninvited signup is an ordinary member.
-      await svc.from("app_memberships")
-        .update({ auth_user_id: created.user.id, status: "active", updated_at: new Date().toISOString() })
-        .eq("app_id", appId).eq("email", email).eq("status", "invited")
-        .then(() => undefined, () => undefined);
-      // Real event integration 1: the first thing a new end user sees in the app's notification
-      // surface, and proof the surface works from the moment they arrive.
-      await notifyAppUser(appId, created.user.id, "app_welcome", "Welcome",
-        "Your account is ready. This is where you'll see updates.", { kind: "welcome" });
-    }
   } else if (!existing) {
     return reply(401, { error: "Invalid email or password." });
   }
@@ -326,6 +303,44 @@ Deno.serve(async (req: Request) => {
       return reply(409, { error: "An account with this email already exists for this app — sign in instead." });
     }
     return reply(401, { error: "Invalid email or password." });
+  }
+
+  // Password authentication is the authority for recovering an interrupted signup.
+  // Never delete an auth user after an uncertain mapping write: its commit may
+  // have succeeded even when the acknowledgement was lost.
+  let insertedMapping = false;
+  try {
+    let { data: mapping, error: mappingError } = await svc.from("app_users")
+      .select("id,auth_user_id,status").eq("app_id", appId).eq("email", email).maybeSingle();
+    if (mappingError) return reply(503, { error: "Account lookup is temporarily unavailable. Try again." });
+    if (!mapping && action === "signup") {
+      const { error: insertError } = await svc.from("app_users").insert({
+        app_id: appId, email, auth_user_id: signed.user.id,
+      });
+      insertedMapping = !insertError;
+      // Confirm the actual row for successful, duplicate and uncertain writes.
+      // A missing row remains retryable using the same authenticated identity.
+      const confirmed = await svc.from("app_users").select("id,auth_user_id,status")
+        .eq("app_id", appId).eq("email", email).maybeSingle();
+      mapping = confirmed.data;
+      mappingError = confirmed.error;
+    }
+    if (mappingError || !mapping) return reply(503, { error: "Account setup could not be confirmed. Try again." });
+    if (mapping.status !== "active") return reply(403, { error: "This account has been disabled by the app owner." });
+    if (mapping.auth_user_id !== signed.user.id) return reply(403, { error: "Account identity could not be confirmed." });
+  } catch {
+    return reply(503, { error: "Account setup could not be confirmed. Try again." });
+  }
+  if (insertedMapping) {
+    await logEvent("signup", ip, appId);
+      // WP4: an invitation for this address becomes an active membership with the invited role.
+      // Nothing else about authority changes at signup — an uninvited signup is an ordinary member.
+      await svc.from("app_memberships")
+        .update({ auth_user_id: signed.user.id, status: "active", updated_at: new Date().toISOString() })
+        .eq("app_id", appId).eq("email", email).eq("status", "invited")
+        .then(() => undefined, () => undefined);
+    await notifyAppUser(appId, signed.user.id, "app_welcome", "Welcome",
+      "Your account is ready. This is where you'll see updates.", { kind: "welcome" });
   }
 
   return reply(200, {
