@@ -989,6 +989,7 @@ export function createOrchestrator({
         rejections = retainedPatchRejections.filter(row => rejectedStylesheets.includes(row.file));
         problems = rejections.map(row => row.reason);
         repairScope = { kind: 'stylesheet_patch_correction', files: rejectedStylesheets,
+          readOnlyFiles: filesChanged.filter(file => /\.[jt]sx$/.test(file) && !isProtectedPath(file, { tree: applied.tree, contract })),
           allowedFiles: rejectedStylesheets, allowedPrefixes: [],
           instruction: `Finish the rejected stylesheet patch(es) [${rejectedStylesheets.join(', ')}]. `
             + 'Emit the COMPLETE CSS as string content on the same replaceFile/newFile patch. '

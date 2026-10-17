@@ -236,6 +236,20 @@ export function renderPrecompileRepairContext(tree, { repairScope, onRetrieval =
     ...interfaces.map((path) => ({ path, form: "interface", reason: "required persistence interface",
       tokens: Math.ceil(interfaceText(path).length / 4) })),
   ];
+  // CSS repair needs the actual retained markup, not invented class names. Keep this
+  // read-only and bounded; the write allowlist remains the rejected stylesheet(s) alone.
+  const markup = [];
+  let remainingMarkup = 30_000;
+  if (repairScope?.kind === "stylesheet_patch_correction") {
+    for (const path of [...new Set(repairScope.readOnlyFiles || [])].sort()) {
+      if (remainingMarkup <= 0 || !/^src\/(?:components|screens)\/.*\.[jt]sx$/.test(path)
+        || typeof tree?.[path] !== "string" || files.includes(path)) continue;
+      const source = tree[path], excerpt = source.slice(0, Math.min(12_000, remainingMarkup));
+      remainingMarkup -= excerpt.length;
+      markup.push(`// ${path} — READ ONLY retained markup${excerpt.length < source.length ? " (excerpt)" : ""}\n${excerpt}`);
+      included.push({ path, form: excerpt.length < source.length ? "excerpt" : "full", reason: "read-only CSS consumers", tokens: Math.ceil(excerpt.length / 4) });
+    }
+  }
   const tokens = included.reduce((sum, row) => sum + row.tokens, 0);
   onRetrieval?.({
     query: { step: "repair", kind: repairScope?.kind, files, capabilityPaths: repairScope?.capabilityPaths || [] },
@@ -250,6 +264,7 @@ export function renderPrecompileRepairContext(tree, { repairScope, onRetrieval =
     "",
     "RELEVANT INTERFACES:",
     ...interfaces.map(interfaceText),
+    ...(markup.length ? ["", "READ-ONLY CSS CONSUMERS — style these existing classes and elements; do not edit these files or invent unused replacement classes:", ...markup] : []),
   ].join("\n");
 }
 

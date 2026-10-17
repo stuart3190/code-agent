@@ -1505,7 +1505,7 @@ test('rejected core stylesheet is finished without regenerating clean screens', 
  let correctionCalls=0;const css='@tailwind base;\n@tailwind components;\n@tailwind utilities;\nmain { max-width: 70rem; margin: auto; padding: 2rem; }\n';
  const h=harness({patchPlan:{
   core:()=>[...CORE_PATCH,{replaceFile:'src/index.css',content:null}],
-  correction:ctx=>{correctionCalls++;assert.equal(ctx.repairScope.kind,'stylesheet_patch_correction');assert.deepEqual(ctx.repairScope.allowedFiles,['src/index.css']);assert.equal(ctx.tree['src/screens/scaffold/BookingScreen.jsx'],CORE_PATCH[0].content);return [{replaceFile:'src/index.css',content:css}];},
+  correction:ctx=>{correctionCalls++;assert.equal(ctx.repairScope.kind,'stylesheet_patch_correction');assert.deepEqual(ctx.repairScope.allowedFiles,['src/index.css']);assert.ok(ctx.repairScope.readOnlyFiles.includes('src/screens/scaffold/BookingScreen.jsx'));assert.equal(ctx.tree['src/screens/scaffold/BookingScreen.jsx'],CORE_PATCH[0].content);return [{replaceFile:'src/index.css',content:css}];},
   'increment:newsletter-signup':()=>NEWSLETTER_PATCH,'increment:browse-info':()=>BROWSE_PATCH,
  }});
  const result=await h.orchestrator.runBuild({owner:'o',projectId:'style-recovery',request:'booking site'});
