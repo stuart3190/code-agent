@@ -181,10 +181,21 @@ const NEGATED_ACTION_CHAIN = new RegExp(
   + `${NEGATED_LIST_TAIL}{0,80}\\b(?:or|nor)\\s+${NEGATED_INTRODUCING_VERB}\\b${NEGATED_LIST_TAIL}*`, "gi",
 );
 
+// Guest access is often expressed as a negated obligation, not "no authentication".
+// Remove only explicit auth actions. Qualified restrictions ("sign in with a password")
+// still imply authentication, as do later affirmative clauses.
+const AUTH_ACCESS_ACTION = "(?:sign[ -]?(?:up|in)|log[ -]?in|register|create\\s+(?:an?\\s+)?(?:user\\s+)?account)";
+const NEGATED_AUTH_OBLIGATION = new RegExp(
+  `\\b(?:(?:should|must|do|does|will|would)\\s+not|(?:shouldn|mustn|don|doesn|won|wouldn)['’]t)\\s+`
+  + `(?:(?:have|need)\\s+to\\s+)?${AUTH_ACCESS_ACTION}(?:\\s+(?:or|nor)\\s+${AUTH_ACCESS_ACTION})*\\b`
+  + `(?!\\s+(?:with|using|via|unless)\\b)`, "gi",
+);
+
 function withoutNegatedRequirements(value) {
   NEGATED_INFRASTRUCTURE.lastIndex = 0;
   NEGATED_CAPABILITY.lastIndex = 0;
   const stripped = normalizeClauseWhitespace(value)
+    .replace(NEGATED_AUTH_OBLIGATION, "")
     .replace(NEGATED_ACTION_CHAIN, "")
     // A comma-separated exclusion such as "no payments, accounts, or admin backend" previously
     // stopped at the first recognized capability (`accounts`) and left `backend` behind as a

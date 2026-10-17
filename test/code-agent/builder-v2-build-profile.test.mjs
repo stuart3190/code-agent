@@ -761,3 +761,23 @@ test("conjoined prohibitions remove the complete capability list while keeping a
     assert.equal(signals.includes("user_accounts"),true,prompt);
   }
 });
+
+test('guest access does not invent accounts from negated sign-in obligations', () => {
+  for (const request of [
+    'The visitor should not have to sign up or sign in.',
+    'Visitors do not need to log in.',
+    'A visitor must not have to create an account or sign in.',
+    'Visitors shouldn’t need to sign in.',
+    "Users don't have to sign up or sign in.",
+  ]) {
+    const signals = inferRequirementSignals(`Save expense records. ${request}`);
+    assert.equal(signals.includes('user_accounts'), false, request);
+    assert.equal(signals.includes('saved_data'), true, request);
+  }
+  for (const request of [
+    'Visitors should not have to sign in, but admins must sign in.',
+    'Do not disable authentication or remove sign in.',
+    'Users should not sign in with passwords; use secure links.',
+    'Visitors should not have to sign in unless editing their profile.',
+  ]) assert.equal(inferRequirementSignals(request).includes('user_accounts'), true, request);
+});

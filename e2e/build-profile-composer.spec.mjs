@@ -119,6 +119,7 @@ function assertResponsiveLayout(layout) {
 }
 
 for (const [label, prompt] of [
+  ["guest access obligation", "Build an application to save expense records. The visitor should not have to sign up or sign in. Do not add payments."],
   ["payment action", "Build a portfolio website. Save contact inquiries. Do not send email or take payments."],
   ["capability list", "Build a portfolio website. Save contact inquiries. Do not rebuild unrelated features or add payments, authentication, or external services."],
 ]) test(`composer respects a negative conjoined ${label}`, async ({ page }) => {
