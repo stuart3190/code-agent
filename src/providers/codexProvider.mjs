@@ -155,7 +155,6 @@ export function createCodexProvider({ fetchImpl = fetch, tokenProvider = getAcce
       error.code = quotaExhausted ? "provider_quota_blocked" : "provider_http_rejected";
       if (quotaExhausted) {
         error.retryable = false;
-        error.classification = "provider_customer";
         if (Number.isSafeInteger(providerError.resets_at) && providerError.resets_at > 0) {
           error.providerResetAt = providerError.resets_at;
         }
