@@ -17,6 +17,7 @@ import path from "node:path";
 
 import { indexTree } from "./indexer.mjs";
 import { mountDeclaredControllers } from "./controllerMount.mjs";
+import { normalizeScaffoldPatchForms } from "./scaffoldPatchForms.mjs";
 import { memoryGraph } from "./graphStore.mjs";
 import { applyPatches, escalationPlan, normalizeMissingCreationCorrections, patchOutcomes, REJECTION, isProtectedPath } from "./patchEngine.mjs";
 import { completionEligibility } from "./contractTiering.mjs";
@@ -654,7 +655,12 @@ export function createOrchestrator({
           : protocolCorrectionDispatch ? "final_patch_protocol_correction"
           : scopeRejectionCorrection ? "scope_rejection_correction" : null,
         spec: scoped, signal });
-      const { patches, conversions } = normalizeMissingCreationCorrections(emittedPatches, working, rejectionHistory);
+      const recoveredForms = normalizeScaffoldPatchForms(emittedPatches, working, {
+        modulePlan: scoped.modulePlan, scaffoldGraph: scoped.scaffoldGraph, baseline });
+      for (const conversion of recoveredForms.conversions) {
+        log(`${step}: recovered complete scaffold payload ${conversion.file} (${conversion.reason})`);
+      }
+      const { patches, conversions } = normalizeMissingCreationCorrections(recoveredForms.patches, working, rejectionHistory);
       for (const conversion of conversions) {
         log(`${step}: corrected ${conversion.file} from replaceFile to newFile because its prior creation was rejected`);
       }

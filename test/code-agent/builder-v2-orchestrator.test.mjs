@@ -1539,18 +1539,22 @@ test("fresh generation carries the original requirements through core and later 
   for (const call of h.patchCalls) assert.equal(call.originalRequest, request);
 });
 
-test("retained expense generation deterministically mounts its controller but cannot promote an unfinished summary", async () => {
+test("retained expense patch forms recover authored screens and CSS but still obey failing journey gates", async () => {
   const { readFileSync } = await import("node:fs");
   const fixture = JSON.parse(readFileSync(new URL("./fixtures/reliability-20261016/expense-unmounted-controller.json", import.meta.url)));
   const h = harness({ contract: fixture.contract,
     assetService: { resolveIntents:async()=>({resolved:[],providerCalls:0}),assetManifestFor:async()=>[] },
     patchPlan: { core:()=>fixture.patches },
+    failJourneys: fixture.contract.journeys.map(j=>j.id), maxJourneyRepairs:0,
   });
   const result = await h.orchestrator.runBuild({owner:"o",projectId:"expense-controller-replay",request:"Pocket Ledger"});
   assert.notEqual(result.state,"green");
-  const candidate = h.checkpoints.find(event => event.tree?.["src/screens/scaffold/PocketLedgerScreen.jsx"]?.includes("<JourneyController"));
-  assert.ok(candidate, "the real patch pipeline must retain a deterministic mount before structural correction");
+  const summary="src/screens/scaffold/SummaryScreen.jsx";
+  const candidate = h.checkpoints.find(event => event.tree?.[summary]?.includes("Category totals"));
+  assert.ok(candidate, "the real patch pipeline must retain complete supplied screens and stylesheet");
   assert.equal(candidate.tree["src/components/create-monthly-expenses/CreateMonthlyExpensesFlow.jsx"],fixture.sources["src/components/create-monthly-expenses/CreateMonthlyExpensesFlow.jsx"]);
-  assert.equal(candidate.tree["src/screens/scaffold/SummaryScreen.jsx"],fixture.sources["src/screens/scaffold/SummaryScreen.jsx"]);
+  assert.equal(candidate.tree[summary],fixture.patches.find(p=>p.file===summary).ops[0].content);
+  assert.equal(candidate.tree["src/index.css"],fixture.patches.find(p=>p.newFile==="src/index.css").content);
+  assert.equal(h.patchCalls.length,1,"recoverable patch form errors require no extra model dispatch");
   assert.equal(await h.snapshotStore.pointer("o","expense-controller-replay","green"),null);
 });
