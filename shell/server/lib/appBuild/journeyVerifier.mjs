@@ -2629,6 +2629,24 @@ function surfaceHasPrimitive(surface, expected) {
   return surfaceIncludes(surface, expected);
 }
 
+function roundedOutputPresentation(surface, expected) {
+  if (typeof expected !== "number" || !Number.isFinite(expected) || Number.isInteger(expected)) return null;
+  const tokens = String(surface ?? "").normalize("NFKC").match(numberTokenPattern()) || [];
+  for (const token of tokens) {
+    const decimals = token.match(/\.(\d+)/)?.[1]?.length;
+    // Integer differences remain failures. A printed decimal can expose a missing
+    // presentation-precision contract, but it must never silently widen numeric equality.
+    if (!decimals || decimals > 12) continue;
+    const actual = parseNumericToken(token);
+    if (actual === null || numbersClose(expected, actual)) continue;
+    const roundingRadius = 0.5 * 10 ** -decimals;
+    if (Math.abs(expected - actual) <= roundingRadius + Number.EPSILON * Math.max(1, Math.abs(expected)) * 4) {
+      return { observed: actual, decimalPlaces: decimals };
+    }
+  }
+  return null;
+}
+
 /**
  * Contract-policy facts for a step's expectedOutputs. Numbers are compared as numbers.
  * Exported so a verdict can be proven without a browser.
@@ -2651,9 +2669,15 @@ export function computedOutputFacts(surface, expectedOutputs, { inputSurface = "
   // reason to rewrite a potentially valid editable-result interface.
   const inputOnlyComputedOutputs = candidates.filter(row => !surfaceHasPrimitive(surface, row.expected)
     && surfaceHasPrimitive(inputSurface, row.expected));
-  const computedOutputs = candidates.filter(row => !inputOnlyComputedOutputs.includes(row));
+  const precisionAmbiguousComputedOutputs = candidates.filter(row => !inputOnlyComputedOutputs.includes(row)
+    && !surfaceHasPrimitive(surface, row.expected)).flatMap(row => {
+      const presentation = roundedOutputPresentation(surface, row.expected);
+      return presentation ? [{ ...row, ...presentation }] : [];
+    });
+  const computedOutputs = candidates.filter(row => !inputOnlyComputedOutputs.includes(row)
+    && !precisionAmbiguousComputedOutputs.some(ambiguous => ambiguous.field === row.field));
   const missingComputedOutputs = computedOutputs.filter((row) => !surfaceHasPrimitive(surface, row.expected));
-  return { computedOutputs, missingComputedOutputs, unobservableComputedOutputs, inputOnlyComputedOutputs };
+  return { computedOutputs, missingComputedOutputs, unobservableComputedOutputs, inputOnlyComputedOutputs, precisionAmbiguousComputedOutputs };
 }
 
 // Operation-transition copy such as "duplicated object disappears" proves the immediate action,
@@ -4709,6 +4733,11 @@ export function structuredStepVerdict({
       detail: `expected output matches only editable input; needs an observable output binding: ${facts.inputOnlyComputedOutputs
         .map(row => row.field).join(", ")}` });
   }
+  if (facts.precisionAmbiguousComputedOutputs?.length) {
+    checks.push({ kind: "computed_output", ok: false, inconclusive: true, contractIncomplete: true,
+      detail: `numeric output needs declared display precision: ${facts.precisionAmbiguousComputedOutputs
+        .map(row => `${row.field} expected ${row.expected}, observed ${row.observed} (${row.decimalPlaces} decimal places)`).join(", ")}` });
+  }
   if (collectionStateRequired) {
     if (facts.memberStructured && facts.collectionRegionFound === false && !collectionStateSatisfied) {
       checks.push({ kind: "collection", ok: false, inconclusive: true,
@@ -4768,7 +4797,8 @@ export function structuredStepVerdict({
   } else if (facts.actionDeclared) {
     const ok = Boolean(changed || mutationWithValues || facts.nextControlVisible || facts.actionAutoApplied || declaredSatisfied);
     const outcomeUnbound = !ok && !declaredOutcomeChecks.length
-      && (facts.unobservableComputedOutputs?.length > 0 || facts.inputOnlyComputedOutputs?.length > 0);
+      && (facts.unobservableComputedOutputs?.length > 0 || facts.inputOnlyComputedOutputs?.length > 0
+        || facts.precisionAmbiguousComputedOutputs?.length > 0);
     checks.push({ kind: "action", ok, ...(outcomeUnbound ? { inconclusive: true, contractIncomplete: true } : {}),
       detail: ok ? "the contracted action fired through its control and changed the surface"
         : outcomeUnbound ? "the action's only declared output has no observable binding"
