@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { buildTree, ensureDeps } from "../../harness/workspace.mjs";
 import { fromScaffold } from "../../src/engine/fileTree.mjs";
@@ -300,7 +301,8 @@ test("14S crash recovery locates a candidate checkpoint and resumes repair witho
 test("14S platform re-verification refreshes protected runtime and makes zero model calls", async () => {
   const snapshots = createSnapshotStore();
   const oldTree = { ...candidateTree(correctedBookingFlow),
-    "src/lib/capabilities/wizard.js": "// stale runtime" };
+    "src/lib/capabilities/wizard.js": "// stale runtime",
+    "src/lib/devReporter.js": readFileSync(new URL("./fixtures/reliability-20261016/legacy-preview-reporter.js", import.meta.url), "utf8") };
   await snapshots.createSnapshot("owner", "project", oldTree, {
     buildId: "paid-repair", reason: "working:resumed-repair",
   });
@@ -314,10 +316,12 @@ test("14S platform re-verification refreshes protected runtime and makes zero mo
     snapshotStore: snapshots, buildStore: memoryBuildStore(), baseTree: () => current,
     baseline: current, compile: async (tree) => {
       assert.equal(tree["src/lib/capabilities/wizard.js"], current["src/lib/capabilities/wizard.js"]);
+      assert.equal(tree["src/lib/devReporter.js"], current["src/lib/devReporter.js"]);
       return { ok: true, tree };
     },
     journeysFn: async ({ journeys, tree }) => {
       assert.equal(tree["src/lib/capabilities/wizard.js"], current["src/lib/capabilities/wizard.js"]);
+      assert.equal(tree["src/lib/devReporter.js"], current["src/lib/devReporter.js"]);
       return { journeys: journeys.map((journey) => ({ ...journey, status: "pass", steps: [] })) };
     },
   });

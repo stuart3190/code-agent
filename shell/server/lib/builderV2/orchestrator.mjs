@@ -23,6 +23,7 @@ import { applyPatches, escalationPlan, normalizeMissingCreationCorrections, patc
 import { completionEligibility } from "./contractTiering.mjs";
 import { deriveBuildSpec, journeysInMountedScreenUnit, scopeBuildSpec } from "./buildSpec.mjs";
 import { refreshAutoBuildProfile } from "../../../shared/buildProfile.mjs";
+import { refreshUnmodifiedPreviewBridge } from "./previewBridgeUpgrade.mjs";
 import { coreGenerationScope, preprocessCandidateTree, staticCandidateVerdict } from "./preRepairPipeline.mjs";
 import { deriveVerificationManifest } from "./verificationManifest.mjs";
 import { advisoryMessages, partitionFindings } from "./validationSeverity.mjs";
@@ -438,7 +439,7 @@ export function createOrchestrator({
         refreshed[path] = source;
       }
     }
-    return refreshed;
+    return refreshUnmodifiedPreviewBridge(refreshed, currentPlatform);
   };
 
   // WP1: one derivation entry point so every spec in this build resolves modules against the same
