@@ -250,3 +250,12 @@ browserTest('entry mobile clipping cannot be hidden by an activation that opens 
     assert.match(result.journeys[0].detail,/Clear search.*cut off/);
   }finally{server.close();}
 });
+
+browserTest('a leading internal guide link cannot hide a crashing calculator control', async()=>{
+ const {server,url}=await serve({'/':'<html><body><h1>Calculator</h1><a href="/guide">Guide</a><button onclick="document.body.innerHTML=\'\'">Calculate</button></body></html>','/guide':'<html><body><h1>Guide</h1><a href="/">Back</a></body></html>'});
+ try{const r=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});assert.equal(r.pass,false);assert.match(r.smoke.crashes[0].control,/Calculate/);assert.equal(r.smoke.controls.activated,2);}finally{server.close();}
+});
+browserTest('working controls after a leading guide link are actually activated', async()=>{
+ const {server,url}=await serve({'/':'<html><body><h1>Calculator</h1><a href="/guide">Guide</a><input aria-label="Length"/><button>Calculate</button></body></html>','/guide':'<html><body><h1>Guide</h1><a href="/">Back</a></body></html>'});
+ try{const r=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});assert.equal(r.pass,true);assert.equal(r.smoke.controls.activated,3);}finally{server.close();}
+});

@@ -259,6 +259,7 @@ export async function smokeVerifyJourneys({
         const reason = skipReason(info, origin);
         if (reason) { skipped.push({ control: describeControl(info), reason }); continue; }
         if (!(await el.isVisible().catch(() => false))) { skipped.push({ control: describeControl(info), reason: "not_visible" }); continue; }
+        const controlPageUrl = page.url();
         try {
           await activate(el, info);
           activated += 1;
@@ -289,6 +290,21 @@ export async function smokeVerifyJourneys({
               ? `fatal runtime error after activation: ${pageErrors.at(-1)}` : "the application went blank after activation",
             ...(crashed ? {} : crashEvidence(detail)) });
           break;
+        }
+        // A top-of-page guide link must not replace the live locator with the guide's
+        // one control and silently skip the calculator/form we came to exercise. Inspect
+        // the destination above, then resume the source's remaining controls. Buttons
+        // that advance an application flow retain their normal navigation semantics.
+        if (info.tag === "a" && page.url() !== controlPageUrl) {
+          try {
+            await page.goBack({ waitUntil: "domcontentloaded", timeout: Math.min(5_000, Math.max(1, deadline - Date.now())) });
+            if (page.url() !== controlPageUrl) await page.goto(controlPageUrl, { waitUntil: "domcontentloaded", timeout: Math.min(5_000, Math.max(1, deadline - Date.now())) });
+            await waitForRender(page, Math.min(deadline, Date.now() + 3_000));
+          } catch (navigationError) {
+            unavailable = true;
+            error = `could not resume source page after link: ${String(navigationError.message || navigationError).slice(0,200)}`;
+            break;
+          }
         }
       }
     }
