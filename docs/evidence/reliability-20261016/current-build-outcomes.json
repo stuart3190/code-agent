@@ -1,0 +1,28 @@
+{
+  "capturedAt": "2026-10-17T18:53:52.191Z",
+  "since": "2026-10-16T18:53:52.007Z",
+  "total": 66,
+  "pages": 1,
+  "byState": {
+    "succeeded": 51,
+    "failed": 13,
+    "cancelled": 1,
+    "running": 1
+  },
+  "byType": {
+    "builder_pipeline": 51,
+    "publish_package": 14,
+    "qa_browser": 1
+  },
+  "byFailureClass": {
+    "none": 52,
+    "generated_app": 9,
+    "pipeline_replay_blocked": 1,
+    "worker_error": 1,
+    "contract": 1,
+    "cancelled": 1,
+    "platform": 1
+  },
+  "ownAuditRows": 66,
+  "limitation": "Includes retained runs, auxiliary work and audit traffic; not a fresh user-build success rate."
+}
