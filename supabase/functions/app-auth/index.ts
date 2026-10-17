@@ -38,6 +38,7 @@
 // the platform's verify_jwt gate; per-user auth is what this function IS, so there is no user JWT yet.
 
 import { createClient } from "npm:@supabase/supabase-js@2.111.0";
+import { syntheticAppEmail as syntheticEmail } from "../_shared/appIdentity.mjs";
 import {
   UUID_RE, requestOrigin, originIsEligible, projectPreviewOriginIsEligible, hmacHex,
 } from "./policy.mjs";
@@ -47,7 +48,6 @@ const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") || "";
 const RESEND_FROM = Deno.env.get("RESEND_FROM") || "Thrallo <noreply@thrallo.com>";
-const SYNTH_DOMAIN = "apps.thrallo.com";
 const RESET_PEPPER = Deno.env.get("APP_AUTH_RESET_PEPPER") || "";
 
 const RESET_TTL_MIN = 15;
@@ -70,15 +70,6 @@ const cors = (origin: string | null) => ({
 });
 const json = (status: number, body: unknown, origin: string | null = null) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...cors(origin) } });
-
-async function sha256hex(s: string): Promise<string> {
-  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-async function syntheticEmail(appId: string, email: string): Promise<string> {
-  return `u.${(await sha256hex(`${appId}|${email.toLowerCase()}`)).slice(0, 32)}@${SYNTH_DOMAIN}`;
-}
 
 const codeHash = (appId: string, email: string, code: string) =>
   hmacHex(RESET_PEPPER, `${appId}|${email}|${code}`);
@@ -323,12 +314,6 @@ Deno.serve(async (req: Request) => {
       await notifyAppUser(appId, created.user.id, "app_welcome", "Welcome",
         "Your account is ready. This is where you'll see updates.", { kind: "welcome" });
     }
-  } else if (action === "signup" && existing) {
-    // A visitor retrying their OWN signup (the browser's saved identity) is a sign-in, not
-    // an error; a DIFFERENT password for an existing account still gets the explicit 409.
-    const probe = createClient(SUPABASE_URL, ANON_KEY, { auth: { persistSession: false } });
-    const { error: probeErr } = await probe.auth.signInWithPassword({ email: synth, password });
-    if (probeErr) return reply(409, { error: "An account with this email already exists for this app — sign in instead." });
   } else if (!existing) {
     return reply(401, { error: "Invalid email or password." });
   }
@@ -336,7 +321,12 @@ Deno.serve(async (req: Request) => {
   // Both paths end in a REAL password sign-in against the synthetic address -> native session.
   const anon = createClient(SUPABASE_URL, ANON_KEY, { auth: { persistSession: false } });
   const { data: signed, error: signErr } = await anon.auth.signInWithPassword({ email: synth, password });
-  if (signErr || !signed.session) return reply(401, { error: "Invalid email or password." });
+  if (signErr || !signed.session) {
+    if (action === "signup" && existing) {
+      return reply(409, { error: "An account with this email already exists for this app — sign in instead." });
+    }
+    return reply(401, { error: "Invalid email or password." });
+  }
 
   return reply(200, {
     user: { id: signed.user.id, email }, // the REAL email, not the synthetic one

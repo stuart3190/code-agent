@@ -22,13 +22,13 @@
 // app_account_policies — all service-role only (migration 20260918120000_app_accounts_memberships).
 
 import { createClient } from "npm:@supabase/supabase-js@2.111.0";
+import { syntheticAppEmail } from "../_shared/appIdentity.mjs";
 import { AccountError, createAccountService } from "./accountService.mjs";
 import { PlatformStateError, createPlatformStateService } from "./platformStateService.mjs";
 import { buildPolicy } from "./policy.js";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const SYNTH_DOMAIN = "apps.thrallo.com";
 const svc = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
 const cors = (origin: string) => ({
@@ -159,8 +159,7 @@ function supabasePlatformStateStorage() {
 }
 
 async function provisionAuthUser(appId: string, email: string) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${appId}:${email}`));
-  const synth = `${Array.from(new Uint8Array(digest)).slice(0, 12).map((b) => b.toString(16).padStart(2, "0")).join("")}@${SYNTH_DOMAIN}`;
+  const synth = await syntheticAppEmail(appId, email);
   const password = crypto.randomUUID() + crypto.randomUUID();
   const { data, error } = await svc.auth.admin.createUser({
     email: synth, password, email_confirm: true, user_metadata: { app_id: appId, app_email: email, provisioned: true },
