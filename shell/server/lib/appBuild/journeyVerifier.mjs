@@ -3917,6 +3917,9 @@ async function runStep(page, step, {
       // names no explicit activation, and the contracted result became freshly visible. Durable
       // mutations and explicit click/apply/reset steps still require their own control identity.
       if (!activated && contractedAction.kind === "action" && filledContractedInputs.length
+        && !contractedAction.persistenceHandoff && !contractedAction.durableLifecycle
+        && !(contractedAction.semanticResponsibilityTypes || []).includes("persistence")
+        && !(contractedAction.writes || []).some(path => String(path).includes(".durable."))
         && !/\b(click|press|tap|submit|apply|activate|run|trigger|confirm|save|delete|remove|clear|reset)\b/i.test(action)) {
         const inputWrites = new Set(filledContractedInputs.flatMap((flow) => flow.writes || []));
         const consumesFilledInput = (contractedAction.reads || []).some((path) => inputWrites.has(path));
@@ -3937,6 +3940,21 @@ async function runStep(page, step, {
             activation.expectationEvidence = expectationEvidence;
             activation.stateChanged = autoAppliedStateChanged || undefined;
             delete activation.reason;
+          } else if (minimal && !(step.expectedOutputs && Object.keys(step.expectedOutputs).length)
+            && !contractedAction.persistenceHandoff && !contractedAction.durableLifecycle
+            && !(contractedAction.semanticResponsibilityTypes || []).includes("persistence")
+            && !(contractedAction.writes || []).some(path => String(path).includes(".durable."))) {
+            const presentation = await contractedActionPresentation(page, contractedAction.control.machineId);
+            if (presentation.candidateCount === 0) {
+              // A repeated negative input may legitimately leave the same error visible. The
+              // input was driven, but this contract provides no independently checkable output
+              // for its implicit operation. Do not invent an Apply button or call this a pass.
+              return verificationVerdict(VERIFICATION_RESULT_CLASS.CONTRACT_INCOMPLETE,
+                "the input accepted its fixture, but the implicit transient operation has no independently observable result transition",
+                { drove, controlEvidence: { ...(controlEvidence || {}), activation,
+                  implicitOperationEvidence: { operationId: contractedAction.operationId || null,
+                    consumesFilledInput: true, stateChanged: false } } });
+            }
           }
         }
       }

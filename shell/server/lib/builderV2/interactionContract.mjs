@@ -1558,6 +1558,29 @@ export function normalizeInteractionStateDependencies(plan) {
     const consumer = flows[consumerIndex];
     for (const originalPath of [...(consumer.reads || [])]) {
       let path = originalPath;
+      // A reused transient operation can retain an external-input path from its first
+      // invocation. When this occurrence explicitly types that same field, its immediate
+      // producer is the current draft, not the earlier starting value.
+      const field = String(path).startsWith(`${consumer.journeyId}.input.`)
+        ? String(path).slice(`${consumer.journeyId}.input.`.length) : null;
+      if (field && consumer.kind === "action" && consumer.operationId
+        && !consumer.persistenceHandoff && !consumer.durableLifecycle
+        && !(consumer.semanticResponsibilityTypes || []).includes("persistence")
+        && !(consumer.writes || []).some(value => String(value).includes(".durable."))) {
+        const draft = `${consumer.journeyId}.draft.${field}`;
+        const producer = flows.slice(0, consumerIndex).findLast(flow =>
+          flow.journeyId === consumer.journeyId && flow.stepIndex === consumer.stepIndex
+          && ["input", "selection"].includes(flow.kind) && flow.control?.logicalField === field
+          && flow.control.statePath === draft && (flow.writes || []).includes(draft));
+        if (producer) {
+          consumer.reads = unique((consumer.reads || []).map(value => value === originalPath ? draft : value));
+          consumer.dependsOn = unique((consumer.dependsOn || []).map(value => value === originalPath ? draft : value));
+          rebindings.push({ journeyId:consumer.journeyId, fromStatePath:originalPath, toStatePath:draft,
+            producerInteractionId:producer.id, consumerInteractionId:consumer.id,
+            reason:"same_step_control_input" });
+          path = draft;
+        }
+      }
       const prior = flows.slice(0, consumerIndex).some((flow) => flow.journeyId === consumer.journeyId
         && (flow.writes || []).includes(path));
       if (prior || stateAvailableAtJourneyStart(plan, consumer.journeyId, path,
