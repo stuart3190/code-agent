@@ -413,20 +413,41 @@ function journeyFixtureKeys(steps) {
 // A single declared transient seed is an input fixture too: list-valued initial recipe
 // data cannot be typed into verificationValues (which describes primitive UI inputs).
 // Do not borrow persisted records, ambiguous rows, or a seed changed earlier in the journey.
-export function transientSeedState(contract, entity) {
-  if (entity?.storage !== "transient") return {};
+function transientSeedRows(contract, entity) {
+  if (entity?.storage !== "transient") return null;
   let rows = contract.sampleData?.[entity.name];
   if (Array.isArray(contract.sampleData)) {
     const declarations = contract.sampleData.filter(row => row?.entity === entity.name);
-    if (declarations.length !== 1 || (declarations[0].storage && declarations[0].storage !== "transient")) return {};
+    if (declarations.length !== 1 || (declarations[0].storage && declarations[0].storage !== "transient")) return null;
     rows = [declarations[0].values];
   }
-  if (!Array.isArray(rows) || rows.length !== 1 || !rows[0] || typeof rows[0] !== "object" || Array.isArray(rows[0])) return {};
+  return Array.isArray(rows) && rows.length && rows.every(row => row && typeof row === "object" && !Array.isArray(row)) ? rows : null;
+}
+
+function sharedSeedValueIsUnambiguous(contract, field, value) {
+  const owners = (contract.entities || []).flatMap(entity => (entity.fields || [])
+    .filter(candidate => referenceKey(candidate.name) === referenceKey(field.name)).map(candidate => ({ entity, field:candidate })));
+  if (owners.length === 1) return true;
+  // A shared foreign-key-like field can be known even when it appears in multiple entities:
+  // every explicit transient row must agree. Never choose one row from a varying collection.
+  if (!["string", "number", "boolean"].includes(field.type)) return false;
+  return owners.every(owner => {
+    if (owner.field.type !== field.type) return false;
+    const declared = Object.hasOwn(owner.field, "initialValue") ? owner.field.initialValue : owner.field.default;
+    if (declared !== undefined && declared !== value) return false;
+    const rows = transientSeedRows(contract, owner.entity);
+    return rows && rows.every(row => Object.hasOwn(row, owner.field.name) && row[owner.field.name] === value);
+  });
+}
+
+export function transientSeedState(contract, entity) {
+  const rows = transientSeedRows(contract, entity);
+  if (!rows || rows.length !== 1) return {};
   const state = {};
   for (const field of entity.fields || []) {
-    const value = rows[0][field.name], key = referenceKey(field.name);
+    const value = rows[0][field.name];
     if (!Object.hasOwn(rows[0], field.name) || value === null || value === undefined) continue;
-    if ((contract.entities || []).filter(other => (other.fields || []).some(f => referenceKey(f.name) === key)).length !== 1) continue;
+    if (!sharedSeedValueIsUnambiguous(contract, field, value)) continue;
     const valid = field.type === "json" ? typeof value === "object"
       : field.type === "array" ? Array.isArray(value)
       : field.type === "number" ? typeof value === "number" && Number.isFinite(value)

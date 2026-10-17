@@ -50,3 +50,21 @@ test('a non-entry journey cannot borrow transient sample rows as prior state',()
  const c=clone();for(const j of c.journeys)j.steps[0].target='existing workspace';
  assert.ok(buildInteractionContract(c).problems.some(p=>/reads state before it is produced/.test(p)));
 });
+
+const sharedRecipe = JSON.parse(await readFile(new URL('./fixtures/reliability-20261016/recipe-shared-seed-contract.json',import.meta.url)));
+test('retained reset contract uses a unanimously seeded shared recipe identity',async()=>{
+ const {validateContract}=await import('../../shell/shared/implementationContract.mjs');
+ assert.equal(transientSeedState(sharedRecipe,sharedRecipe.entities[0]).recipeId,'initial-recipe');
+ const verdict=validateContract(sharedRecipe);assert.equal(verdict.ok,true,verdict.problems.join('; '));
+ assert.deepEqual(transientSeedState(sharedRecipe,sharedRecipe.entities[1]),{},'multirow ingredient quantities remain ambiguous');
+});
+for(const [label,change] of [
+ ['different related row',c=>{c.sampleData.ingredient[1].recipeId='another-recipe';}],
+ ['missing related value',c=>{delete c.sampleData.ingredient[1].recipeId;}],
+ ['persistent related entity',c=>{c.entities[1].storage='durable';}],
+ ['related default conflict',c=>{c.entities[1].fields.find(f=>f.name==='recipeId').default='other';}],
+ ['related type mismatch',c=>{c.entities[1].fields.find(f=>f.name==='recipeId').type='number';}],
+ ['absent related seed',c=>{delete c.sampleData.ingredient;}],
+])test(`shared seed identity abstains on ${label}`,()=>{
+ const c=structuredClone(sharedRecipe);change(c);assert.equal(Object.hasOwn(transientSeedState(c,c.entities[0]),'recipeId'),false);
+});
