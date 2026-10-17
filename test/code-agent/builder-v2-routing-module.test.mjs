@@ -226,3 +226,18 @@ test('routing accepts exact declared static path aliases without relaxing parame
  assert.throws(()=>routeHref(table,'detail'),e=>e.code==='route_param_missing');
  assert.equal(moduleManifest('thrallo.routing').version,'1.1.0');
 });
+
+test('default route errors offer the router retry operation while custom state presentation stays owned', () => {
+  const spec=deriveBuildSpec(CONTRACT);
+  const capability=composeCapabilityFoundation(REACT_VITE,spec.capabilityGraph,{moduleLock:spec.moduleLock,identityPlan:spec.identityPlan,entitySchema:spec.entitySchema,routePlan:spec.routePlan});
+  const scaffold=composeScaffoldFoundation(capability.tree,spec.scaffoldGraph,{routePlan:spec.routePlan});
+  const source=scaffold.tree[ROUTE_STATES_PATH];
+  const {code}=require('esbuild').transformSync(source,{loader:'jsx',format:'cjs'});
+  const module={exports:{}};new Function('module','exports','React',code)(module,module.exports,React);
+  let retries=0;const element=module.exports.default({state:'error',onRetry:()=>{retries++}});
+  assert.match(renderToString(element),/role="alert"/);assert.match(renderToString(element),/>Try again<\/button>/);
+  const button=React.Children.toArray(element.props.children).find(child=>child.type==='button');button.props.onClick();assert.equal(retries,1);
+  assert.match(scaffold.tree[SCAFFOLD_APP_PATH],/onRetry=\{route.reload\}/);
+  const custom={...scaffold.tree,[ROUTE_STATES_PATH]:'export default function State(){ return <p>Custom recovery</p>; }'};
+  assert.equal(composeScaffoldFoundation(custom,spec.scaffoldGraph,{routePlan:spec.routePlan}).tree[ROUTE_STATES_PATH],custom[ROUTE_STATES_PATH]);
+});

@@ -144,6 +144,8 @@ export function evaluateGuard(route, sessionState, { signInRoute = null } = {}) 
   const guard = route?.guard || "any";
   if (guard === "any") return Object.freeze({ state: "ready", reason: null, redirectTo: null });
   if (status === "initializing") return Object.freeze({ state: "loading", reason: "session_initializing", redirectTo: null });
+  if (status === "error") return Object.freeze({ state: "error",
+    reason: sessionState?.error?.code || "session_unavailable", redirectTo: null });
   if (guard === "visitor") {
     const allowed = status === "visitor" || status === "signed_in";
     return Object.freeze({ state: allowed ? "ready" : "forbidden", reason: allowed ? null : status, redirectTo: allowed ? null : signInRoute });

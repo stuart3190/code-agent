@@ -1,0 +1,18 @@
+{
+  "measuredAt": "2026-10-17T16:27:29.922Z",
+  "results": [
+    {
+      "endpoint": "/provision",
+      "status": 400,
+      "code": "bad_preview_tree"
+    },
+    {
+      "endpoint": "/update",
+      "status": 400,
+      "code": "bad_preview_tree"
+    }
+  ],
+  "noContainerAllocated": true,
+  "caddyRestarted": false,
+  "scope": "Authenticated internal service; canonical-path rejection before resource allocation."
+}
