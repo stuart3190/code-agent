@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { pinnedHttpsTransport } from "./pinnedHttpsTransport.mjs";
+import { publicIp } from "./builderV2/assets/safeImageFetch.mjs";
 import { lookup } from "node:dns/promises";
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -16,7 +18,6 @@ const MAX_HTTP_BYTES = 1_000_000;
 const MAX_ASSET_BYTES = 500 * 1024 * 1024;
 const MANAGED_MARGIN = 1.1;
 const TERMINAL = new Set(["succeeded", "failed", "cancelled"]);
-const PRIVATE_V4 = [/^10\./, /^127\./, /^169\.254\./, /^192\.168\./, /^172\.(1[6-9]|2\d|3[01])\./, /^0\./];
 
 // Canonical operations accepted by the generated-app runtime. Builder V1's retired
 // configuration route used to own a second, UI-only preset catalogue; keeping the executable
@@ -32,9 +33,7 @@ export const RUNTIME_CAPABILITY_OPERATIONS = Object.freeze({
 });
 
 function isPrivateAddress(address) {
-  const value = String(address || "").toLowerCase();
-  if (value === "::1" || value.startsWith("fe80:") || value.startsWith("fc") || value.startsWith("fd")) return true;
-  return PRIVATE_V4.some((pattern) => pattern.test(value));
+  return !publicIp(address) || String(address).toLowerCase().startsWith("ff");
 }
 
 function cleanError(error) {
@@ -73,32 +72,56 @@ function mapped(object, mapping) {
   return result;
 }
 
-async function publicHttps(raw) {
+async function publicHttps(raw, dnsLookup = lookup) {
   let url;
   try { url = new URL(raw); } catch { return null; }
   if (url.protocol !== "https:" || url.username || url.password) return null;
   const host = url.hostname.toLowerCase();
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".internal")) return null;
-  const rows = await lookup(host, { all: true }).catch(() => []);
+  const rows = await dnsLookup(host, { all: true }).catch(() => []);
   if (!rows.length || rows.some((row) => isPrivateAddress(row.address))) return null;
-  return url;
+  return { url, addresses: rows.map(row => ({ address: row.address, family: row.family })) };
 }
 
-export async function safeRuntimeFetch(rawUrl, init = {}, { maxBytes = MAX_HTTP_BYTES, redirects = 3 } = {}) {
-  let url = await publicHttps(rawUrl);
-  if (!url) throw new Error("The configured API URL is not a public HTTPS address.");
+export async function safeRuntimeFetch(rawUrl, init = {}, { maxBytes = MAX_HTTP_BYTES, redirects = 3, fetchImpl = pinnedHttpsTransport, dnsLookup = lookup } = {}) {
+  let resolved = await publicHttps(rawUrl, dnsLookup);
+  if (!resolved) throw new Error("The configured API URL is not a public HTTPS address.");
+  let url = resolved.url;
+  const sensitiveRequest = [...new Headers(init.headers).keys()].length > 0 || init.body != null || init.credentials === "include";
   for (let hop = 0; hop <= redirects; hop += 1) {
-    const response = await fetch(url, { ...init, redirect: "manual", signal: init.signal || AbortSignal.timeout(30_000) });
+    const response = await fetchImpl(url, { ...init, redirect: "manual", signal: init.signal || AbortSignal.timeout(30_000) }, { addresses: resolved.addresses });
     if ([301, 302, 303, 307, 308].includes(response.status)) {
+      await response.body?.cancel().catch(() => {});
       if (hop === redirects) throw new Error("The API redirected too many times.");
       const location = response.headers.get("location");
-      url = location ? await publicHttps(new URL(location, url).href) : null;
-      if (!url) throw new Error("The API redirected to an unsafe address.");
+      const next = location ? await publicHttps(new URL(location, url).href, dnsLookup) : null;
+      if (!next) throw new Error("The API redirected to an unsafe address.");
+      // Custom header names may carry project secrets; a denylist cannot safely
+      // identify them. Public asset downloads have no authored headers/body.
+      if (next.url.origin !== url.origin && sensitiveRequest) throw new Error("The API attempted a cross-origin redirect with request credentials or data.");
+      resolved = next;
+      url = next.url;
       continue;
     }
     const declared = Number(response.headers.get("content-length") || 0);
-    if (declared > maxBytes) throw new Error("The API response is too large.");
-    return response;
+    if (declared > maxBytes) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error("The API response is too large.");
+    }
+    if (!response.body) return response;
+    // Content-Length can be absent, incorrect, or describe compressed bytes.
+    // Enforce the limit on the bytes actually delivered to every consumer.
+    let received = 0;
+    const body = response.body.pipeThrough(new TransformStream({
+      transform(chunk, controller) {
+        received += chunk.byteLength;
+        if (received > maxBytes) throw new Error("The API response is too large.");
+        controller.enqueue(chunk);
+      },
+    }));
+    const bounded = new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
+    Object.defineProperty(bounded, "url", { value: response.url });
+    return bounded;
   }
   throw new Error("The API request could not be completed.");
 }
