@@ -2438,7 +2438,7 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
       drove: false,
       groupKey: group.key,
       status: "pass",
-      detail: `contracted selection "${String(selected?.text || selected?.label || contractedFixture).slice(0, 40)}" was already established for the companion action`,
+      detail: `contracted selection "${String(selected?.text || selected?.label || contractedFixture).slice(0, 40)}" was already established`,
       selectedText: selected?.text || selected?.label || contractedFixture,
       selectedValue: selected?.value ?? contractedFixture,
       groupId: group.groupId,
@@ -3110,6 +3110,8 @@ async function runStep(page, step, {
   // Structured selection facts: the contracted value was already selected on entry, and a
   // hidden contract-scaffolding action was applied by the selection itself.
   let selectionEstablished = false;
+  let selectionOnlyEstablished = false;
+  let selectionTexts = null;
   let selectionAutoApplied = false;
   // The contracted input's owning form was submitted by the driver: the submission is then an
   // action of this step, proven by the surface it changed.
@@ -3617,9 +3619,10 @@ async function runStep(page, step, {
       // One contracted step can set several independent filters. A fixture may deliberately keep
       // one at its current sentinel while another filter makes the real transition. Treat the
       // exact current value as that field's established precondition, but only for a compound
-      // selection and only when at least one sibling selection actually moves.
+      // selection and only when at least one sibling selection actually moves in legacy mode.
+      // Contract policy can observe the exact declared default without inventing a transition.
       const compoundSelection = selectionFlows.length > 1;
-      const selectionOptions = { allowAlreadySelected: Boolean(companionAction) || compoundSelection };
+      const selectionOptions = { allowAlreadySelected: minimal || Boolean(companionAction) || compoundSelection };
       const outcomes = [];
       const used = new Set();
       const advances = [];
@@ -3690,95 +3693,107 @@ async function runStep(page, step, {
         selectedTexts: outcomes.map((row) => row.selectedText).filter(Boolean),
         terminalOutcomeProven: outcomes.some((row) => row.terminalOutcomeProven === true),
         controlEvidence: { selections: outcomes.map((row) => row.controlEvidence), flowAdvances: advances } };
-      if (compoundSelection && !selectionResult.drove && !companionAction) {
+      if (!minimal && compoundSelection && !selectionResult.drove && !companionAction) {
         return { ...selectionResult, status: "fail",
           detail: "every contracted selection value was already selected, so no transition was observed" };
       }
-      if (!companionAction) return selectionResult;
-      // A generated selection surface can expose a hidden action-identity proxy whose handler
-      // simply replays the already-selected value. That proxy is contract scaffolding, not a
-      // second customer operation: the visible select/card handler has already produced the
-      // transient result. Recognize only the narrow established-state shape: one exact contracted
-      // selection, one hidden machine identity, a non-durable action that reads that selection's
-      // state, no explicit Apply/Save-style instruction, and the exact expected result already
-      // visible. Visible controls, explicit activations and durable mutations remain mandatory.
-      let autoAppliedSelectionAction = null;
-      const establishedSelection = selectionFlows.length === 1 && !selectionResult.drove
-        && outcomes[0]?.controlEvidence?.precondition === "already_selected";
-      const transitionedSelection = selectionFlows.length === 1 && selectionResult.drove;
-      const selectionStatePath = selectionFlows[0]?.control?.statePath || null;
-      const consumesSelection = selectionStatePath
-        && (companionAction.reads || []).includes(selectionStatePath);
-      const writesDurableState = Boolean(companionAction.durableLifecycle)
-        || (companionAction.writes || []).some((path) => String(path).includes(".durable."));
-      const explicitlyRequestsActivation = /\b(click|press|tap|submit|apply|activate|run|trigger|confirm|save|delete|remove|clear|reset)\b/i
-        .test(action);
-      if ((establishedSelection || transitionedSelection)
-        && companionAction.kind === "action" && consumesSelection
-        && !writesDurableState && !explicitlyRequestsActivation && companionAction.control?.machineId) {
-        const presentation = await contractedActionPresentation(page, companionAction.control.machineId);
-        // The proxy's result is proven structurally: the selected option's own label is rendered
-        // somewhere OUTSIDE the selection control (the transient result reflects the selection).
-        const selectedLabels = unique(outcomes.flatMap((row) => [row.selectedText, row.selectedValue,
-          ...((row.controlEvidence?.selectedOptions || []).flatMap((option) => typeof option === "string" ? [option]
-            : [option?.label, option?.text, option?.value]))]).filter((value) => typeof value === "string" && value.trim()));
-        const expectationEvidence = presentation.candidateCount === 1 && presentation.perceivableCount === 0
-          ? await (async () => {
-            // An established selection is proven by its label rendered outside the control; a
-            // selection that just TRANSITIONED is proven by the surface change it caused.
-            const reflected = await selectionReflectedOutsideControl(page, selectionFlows[0].control?.machineId, selectedLabels);
-            const surfaceChanged = transitionedSelection
-              && (await page.evaluate(() => document.body?.innerText || "").catch(() => textBefore)) !== textBefore;
-            return { met: reflected || surfaceChanged, reflected, surfaceChanged, selectedLabels };
-          })()
-          : { met: false, selectedLabels };
-        selectionEstablished = establishedSelection;
-        if (expectationEvidence.met) {
-          selectionAutoApplied = true;
-          autoAppliedSelectionAction = {
-            selectionControl: selectionFlows[0].control?.machineId || null,
-            actionControl: companionAction.control.machineId,
-            matchedBy: establishedSelection
-              ? "established_selection_auto_applied_action"
-              : "selection_transition_auto_applied_action",
-            candidateCount: presentation.candidateCount,
-            perceivableCount: presentation.perceivableCount,
-            expectationEvidence,
-          };
-          const evidenceKey = establishedSelection
-            ? "establishedSelectionAction" : "selectionTransitionAction";
-          selectionResult.controlEvidence[evidenceKey] = autoAppliedSelectionAction;
-        }
-      }
-      if (!selectionOwnedOperation && selectionResult.drove) {
-        selectionOwnedOperation = await selectionOwnedCollectionOperation();
-      }
-      if (selectionOwnedOperation?.ok) {
-        selectionResult.terminalOutcomeProven = true;
-        selectionResult.controlEvidence.selectionOwnedOperation = selectionOwnedOperation;
-      }
-      // The scaffold stamps a coalesced selection/operation pair on one representative repeated
-      // option. Equivalent members execute that same handler even when only the representative
-      // carries the opaque attributes. Once a real selection transition has run, activating the
-      // representative action identity would perform the operation a second time on the wrong
-      // member. This shortcut requires both identities on the same option; a separate Apply/Save
-      // control therefore remains mandatory.
-      const selectionOwnedActionIndex = companionAction.control?.machineId
-        ? outcomes.findIndex((row) => row.selectionOwnedActionIds?.includes(companionAction.control.machineId))
-        : -1;
-      const selectionOwnedAction = selectionResult.drove && selectionOwnedActionIndex >= 0
-        ? { selectionControl: selectionFlows[selectionOwnedActionIndex]?.control?.machineId || null,
-          actionControl: companionAction.control.machineId }
-        : null;
-      if (selectionOwnedAction) selectionResult.controlEvidence.selectionOwnedAction = selectionOwnedAction;
-      drove = drove || selectionResult.drove;
-      controlEvidence = { ...(controlEvidence || {}), ...selectionResult.controlEvidence };
-      // A selection-owned operation runs through the option's onSelect handler. It still has to
-      // prove the operation's contracted outcome below, but the driver must not click a second
-      // prose-matched control after the semantic option already triggered it.
-      if (selectionResult.terminalOutcomeProven || selectionOwnedAction
-        || autoAppliedSelectionAction || !companionAction.control) {
+      if (!companionAction && !minimal) return selectionResult;
+      if (!companionAction) {
+        // The exact fixture's selected state is observable even when it was the default.
+        // Continue through structured output checks: selecting correctly cannot hide a
+        // wrong calculated result declared on this same step.
+        selectionEstablished = true;
+        selectionOnlyEstablished = true;
+        selectionTexts = selectionResult.selectedTexts;
+        drove = drove || selectionResult.drove;
         contractDriven = true;
+        controlEvidence = { ...(controlEvidence || {}), ...selectionResult.controlEvidence };
+      } else {
+        // A generated selection surface can expose a hidden action-identity proxy whose handler
+        // simply replays the already-selected value. That proxy is contract scaffolding, not a
+        // second customer operation: the visible select/card handler has already produced the
+        // transient result. Recognize only the narrow established-state shape: one exact contracted
+        // selection, one hidden machine identity, a non-durable action that reads that selection's
+        // state, no explicit Apply/Save-style instruction, and the exact expected result already
+        // visible. Visible controls, explicit activations and durable mutations remain mandatory.
+        let autoAppliedSelectionAction = null;
+        const establishedSelection = selectionFlows.length === 1 && !selectionResult.drove
+          && outcomes[0]?.controlEvidence?.precondition === "already_selected";
+        const transitionedSelection = selectionFlows.length === 1 && selectionResult.drove;
+        const selectionStatePath = selectionFlows[0]?.control?.statePath || null;
+        const consumesSelection = selectionStatePath
+          && (companionAction.reads || []).includes(selectionStatePath);
+        const writesDurableState = Boolean(companionAction.durableLifecycle)
+          || (companionAction.writes || []).some((path) => String(path).includes(".durable."));
+        const explicitlyRequestsActivation = /\b(click|press|tap|submit|apply|activate|run|trigger|confirm|save|delete|remove|clear|reset)\b/i
+          .test(action);
+        if ((establishedSelection || transitionedSelection)
+          && companionAction.kind === "action" && consumesSelection
+          && !writesDurableState && !explicitlyRequestsActivation && companionAction.control?.machineId) {
+          const presentation = await contractedActionPresentation(page, companionAction.control.machineId);
+          // The proxy's result is proven structurally: the selected option's own label is rendered
+          // somewhere OUTSIDE the selection control (the transient result reflects the selection).
+          const selectedLabels = unique(outcomes.flatMap((row) => [row.selectedText, row.selectedValue,
+            ...((row.controlEvidence?.selectedOptions || []).flatMap((option) => typeof option === "string" ? [option]
+              : [option?.label, option?.text, option?.value]))]).filter((value) => typeof value === "string" && value.trim()));
+          const expectationEvidence = presentation.candidateCount === 1 && presentation.perceivableCount === 0
+            ? await (async () => {
+              // An established selection is proven by its label rendered outside the control; a
+              // selection that just TRANSITIONED is proven by the surface change it caused.
+              const reflected = await selectionReflectedOutsideControl(page, selectionFlows[0].control?.machineId, selectedLabels);
+              const surfaceChanged = transitionedSelection
+                && (await page.evaluate(() => document.body?.innerText || "").catch(() => textBefore)) !== textBefore;
+              return { met: reflected || surfaceChanged, reflected, surfaceChanged, selectedLabels };
+            })()
+            : { met: false, selectedLabels };
+          selectionEstablished = establishedSelection;
+          if (expectationEvidence.met) {
+            selectionAutoApplied = true;
+            autoAppliedSelectionAction = {
+              selectionControl: selectionFlows[0].control?.machineId || null,
+              actionControl: companionAction.control.machineId,
+              matchedBy: establishedSelection
+                ? "established_selection_auto_applied_action"
+                : "selection_transition_auto_applied_action",
+              candidateCount: presentation.candidateCount,
+              perceivableCount: presentation.perceivableCount,
+              expectationEvidence,
+            };
+            const evidenceKey = establishedSelection
+              ? "establishedSelectionAction" : "selectionTransitionAction";
+            selectionResult.controlEvidence[evidenceKey] = autoAppliedSelectionAction;
+          }
+        }
+        if (!selectionOwnedOperation && selectionResult.drove) {
+          selectionOwnedOperation = await selectionOwnedCollectionOperation();
+        }
+        if (selectionOwnedOperation?.ok) {
+          selectionResult.terminalOutcomeProven = true;
+          selectionResult.controlEvidence.selectionOwnedOperation = selectionOwnedOperation;
+        }
+        // The scaffold stamps a coalesced selection/operation pair on one representative repeated
+        // option. Equivalent members execute that same handler even when only the representative
+        // carries the opaque attributes. Once a real selection transition has run, activating the
+        // representative action identity would perform the operation a second time on the wrong
+        // member. This shortcut requires both identities on the same option; a separate Apply/Save
+        // control therefore remains mandatory.
+        const selectionOwnedActionIndex = companionAction.control?.machineId
+          ? outcomes.findIndex((row) => row.selectionOwnedActionIds?.includes(companionAction.control.machineId))
+          : -1;
+        const selectionOwnedAction = selectionResult.drove && selectionOwnedActionIndex >= 0
+          ? { selectionControl: selectionFlows[selectionOwnedActionIndex]?.control?.machineId || null,
+            actionControl: companionAction.control.machineId }
+          : null;
+        if (selectionOwnedAction) selectionResult.controlEvidence.selectionOwnedAction = selectionOwnedAction;
+        drove = drove || selectionResult.drove;
+        controlEvidence = { ...(controlEvidence || {}), ...selectionResult.controlEvidence };
+        // A selection-owned operation runs through the option's onSelect handler. It still has to
+        // prove the operation's contracted outcome below, but the driver must not click a second
+        // prose-matched control after the semantic option already triggered it.
+        if (selectionResult.terminalOutcomeProven || selectionOwnedAction
+          || autoAppliedSelectionAction || !companionAction.control) {
+          contractDriven = true;
+        }
       }
     } else {
       const outcome = await driveSelection(page, step);
@@ -4170,7 +4185,7 @@ async function runStep(page, step, {
         .filter((text) => !surfaceIncludes(surface, text)),
       ...computedOutputFacts(surface, step.expectedOutputs),
       observedStateChanged,
-      observationOnly,
+      observationOnly: observationOnly || selectionOnlyEstablished,
     };
   };
   const pollBudget = !drove ? 0 : commits ? 20_000 : 10_000;
@@ -4523,6 +4538,7 @@ async function runStep(page, step, {
     // survived. It never outlives one verifyJourneys call, so nothing crosses a build or a user.
     runEvidence.set(durableRecordKey(mutationFlow), { ...durable });
   }
+  if (selectionTexts) outcome.selectedTexts = selectionTexts;
   return controlEvidence ? { ...outcome, controlEvidence } : outcome;
 }
 
@@ -4680,7 +4696,7 @@ export function structuredStepVerdict({
   }
   if (facts.selectionDeclared) {
     checks.push({ kind: "selection", ok: Boolean(facts.selectionProven),
-      detail: facts.selectionProven ? "the contracted selection transitioned" : "the contracted selection did not transition" });
+      detail: facts.selectionProven ? "the contracted selection matches its required value" : "the contracted selection did not match its required value" });
   }
   const ratio = wanted.length ? found.length / wanted.length : 1;
   const proseAdvisory = wanted.length && ratio < 0.5

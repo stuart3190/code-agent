@@ -1,0 +1,191 @@
+{
+  "policy": "minimal_contract_v1",
+  "productionGateUnchanged": true,
+  "results": [
+    {
+      "slug": "reliability-quote-20261017",
+      "sourceHash": "37f86e35c395a952e44a6277b6ca9f72f41b36d5b896eaa149c2c18dc9af4b38",
+      "contractProvenance": {
+        "via": "source_build",
+        "sourceSnapshotId": "c130dbea-188e-43ef-ac1f-d6b5fabac534",
+        "contractSnapshotId": "da33a1d3-89b2-4c2b-90e0-5fc23902b645"
+      },
+      "pass": false,
+      "primaryStatus": "fail",
+      "journeys": [
+        {
+          "id": "calculate-metre-quote",
+          "status": "fail",
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "steps": [
+            {
+              "action": "open the Calculator page",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted route / is open"
+            },
+            {
+              "action": "select metres as the measurement unit",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted selection matches its required value"
+            },
+            {
+              "action": "enter valid room dimensions",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "5/5 fields hold values"
+            },
+            {
+              "action": "enter the door and window counts",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "5/5 fields hold values"
+            },
+            {
+              "action": "select two paint coats",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted selection matches its required value · reflects the selection (2)"
+            },
+            {
+              "action": "calculate the quote",
+              "status": "fail",
+              "classification": "APP_FUNCTIONAL_FAILURE",
+              "detail": "computed output wrong or missing: resultsVisible expected true"
+            }
+          ]
+        },
+        {
+          "id": "calculate-feet-quote",
+          "status": "fail",
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "steps": [
+            {
+              "action": "open the Calculator page",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted route / is open"
+            },
+            {
+              "action": "select feet as the measurement unit",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted selection matches its required value"
+            },
+            {
+              "action": "enter room dimensions in feet",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "5/5 fields hold values"
+            },
+            {
+              "action": "enter zero doors and zero windows",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "5/5 fields hold values"
+            },
+            {
+              "action": "select one paint coat",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted selection matches its required value · reflects the selection (1)"
+            },
+            {
+              "action": "calculate the feet-based quote",
+              "status": "fail",
+              "classification": "APP_FUNCTIONAL_FAILURE",
+              "detail": "computed output wrong or missing: wallArea expected 37.161216, resultsVisible expected true"
+            }
+          ]
+        },
+        {
+          "id": "reject-invalid-and-reset",
+          "status": "fail",
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "steps": [
+            {
+              "action": "open the Calculator page",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted route / is open"
+            },
+            {
+              "action": "select metres as the measurement unit",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted selection matches its required value"
+            },
+            {
+              "action": "enter valid room dimensions",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "5/5 fields hold values"
+            },
+            {
+              "action": "enter valid opening counts",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "5/5 fields hold values"
+            },
+            {
+              "action": "select two paint coats",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted selection matches its required value · reflects the selection (2)"
+            },
+            {
+              "action": "calculate a valid quote",
+              "status": "fail",
+              "classification": "APP_FUNCTIONAL_FAILURE",
+              "detail": "computed output wrong or missing: resultsVisible expected true"
+            },
+            {
+              "action": "replace the length with zero",
+              "status": "not_reached",
+              "detail": "not reached because step 6 was fail"
+            },
+            {
+              "action": "attempt to calculate with the invalid dimension",
+              "status": "not_reached",
+              "detail": "not reached because step 6 was fail"
+            },
+            {
+              "action": "reset the calculator",
+              "status": "not_reached",
+              "detail": "not reached because step 6 was fail"
+            }
+          ]
+        },
+        {
+          "id": "navigate-between-pages",
+          "status": "undriveable",
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "steps": [
+            {
+              "action": "open the Calculator page",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted route / is open"
+            },
+            {
+              "action": "use the About navigation link",
+              "status": "undriveable",
+              "classification": "APP_FUNCTIONAL_FAILURE",
+              "detail": "the contracted action control was not offered (use the About navigation link)"
+            },
+            {
+              "action": "use the Calculator navigation link",
+              "status": "not_reached",
+              "detail": "not reached because step 2 was undriveable"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Shadow evaluation of one existing published app, not fresh-generation success.",
+    "Historical edit/verify runtime contracts were unrecorded; selected contracts follow source snapshot ancestry. Published captured source hashes are checked before execution."
+  ]
+}
