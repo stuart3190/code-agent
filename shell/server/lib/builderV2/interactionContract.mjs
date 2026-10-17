@@ -2526,7 +2526,15 @@ export function collectInteractionControls(tree) {
       const accessibleName = ariaLabel || labelledByText || label?.text || title || null;
       const nameAttr = attr(opening, "name");
       const placeholder = attr(opening, "placeholder");
-      const type = String(attr(opening, "type") || (String(tag).toLowerCase().includes("textarea") ? "textarea" : "text")).toLowerCase();
+      const attributes = opening.attributes || [];
+      const lastSpread = attributes.findLastIndex(row => row.type === "JSXSpreadAttribute");
+      const lastType = attributes.findLastIndex(row => row.type === "JSXAttribute" && row.name?.name === "type");
+      // A spread can supply or override the native type. The absence of a literal type is not
+      // evidence of text input (semantic inputProps commonly carry type="number").
+      const typeUnknown = lastSpread >= 0 && lastType <= lastSpread
+        || lastType >= 0 && !literal(attributes[lastType].value);
+      const type = typeUnknown ? null : String(lastType >= 0 ? literal(attributes[lastType].value)
+        : String(tag).toLowerCase().includes("textarea") ? "textarea" : "text").toLowerCase();
       const changeHandlerSource = [attrSource(raw, opening, "onChange"), attrSource(raw, opening, "onInput")].filter(Boolean).join(" ");
       const resolvedHandlerSource = handlerDefinition(String(raw), changeHandlerSource);
       const valueSource = [attrSource(raw, opening, "value"), attrSource(raw, opening, "defaultValue"),
