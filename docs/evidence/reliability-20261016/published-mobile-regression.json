@@ -1,0 +1,32 @@
+[
+  {
+    "app": "counter",
+    "checked": true,
+    "width": 390,
+    "findings": []
+  },
+  {
+    "app": "downlight",
+    "checked": true,
+    "width": 390,
+    "findings": []
+  },
+  {
+    "app": "quote",
+    "checked": true,
+    "width": 390,
+    "findings": []
+  },
+  {
+    "app": "bookshelf",
+    "checked": true,
+    "width": 390,
+    "findings": []
+  },
+  {
+    "app": "booking",
+    "checked": true,
+    "width": 390,
+    "findings": []
+  }
+]

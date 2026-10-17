@@ -1,0 +1,62 @@
+[
+  {
+    "width": 1440,
+    "name": "initial example",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "rice scales to 450g",
+    "ok": false
+  },
+  {
+    "width": 1440,
+    "name": "water scales to 900ml",
+    "ok": false
+  },
+  {
+    "width": 1440,
+    "name": "salt scales to 3tsp",
+    "ok": false
+  },
+  {
+    "width": 1440,
+    "name": "fractional servings",
+    "ok": false
+  },
+  {
+    "width": 1440,
+    "name": "proof completed",
+    "ok": false
+  },
+  {
+    "width": 390,
+    "name": "initial example",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "rice scales to 450g",
+    "ok": false
+  },
+  {
+    "width": 390,
+    "name": "water scales to 900ml",
+    "ok": false
+  },
+  {
+    "width": 390,
+    "name": "salt scales to 3tsp",
+    "ok": false
+  },
+  {
+    "width": 390,
+    "name": "fractional servings",
+    "ok": false
+  },
+  {
+    "width": 390,
+    "name": "proof completed",
+    "ok": false
+  }
+]
