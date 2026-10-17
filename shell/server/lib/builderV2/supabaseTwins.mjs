@@ -14,7 +14,7 @@
 import crypto from "node:crypto";
 import { serviceClient } from "../supabase.mjs";
 import { memoryGraph } from "./graphStore.mjs";
-import { INDEXER_VERSION, treeHashOf } from "./indexer.mjs";
+import { INDEXER_VERSION, treeHashOf, resolveTreeIndex } from "./indexer.mjs";
 import { fileGraphHash, fileGraphPayload, manifestOf } from "./graphParity.mjs";
 
 const sha256 = (text) => crypto.createHash("sha256").update(text).digest("hex");
@@ -150,6 +150,13 @@ export async function loadIndex(owner, projectId, manifest, { client = serviceCl
     if (computed !== revision.graph_hash) {
       integrity.push({ path, revisionId: revision.id, problem: "graph hash differs", expected: revision.graph_hash, actual: computed });
     }
+  }
+  // Stored targets belong to the tree at first persistence. Validate that immutable
+  // payload above before deriving targets for the requested manifest. Never mask corruption.
+  if (!missing.length && !incomplete.length && !integrity.length) {
+    const resolved = resolveTreeIndex(files);
+    loaded.edges = resolved.edges;
+    loaded.refs = resolved.refs;
   }
   return loaded;
 }

@@ -1,0 +1,27 @@
+{
+  "passed": 21,
+  "checks": [
+    "old function reproduces context-only immutable conflict",
+    "new context reuses immutable revision and writes only new files",
+    "original revision and children are byte-for-byte unchanged",
+    "old manifest round-trip derives correct call and import targets",
+    "new manifest round-trip derives correct call and import targets",
+    "ambiguous manifest round-trip derives correct call and import targets",
+    "rejects changed symbols",
+    "rejects changed references",
+    "rejects changed imports",
+    "rejects changed version",
+    "rejects changed metadata",
+    "rejects changed null hash",
+    "rejects changed null symbols",
+    "rejects changed owner",
+    "anon cannot persist or read graphs",
+    "authenticated cannot persist or read graphs",
+    "cross-owner load rejected",
+    "stored target corruption is caught before rebind",
+    "different context cannot conceal missing children",
+    "original context can atomically repair missing children",
+    "repaired original still loads with new context"
+  ],
+  "scope": "isolated PostgreSQL, production functions and internal constraints; actual JS persistence/load/parity; no production rows"
+}

@@ -2,3 +2,5 @@
 // error-recovery-means-opaque) is the default; v0 remains in the tree as the documented
 // floor, the fixture parser, and the parity baseline — never delete it (correction C3).
 export { indexFile, indexTree, tokensOf, treeHashOf, diffIndex, INDEXER_VERSION } from "./indexerV1.mjs";
+
+export { resolveTreeIndex } from "./indexerV0.mjs";
