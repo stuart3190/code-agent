@@ -13,3 +13,8 @@ test('shadowed bindings and legacy routing are not condemned',()=>{
  assert.equal(findings('import {Link} from "../lib/app/index.js"; const A=({Link})=> <Link to="/about"/>;').length,0);
  assert.equal(findings('import {Link} from "../lib/app/index.js"; const A=()=> <Link to="/about"/>;',false).length,0);
 });
+test('declared static aliases are accepted but parameter templates and unknown paths retain diagnosis',()=>{
+ const source='import {Link} from "../lib/app/index.js"; const A=()=> <><Link to="/about"/><Link to="/records/:id"/><Link to="/missing"/></>';
+ const tree={'src/screens/Screen.jsx':source,'src/lib/app/routing.js':'// composed','src/lib/capabilities/composed/routes.js':'export const routeDefinitions=Object.freeze([{id:"about",path:"/about"},{id:"record",path:"/records/:id"}]);'};
+ assert.deepEqual(lintPlatformAbi(tree).findings.filter(f=>f.code==='platform_link_path').map(f=>f.target),['/records/:id','/missing']);
+});

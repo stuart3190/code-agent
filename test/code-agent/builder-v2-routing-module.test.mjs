@@ -177,7 +177,7 @@ test("WP6 — the composer ships the route table, a generated layout with an out
 test("WP6 — registry and lint: thrallo.routing is locked; a literal parameterised path in generated code is reported", () => {
   assert.deepEqual(validateModuleRegistry(), { ok: true, problems: [] });
   const routing = moduleManifest("thrallo.routing");
-  assert.equal(routing.version, "1.0.0");
+  assert.equal(routing.version, "1.1.0");
   assert.ok(routing.runtime.protectedArtifacts.some((artifact) => artifact.path === "src/lib/modules/routing.js"));
   const spec = deriveBuildSpec(CONTRACT);
   assert.ok(spec.moduleResolution.modules.some((row) => row.id === "thrallo.routing"));
@@ -215,4 +215,14 @@ test("WP6 — UI binding: a generated layout and screens render every route stat
   assert.match(renderToString(React.createElement(Screen)), /Please sign in \(member_required\)/);
   await router.resolve("/nowhere");
   assert.match(renderToString(React.createElement(Screen)), /Nothing here/);
+});
+
+test('routing accepts exact declared static path aliases without relaxing parameter or unknown-route guards',()=>{
+ const table=compileRoutes([{id:'home',path:'/'},{id:'about',path:'/how-it-works'},{id:'detail',path:'/projects/:id'},{id:'files',path:'/files/*'}]);
+ assert.equal(routeHref(table,'/'),'/');assert.equal(routeHref(table,'/how-it-works'),'/how-it-works');
+ assert.equal(routeHref(table,'about'),'/how-it-works');
+ assert.equal(routeHref(table,'detail',{id:'a b'}),'/projects/a%20b');
+ for(const destination of ['/missing','//evil.example','https://evil.example','/projects/:id','/projects/123','/files/*','/how-it-works?x=1'])assert.throws(()=>routeHref(table,destination),e=>e.code==='route_unknown');
+ assert.throws(()=>routeHref(table,'detail'),e=>e.code==='route_param_missing');
+ assert.equal(moduleManifest('thrallo.routing').version,'1.1.0');
 });

@@ -117,9 +117,10 @@ export function matchRoute(table, actualPath) {
   return null;
 }
 
-/** A concrete href for a route id. Every declared parameter must be supplied — never a literal ":projectId". */
+/** A concrete href for a route id or an exact declared static path. Parameters still require an id. */
 export function routeHref(table, id, params = {}) {
-  const route = table.byId[id];
+  const route = table.byId[id] || (typeof id === "string" && id.startsWith("/")
+    ? table.routes.find(candidate => candidate.path === id && !/[:*]/.test(candidate.path)) : null);
   if (!route) throw new RouteError("route_unknown", `no route ${id}`);
   const href = segmentsOf(route.path).map((segment) => {
     if (segment === "*") return "";

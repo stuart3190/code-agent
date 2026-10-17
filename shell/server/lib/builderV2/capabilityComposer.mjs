@@ -272,12 +272,12 @@ import { useRouterState } from "../modules/uiReact.js";
 
 /** The matched route: { path, route, params, state: loading|ready|not_found|forbidden|error, data, navigate, href }. */
 export function useRoute() { return useRouterState(router); }
-/** A concrete href for a route id. Every declared parameter must be supplied. */
+/** A concrete href for a route id or exact declared static path. Parameterised routes require an id and params. */
 export const routeHref = (id, params = {}) => router.href(id, params);
 export const navigate = (target, options) => router.navigate(target, options);
 export const routeIds = Object.freeze(routeTable.routes.map((route) => route.id));
 
-/** An anchor bound to a route id, so a parameterised path is never written by hand. */
+/** An anchor bound to a route id or exact declared static path; parameterised paths are built from params. */
 export function Link({ to, params = {}, replace = false, children, onClick, ...rest }) {
   const href = routeHref(to, params);
   return React.createElement("a", {

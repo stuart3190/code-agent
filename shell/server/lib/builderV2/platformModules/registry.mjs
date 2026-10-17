@@ -436,6 +436,9 @@ const ROUTING_MODULE = platformModule({
   proof: "test/code-agent/builder-v2-routing-module.test.mjs",
 });
 
+const ROUTING_1_1 = defineModule({ ...ROUTING_MODULE, version: "1.1.0",
+  title: "Routing (route IDs and exact declared static paths)" });
+
 // WP7 — the query, form and async-state runtimes. Each replaces a category of repeated generated
 // controller work (audit §5) and is selected from the contract's structure, not from a capability.
 const QUERY_MODULE = platformModule({
@@ -1044,7 +1047,7 @@ const META_CONNECTOR_MODULE = providerFamily({
 
 const MODULES = [
   CORE_MODULE, ...LEGACY_WRAPPED.map(legacyCapabilityModule), IDENTITY_1_2, ACCOUNTS_MODULE, AUTHORIZATION_1_1,
-  ADMIN_MODULE, ENTITIES_1_1, ROUTING_MODULE, QUERY_MODULE, FORMS_1_1, ASYNC_MODULE, SETTINGS_MODULE, AUDIT_MODULE,
+  ADMIN_MODULE, ENTITIES_1_1, ROUTING_MODULE, ROUTING_1_1, QUERY_MODULE, FORMS_1_1, ASYNC_MODULE, SETTINGS_MODULE, AUDIT_MODULE,
   WORKFLOW_1_1, BOOKING_1_1, BOOKING_1_2, WORKSPACE_MODULE, EDITOR_MODULE,
   FILES_MODULE, NOTIFICATIONS_MODULE, REALTIME_MODULE,
   ANALYTICS_EVENTS_MODULE, ANALYTICS_QUERIES_MODULE, EXPORTS_MODULE, BILLING_MODULE,

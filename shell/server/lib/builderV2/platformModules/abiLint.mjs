@@ -40,7 +40,7 @@ function lineOf(source, index) {
 
 // Only diagnose imported platform Links with literal path props. Unknown components,
 // dynamic destinations and locally shadowed names remain the browser's responsibility.
-function linkPathFindings(source, file) {
+function linkPathFindings(source, file, staticPaths = new Set()) {
   let ast;
   try { ast = parse(source, { sourceType: "module", plugins: ["jsx", ...(/\.tsx?$/.test(file) ? ["typescript"] : [])] }); }
   catch { return []; }
@@ -81,11 +81,22 @@ function linkPathFindings(source, file) {
     const attr = node.attributes.find(a => a.type === "JSXAttribute" && a.name?.name === "to");
     const value = attr?.value?.type === "StringLiteral" ? attr.value.value
       : attr?.value?.expression?.type === "StringLiteral" ? attr.value.expression.value : null;
-    if (!value?.startsWith("/")) continue;
+    if (!value?.startsWith("/") || staticPaths.has(value)) continue;
     findings.push({ code: "platform_link_path", module: file, line: node.loc.start.line, target: value,
-      message: `${file}:${node.loc.start.line} passes path "${value}" to the platform Link, which expects a declared route ID. Use <Link to="routeId"> (and params for parameterised routes); a path here throws "no route" during render.` });
+      message: `${file}:${node.loc.start.line} passes path "${value}" to the platform Link, but it is not a declared static path. Use a declared route ID with <Link to="routeId"> (and params for parameterised routes); an unknown path throws "no route" during render.` });
   }
   return findings;
+}
+
+function composedStaticPaths(tree) {
+  try {
+    const ast = parse(tree['src/lib/capabilities/composed/routes.js'] || '', { sourceType: 'module' });
+    const declaration = ast.program.body.flatMap(n => n.declaration?.declarations || [])
+      .find(n => n.id?.name === 'routeDefinitions');
+    const entries = declaration?.init?.arguments?.[0]?.elements || [];
+    return new Set(entries.map(n => n.properties?.find(p => (p.key?.name || p.key?.value) === 'path')?.value?.value)
+      .filter(path => typeof path === 'string' && !/[:*]/.test(path)));
+  } catch { return new Set(); }
 }
 
 /**
@@ -94,10 +105,11 @@ function linkPathFindings(source, file) {
  */
 export function lintPlatformAbi(tree, { locked = false, identityInstalled = null } = {}) {
   const findings = [];
+  const staticPaths = composedStaticPaths(tree);
   const hasIdentity = identityInstalled ?? typeof tree?.["src/lib/capabilities/composed/identity.js"] === "string";
   for (const [file, source] of Object.entries(tree || {})) {
     if (!GENERATED_SOURCE.test(file) || isProtectedPath(file, { tree }) || typeof source !== "string") continue;
-    if (typeof tree?.["src/lib/app/routing.js"] === "string") findings.push(...linkPathFindings(source, file));
+    if (typeof tree?.["src/lib/app/routing.js"] === "string") findings.push(...linkPathFindings(source, file, staticPaths));
     IMPORT_SPECIFIER.lastIndex = 0;
     let match;
     while ((match = IMPORT_SPECIFIER.exec(source))) {
