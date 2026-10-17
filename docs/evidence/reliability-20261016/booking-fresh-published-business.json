@@ -1,0 +1,102 @@
+[
+  {
+    "width": 1440,
+    "name": "declared static route navigation works",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "confirmation appears after click",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "confirmation is backed by reservation",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "displayed reference is server reference",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "wrong email cannot retrieve",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "own reference lookup succeeds",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "lookup survives reload",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "UI cancellation confirmed",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "cancellation persists after reload",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "own test reservation cleanup",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "declared static route navigation works",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "confirmation appears after click",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "confirmation is backed by reservation",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "displayed reference is server reference",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "wrong email cannot retrieve",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "own reference lookup succeeds",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "lookup survives reload",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "UI cancellation confirmed",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "cancellation persists after reload",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "own test reservation cleanup",
+    "ok": true
+  }
+]

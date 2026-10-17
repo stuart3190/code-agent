@@ -1,0 +1,122 @@
+[
+  {
+    "width": 1440,
+    "name": "scales to 6 servings",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "scales to 2.5 servings",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "invalid \"0\" clears output",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "invalid input feedback appears",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "invalid \"-2\" clears output",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "invalid input feedback appears",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "invalid \"\" clears output",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "invalid input feedback appears",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "reset restores example",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "added decimal ingredient scales",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "removed ingredient absent",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "guide route opens",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "scales to 6 servings",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "scales to 2.5 servings",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "invalid \"0\" clears output",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "invalid input feedback appears",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "invalid \"-2\" clears output",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "invalid input feedback appears",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "invalid \"\" clears output",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "invalid input feedback appears",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "reset restores example",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "added decimal ingredient scales",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "removed ingredient absent",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "guide route opens",
+    "ok": true
+  }
+]
