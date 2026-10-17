@@ -406,7 +406,7 @@ export default function RouteStates({ state, reason, redirectTo, onRetry }) {
   if (state === "forbidden") {
     return <p role="alert">You need to sign in to view this{redirectTo ? <> — <a href={redirectTo}>sign in</a></> : null}.</p>;
   }
-  if (state === "error") return <div role="alert"><p>We could not load this page. Please try again.</p>{onRetry ? <button type="button" onClick={onRetry}>Try again</button> : null}</div>;
+  if (state === "error") return <div role="alert"><p>{reason === "session_refresh_timeout" ? "Your session refresh timed out. Please try again in a minute." : "We could not load this page. Please try again."}</p>{onRetry ? <button type="button" onClick={onRetry}>Try again</button> : null}</div>;
   return null;
 }
 `;
@@ -451,8 +451,11 @@ export function scaffoldCompositionPlan(graph, { routePlan = graph?.routePlan ||
   };
 }
 
-// Exact platform default before recoverable session errors. Never pattern-rewrite authored UI.
-const LEGACY_ROUTE_STATES_SHA256 = "8c3cf2c3f117ed84fc273081f7ed318c709bb17781991e5f1790d59367c65ce4";
+// Exact historical platform defaults. Never pattern-rewrite authored UI.
+const LEGACY_ROUTE_STATES_SHA256 = new Set([
+  "8c3cf2c3f117ed84fc273081f7ed318c709bb17781991e5f1790d59367c65ce4",
+  "a0713420a29422e19914df72c0cf5056c0d71f9a217e523eb991817ca596e44d",
+]);
 
 /** Refresh deterministic files and known untouched defaults; preserve authored presentation. */
 export function composeScaffoldFoundation(tree, graph, { routePlan = (routingInstalled(tree) ? graph?.routePlan || null : null) } = {}) {
@@ -461,7 +464,7 @@ export function composeScaffoldFoundation(tree, graph, { routePlan = (routingIns
   const defaultSlotsUpgraded = [];
   for (const [path, source] of Object.entries(rendered.screenFiles)) {
     if (typeof next[path] !== "string") next[path] = source;
-    else if (path === ROUTE_STATES_PATH && digest(next[path]) === LEGACY_ROUTE_STATES_SHA256) {
+    else if (path === ROUTE_STATES_PATH && LEGACY_ROUTE_STATES_SHA256.has(digest(next[path]))) {
       next[path] = source;
       defaultSlotsUpgraded.push(path);
     }
