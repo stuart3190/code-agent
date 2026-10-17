@@ -59,7 +59,7 @@ export async function ensureAppVisitorSession({
   if (!auth?.currentUser || !auth?.signIn || !auth?.signUp) {
     throw new Error("ensureAppVisitorSession: app-scoped auth is required.");
   }
-  const current = await auth.currentUser().catch(() => null);
+  const current = await auth.currentUser();
   if (current) return current;
 
   const identity = String(appId || "app");
@@ -110,6 +110,17 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
   const unwrap = ({ data, error }) => {
     if (error) throw error;
     return data;
+  };
+
+  const currentSessionUser = async () => {
+    const { data, error } = await client.auth.getUser();
+    // Absence/expiry is authoritative; a failed lookup is not evidence of sign-out.
+    if (error) {
+      if (error.name === "AuthSessionMissingError"
+          || ["session_not_found", "session_expired", "bad_jwt"].includes(error.code)) return null;
+      throw error;
+    }
+    return data?.user ?? null;
   };
 
   // Per-app auth (PLAN-per-app-auth default lane): when authUrl + appId are configured, sign-up/
@@ -174,8 +185,7 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
           if (error) throw error;
         },
         async currentUser() {
-          const { data } = await client.auth.getUser();
-          const u = data?.user ?? null;
+          const u = await currentSessionUser();
           // Surface the REAL email the person typed, not the app-scoped synthetic address.
           return u ? { ...u, email: u.user_metadata?.app_email || u.email } : null;
         },
@@ -202,8 +212,7 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
           if (error) throw error;
         },
         async currentUser() {
-          const { data } = await client.auth.getUser();
-          return data?.user ?? null;
+          return currentSessionUser();
         },
       };
 
