@@ -1,0 +1,33 @@
+{
+  "independentJsonSchema": {
+    "passed": 14,
+    "checks": [
+      "complete CSS replacement",
+      "complete new source",
+      "delete file",
+      "indexed operations",
+      "null replacement content",
+      "null new file content",
+      "multiple targets",
+      "orphan content",
+      "missing selected target",
+      "ops on whole file",
+      "non-string file content",
+      "unknown patch keys",
+      "path/content split across patches",
+      "actual connected-provider response"
+    ]
+  },
+  "provider": "codex",
+  "model": "gpt-5.6-terra",
+  "usage": {
+    "input": 580,
+    "output": 221,
+    "reasoning": 51,
+    "cached": 0,
+    "total": 801,
+    "providerRequestId": "codex:response:resp_0239742d36694391016ad2c68f7b588191b8c4c608fd746100"
+  },
+  "patchCount": 4,
+  "appliedPatches": 0
+}

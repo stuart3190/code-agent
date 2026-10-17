@@ -164,9 +164,10 @@ test("WP2 — the strict tool schema is complete: every property required, optio
   const schema = EMIT_PATCHES_SCHEMA;
   assert.equal(schema.strict, true);
   assert.deepEqual(schema.parameters.required, ["patches"]);
-  const item = schema.parameters.properties.patches.items;
+  for (const item of schema.parameters.properties.patches.items.anyOf) {
   assert.deepEqual(item.required.sort(), ["content", "deleteFile", "file", "newFile", "ops", "replaceFile"].sort(),
     "strict tools need ALL properties required (the P18 lesson) with nullable optionals");
+  }
 });
 
 // ── WP-11 live evidence: replaceFile is the mutation path for index-opaque files ──────────────
@@ -315,8 +316,8 @@ test("replace_exact surgically patches one unique nested excerpt and fails close
     content: "if (!ready) { const advance = () => true; return <button onClick={advance}>Start</button>; }",
   }] }]);
   assert.equal(locallyBound.rejected.length, 0, JSON.stringify(locallyBound.rejected));
-  assert.ok(EMIT_PATCHES_SCHEMA.parameters.properties.patches.items.properties.ops.items
+  assert.ok(EMIT_PATCHES_SCHEMA.parameters.properties.patches.items.anyOf[0].properties.ops.items
     .properties.op.enum.includes("replace_exact"));
-  assert.match(EMIT_PATCHES_SCHEMA.parameters.properties.patches.items.properties.ops.items
+  assert.match(EMIT_PATCHES_SCHEMA.parameters.properties.patches.items.anyOf[0].properties.ops.items
     .properties.symbol.description, /never only a function\/component name/);
 });

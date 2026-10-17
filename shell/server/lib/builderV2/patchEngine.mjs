@@ -21,53 +21,47 @@ export const PROTECTED_PATHS = Object.freeze([
   /^src\/lib\/app\//,
 ]);
 
-// The strict tool schema the orchestrator will register (strict tools proven since P18:
-// every property required, optionals nullable).
+// Strict, mutually exclusive target branches prevent a decoder-valid null-content
+// whole-file patch. Keep the existing wire keys so retained valid patches remain compatible.
+const PATCH_OPERATIONS_SCHEMA = {
+  type: "array",
+  items: {
+    type: "object", additionalProperties: false, required: ["op", "symbol", "content"],
+    properties: {
+      op: { type: "string", enum: ["replace_symbol", "replace_exact", "insert_after_symbol", "insert_before_symbol", "delete_symbol", "append", "add_import"] },
+      symbol: { type: ["string", "null"], description: "For replace_exact, the complete exact old source excerpt (never only a function/component name); otherwise the indexed symbol name" },
+      content: { type: ["string", "null"], description: "Complete replacement source for the selected symbol or exact old excerpt" },
+    },
+  },
+};
+function patchTargetSchema(target) {
+  const wholeFile = target === "newFile" || target === "replaceFile";
+  return {
+    type: "object", additionalProperties: false,
+    required: ["file", "ops", "newFile", "content", "deleteFile", "replaceFile"],
+    properties: {
+      file: target === "file" ? { type: "string", description: "Existing indexed file to modify with ops" } : { type: "null" },
+      ops: target === "file" ? PATCH_OPERATIONS_SCHEMA : { type: "null" },
+      newFile: target === "newFile" ? { type: "string", description: "Path of a file to CREATE" } : { type: "null" },
+      content: wholeFile ? { type: "string", description: "COMPLETE file source, including CSS; never omit the implementation" } : { type: "null" },
+      deleteFile: target === "deleteFile" ? { type: "string", description: "Existing file to DELETE" } : { type: "null" },
+      replaceFile: target === "replaceFile" ? { type: "string", description: "Existing file to replace with complete content; required for opaque CSS/config files" } : { type: "null" },
+    },
+  };
+}
 export const EMIT_PATCHES_SCHEMA = Object.freeze({
   name: "emit_patches",
-  description: "Apply your changes as symbol-level operations. Every op is validated against "
-    + "the code index; a rejected op comes back with the exact reason. Use newFile for files "
-    + "that do not exist yet; never rewrite a whole existing file through newFile. Files the "
-    + "index cannot parse into symbols (CSS, config) can only change via replaceFile with the "
-    + "COMPLETE new content on the SAME patch object. Each patch has exactly one non-null target "
-    + "(file, newFile, replaceFile, or deleteFile); all other targets are null. Never put a file path "
-    + "on one patch and its content on another. For a very large symbol, replace_exact uses `symbol` as the exact "
-    + "old source excerpt and `content` as its replacement; the excerpt must occur exactly once.",
+  description: "Apply changes as validated symbol operations or complete files. Each patch selects exactly "
+    + "one target: file with ops, newFile with complete content, replaceFile with complete content, or deleteFile. "
+    + "All unused keys must be null. Existing opaque CSS/config files require replaceFile and complete CSS/source "
+    + "on that SAME patch. Never split a path and its source across patches. For replace_exact, symbol is the "
+    + "exact old source excerpt and content is its replacement; the excerpt must occur exactly once.",
   strict: true,
   parameters: {
-    type: "object",
-    additionalProperties: false,
-    required: ["patches"],
-    properties: {
-      patches: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["file", "ops", "newFile", "content", "deleteFile", "replaceFile"],
-          properties: {
-            file: { type: ["string", "null"], description: "Existing file to modify with ops" },
-            ops: {
-              type: ["array", "null"],
-              items: {
-                type: "object",
-                additionalProperties: false,
-                required: ["op", "symbol", "content"],
-                properties: {
-                  op: { type: "string", enum: ["replace_symbol", "replace_exact", "insert_after_symbol", "insert_before_symbol", "delete_symbol", "append", "add_import"] },
-                  symbol: { type: ["string", "null"], description: "For replace_exact, the complete exact old source excerpt (never only a function/component name); for symbol operations, the indexed symbol name" },
-                  content: { type: ["string", "null"], description: "Complete replacement source for the selected symbol or exact old excerpt" },
-                },
-              },
-            },
-            newFile: { type: ["string", "null"], description: "Path of a file to CREATE" },
-            content: { type: ["string", "null"], description: "Content for newFile or replaceFile" },
-            deleteFile: { type: ["string", "null"], description: "Path of a file to DELETE" },
-            replaceFile: { type: ["string", "null"], description: "EXISTING file to replace wholesale with `content` — the only way to change files the index treats as opaque (CSS, config)" },
-          },
-        },
-      },
-    },
+    type: "object", additionalProperties: false, required: ["patches"],
+    properties: { patches: { type: "array", items: {
+      anyOf: ["file", "newFile", "replaceFile", "deleteFile"].map(patchTargetSchema),
+    } } },
   },
 });
 
