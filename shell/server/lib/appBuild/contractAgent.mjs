@@ -138,9 +138,15 @@ Rules:
   browser must see: "expectedOutputs": { "outputField": <number, string or boolean> }. Each key
   is a field a functional responsibility writes, or a field this step produces, that this step
   reaches by operating that operation, producing the field, or reading it after an earlier step
-  produced it. Every entity field that responsibility reads must have a verificationValues
-  fixture on this step or an earlier step of the same journey, so the expected result is fixed
-  by those inputs. Never put authEmail, authPassword, or any other secret in expectedOutputs.
+  produced it. Each input it reads needs a known value: either a primitive verificationValues
+  fixture on a step that actually operates that field, an earlier asserted computed output,
+  or an untouched value in one explicitly declared transient sampleData row at route entry.
+  Use sampleData: { "EntityName": [{ ...initialValues }] } for initial scalar and collection
+  values, preserving the requested quantities and units. NEVER place arrays or objects in
+  verificationValues, and never add an untouched seed field to verificationValues just because
+  a calculation reads it. Persisted records, multiple seed rows, or values changed earlier still
+  require an explicit producer or operated input fixture. Never put authEmail, authPassword,
+  or any other secret in expectedOutputs.
 - EXACTLY ONE journey has priority "primary".
 - A journey that starts from records another journey created names that journey in "dependsOn".
   When two journeys could each be the creator, "dependsOn" names exactly one of them; the
