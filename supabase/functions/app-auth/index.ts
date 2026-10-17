@@ -262,6 +262,10 @@ Deno.serve(async (req: Request) => {
   const { data: existing, error: lookupErr } = await svc
     .from("app_users").select("id, auth_user_id, status").eq("app_id", appId).eq("email", email).maybeSingle();
   if (lookupErr) return reply(500, { error: `lookup failed: ${lookupErr.message}` });
+  // Idempotent signup must honor the same account suspension as ordinary sign-in.
+  if (existing && existing.status !== "active") {
+    return reply(403, { error: "This account has been disabled by the app owner." });
+  }
 
   if (action === "signup" && !existing) {
     // Abuse guards: a promo spike is fine; a signup script is not. The platform's own
@@ -327,8 +331,6 @@ Deno.serve(async (req: Request) => {
     if (probeErr) return reply(409, { error: "An account with this email already exists for this app — sign in instead." });
   } else if (!existing) {
     return reply(401, { error: "Invalid email or password." });
-  } else if (existing.status !== "active") {
-    return reply(403, { error: "This account has been disabled by the app owner." });
   }
 
   // Both paths end in a REAL password sign-in against the synthetic address -> native session.
