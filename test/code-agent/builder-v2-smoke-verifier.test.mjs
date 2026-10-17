@@ -200,6 +200,8 @@ for (const [name, content, expectedPass, phase] of [
 }
 
 for (const [name, css, expectedPass] of [
+  ['below-fold clipped control is inspected without activating it', 'html,body{overflow-x:clip}main{width:500px;margin-top:1200px}', false],
+  ['below-fold horizontal scrolling board is intentional', 'main{width:350px;overflow-x:auto;margin-top:1200px}', true],
   ['root clipping masks mobile control overflow', 'html,body{overflow-x:clip}main{width:500px}', false],
   ['hidden container clips a control', 'main{width:350px;overflow:hidden}', false],
   ['horizontal scrolling board is intentional', 'main{width:350px;overflow-x:auto}', true],

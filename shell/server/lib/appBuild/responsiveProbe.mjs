@@ -20,8 +20,15 @@ export async function probeResponsiveControls({ browser, page: existingPage = nu
         if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
         const style = getComputedStyle(el);
         if (style.display === 'none' || style.visibility === 'hidden' || style.pointerEvents === 'none' || Number(style.opacity) === 0) continue;
-        const r = el.getBoundingClientRect();
-        if (r.width < 2 || r.height < 2 || r.top < 0 || r.bottom > innerHeight) continue;
+        let r = el.getBoundingClientRect();
+        if (r.width < 2 || r.height < 2) continue;
+        // Inspect controls below the fold too. Scroll only vertically: horizontal scrolling
+        // would conceal the clipping we are trying to measure. Never move a modal's backdrop.
+        if (!modal && r.height <= innerHeight && (r.top < 0 || r.bottom > innerHeight)) {
+          window.scrollTo({ left: window.scrollX, top: window.scrollY + r.top - (innerHeight - r.height) / 2, behavior: 'instant' });
+          r = el.getBoundingClientRect();
+        }
+        if (r.top < 0 || r.bottom > innerHeight) continue;
         // Root overflow clipping can hide broken layouts from scrollWidth. Prove a partially
         // visible control is cut off by a non-scrollable ancestor, without rejecting carousels,
         // scrollable boards, hidden drawers, or controls wholly outside the initial viewport.
@@ -61,6 +68,7 @@ export async function probeResponsiveControls({ browser, page: existingPage = nu
           controlId: el.getAttribute('data-thrallo-control') || el.getAttribute('data-thrallo-action') || null,
           blocker: panel.getAttribute('aria-label') || panel.getAttribute('role') || panel.tagName.toLowerCase(), width:viewportWidth });
       }
+      window.scrollTo({ left: 0, top: 0, behavior: 'instant' });
       return findings;
     }, viewportWidth);
     const first = await sample();
