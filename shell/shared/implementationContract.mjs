@@ -413,6 +413,31 @@ function journeyFixtureKeys(steps) {
 // A single declared transient seed is an input fixture too: list-valued initial recipe
 // data cannot be typed into verificationValues (which describes primitive UI inputs).
 // Do not borrow persisted records, ambiguous rows, or a seed changed earlier in the journey.
+export function transientSeedState(contract, entity) {
+  if (entity?.storage !== "transient") return {};
+  let rows = contract.sampleData?.[entity.name];
+  if (Array.isArray(contract.sampleData)) {
+    const declarations = contract.sampleData.filter(row => row?.entity === entity.name);
+    if (declarations.length !== 1 || (declarations[0].storage && declarations[0].storage !== "transient")) return {};
+    rows = [declarations[0].values];
+  }
+  if (!Array.isArray(rows) || rows.length !== 1 || !rows[0] || typeof rows[0] !== "object" || Array.isArray(rows[0])) return {};
+  const state = {};
+  for (const field of entity.fields || []) {
+    const value = rows[0][field.name], key = referenceKey(field.name);
+    if (!Object.hasOwn(rows[0], field.name) || value === null || value === undefined) continue;
+    if ((contract.entities || []).filter(other => (other.fields || []).some(f => referenceKey(f.name) === key)).length !== 1) continue;
+    const valid = field.type === "json" ? typeof value === "object"
+      : field.type === "array" ? Array.isArray(value)
+      : field.type === "number" ? typeof value === "number" && Number.isFinite(value)
+      : field.type === "boolean" ? typeof value === "boolean" : field.type === "string" && typeof value === "string";
+    const declared = Object.hasOwn(field, "initialValue") ? field.initialValue : field.default;
+    if (declared !== undefined && JSON.stringify(declared) !== JSON.stringify(value)) continue;
+    if (valid) Object.defineProperty(state, field.name, { value, enumerable:true, configurable:true, writable:true });
+  }
+  return state;
+}
+
 function initialTransientFixtureKeys(contract, steps) {
   const keys = new Set();
   const first = steps?.[0];
@@ -430,18 +455,9 @@ function initialTransientFixtureKeys(contract, steps) {
     }
   }
   for (const entity of contract.entities || []) {
-    if (entity.storage !== "transient") continue;
-    const rows = contract.sampleData?.[entity.name];
-    if (!Array.isArray(rows) || rows.length !== 1 || !rows[0] || typeof rows[0] !== "object") continue;
-    for (const field of entity.fields || []) {
-      const key = referenceKey(field.name), value = rows[0][field.name];
-      if (changed.has(key) || !Object.hasOwn(rows[0], field.name) || value === null || value === undefined) continue;
-      const owners = (contract.entities || []).filter(other => (other.fields || []).some(f => referenceKey(f.name) === key));
-      if (owners.length !== 1) continue;
-      const valid = field.type === "json" ? typeof value === "object"
-        : field.type === "number" ? typeof value === "number" && Number.isFinite(value)
-        : field.type === "boolean" ? typeof value === "boolean" : field.type === "string" && typeof value === "string";
-      if (valid) keys.add(key);
+    for (const field of Object.keys(transientSeedState(contract, entity))) {
+      const key = referenceKey(field);
+      if (!changed.has(key)) keys.add(key);
     }
   }
   return keys;

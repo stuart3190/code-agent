@@ -22,7 +22,7 @@ import {
 import { ADVANCE_ACTION_ID, actionIdFor, controlIdFor } from "./verificationManifest.mjs";
 import {
   contractUsesDurablePersistence, entityPersistencePolicy, operationUsesDurablePersistence,
-  verificationFixtureFields,
+  verificationFixtureFields, transientSeedState,
 } from "../../../shared/implementationContract.mjs";
 import { AUTH_CREDENTIAL_FIELDS, contractUsesPlatformAuthentication } from "../../../shared/implementationContract.mjs";
 import { isSessionOperation } from "../../../shared/implementationContract.mjs";
@@ -205,7 +205,14 @@ const transientStateDefaults = (contract, journey) => {
       }
     }
   }
-  return defaults;
+  const first = journey?.steps?.[0];
+  const entersFreshRoute = typeof first?.target === "string" && first.target.startsWith("/")
+    && !first.target.startsWith("//") && !list(first.operates).length;
+  // The declared initial state exists before any operation, including operations inferred
+  // from value controls whose IDs are not explicitly listed in this journey.
+  const seeds = entersFreshRoute ? Object.fromEntries((contract.entities || [])
+    .flatMap(entity => Object.entries(transientSeedState(contract, entity)))) : {};
+  return { ...defaults, ...seeds };
 };
 const IDENTITY_FIELD = /(?:id|key|reference)$/i;
 const DERIVED_SELECTION_FIELD = /(?:name|title|label|description|price|cost|amount|value|pence|cents|remaining|capacity|date|status|image|url)$/i;
