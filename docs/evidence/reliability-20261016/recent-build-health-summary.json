@@ -1,0 +1,16 @@
+{
+  "at": "2026-10-17T19:46:44.445Z",
+  "windowStart": "2026-10-16T19:46:44.265Z",
+  "total": 72,
+  "audit": {
+    "succeeded:none": 58,
+    "failed:generated_app": 9,
+    "failed:contract": 1,
+    "cancelled:cancelled": 1,
+    "failed:platform": 1,
+    "failed:pipeline_replay_blocked": 1,
+    "failed:worker_error": 1
+  },
+  "other": {},
+  "limitation": "Queue outcomes include retained and audit work; not a representative fresh-generation success denominator."
+}
