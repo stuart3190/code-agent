@@ -214,7 +214,7 @@ export class ScaffoldErrorBoundary extends React.Component {
   static getDerivedStateFromError(error) { return { error }; }
   componentDidCatch(error) { console.error("scaffold screen render failed", error); }
   render() {
-    if (this.state.error) return <main role="alert" data-scaffold-boundary="error"><h1>This screen could not load</h1><p>Please try again.</p></main>;
+    if (this.state.error) return <main role="alert" data-scaffold-boundary="error"><h1>This screen could not load</h1><p>Please try again.</p><button type="button" onClick={() => this.setState({ error: null })}>Try again</button></main>;
     return this.props.children;
   }
 }
@@ -262,6 +262,10 @@ export function ScaffoldNavigation({ path, setPath }) {
 }
 
 export default function ScaffoldApp() {
+  return <ScaffoldErrorBoundary><ScaffoldRouteContent /></ScaffoldErrorBoundary>;
+}
+
+function ScaffoldRouteContent() {
   const [path, setPath] = useState(currentPath);
   useEffect(() => { const onPop = () => setPath(currentPath()); globalThis.addEventListener?.("popstate", onPop); return () => globalThis.removeEventListener?.("popstate", onPop); }, []);
   const route = SCAFFOLD_ROUTES.find((candidate) => routeMatches(candidate.path, path)) || SCAFFOLD_ROUTES[0];
@@ -269,13 +273,13 @@ export default function ScaffoldApp() {
   const params = useMemo(() => matchRouteParams(route?.path || "/", path) || {}, [route, path]);
   const navigate = useCallback((target, options) => go(target, setPath, options), []);
   const routeValue = useMemo(() => ({ path, pattern: route?.path || null, params, navigate }), [path, route, params, navigate]);
-  return <ScaffoldErrorBoundary><AppShell navigation={<ScaffoldNavigation path={path} setPath={setPath} />}>
+  return <AppShell navigation={<ScaffoldNavigation path={path} setPath={setPath} />}>
     <Suspense fallback={<ScaffoldLoadingBoundary />}><main data-scaffold-screen={route?.screenId || "missing"} data-scaffold-route={route?.path || path}>
       <ScaffoldRouteContext.Provider value={routeValue}>
         {Screen ? <Screen /> : <div role="alert">No mounted screen is available.</div>}
       </ScaffoldRouteContext.Provider>
     </main></Suspense>
-  </AppShell></ScaffoldErrorBoundary>;
+  </AppShell>;
 }
 `;
 }
@@ -362,17 +366,21 @@ ${screens.map((screen) => {
 });
 
 export default function ScaffoldApp() {
+  return <ScaffoldErrorBoundary><ScaffoldRouteContent /></ScaffoldErrorBoundary>;
+}
+
+function ScaffoldRouteContent() {
   const route = useRoute();
   const Screen = route.route ? ROUTE_SCREENS[route.route.id] : null;
   // Layout, navigation and every state's appearance are the application's; which route is active,
   // whether it is admitted and whether its record loaded are the platform's.
-  return <ScaffoldErrorBoundary><AppLayout route={route.route} params={route.params} state={route.state} navigate={route.navigate}>
+  return <AppLayout route={route.route} params={route.params} state={route.state} navigate={route.navigate}>
     <Suspense fallback={<ScaffoldLoadingBoundary />}><main data-scaffold-screen={route.route?.id || "missing"} data-scaffold-route={route.route?.path || route.path}>
       {route.state === "ready" && Screen
         ? <Screen route={route.route} params={route.params} data={route.data} />
         : <RouteStates state={route.state} reason={route.reason} redirectTo={route.redirectTo} error={route.error} route={route.route} onRetry={route.reload} />}
     </main></Suspense>
-  </AppLayout></ScaffoldErrorBoundary>;
+  </AppLayout>;
 }
 `;
 }
