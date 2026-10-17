@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-17T18:56:39.465Z",
+  "deployedCommit": "ccd59d92cc5987b1c86404681aada2a2ebec3e77",
+  "publicBuildId": "aa3ecc02-dd92-4fe4-9bb1-60bca57f0324",
+  "checks": [
+    "HTTP reattachment returns latest completed build",
+    "completed SSE snapshot closes immediately",
+    "unauthenticated event stream denied",
+    "revoked token denied"
+  ],
+  "tokenRevoked": true
+}

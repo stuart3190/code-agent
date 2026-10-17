@@ -1,0 +1,24 @@
+{
+  "deployedCommit": "ccd59d92cc5987b1c86404681aada2a2ebec3e77",
+  "buildId": "0fc8d91d-f915-4377-a69d-4e417433e3a5",
+  "checks": [
+    {
+      "width": 1440,
+      "errorText": "Something went wrong (backend_unavailable).",
+      "retryCount": 0,
+      "recoveryUnavailable": true
+    },
+    {
+      "width": 390,
+      "errorText": "Something went wrong (backend_unavailable).",
+      "retryCount": 0,
+      "recoveryUnavailable": true
+    },
+    {
+      "width": 320,
+      "errorText": "Something went wrong (backend_unavailable).",
+      "retryCount": 0,
+      "recoveryUnavailable": true
+    }
+  ]
+}

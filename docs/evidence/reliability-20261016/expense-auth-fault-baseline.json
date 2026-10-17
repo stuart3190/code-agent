@@ -1,0 +1,34 @@
+{
+  "probes": [
+    {
+      "scenario": "delay",
+      "intercepted": 1,
+      "early": {
+        "rootText": "Loading\u2026",
+        "bodyText": "Loading\u2026",
+        "htmlBytes": 137
+      },
+      "later": {
+        "rendered": true,
+        "atMs": 20044
+      },
+      "errors": []
+    },
+    {
+      "scenario": "failure",
+      "intercepted": 1,
+      "early": {
+        "rootText": "You need to sign in to view this.",
+        "bodyText": "You need to sign in to view this.",
+        "htmlBytes": 161
+      },
+      "later": {
+        "rendered": false,
+        "atMs": 28142,
+        "body": "You need to sign in to view this."
+      },
+      "errors": []
+    }
+  ],
+  "limitation": "Controlled failure/delay. Not proven cause of historical blank-load incidents."
+}
