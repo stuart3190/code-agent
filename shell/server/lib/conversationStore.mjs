@@ -153,6 +153,17 @@ export class MemoryConversationStore {
     return (this.turns.get(conversationId) || []).slice(-limit);
   }
 
+  async patchTurn(owner, conversationId, turnId, patch = {}) {
+    const conversation = await this.getConversation(owner, conversationId);
+    if (!conversation || !turnId) return null;
+    const turn = (this.turns.get(conversationId) || []).find((row) => row.id === turnId && row.owner === owner);
+    if (!turn) return null;
+    if (patch.payload && typeof patch.payload === "object") {
+      turn.payload = { ...(turn.payload || {}), ...patch.payload };
+    }
+    return turn;
+  }
+
   async appendEvent(conversation, type, payload = {}) {
     const list = this.events.get(conversation.id) || [];
     const event = {
@@ -390,6 +401,16 @@ export class SupabaseConversationStore {
       .eq("conversation_id", conversationId)
       .order("sequence", { ascending: false }).limit(limit));
     return rows.reverse();
+  }
+
+  async patchTurn(owner, conversationId, turnId, patch = {}) {
+    if (!turnId) return null;
+    const existing = maybe(await this.client.from("ca_conversation_turns").select("payload")
+      .eq("id", turnId).eq("owner", owner).eq("conversation_id", conversationId).maybeSingle());
+    if (!existing) return null;
+    const payload = { ...(existing.payload || {}), ...(patch.payload || {}) };
+    return maybe(await this.client.from("ca_conversation_turns").update({ payload })
+      .eq("id", turnId).eq("owner", owner).eq("conversation_id", conversationId).select("*").maybeSingle());
   }
 
   // Concurrency-safe append: read-max-then-insert races when two writers (relay + lead
