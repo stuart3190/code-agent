@@ -14,6 +14,7 @@ import { publishApp, connectDomain, publishConfigured } from "../appBuild/appPub
 import { automationsStore, nextRunAt } from "../automationsStore.mjs";
 import { parseAutomationInput, publicAutomation } from "../automationService.mjs";
 import { startAppBuildV2, startExistingAppWorkV2 } from "../builderV2/entry.mjs";
+import { applyStoredReferenceBrief } from "../referenceFetch.mjs";
 import { createBudgetLedger } from "../appBuild/budgetLedger.mjs";
 
 // Strict tool schemas (OpenAI Responses) require EVERY property in `required`; optionality
@@ -52,7 +53,7 @@ export function registerCoreCapabilities() {
     description: "Create a complete new application from a description: the team designs it, writes the code on a modern stack it chooses itself, verifies it builds, and serves a live preview into this conversation. Use for any 'build me a…' outcome that is not a change to an existing connected repository. Write the description as a full product brief — the user never chooses technology.",
     costProfile: "run",
     inputSchema: strings({
-      description: str("Complete product brief: what the app does, who uses it, key screens/flows, branding hints from memory"),
+      description: str("Complete product brief: what the app does, who uses it, key screens/flows, branding hints from memory. When a reference page summary is attached, paraphrase its structure into this brief and do not copy its copy, images, branding, or code"),
       productName: optionalStr("Short product name (creates/updates the named product in memory)"),
     }),
     // Provider eligibility is owner-specific (managed, BYOK, Codex allowance or xAI), so a
@@ -70,7 +71,9 @@ export function registerCoreCapabilities() {
           throw error;
         }
       }
-      const accepted = await startAppBuildV2(ctx, input);
+      const description = await applyStoredReferenceBrief(ctx, String(input.description || ""));
+      const start = typeof ctx.startAppBuild === "function" ? ctx.startAppBuild : startAppBuildV2;
+      const accepted = await start(ctx, { ...input, description });
       if (!accepted.handled) throw new Error("Builder V2 dispatch declined");
       return accepted.result;
     },
@@ -98,8 +101,9 @@ export function registerCoreCapabilities() {
         error.code = "nothing_to_edit";
         throw error;
       }
+      const request = await applyStoredReferenceBrief(ctx, String(input.request));
       const accepted = await startExistingAppWorkV2(ctx, {
-        project, request: String(input.request), kind: "edit", trigger: "user", taskHint: String(input.request),
+        project, request, kind: "edit", trigger: "user", taskHint: String(input.request),
       });
       return accepted.result;
     },
@@ -131,11 +135,11 @@ export function registerCoreCapabilities() {
         error.code = "nothing_to_repair";
         throw error;
       }
-      const request = [
+      const request = await applyStoredReferenceBrief(ctx, [
         `Repair only this reported problem in the existing app "${project.name}":`,
         String(input.issue),
         "Preserve the established product and visual design; make the smallest verified change.",
-      ].join("\n\n");
+      ].join("\n\n"));
       const accepted = await startExistingAppWorkV2(ctx, {
         project, request, kind: "repair", trigger: "user", taskHint: String(input.issue),
       });
