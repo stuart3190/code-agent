@@ -81,6 +81,16 @@ const CONTRACT = {
 };
 const TIERS = { essential: { journeys: ["send-message"], entities: [], operations: [] }, secondary: { journeys: [], entities: [], operations: [] } };
 
+test("whole-file escalation distinguishes missing rejected files from retained files", () => {
+  const prompt = renderPatchPrompt({ step: "core", contract: CONTRACT, tiers: TIERS,
+    tree: { "src/existing.js": "export const value = 1;" },
+    regenerateFiles: ["src/missing.js", "src/existing.js"],
+  });
+  assert.match(prompt, /src\/missing\.js: missing — use newFile/);
+  assert.match(prompt, /src\/existing\.js: exists — use replaceFile/);
+  assert.doesNotMatch(prompt, /Do not use newFile or symbol operations for these files/);
+});
+
 function fakePatchProvider({ usage = { input: 1000, output: 200, cached: 0, reasoning: 0, total: 1200 }, patches = [] } = {}) {
   const calls = [];
   return {
@@ -1618,4 +1628,88 @@ test("a second interruption, or an interruption that carried usage, still fails 
   }), (error) => error.code === "provider_replay_unsafe");
   assert.equal(usageCalls, 1, "usage means the turn happened: no replay");
   assert.equal(withUsage.rows()[0].state, "settled", "the usage that was reported is settled, not discarded");
+});
+
+test("transport retry fits the original recovery envelope while protecting completion reserve", async () => {
+  const reservations = memoryModelReservations();
+  let calls = 0;
+  const turn = await runReservedDispatch({
+    reservations, owner: "o", projectId: "p", buildId: "tight-retry", step: "contract", sequence: 1,
+    usageResponsibility: "thrallo_repair", fundingPool: "thrallo_recovery",
+    provider: { model: "gpt-5.5", provider: "codex", runTurn: async () => {
+      if (++calls === 1) throw socketClosed("original-tight");
+      return { text: "recovered", usage: { input: 100, output: 20, total: 120 } };
+    } },
+    decision: { provider: "codex", billingLane: "connected_allowance", estimatedCredits: 1.9955, callCeilingCredits: 1.9955, maxOutputTokens: 6000 },
+    options: { systemPrompt: "system", messages: [{ role: "user", content: "contract" }] },
+    ceilingCredits: 3.2911, completionReserveCredits: 1.2956,
+  });
+  assert.equal(turn.text, "recovered");
+  assert.equal(calls, 2);
+  assert.equal(reservations.rows()[0].reconciliationState, "platform_assumed");
+  assert.equal(reservations.rows()[1].state, "settled");
+});
+
+test("retry admission failure retains transport cause and platform classification", async () => {
+  const reservations = memoryModelReservations();
+  let reads = 0, calls = 0;
+  const budget = reservations.budget;
+  reservations.budget = async (...args) => ++reads === 1 ? budget(...args) : { remainingCredits: 0 };
+  await assert.rejects(runReservedDispatch({
+    reservations, owner: "o", projectId: "p", buildId: "retry-denied", step: "contract", sequence: 1,
+    usageResponsibility: "thrallo_repair",
+    provider: { model: "gpt-5.5", provider: "codex", runTurn: async () => { calls++; throw socketClosed("denied-original"); } },
+    decision: { provider: "codex", billingLane: "connected_allowance", estimatedCredits: 0.5, maxOutputTokens: 6000 },
+    options: { systemPrompt: "system", messages: [{ role: "user", content: "contract" }] },
+    ceilingCredits: 10, completionReserveCredits: 1,
+  }), error => error.code === "recovery_completion_reserve" && error.classification === "platform"
+    && error.customerActionRequired === false && error.transportRetryAdmissionFailed === true
+    && error.cause?.message === "terminated");
+  assert.equal(calls, 1);
+});
+
+test("the dispatched generation prompt retains omitted user details and budgets their bytes", async () => {
+  const originalRequest = "Pocket Ledger. Default the date to today but allow changing it. Start empty; do not seed fake transactions.";
+  const provider = fakePatchProvider({ patches: [{ newFile: "src/Test.jsx", content: "export default function Test(){return null}" }] });
+  const lanes = createModelLanes({
+    providerForStep: async () => ({ provider, decision: {
+      provider: "openai", model: "gpt-5.5", billingLane: "connected_allowance",
+      estimatedCredits: 2, callCeilingCredits: 6, maxOutputTokens: 16_000,
+    } }), ceilingCredits: 30, reservations: memoryModelReservations(), knowledgeStore: memoryKnowledgeStore(),
+  });
+  await lanes.patchesFn({ owner: "owner", projectId: "project", buildId: "fidelity", step: "core",
+    originalRequest, contract: CONTRACT, tiers: TIERS, tree: {}, rejections: [], problems: [],
+  });
+  assert.equal(provider.calls.length, 1);
+  const prompt = provider.calls[0].messages[0].content;
+  assert.ok(prompt.includes(originalRequest), "contract omission must not erase the user's defaults and exclusions");
+  const without = prompt.replace(originalRequest, "");
+  assert.ok(estimatePromptTokens({messages:[{role:"user",content:prompt}]})
+    > estimatePromptTokens({messages:[{role:"user",content:without}]}));
+  const bounded = renderPatchPrompt({ step: "correction", originalStep: "core", originalRequest,
+    contract: CONTRACT, tiers: TIERS, tree: {"src/Test.jsx":"export default function Test(){return null}"},
+    repairScope: {kind:"compile",files:["src/Test.jsx"],allowedFiles:["src/Test.jsx"],instruction:"Fix Test only."},problems:["syntax error"],
+  });
+  assert.ok(bounded.includes(originalRequest));
+  assert.match(bounded,/src\/Test\.jsx/);
+});
+
+test("an exhausted connected allowance is released once and not retried by the model lane", async () => {
+  let calls = 0;
+  const provider = createCodexProvider({ tokenProvider: async () => ({accessToken:"test",accountId:"test"}),
+    fetchImpl: async () => { calls++; return {ok:false,status:429,headers:{get:()=>null},text:async()=>JSON.stringify({error:{type:"usage_limit_reached",message:"The usage limit has been reached"}})}; },
+  });
+  const reservations = memoryModelReservations();
+  const lanes = createModelLanes({ providerForStep:async()=>({provider,decision:{
+    provider:"codex",model:"gpt-5.6-terra",billingLane:"connected_allowance",estimatedCredits:2,callCeilingCredits:6,maxOutputTokens:16000,
+  }}),ceilingCredits:30,reservations,knowledgeStore:memoryKnowledgeStore() });
+  await assert.rejects(lanes.patchesFn({owner:"owner",projectId:"project",buildId:"quota",step:"core",
+    contract:CONTRACT,tiers:TIERS,tree:{},rejections:[],problems:[]}), error=>{
+      assert.equal(error.code,"provider_quota_blocked");
+      assert.equal(error.classification,"provider_customer");
+      return true;
+    });
+  assert.equal(calls,1);
+  assert.equal(reservations.rows().length,1);
+  assert.equal(reservations.rows()[0].state,"released");
 });

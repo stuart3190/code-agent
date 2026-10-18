@@ -1,0 +1,27 @@
+{
+  "rpcAvailableThroughProductionPostgrest": true,
+  "invalidIdentityRejectedBeforeMutation": true,
+  "errorCode": "22023",
+  "productionMigrationCount": 98,
+  "serviceExecute": true,
+  "anonExecute": false,
+  "authenticatedExecute": false,
+  "callerDeploymentPending": false,
+  "deployedCommit": "bb4e3af209bc8b46b5db2a709a02f113fc47ac92",
+  "manifestSha256": "2a28f894c7abde28b7ddb9589bfb545f9b42bf565110afad6355df0a9e550c1b",
+  "productionHealthChecks": {
+    "passed": 40,
+    "total": 40
+  },
+  "ownRetainedBuild": {
+    "publicId": "a60421ae-5c2e-4e73-b0a8-f74626141123",
+    "workId": "cbef3623-2dfb-4239-9771-ea5d8a34d012",
+    "internalId": "2b03e7f4-1d45-4346-a42d-a769e50e1f9a",
+    "durationMs": 79601,
+    "success": true,
+    "credits": 0,
+    "modelReservations": 0,
+    "independentBrowserChecks": 26
+  },
+  "limitation": "Retained verification, not fresh-generation success."
+}

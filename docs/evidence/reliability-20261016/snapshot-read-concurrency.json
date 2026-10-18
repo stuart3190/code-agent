@@ -1,0 +1,17 @@
+{
+  "scope": "own audit snapshot, read-only comparison; one sample per variant, no throughput claim",
+  "results": [
+    {
+      "label": "sequential",
+      "durationMs": 7193,
+      "fileCount": 97,
+      "treeHash": "80a35d6dbb0b69eae9492ced7f898d77479607249dd178f67f5119364c20c5da"
+    },
+    {
+      "label": "bounded-four",
+      "durationMs": 3363,
+      "fileCount": 97,
+      "treeHash": "80a35d6dbb0b69eae9492ced7f898d77479607249dd178f67f5119364c20c5da"
+    }
+  ]
+}

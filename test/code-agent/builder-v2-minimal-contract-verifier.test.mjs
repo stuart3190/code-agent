@@ -66,6 +66,19 @@ async function run(html, step, flows = []) {
   });
 }
 
+test("an explicit blank fixture clears an optional numeric input instead of inventing spacing", needsBrowser, async () => {
+  const field = { ...control("preferredSpacing", "spacing", ["spinbutton"]),
+    valueType: "number", verificationValue: "" };
+  const result = await run('<main><label>Preferred spacing <input type="number" data-thrallo-control="spacing" value="4"></label></main>',
+    { action: "enter the preferred spacing", operates: ["preferredSpacing"],
+      verificationValues: { preferredSpacing: "" }, expect: "the input accepts the requested value" },
+    [{ kind: "input", valueWritten: "preferredSpacing", control: field }]);
+  assert.equal(result.journeys[0].steps[0].status, "pass", JSON.stringify(result));
+  const evidence = JSON.stringify(result.journeys[0].steps[0]);
+  assert.match(evidence, /"expectedValue":""/);
+  assert.match(evidence, /"observedValue":""/);
+});
+
 test("minimal_contract_v1 keeps only contract outcome evidence blocking", async () => {
   const visible = expectationOutcome({
     wanted: ["confirmation", "visible"], found: ["confirmation", "visible"], fresh: [],
@@ -1158,7 +1171,7 @@ test("retained false negatives and concrete failures classify correctly in a rea
           <p id="out"></p></main>`;
       const result = await run(working, step, [flow]);
       assert.equal(result.pass, true, JSON.stringify(result.journeys));
-      assert.match(result.journeys[0].steps[0].detail, /selection created/i);
+      assert.equal(result.journeys[0].steps[0].checks.find(check => check.kind === "selection")?.ok, true);
 
       const unchanged = await run(working.replace("this.setAttribute('aria-pressed','true');", ""), step, [flow]);
       assert.equal(unchanged.pass, false, "a machine identity must not weaken selected-state proof");
@@ -1173,6 +1186,7 @@ test("retained false negatives and concrete failures classify correctly in a rea
         selectedState: true,
       };
       const step = { action: "select the visible software item", operates: ["selectedSoftwareId"],
+        expectedOutputs: { selectedTitle: "Atlas Editor details" },
         expect: "selected software details are visible" };
       const flow = { kind: "selection", valueWritten: "selectedSoftwareId", control: selectedItem };
       const established = await run(`<main><div role="radiogroup" aria-label="selected software">
@@ -1536,7 +1550,7 @@ test("retained false negatives and concrete failures classify correctly in a rea
         </div>
         <p id="out"></p></main>`, step, [flow]);
       assert.equal(result.pass, true, JSON.stringify(result.journeys));
-      assert.match(result.journeys[0].steps[0].detail, /selection created/i);
+      assert.equal(result.journeys[0].steps[0].checks.find(check => check.kind === "selection")?.ok, true);
     });
 
     await t.test("a transient search operation may be owned by its contracted input", async () => {

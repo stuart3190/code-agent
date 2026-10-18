@@ -15,7 +15,7 @@ import { ensureSession as defaultEnsureSession } from "./session.js";
 export const BOOKING_STATUS = Object.freeze({ ACTIVE: "Active", CANCELLED: "Cancelled" });
 export const CREATE_RESULT = Object.freeze({ OK: "ok", INVALID: "invalid", OVER_CAPACITY: "over_capacity" });
 
-const flatten = (row) => (row ? { id: row.id, createdAt: row.created_at, ...(row.data || {}) } : null);
+const flatten = (row) => (row ? { createdAt: row.created_at, ...(row.data || {}), id: row.id } : null);
 const emailOk = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
 const bookingResult = (result, booking) => ({ ...(booking || {}), result, booking });
 
@@ -27,11 +27,20 @@ function makeReference() {
 /**
  * @param slots     [{ id, capacity }] — the app's slot catalogue (from its contract)
  * @param entity    entity type name, default "booking"
+ * @param shared    opt in to server-atomic capacity-one slots across app visitors.
+ *                 Existing visitor-only bookings are not migrated automatically.
  */
-export function makeBookingSystem({ slots = [], entity = "booking", deps = {} } = {}) {
+export function makeBookingSystem({ slots = [], entity = "booking", shared = false, deps = {} } = {}) {
   const db = deps.db || defaultDb;
   const ensureSession = deps.ensureSession || defaultEnsureSession;
   const store = () => db.entity(entity);
+  if (shared && (!slots.length || slots.some(slot => Number(slot.capacity) !== 1))) {
+    throw new TypeError("Shared bookings currently require configured capacity-one slots.");
+  }
+  const sharedStore = () => {
+    if (typeof db.booking !== "function") throw new Error("This backend does not support shared booking reservations.");
+    return db.booking(entity);
+  };
   const capacityOf = (slotId) => slots.find((s) => s.id === slotId)?.capacity ?? Infinity;
 
   async function activeFor(date, slotId) {
@@ -53,6 +62,7 @@ export function makeBookingSystem({ slots = [], entity = "booking", deps = {} } 
    */
   async function remaining(date, slotId) {
     if (slots.length && !slots.some((s) => s.id === slotId)) return null;
+    if (shared) return sharedStore().remaining(date, slotId);
     const active = await activeFor(date, slotId);
     return capacityOf(slotId) - active.reduce((total, b) => total + (Number(b.partySize) || 1), 0);
   }
@@ -79,6 +89,15 @@ export function makeBookingSystem({ slots = [], entity = "booking", deps = {} } 
     const partySize = Number(values.partySize) || 1;
     if (!date || !values.slotId || !emailOk(email) || !String(name || "").trim()) {
       return bookingResult(CREATE_RESULT.INVALID, null);
+    }
+    if (shared) {
+      if (partySize !== 1 || !slots.some(slot => slot.id === values.slotId)) return bookingResult(CREATE_RESULT.INVALID, null);
+      await ensureSession();
+      const requestId = globalThis.crypto?.randomUUID?.();
+      if (!requestId) throw new Error("Shared booking requires secure UUID support.");
+      const response = await sharedStore().reserve({ date, slotId: values.slotId, requestId,
+        values: { ...values, date, slotId: values.slotId, name: String(name).trim(), email: String(email).trim().toLowerCase(), partySize: 1 } });
+      return bookingResult(response.result, flatten(response.record));
     }
     if (await remaining(date, values.slotId) < partySize) {
       return bookingResult(CREATE_RESULT.OVER_CAPACITY, null);
@@ -128,6 +147,12 @@ export function makeBookingSystem({ slots = [], entity = "booking", deps = {} } 
 
   /** CANCELLATION: a status TRANSITION the UI must render — never a silent delete. */
   async function cancelBooking(reference, email) {
+    if (shared) {
+      await ensureSession();
+      const response = await sharedStore().cancel(reference, email);
+      const booking = flatten(response.record);
+      return { ...(booking || {}), ok: response.ok === true, reason: response.reason, booking };
+    }
     const booking = await getBooking(reference, email);
     if (!booking) return { ok: false, reason: "not_found", booking: null };
     if (booking.status === BOOKING_STATUS.CANCELLED) return { ...booking, ok: false, reason: "already_cancelled", booking };

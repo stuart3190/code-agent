@@ -113,6 +113,10 @@ Rules:
   for a pure observation ("visibleText": ["Pendant Light", "Wall Sconce"]), or "expectedOutputs"
   for a computed result. The verifier never matches the "expect" sentence literally; a step with
   none of those is rejected as unverifiable.
+- Put computed numeric results in expectedOutputs, not only in visibleText or expect. Missing
+  numeric copy alone cannot prove whether the calculation or its presentation is wrong and
+  leaves verification incomplete. Declare the actual displayed value, including requested
+  display precision, rather than an unrounded internal intermediate result.
 - Add "primitive": "selection" or "textbox" only when the verb leaves it ambiguous.
 - A keyboard-focus or tab-navigation step is a control interaction, not a passive observation. It
   MUST name the focused entity field(s) in "operates" and declare "primitive". Split text-entry
@@ -124,6 +128,9 @@ Rules:
   as the step asks. Never put a real password, token, credential, customer record, or other secret
   in verificationValues. Ordinary names, emails, numbers and dates need no override when their
   native HTML constraints fully describe validity.
+- Use an explicit empty string in verificationValues to clear an input or test its optional
+  blank/default behavior. Empty expectedOutputs are not visible assertions: omit absent messages
+  and assert the actual computed result or a visible validation message instead.
 - A transient functional search/filter/query operation also needs verificationValues for EVERY
   operated search or filter field. Choose one exact combination that the generated sample data
   will match; use a non-empty all-options sentinel for optional filters rather than an empty value.
@@ -132,12 +139,24 @@ Rules:
   value. Keep the sentinel in a compound filter step where another field genuinely changes, choose
   a non-default option, or first change this field so the browser has a real transition to verify.
 - A step that calculates or otherwise transforms declared inputs states the exact result the
-  browser must see: "expectedOutputs": { "outputField": <number, string or boolean> }. Each key
+  browser must see: "expectedOutputs": { "outputField": <number or non-empty string> }.
+  Assert observable displayed results, not internal boolean flags such as resultVisible or
+  hasValidScale: the browser cannot infer a flag's presentation from its name. A typed boolean
+  has no observable binding and leaves verification incomplete; it does not require printing
+  "true" or "false". For a visible textual answer use its literal string. Each key
   is a field a functional responsibility writes, or a field this step produces, that this step
   reaches by operating that operation, producing the field, or reading it after an earlier step
-  produced it. Every entity field that responsibility reads must have a verificationValues
-  fixture on this step or an earlier step of the same journey, so the expected result is fixed
-  by those inputs. Never put authEmail, authPassword, or any other secret in expectedOutputs.
+  produced it. Each input it reads needs a known value: either a primitive verificationValues
+  fixture on a step that actually operates that field, an earlier asserted computed output,
+  or an untouched value in one explicitly declared transient sampleData row at route entry.
+  Use TOP-LEVEL sampleData: { "EntityName": [{ ...initialValues }] } (never step.sampleData) for initial scalar and collection
+  values, preserving the requested quantities and units. NEVER place arrays or objects in
+  verificationValues, and never add an untouched seed field to verificationValues just because
+  a calculation reads it. Persisted records, multiple seed rows, or values changed earlier still
+  require an explicit producer or operated input fixture. Never put authEmail, authPassword,
+  or any other secret in expectedOutputs.
+- Example or seeded records remain subject to the requested edit/remove operations unless the user
+  explicitly makes them read-only. Do not restrict those operations to newly created records.
 - EXACTLY ONE journey has priority "primary".
 - A journey that starts from records another journey created names that journey in "dependsOn".
   When two journeys could each be the creator, "dependsOn" names exactly one of them; the

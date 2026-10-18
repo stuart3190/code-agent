@@ -1,0 +1,62 @@
+[
+  {
+    "app": "counter",
+    "checked": true,
+    "width": 390,
+    "findings": []
+  },
+  {
+    "app": "downlight",
+    "checked": true,
+    "width": 390,
+    "findings": []
+  },
+  {
+    "app": "quote",
+    "checked": true,
+    "width": 390,
+    "findings": []
+  },
+  {
+    "app": "bookshelf",
+    "checked": true,
+    "width": 390,
+    "findings": []
+  },
+  {
+    "app": "booking",
+    "checked": true,
+    "width": 390,
+    "findings": []
+  },
+  {
+    "app": "recipe",
+    "checked": true,
+    "width": 390,
+    "findings": []
+  },
+  {
+    "app": "booking-fresh",
+    "checked": true,
+    "width": 390,
+    "findings": []
+  },
+  {
+    "app": "kanban",
+    "checked": true,
+    "width": 390,
+    "findings": []
+  },
+  {
+    "app": "portfolio",
+    "checked": true,
+    "width": 390,
+    "findings": []
+  },
+  {
+    "app": "recipe-fresh",
+    "checked": true,
+    "width": 390,
+    "findings": []
+  }
+]

@@ -1,0 +1,33 @@
+{
+  "measuredAt": "2026-10-17T17:52:54.365Z",
+  "deployedCommit": "283451f5c174ba13299330bbf7aceff9085427e2",
+  "projectId": "79cf1c51-d9bb-4073-bc4d-98300dd6269b",
+  "buildId": "fe69eb8e-9639-40e1-9903-0862ec3c9fae",
+  "contractId": "bd09165f-4873-4b41-99fb-9ced0e72e293",
+  "snapshotId": "6d035dbe-f9e1-49b6-b7f9-365ece6939b7",
+  "diagnosticMatchesRedactedDerivedSource": true,
+  "nonCyclicGraphReferencesPreserved": true,
+  "contractMatchesDerivedSource": true,
+  "snapshotBoundToBuild": true,
+  "sourceTreeUnchanged": false,
+  "generatedFrontendUnchanged": true,
+  "previewBridgeCurrent": true,
+  "rootBoundaryIncludesRouting": true,
+  "refreshedPlatformFiles": [
+    "src/lib/capabilities/booking.js",
+    "src/lib/capabilities/composed/lock.js",
+    "src/lib/capabilities/crud.js",
+    "src/lib/capabilities/forms.js",
+    "src/lib/capabilities/wizard.js",
+    "src/lib/devReporter.js",
+    "src/lib/modules/router.js",
+    "src/lib/modules/routing.js",
+    "src/lib/scaffolds/composed/primitives.jsx",
+    "src/lib/scaffolds/composed/ScaffoldApp.jsx"
+  ],
+  "modelReservations": 0,
+  "spentCredits": 0,
+  "platformSuccess": true,
+  "durationMs": 87582,
+  "limitation": "Zero-model verification of assisted recipe repair, not fresh-generation success."
+}

@@ -1,0 +1,12 @@
+{
+  "measuredAt": "2026-10-17T17:54:08.847Z",
+  "url": "https://reliability-recipe-assisted-20261017.app.thrallo.com/",
+  "releaseId": "1af17b0e-1253-4f22-a65b-fa7944056905",
+  "snapshotId": "6d035dbe-f9e1-49b6-b7f9-365ece6939b7",
+  "capturedSourceHash": "b2fc10d1324d0a55526ad161858d81f2e1610f3039ed3026973f4f54f6083051",
+  "artifactHash": "30f338746b882353546c4519476de0e6e75cf911ded4cbd84de1172ebb26b94b",
+  "sourceBytesMatch": true,
+  "sourceDiagnosticMatches": true,
+  "active": true,
+  "verified": true
+}

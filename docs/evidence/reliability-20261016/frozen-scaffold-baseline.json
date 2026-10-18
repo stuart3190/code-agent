@@ -1,0 +1,11 @@
+{
+  "qualifiedSource": "22038ccab4b00ada8c90d06ef3935cf560ba2623",
+  "qualifiedImage": "sha256:59e8e9b458411bb4ae83a5cb14f2c14602ee164c7782df14d53af801009c2815",
+  "lockedPackages": 244,
+  "allResolvedPackageMetadataUnchanged": true,
+  "lockSha256": "fa4ef71d8ee0981107f80322a5dbb1bff226a5a782619fe3a42649fdd47aa0a1",
+  "oldPreviewImage": "sha256:66a74b07b611ad3b705615f59d554c87babf1e634471308f52e426354fba6d70",
+  "compilerSupabase": "2.118.0",
+  "oldPreviewSupabase": "2.112.3",
+  "sourceChangesDeployed": false
+}

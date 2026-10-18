@@ -1,0 +1,24 @@
+{
+  "deployedCommit": "f4652de9069f4195f04dbb2476a842addee45f87",
+  "buildId": "f5f4e27a-c5da-40a0-bda4-8037594eab85",
+  "checks": [
+    {
+      "width": 1440,
+      "errorText": "We could not load this page. Please try again.\n\nTry again",
+      "retryCount": 1,
+      "recovered": true
+    },
+    {
+      "width": 390,
+      "errorText": "We could not load this page. Please try again.\n\nTry again",
+      "retryCount": 1,
+      "recovered": true
+    },
+    {
+      "width": 320,
+      "errorText": "We could not load this page. Please try again.\n\nTry again",
+      "retryCount": 1,
+      "recovered": true
+    }
+  ]
+}

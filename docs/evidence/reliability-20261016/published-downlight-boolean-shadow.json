@@ -1,0 +1,118 @@
+{
+  "policy": "minimal_contract_v1",
+  "productionGateUnchanged": true,
+  "results": [
+    {
+      "slug": "reliability-downlight-20261017",
+      "sourceHash": "061ebb40665d00ff42e44f901027e300debef11650f01ebe6ad4bb0e670600ab",
+      "contractProvenance": {
+        "via": "source_build",
+        "sourceSnapshotId": "a0435f9c-c824-457f-924f-d925663f3ec4",
+        "contractSnapshotId": "1aec1e8b-da0d-4ea7-aaac-c44f01d5317c"
+      },
+      "pass": false,
+      "primaryStatus": "undriveable",
+      "journeys": [
+        {
+          "id": "calculate-feet-layout",
+          "status": "undriveable",
+          "classification": "CONTRACT_INCOMPLETE",
+          "steps": [
+            {
+              "action": "select feet as the measurement unit",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted selection matches its required value"
+            },
+            {
+              "action": "enter the room dimensions and preferred spacing",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "3/3 fields hold values"
+            },
+            {
+              "action": "calculate the downlight layout",
+              "status": "undriveable",
+              "classification": "CONTRACT_INCOMPLETE",
+              "detail": "boolean output state needs an observable binding: resultVisible"
+            }
+          ]
+        },
+        {
+          "id": "calculate-metre-layouts",
+          "status": "undriveable",
+          "classification": "CONTRACT_INCOMPLETE",
+          "steps": [
+            {
+              "action": "select metres as the measurement unit",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted selection matches its required value"
+            },
+            {
+              "action": "enter metric room dimensions and a preferred spacing",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "3/3 fields hold values"
+            },
+            {
+              "action": "calculate the custom metric layout",
+              "status": "undriveable",
+              "classification": "CONTRACT_INCOMPLETE",
+              "detail": "boolean output state needs an observable binding: resultVisible"
+            },
+            {
+              "action": "replace the dimensions and clear the optional preferred spacing",
+              "status": "not_reached",
+              "detail": "not reached because step 3 was undriveable"
+            },
+            {
+              "action": "calculate the layout using the metric default spacing",
+              "status": "not_reached",
+              "detail": "not reached because step 3 was undriveable"
+            }
+          ]
+        },
+        {
+          "id": "reject-invalid-dimensions",
+          "status": "undriveable",
+          "classification": "CONTRACT_INCOMPLETE",
+          "steps": [
+            {
+              "action": "select metres and enter valid values for an initial calculation",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted selection matches its required value"
+            },
+            {
+              "action": "enter valid room dimensions and spacing",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "3/3 fields hold values"
+            },
+            {
+              "action": "calculate an initial valid result",
+              "status": "undriveable",
+              "classification": "CONTRACT_INCOMPLETE",
+              "detail": "boolean output state needs an observable binding: resultVisible"
+            },
+            {
+              "action": "replace the room length with a negative value",
+              "status": "not_reached",
+              "detail": "not reached because step 3 was undriveable"
+            },
+            {
+              "action": "attempt to calculate with the invalid dimension",
+              "status": "not_reached",
+              "detail": "not reached because step 3 was undriveable"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Shadow evaluation of one existing published app, not fresh-generation success.",
+    "Historical edit/verify runtime contracts were unrecorded; selected contracts follow source snapshot ancestry. Published captured source hashes are checked before execution."
+  ]
+}

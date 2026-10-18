@@ -162,7 +162,7 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
   const { deployment, joined } = await openDeployment({
     owner: ctx.owner, projectId: project.id, productId,
     triggeredBy: ctx.owner, triggeredByKind: "user",
-    buildRunId: await latestBuildRunId(ctx.owner, project.id),
+    buildRunId: await sourceBuildRunId(ctx.owner, project.id, source.snapshotId),
   });
   if (joined) {
     return {
@@ -209,7 +209,7 @@ export async function publishApp(ctx, { projectId = null, siteName = null, produ
     const files = slug ? await withAnalytics(built, slug) : built;
     const atomic = await finalizeAndActivateRelease({
       owner: ctx.owner, projectId: project.id, productId: project.product_id || null,
-      buildId: deployment.build_run_id || null, deploymentId: deployment.id, slug,
+      buildId: deployment.build_run_id || null, snapshotId: source.snapshotId, deploymentId: deployment.id, slug,
       url: `https://${slug}.app.thrallo.com/`, files,
       runtimeConfig: runtimeTree[".env"],
       metadata: { workerJobId: packaged.workJobId || null, artifactRef: packaged.artifactRef || null },
@@ -321,13 +321,18 @@ export async function connectDomain(ctx, { domain, productName = null, projectId
   return { domain: cleaned, status: result.status, records, instructions, alreadyConnected: !!result.alreadyConnected };
 }
 
-// The newest build run for a project, so a deployment can link to the exact log that produced it.
-// Null when there is none — the UI then hides View Logs rather than opening the whole stream.
-async function latestBuildRunId(owner, projectId) {
-  const { data } = await serviceClient().from("diag_runs")
-    .select("id").eq("owner", owner).eq("project_id", String(projectId))
-    .order("started_at", { ascending: false }).limit(1);
-  return data?.[0]?.id || null;
+// Resolve the log for the exact immutable source captured before packaging. A newer failed
+// attempt must not become the published release's provenance merely because it is newest.
+export async function sourceBuildRunId(owner, projectId, snapshotId, client = serviceClient()) {
+  if (!snapshotId) return null;
+  const snapshot = await client.from("bv2_snapshots").select("build_id")
+    .eq("owner", owner).eq("project_id", projectId).eq("id", snapshotId).maybeSingle();
+  if (snapshot.error) throw new Error(`published source lineage: ${snapshot.error.message}`);
+  if (!snapshot.data?.build_id) return null;
+  const jobs = await client.from("build_jobs").select("diag_run_id")
+    .eq("owner", owner).eq("project_id", String(projectId)).eq("bv2_build_id", snapshot.data.build_id).limit(2);
+  if (jobs.error) throw new Error(`published source build lineage: ${jobs.error.message}`);
+  return jobs.data?.length === 1 ? jobs.data[0].diag_run_id || null : null;
 }
 
 /**

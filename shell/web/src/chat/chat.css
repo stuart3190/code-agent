@@ -1716,3 +1716,7 @@ button.ct-published-version.is-link:hover { background: var(--surface-2); color:
   .ct-project-sidebar, .ct-projects-scrim, .ct-new-project { transition: none; }
   .ct-new-project:hover { transform: none; }
 }
+
+.ct-pane-top { flex-wrap: wrap; }
+.ct-pane-top .ct-urlpill { flex: 1 1 140px; }
+.ct-pane-top .ct-btn { flex-shrink: 0; }

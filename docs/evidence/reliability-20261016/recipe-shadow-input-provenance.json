@@ -1,0 +1,132 @@
+{
+  "source": "retained unchanged recipe preview; shadow only",
+  "pass": false,
+  "primaryStatus": "pass",
+  "verifierPolicy": "minimal_contract_v1",
+  "journeys": [
+    {
+      "id": "scale-initial-recipe",
+      "classification": "PASS",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "open the calculator",
+          "classification": "PASS",
+          "detail": "the contracted route / is open \u00b7 the contract's declared visible text is present"
+        },
+        {
+          "action": "enter 6 as the desired serving count",
+          "classification": "PASS",
+          "detail": "1 contracted value(s) visible \u00b7 declared visible text missing: \"rice 450 g\", \"water 900 ml\", \"salt 3 tsp\" \u00b7 the contracted action fired through its control and changed the surface \u00b7 the contracted input accepted its value"
+        },
+        {
+          "action": "switch to the original ingredient list",
+          "classification": "PASS",
+          "detail": "contracted selection \"Original ingredients\" and its expected outcome were already established"
+        },
+        {
+          "action": "switch back to the scaled ingredient list",
+          "classification": "PASS",
+          "detail": "selection moved from \"Original ingredients\" to \"Scaled ingredients\""
+        }
+      ]
+    },
+    {
+      "id": "validate-serving-counts",
+      "classification": "CONTRACT_INCOMPLETE",
+      "status": "undriveable",
+      "steps": [
+        {
+          "action": "open the calculator",
+          "classification": "PASS",
+          "detail": "the contracted route / is open \u00b7 the contract's declared visible text is present"
+        },
+        {
+          "action": "enter zero as the original serving count",
+          "classification": "PASS",
+          "detail": "1 contracted value(s) visible \u00b7 declared visible text missing: \"Enter a serving count greater than zero\", \"Scaled quantities unavailable\" \u00b7 the contracted action fired through its control and changed the surface \u00b7 the contracted input accepted its value"
+        },
+        {
+          "action": "enter a negative desired serving count",
+          "classification": "CONTRACT_INCOMPLETE",
+          "detail": "the input accepted its fixture, but the implicit transient operation has no independently observable result transition"
+        },
+        {
+          "action": "clear the original serving count",
+          "classification": null,
+          "detail": "not reached because step 3 was undriveable"
+        }
+      ]
+    },
+    {
+      "id": "add-and-remove-decimal-ingredient",
+      "classification": "APP_FUNCTIONAL_FAILURE",
+      "status": "undriveable",
+      "steps": [
+        {
+          "action": "open the calculator",
+          "classification": "PASS",
+          "detail": "the contracted route / is open \u00b7 the contract's declared visible text is present"
+        },
+        {
+          "action": "add an ingredient row",
+          "classification": "PASS",
+          "detail": "declared visible text missing: \"Ingredient name\", \"Remove ingredient\" \u00b7 the contracted action fired through its control and changed the surface"
+        },
+        {
+          "action": "enter pepper, 1.5, and tbsp in the new row",
+          "classification": "PASS",
+          "detail": "3 contracted value(s) visible \u00b7 the contract's declared visible text is present \u00b7 the contracted action fired through its control and changed the surface \u00b7 the contracted input accepted its value"
+        },
+        {
+          "action": "enter 6 as the desired serving count",
+          "classification": "PASS",
+          "detail": "1 contracted value(s) visible \u00b7 declared visible text missing: \"pepper 2.25 tbsp\" \u00b7 the contracted action fired through its control and changed the surface \u00b7 the contracted input accepted its value"
+        },
+        {
+          "action": "remove the pepper ingredient row",
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "detail": "the contracted action control was not offered (pepper ingredient remove control)"
+        }
+      ]
+    },
+    {
+      "id": "reset-calculator",
+      "classification": "APP_FUNCTIONAL_FAILURE",
+      "status": "fail",
+      "steps": [
+        {
+          "action": "open the calculator",
+          "classification": "PASS",
+          "detail": "the contracted route / is open \u00b7 the contract's declared visible text is present"
+        },
+        {
+          "action": "reset the example",
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "detail": "computed output wrong or missing: resetVersion expected 1, hasValidScale expected true"
+        }
+      ]
+    },
+    {
+      "id": "read-how-it-works",
+      "classification": "PASS",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "open the how it works page",
+          "classification": "PASS",
+          "detail": "the contracted route /how-it-works is open \u00b7 declared visible text missing: \"scaled quantity = original quantity \u00d7 desired servings \u00f7 original servings\""
+        },
+        {
+          "action": "return to the calculator",
+          "classification": "PASS",
+          "detail": "the contracted route / is open \u00b7 the contract's declared visible text is present \u00b7 the contracted outcome after the reset is present"
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Production smoke gate unchanged. Primary scaling still falsely passes missing numeric results because visibleText is advisory.",
+    "Independent business checks remain 27/39 passing; no promotion or fresh success claimed."
+  ]
+}

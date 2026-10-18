@@ -38,10 +38,20 @@ export function createRouter({ table, identity = null, loaders = {}, signInRoute
     }
     if (!match) return set({ path, route: null, params: freeze({}), state: "not_found", reason: "no_route", redirectTo: null, data: null, error: null });
     set({ path, route: match.route, params: match.params, state: "loading", reason: null, redirectTo: null, data: null, error: null });
-    if (match.route.guard !== "any" && identity) await identity.ensure?.();
+    if (match.route.guard !== "any" && identity) {
+      try { await identity.ensure?.(); }
+      catch (error) {
+        if (generation !== mine) return state;
+        const code = error?.code || "session_unavailable";
+        return set({ state: "error", reason: code, redirectTo: null,
+          error: { code, message: "Your session could not be checked. Please try again." } });
+      }
+    }
     if (generation !== mine) return state;
     const guard = evaluateGuard(match.route, identity?.getState?.() || { status: "signed_out" }, { signInRoute });
-    if (guard.state !== "ready") return set({ state: guard.state, reason: guard.reason, redirectTo: guard.redirectTo });
+    if (guard.state !== "ready") return set({ state: guard.state, reason: guard.reason, redirectTo: guard.redirectTo,
+      error: guard.state === "error" ? { code: guard.reason,
+        message: "Your session could not be checked. Please try again." } : null });
     if (match.route.loader) {
       const loader = loaders[match.route.loader.operation];
       if (typeof loader !== "function") return set({ state: "error", reason: "loader_missing", error: { code: "loader_missing", message: `no loader for ${match.route.loader.operation}` } });
@@ -69,11 +79,13 @@ export function createRouter({ table, identity = null, loaders = {}, signInRoute
       return () => globalThis.removeEventListener?.("popstate", onPop);
     },
     href: (id, params) => routeHref(table, id, params),
-    /** Navigate to a path or to { id, params }. Same target twice is a no-op; history is pushed unless replace. */
+    /** Navigate to a path or { id, params }; retry a failed current route without adding history. */
     navigate(target, { replace = false } = {}) {
       const path = typeof target === "string" ? normalizePath(target) : routeHref(table, target.id, target.params || {});
-      if (path === state.path && state.state !== "not_found") return Promise.resolve(state);
-      if (replace) history?.replaceState?.({}, "", path); else history?.pushState?.({}, "", path);
+      if (path === state.path && !["not_found", "error"].includes(state.state)) return Promise.resolve(state);
+      if (path !== state.path) {
+        if (replace) history?.replaceState?.({}, "", path); else history?.pushState?.({}, "", path);
+      }
       return resolve(path);
     },
     reload() { return resolve(state.path); },

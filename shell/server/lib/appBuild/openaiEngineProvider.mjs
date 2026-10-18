@@ -37,7 +37,7 @@ function toWireTools(tools) {
     name: t.name,
     description: t.description,
     parameters: t.parameters,
-    strict: false,
+    strict: t.strict === true,
   }));
 }
 
@@ -49,7 +49,7 @@ export function createOpenAIEngineProvider({ model, apiKey = null, fetchImpl = f
     model: model || approvedConfiguredModel("OPENAI_BALANCED_MODEL", "gpt-5.6-terra", { provider: "openai", tier: "balanced" }),
   }).model;
 
-  async function runTurn({ systemPrompt, messages, tools, signal = null, maxOutputTokens = null }) {
+  async function runTurn({ systemPrompt, messages, tools, toolChoice = null, signal = null, maxOutputTokens = null }) {
     const body = {
       model: resolvedModel,
       instructions: systemPrompt,
@@ -60,8 +60,8 @@ export function createOpenAIEngineProvider({ model, apiKey = null, fetchImpl = f
     const wireTools = toWireTools(tools);
     if (wireTools) {
       body.tools = wireTools;
-      body.tool_choice = "auto";
-      body.parallel_tool_calls = true;
+      body.tool_choice = toolChoice || "auto";
+      body.parallel_tool_calls = !wireTools.some(tool => tool.strict) && !toolChoice;
     }
 
     let res;

@@ -27,7 +27,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-printf '{"startedAt":"%s","backup":"%s"}\n' "$(date -u +%FT%TZ)" "$backup_root/$latest" > "$evidence/drill.json"
+started_at=$(date -u +%FT%TZ)
+printf '{"startedAt":"%s","backup":"%s"}\n' "$started_at" "$backup_root/$latest" > "$evidence/drill.json"
 "$probe_command" --host "$public_host" --ports 55320-55327 --until-file "$stop_file" \
   --output "$evidence/external-probes.jsonl" &
 probe_pid=$!
@@ -39,8 +40,11 @@ npm run supabase:reset
 touch "$stop_file"
 wait "$probe_pid"
 probe_pid=""
-if grep -Eq '"(?:ok|connected|success)"[[:space:]]*:[[:space:]]*true' "$evidence/external-probes.jsonl"; then
-  echo "external probe reached a disposable restore port" >&2
-  exit 1
-fi
-printf '{"completedAt":"%s","result":"pass"}\n' "$(date -u +%FT%TZ)" >> "$evidence/drill.json"
+completed_at=$(date -u +%FT%TZ)
+node --input-type=module - "$evidence/external-probes.jsonl" "$public_host" "$started_at" "$completed_at" <<'JS'
+import {readFile} from 'node:fs/promises';
+import {validateExternalRestoreProbes} from './ops/lib/restoreDrillEvidence.mjs';
+const [file,host,startedAt,completedAt]=process.argv.slice(2);
+console.log(JSON.stringify(validateExternalRestoreProbes(await readFile(file,'utf8'),{host,startedAt,completedAt})));
+JS
+printf '{"completedAt":"%s","result":"pass"}\n' "$completed_at" >> "$evidence/drill.json"

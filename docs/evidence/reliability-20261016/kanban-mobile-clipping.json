@@ -1,0 +1,18 @@
+{
+  "checked": true,
+  "width": 390,
+  "findings": [
+    {
+      "control": "Clear search button",
+      "kind": "clipped_control",
+      "blocker": "non-scrollable horizontal clipping",
+      "width": 390
+    },
+    {
+      "control": "Create task button",
+      "kind": "clipped_control",
+      "blocker": "non-scrollable horizontal clipping",
+      "width": 390
+    }
+  ]
+}

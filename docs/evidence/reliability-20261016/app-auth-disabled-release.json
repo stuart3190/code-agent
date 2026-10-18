@@ -1,0 +1,12 @@
+{
+  "version": 9,
+  "verify_jwt": true,
+  "ezbr_sha256": "6be67e3ee117de3c8ca473e7c436f10c6969467e41e59c508936a1d5946aad5d",
+  "exactTestedCandidate": true,
+  "jwtEnforcementPreserved": true,
+  "backup": "/home/ubuntu/backups/reliability-app-auth-disabled-20261017",
+  "repositoryDriftExcluded": "Existing invitation-activation block remains absent from deployed Edge artifact.",
+  "disabledAccountChecks": 2,
+  "activeAccountControls": 2,
+  "issuedTestSessionsRevoked": true
+}

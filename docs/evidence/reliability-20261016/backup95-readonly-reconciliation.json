@@ -1,0 +1,11 @@
+{
+  "rounds": 2,
+  "addedRows": 3,
+  "changedTables": [
+    "build_jobs",
+    "build_work_jobs",
+    "build_work_payloads"
+  ],
+  "catalogSha256": "d8427b43718e559098948f3b9176de0ae471098173b395d8351f4ab19f636e9c",
+  "mode": "read-only diagnosis; original archive untouched; fetched rows only in memory"
+}

@@ -1,0 +1,23 @@
+{
+  "sourceCommit": "1b8bbd6c6e2a2c2a477a3c198c30c867a930c37c",
+  "extensionVersion": "0.4.1",
+  "artifactPath": "/home/ubuntu/thrallo-reliability-runs/thrallo-0.4.1-desktop-qualified.vsix",
+  "artifactSha256": "acd0f2b58ceeef3a19045674c047f07c1cbdcc64b0b562989696293562490128",
+  "artifactBytes": 1418107,
+  "packagedFiles": 50,
+  "runtimeFilesMatchCommit": {
+    "extension.js": "c19c289137be7d879317ce205d33af8b91a903ad2e7e4ab27e654d3e1cfd6486",
+    "lib/api.js": "aa4faa27f2b1dadd620e20d0c5ad3f85b12f8a1f8eff12504c11619dddb69a96",
+    "lib/connectionSecurity.js": "e1a0658def6561e34626559574469b78b0e80830ed01bee4762036f0e8d82738",
+    "lib/conversationPanel.js": "31d8b6fe6ba917a74864c26589841693e9b4c5d0c7405fe5f435832e7c291a93",
+    "lib/localIndex.js": "a063b83e490f94b3a6eeee4a0c885eeac1b65fe21b4f5f1b618681fb8c2bd91a",
+    "package.json": "3b01f0930c8384ab1c87a363ef80c1a7bf903fcfde3074f4a97662d9648a6794"
+  },
+  "webFilesMatchQualifiedArtifact": 34,
+  "webArtifactSha256": "3137811eef8ab01035c764c820674785a37b51508b02ffea688c2e063052812e",
+  "limitations": [
+    "Candidate VSIX packaged and content-verified on Linux. Not installed or executed in native Windows.",
+    "Existing Windows installer and portable downloads remain unchanged; no marketplace publication.",
+    "Earlier source-only and old-web candidates remain private and are superseded by this artifact."
+  ]
+}

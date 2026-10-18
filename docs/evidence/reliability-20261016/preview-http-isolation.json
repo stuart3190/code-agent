@@ -1,0 +1,30 @@
+{
+  "checks": [
+    {
+      "name": "foreign conversation denied",
+      "status": 404,
+      "code": "conversation_not_found",
+      "pass": true
+    },
+    {
+      "name": "invalid explicit project denied",
+      "status": 400,
+      "code": "invalid_project",
+      "pass": true
+    },
+    {
+      "name": "foreign project never exposed",
+      "status": 404,
+      "code": "nothing_to_preview",
+      "pass": true
+    },
+    {
+      "name": "empty own conversation reports no preview",
+      "status": 404,
+      "code": "nothing_to_preview",
+      "pass": true
+    }
+  ],
+  "failure": null,
+  "disposableUsersRemoved": 2
+}

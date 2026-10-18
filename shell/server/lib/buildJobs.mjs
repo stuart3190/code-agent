@@ -9,11 +9,10 @@ import crypto from "node:crypto";
 import { creditsForUsage } from "../../../src/billing/costModel.mjs";
 import { serviceClient } from "./supabase.mjs";
 import {
-  BUILD_WORK_TERMINAL, buildWorkerEnabled, enqueueBuildWork, getBuildWork, requestBuildWorkCancel,
+  BUILD_WORK_TERMINAL, buildWorkerEnabled, dispatchBuildPipeline, getBuildWork, requestBuildWorkCancel,
 } from "./buildWorkQueue.mjs";
 
 const TERMINAL = new Set(["complete", "failed", "interrupted"]);
-const jobs = new Map();
 
 function db(client = null) { return (client || serviceClient()).from("build_jobs"); }
 
@@ -87,18 +86,11 @@ function rowToJob(row) {
   };
 }
 
-export function activeJobFor(ownerId, projectId) {
-  for (const job of jobs.values()) {
-    if (job.owner.id === ownerId && String(job.projectId) === String(projectId) && !TERMINAL.has(job.status)) return job;
-  }
-  return null;
-}
-
 export async function createJob({
   owner, projectId, mode, prompt, diag = null, trigger = "user", taskHint = null,
   budgetAllowance = null, byokCostLimit = null, providerOverride = null,
   pipelineVersion = null, manualModel = null, providerSelection = null, routingMode = null,
-  v2Input = null, budgetApprovalId = null,
+  v2Input = null, budgetApprovalId = null, client = null,
 }) {
   if (pipelineVersion !== "v2") {
     throw Object.assign(new Error("Builder V1 dispatch is retired; only Builder V2 jobs are accepted."), {
@@ -111,10 +103,7 @@ export async function createJob({
     });
   }
 
-  const live = activeJobFor(owner.id, projectId);
-  if (live) return { job: live, existing: true };
-
-  const { data: durableExisting, error: existingError } = await db().select("*")
+  const { data: durableExisting, error: existingError } = await db(client).select("*")
     .eq("owner", owner.id).eq("project_id", projectId)
     .in("status", ["queued", "running"]).order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (existingError) throw new Error(`could not inspect active Builder V2 jobs: ${existingError.message}`);
@@ -129,61 +118,40 @@ export async function createJob({
     manualModel, providerSelection, routingMode,
     subscribers: new Set(), createdAt: Date.now(), workJobId: null,
   };
-  const { error } = await db().insert({
-    id: job.id, owner: owner.id, project_id: projectId, mode,
-    status: "queued", phase: "queued", pipeline_version: "v2",
-    diag_run_id: diag?.sessionId || null, budget_approval_id: budgetApprovalId,
-  });
-  if (error) {
-    if (error.code === "23505") {
-      const { data: winner } = await db().select("*").eq("owner", owner.id).eq("project_id", projectId)
-        .in("status", ["queued", "running"])
-        .order("created_at", { ascending: false }).limit(1).maybeSingle();
-      if (winner) return { job: rowToJob(winner), existing: true };
-    }
-    throw Object.assign(new Error(`could not create build job: ${error.message}`), {
-      code: "build_job_create_failed",
-      publicMessage: "The approval was saved, but Thrallo could not create its durable build job.",
-    });
-  }
-
-  jobs.set(job.id, job);
   try {
-    const work = await enqueueBuildWork({
-      owner: owner.id, projectId, buildId: job.id, jobType: "builder_pipeline",
+    const dispatched = await dispatchBuildPipeline({
+      owner: owner.id, projectId, buildId: job.id, mode,
+      diagRunId: diag?.sessionId || null, budgetApprovalId,
       payload: {
         input: job.input, mode, trigger, taskHint, budgetAllowance, byokCostLimit, providerOverride,
         diagSessionId: diag?.sessionId || null, pipelineVersion: "v2", manualModel, providerSelection, routingMode,
       },
-      idempotencyKey: `builder-pipeline:${job.id}`,
-      priority: trigger === "user" ? 20 : 10,
-      maxAttempts: 2,
+      priority: trigger === "user" ? 20 : 10, client,
     });
-    job.workJobId = work.id;
+    if (dispatched.existing) return { job: rowToJob(dispatched.job), existing: true };
+    job.workJobId = dispatched.work.id;
+    // The durable transaction is the authority, including after browser disconnects.
     return { job, existing: false };
-  } catch (queueError) {
-    jobs.delete(job.id);
-    const { error: markError } = await db().update({
-      status: "failed", phase: "failed", error: "Build work could not be queued.",
-      stop_reason: "worker_enqueue_failed", updated_at: new Date().toISOString(),
-    }).eq("id", job.id).eq("owner", owner.id);
-    if (markError) throw new AggregateError([queueError, markError], "Build enqueue and failure persistence both failed.");
-    throw queueError;
+  } catch (error) {
+    // A database failure rolls back the whole dispatch. A lost response may have committed;
+    // never mark that potentially executing job failed. A retry reads its durable authority.
+    throw Object.assign(new Error(`could not dispatch build job: ${error.message}`, { cause: error }), {
+      code: "build_job_create_failed",
+      publicMessage: "Thrallo could not confirm the build was queued. Retry to reconnect safely.",
+    });
   }
 }
 
-export async function getJob(ownerId, jobId) {
-  const live = jobs.get(jobId);
-  if (live) return live.owner.id === ownerId ? live : null;
-  const { data } = await db().select("*").eq("id", jobId).maybeSingle();
+export async function getJob(ownerId, jobId, { client = null } = {}) {
+  const { data, error } = await db(client).select("*").eq("id", jobId).eq("owner", ownerId).maybeSingle();
+  if (error) throw new Error(`could not read build job: ${error.message}`);
   return data?.owner === ownerId ? rowToJob(data) : null;
 }
 
-export async function activeBuildFor(ownerId, projectId) {
-  const live = activeJobFor(ownerId, projectId);
-  if (live) return live;
-  const { data } = await db().select("*").eq("owner", ownerId).eq("project_id", projectId)
+export async function activeBuildFor(ownerId, projectId, { client = null } = {}) {
+  const { data, error } = await db(client).select("*").eq("owner", ownerId).eq("project_id", projectId)
     .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) throw new Error(`could not read project build: ${error.message}`);
   return data ? rowToJob(data) : null;
 }
 
@@ -191,12 +159,6 @@ export async function activeBuildsFor(ownerId, projectIds, { client = null } = {
   const ids = [...new Set((projectIds || []).filter(Boolean).map(String))];
   if (!ids.length) return new Map();
   const byProject = new Map();
-  for (const job of jobs.values()) {
-    if (job.owner.id !== ownerId || !ids.includes(String(job.projectId))
-        || !["queued", "running"].includes(job.status)) continue;
-    const prior = byProject.get(String(job.projectId));
-    if (!prior || job.createdAt > prior.createdAt) byProject.set(String(job.projectId), job);
-  }
   const { data, error } = await db(client).select("*").eq("owner", ownerId)
     .in("project_id", ids).in("status", ["queued", "running"])
     .order("created_at", { ascending: false });
@@ -209,11 +171,7 @@ export async function activeBuildsFor(ownerId, projectIds, { client = null } = {
 }
 
 export async function cancelJob(ownerId, jobId, { client = null } = {}) {
-  let job = jobs.get(jobId);
-  if (!job) {
-    const { data } = await db(client).select("*").eq("id", jobId).eq("owner", ownerId).maybeSingle();
-    if (data) job = rowToJob(data);
-  }
+  const job = await getJob(ownerId, jobId, { client });
   if (!job || job.owner.id !== ownerId) return { ok: false, error: "not found" };
   if (!job.workJobId) return { ok: false, error: TERMINAL.has(job.status) ? "already finished" : "work unavailable" };
   const work = await getBuildWork(ownerId, job.workJobId, { client, includeResult: false });
@@ -222,29 +180,44 @@ export async function cancelJob(ownerId, jobId, { client = null } = {}) {
   return { ok: true };
 }
 
-export function subscribe(job, fn) {
+export function subscribe(job, fn, { client = null, pollMs = 750 } = {}) {
   if (!job.workJobId || TERMINAL.has(job.status)) return () => {};
   let previous = `${job.status}:${job.phase}`;
   let stopped = false;
+  let reading = false;
   const tick = async () => {
-    if (stopped) return;
-    const { data } = await db().select("*").eq("id", job.id).eq("owner", job.owner.id).maybeSingle();
-    if (!data) return;
-    const current = rowToJob(data);
-    Object.assign(job, current, { subscribers: job.subscribers });
-    const key = `${current.status}:${current.phase}`;
-    if (key !== previous) {
-      previous = key;
-      fn("phase", { jobId: job.id, status: current.status, phase: current.phase });
-    }
-    if (TERMINAL.has(current.status)) {
+    if (stopped || reading) return;
+    reading = true;
+    try {
+      let response;
+      try {
+        response = await db(client).select("*").eq("id", job.id).eq("owner", job.owner.id).maybeSingle();
+      } catch {
+        // A lost observation is not a build failure. Retry on the next poll.
+        return;
+      }
+      if (stopped || response.error || !response.data) return;
+      const current = rowToJob(response.data);
+      Object.assign(job, current, { subscribers: job.subscribers });
+      const key = `${current.status}:${current.phase}`;
+      if (key !== previous) {
+        previous = key;
+        fn("phase", { jobId: job.id, status: current.status, phase: current.phase });
+      }
+      if (!stopped && TERMINAL.has(current.status)) {
+        stopped = true;
+        clearInterval(timer);
+        fn("end", publicJob(current));
+      }
+    } catch {
+      // A closed/throwing consumer must not take down detached builds or the shell.
       stopped = true;
       clearInterval(timer);
-      jobs.delete(job.id);
-      fn("end", publicJob(current));
+    } finally {
+      reading = false;
     }
   };
-  const timer = setInterval(tick, 750);
+  const timer = setInterval(tick, pollMs);
   timer.unref?.();
   void tick();
   return () => { stopped = true; clearInterval(timer); };

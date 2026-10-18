@@ -1,0 +1,367 @@
+{
+  "measuredAt": "2026-10-17T16:32:57.568956+00:00",
+  "url": "https://reliability-expense-assisted-20261017.app.thrallo.com/",
+  "buildKind": "operator-assisted retained recovery; not fresh generation",
+  "firstPublicBusinessRun": [
+    {
+      "width": 1440,
+      "name": "date defaults to local today",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "new guest begins empty without signup",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "zero rejected without creating record",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "integer cents sum 0.10 and 0.20 to 0.30",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "other month excluded from current total",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "month selection uses real saved records",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "summary route preserves selected month",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "summary total matches ledger",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "category totals use same records",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "edit updates actual record and aggregate",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "saved edits survive reload",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "delete updates real records and aggregate",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "layout fits viewport",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "independent guest cannot see saved records",
+      "ok": true
+    },
+    {
+      "width": 1440,
+      "name": "own tagged test records cleaned",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "proof completed",
+      "ok": false,
+      "error": "locator.waitFor: Timeout 15000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('heading', { name: 'Pocket Ledger', exact: true }) to be visible\u001b[22m\n"
+    },
+    {
+      "width": 320,
+      "name": "date defaults to local today",
+      "ok": true
+    },
+    {
+      "width": 320,
+      "name": "new guest begins empty without signup",
+      "ok": true
+    },
+    {
+      "width": 320,
+      "name": "zero rejected without creating record",
+      "ok": true
+    },
+    {
+      "width": 320,
+      "name": "integer cents sum 0.10 and 0.20 to 0.30",
+      "ok": true
+    },
+    {
+      "width": 320,
+      "name": "other month excluded from current total",
+      "ok": true
+    },
+    {
+      "width": 320,
+      "name": "month selection uses real saved records",
+      "ok": true
+    },
+    {
+      "width": 320,
+      "name": "summary route preserves selected month",
+      "ok": true
+    },
+    {
+      "width": 320,
+      "name": "summary total matches ledger",
+      "ok": true
+    },
+    {
+      "width": 320,
+      "name": "category totals use same records",
+      "ok": true
+    },
+    {
+      "width": 320,
+      "name": "edit updates actual record and aggregate",
+      "ok": true
+    },
+    {
+      "width": 320,
+      "name": "saved edits survive reload",
+      "ok": true
+    },
+    {
+      "width": 320,
+      "name": "delete updates real records and aggregate",
+      "ok": true
+    },
+    {
+      "width": 320,
+      "name": "layout fits viewport",
+      "ok": true
+    },
+    {
+      "width": 320,
+      "name": "independent guest cannot see saved records",
+      "ok": true
+    },
+    {
+      "width": 320,
+      "name": "own tagged test records cleaned",
+      "ok": true
+    }
+  ],
+  "mobile390Recheck": [
+    {
+      "width": 390,
+      "name": "date defaults to local today",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "new guest begins empty without signup",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "zero rejected without creating record",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "integer cents sum 0.10 and 0.20 to 0.30",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "other month excluded from current total",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "month selection uses real saved records",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "summary route preserves selected month",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "summary total matches ledger",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "category totals use same records",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "edit updates actual record and aggregate",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "saved edits survive reload",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "delete updates real records and aggregate",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "layout fits viewport",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "independent guest cannot see saved records",
+      "ok": true
+    },
+    {
+      "width": 390,
+      "name": "own tagged test records cleaned",
+      "ok": true
+    }
+  ],
+  "businessAssertionsPassedAcrossRuns": 45,
+  "firstPublicRunUninterruptedSuccess": false,
+  "readonlyExistingSessionLoads": [
+    {
+      "width": 1440,
+      "headingMs": 462,
+      "httpStatus": 200,
+      "errorCount": 0
+    },
+    {
+      "width": 390,
+      "headingMs": 589,
+      "httpStatus": 200,
+      "errorCount": 0
+    },
+    {
+      "width": 320,
+      "headingMs": 413,
+      "httpStatus": 200,
+      "errorCount": 0
+    },
+    {
+      "width": 1440,
+      "headingMs": 342,
+      "httpStatus": 200,
+      "errorCount": 0
+    },
+    {
+      "width": 390,
+      "headingMs": 341,
+      "httpStatus": 200,
+      "errorCount": 0
+    },
+    {
+      "width": 320,
+      "headingMs": 275,
+      "httpStatus": 200,
+      "errorCount": 0
+    },
+    {
+      "width": 1440,
+      "headingMs": 399,
+      "httpStatus": 200,
+      "errorCount": 0
+    },
+    {
+      "width": 390,
+      "headingMs": 372,
+      "httpStatus": 200,
+      "errorCount": 0
+    },
+    {
+      "width": 320,
+      "headingMs": 312,
+      "httpStatus": 200,
+      "errorCount": 0
+    },
+    {
+      "width": 1440,
+      "headingMs": 523,
+      "httpStatus": 200,
+      "errorCount": 0
+    },
+    {
+      "width": 390,
+      "headingMs": 543,
+      "httpStatus": 200,
+      "errorCount": 0
+    },
+    {
+      "width": 320,
+      "headingMs": 304,
+      "httpStatus": 200,
+      "errorCount": 0
+    },
+    {
+      "width": 1440,
+      "headingMs": 342,
+      "httpStatus": 200,
+      "errorCount": 0
+    },
+    {
+      "width": 390,
+      "headingMs": 268,
+      "httpStatus": 200,
+      "errorCount": 0
+    },
+    {
+      "width": 320,
+      "headingMs": 347,
+      "httpStatus": 200,
+      "errorCount": 0
+    },
+    {
+      "width": 1440,
+      "headingMs": 337,
+      "httpStatus": 200,
+      "errorCount": 0
+    },
+    {
+      "width": 390,
+      "headingMs": 272,
+      "httpStatus": 200,
+      "errorCount": 0
+    },
+    {
+      "width": 320,
+      "headingMs": 381,
+      "httpStatus": 200,
+      "errorCount": 0
+    }
+  ],
+  "freshSessionLoads": [
+    {
+      "width": 1440,
+      "headingMs": 2795,
+      "httpStatus": 200,
+      "errorCount": 0
+    },
+    {
+      "width": 390,
+      "headingMs": 2234,
+      "httpStatus": 200,
+      "errorCount": 0
+    }
+  ],
+  "unresolved": "Intermittent blank initial load observed once in public business run and in preview; later probes did not reproduce it. Root cause remains unknown."
+}

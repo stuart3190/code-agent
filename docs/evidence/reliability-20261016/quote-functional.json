@@ -1,0 +1,106 @@
+{
+  "checks": [
+    {
+      "width": 1440,
+      "name": "metres arithmetic visible",
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "name": "feet arithmetic visible",
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "name": "invalid dimension \"\" hides stale quote",
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "name": "invalid dimension \"0\" hides stale quote",
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "name": "invalid dimension \"-1\" hides stale quote",
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "name": "reset clears dimensions and quote",
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "name": "no horizontal overflow",
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "name": "no browser errors",
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "name": "About navigation exists",
+      "pass": true
+    },
+    {
+      "width": 1440,
+      "name": "navigation round trip works",
+      "pass": true
+    },
+    {
+      "width": 390,
+      "name": "metres arithmetic visible",
+      "pass": true
+    },
+    {
+      "width": 390,
+      "name": "feet arithmetic visible",
+      "pass": true
+    },
+    {
+      "width": 390,
+      "name": "invalid dimension \"\" hides stale quote",
+      "pass": true
+    },
+    {
+      "width": 390,
+      "name": "invalid dimension \"0\" hides stale quote",
+      "pass": true
+    },
+    {
+      "width": 390,
+      "name": "invalid dimension \"-1\" hides stale quote",
+      "pass": true
+    },
+    {
+      "width": 390,
+      "name": "reset clears dimensions and quote",
+      "pass": true
+    },
+    {
+      "width": 390,
+      "name": "no horizontal overflow",
+      "pass": true
+    },
+    {
+      "width": 390,
+      "name": "no browser errors",
+      "pass": true
+    },
+    {
+      "width": 390,
+      "name": "About navigation exists",
+      "pass": true
+    },
+    {
+      "width": 390,
+      "name": "navigation round trip works",
+      "pass": true
+    }
+  ],
+  "passed": 20,
+  "failure": null
+}

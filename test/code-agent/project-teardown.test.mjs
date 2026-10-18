@@ -236,3 +236,19 @@ test("unpublishing also stands down domains and health", async () => {
   assert.match(fn, /status: "pending_dns"/, "the Domains tab must stop claiming Active");
   assert.match(fn, /from\("health_status"\)\.delete\(\)/, "health must stop reporting on a dead site");
 });
+
+test("booking cleanup removes all visitor records only within the requested app", async () => {
+  const db = fakeDb();
+  await purgeProjectResources(OWNER, PROJECT, { client: db, provisiond: fakeProvisiond() });
+  const order = PROJECT_SCOPED_TABLES.map(row => row.table);
+  assert.ok(order.indexOf("app_booking_request_keys") < order.indexOf("app_booking_reservations"));
+  assert.ok(order.indexOf("app_booking_reservations") < order.indexOf("entities"));
+  for (const table of ["app_booking_request_keys", "app_booking_reservations"]) {
+    const row = PROJECT_SCOPED_TABLES.find(row => row.table === table);
+    assert.equal(row.column, "app_id");
+    const deletion = db.deletes.find(value => value.table === table);
+    assert.equal(deletion.filters.app_id, PROJECT);
+    assert.equal(deletion.filters.owner, undefined);
+    assert.equal(row.ownerScoped, false, "app owner differs from individual booking visitors");
+  }
+});

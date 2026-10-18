@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
-  fundingPoolFor, memoryModelReservations, modelCallKey,
+  fundingPoolFor, memoryModelReservations, modelCallKey, reservationBudget,
 } from "../../shell/server/lib/builderV2/modelReservations.mjs";
 
 test("reservation responsibilities select the only database-valid funding pool", () => {
@@ -98,4 +98,54 @@ test("migration grants reservations and RPCs only to service_role", async () => 
   assert.match(sql, /insert into public\.ca_usage_records/i, "managed settlement is canonical and transactional");
   assert.match(sql, /v_row\.id, v_row\.owner/i, "reservation id is the idempotent charge identity");
   assert.doesNotMatch(sql, /grant execute[^;]+authenticated/i);
+});
+
+test("absorbed transport liabilities preserve provenance without blocking the build retry", async () => {
+  const store = memoryModelReservations();
+  const args = input({ provider: "codex", billingLane: "connected_allowance", usageResponsibility: "thrallo_repair", fundingPool: "thrallo_recovery", ceilingCredits: 2 });
+  const first = await store.reserve(args);
+  await store.markAmbiguous(args.owner, first.id, { reason: "terminated", providerRequestIds: ["request-original"] });
+  assert.equal((await store.budget(args.owner, args.buildId, 2, args.fundingPool)).remainingCredits, 0, "unresolved pending usage still consumes headroom");
+  await assert.rejects(store.reserve({ ...args, callKey: "retry" }), { code: "budget_ceiling" });
+  await store.absorbAmbiguous(args.owner, first.id, "bounded transport retry");
+  assert.equal((await store.budget(args.owner, args.buildId, 2, args.fundingPool)).remainingCredits, 2);
+  const retry = await store.reserve({ ...args, callKey: "retry" });
+  await store.settle(args.owner, retry.id, { actualCredits: 1, usage: { total: 10 } });
+  await store.releaseAll(args.owner, args.buildId);
+  const original = store.rows().find(row => row.id === first.id);
+  assert.equal(original.state, "released");
+  assert.equal(original.reconciliationState, "platform_assumed");
+  assert.deepEqual(original.providerRequestIds, ["request-original"]);
+  assert.equal((await store.budget(args.owner, args.buildId, 2, args.fundingPool)).remainingCredits, 1);
+});
+
+
+test("database budget rows exclude only absorbed holds, preserving settled usage", () => {
+  const base = { owner: "o", build_id: "b", funding_pool: "thrallo_recovery" };
+  const result = reservationBudget([
+    { ...base, state: "held", reserved_credits: 2, reconciliation_state: "platform_assumed" },
+    { ...base, state: "held", reserved_credits: 1, reconciliation_state: "pending" },
+    { ...base, state: "settled", actual_credits: 0.5, reconciliation_state: "provider_settled" },
+  ], { owner: "o", buildId: "b", ceilingCredits: 3, fundingPool: "thrallo_recovery" });
+  assert.equal(result.reservedCredits, 1);
+  assert.equal(result.consumedCredits, 0.5);
+  assert.equal(result.remainingCredits, 1.5);
+});
+
+test("customer transport liability transfers to platform without changing the original pool or charging usage", async () => {
+  for (const billingLane of ["managed", "connected_allowance", "byok_api"]) {
+    const store = memoryModelReservations();
+    const args = input({ billingLane, fundingPool: "customer_generation", usageResponsibility: "customer_request" });
+    const first = await store.reserve(args);
+    await store.markAmbiguous(args.owner, first.id, { reason: "terminated" });
+    await store.absorbAmbiguous(args.owner, first.id, "transport retry");
+    await store.settle(args.owner, first.id, { actualCredits: 0.75, usage: { total: 20 } });
+    const row = store.rows()[0];
+    assert.equal(row.usageResponsibility, "platform_failure");
+    assert.equal(row.fundingPool, "customer_generation");
+    assert.equal(row.billingLane, billingLane);
+    assert.equal(row.includedActualCredits, 0);
+    assert.equal(row.purchasedActualCredits, 0);
+    assert.equal(row.platformActualCredits, billingLane === "managed" ? 0.75 : 0);
+  }
 });

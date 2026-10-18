@@ -48,7 +48,8 @@ export function nullVerificationCache() {
 
 /**
  * The preview "started and is reachable" proof used when the verifier is bypassed: the preview
- * host answers an HTTP request with anything below 500. Retries until the deadline, then throws a
+ * host answers an HTTP request successfully. Proxy/auth/not-found error pages do not prove the
+ * application is available. Retries until the deadline, then throws a
  * platform error (the candidate is retained; no model spend follows).
  */
 export async function awaitPreviewReachable(url, {
@@ -64,7 +65,12 @@ export async function awaitPreviewReachable(url, {
       const response = await fetchImpl(url, { method: "GET", redirect: "follow",
         signal: AbortSignal.timeout(requestTimeoutMs), headers: { "user-agent": "thrallo-preview-reachability/1" } });
       last = `HTTP ${response.status}`;
-      if (response.status < 500) return { ok: true, status: response.status, attempts, detail: last };
+      // Only headers are needed. Release the stream on both retry and success so repeated
+      // readiness checks do not retain sockets or buffer arbitrarily large preview bodies.
+      await response.body?.cancel().catch(() => {});
+      if (response.status >= 200 && response.status < 300) {
+        return { ok: true, status: response.status, attempts, detail: last };
+      }
     } catch (error) {
       last = String(error?.cause?.code || error?.code || error?.message || error).slice(0, 200);
     }

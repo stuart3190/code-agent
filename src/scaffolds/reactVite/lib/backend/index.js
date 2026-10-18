@@ -57,7 +57,7 @@ function unconfigured() {
   const surface = { signUp: fail, signIn: fail, signOut: fail, currentUser: fail, resetPassword: fail, confirmReset: fail };
   return {
     auth: surface,
-    db: { entity: () => ({ create: fail, list: fail, get: fail, update: fail, delete: fail }) },
+    db: { entity: () => ({ create: fail, list: fail, get: fail, update: fail, delete: fail }), booking: () => ({ reserve: fail, remaining: fail, cancel: fail }) },
     storage: { upload: fail, getUrl: fail },
     payments: { checkout: fail },
     notifications: { list: fail, markRead: fail, notifySelf: fail, emailSelf: fail, emit: fail },

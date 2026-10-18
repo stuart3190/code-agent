@@ -1,0 +1,22 @@
+[
+  {
+    "name": "availability outage offers explicit retry",
+    "ok": true
+  },
+  {
+    "name": "unknown availability cannot be booked",
+    "ok": true
+  },
+  {
+    "name": "retry recovers real availability",
+    "ok": true
+  },
+  {
+    "name": "no uncaught errors",
+    "ok": true
+  },
+  {
+    "name": "mobile controls remain usable",
+    "ok": true
+  }
+]

@@ -5,6 +5,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "../lib/useSession.js";
+import PreviewPane from "./PreviewPane.jsx";
 import Landing from "../landing/Landing.jsx";
 import AccountMenu from "../auth/AccountMenu.jsx";
 import ConfirmDialog from "../settings/ConfirmDialog.jsx";
@@ -12,7 +13,7 @@ import { rememberIntendedPath, signOutCompletely, takeIntendedPath } from "../au
 import ResetPassword from "../auth/ResetPassword.jsx";
 import { client } from "../lib/backend.js";
 import {
-  listConversations, bulkConversations, startConversation, sendConversationMessage,
+  reopenConversationPreview, listConversations, bulkConversations, startConversation, sendConversationMessage,
   streamConversationEvents, streamBuildEvents, projectBuildStatus, deleteConversation,
   listDeletedConversations, restoreConversation, incidentDetails,
 } from "../lib/codeAgentApi.js";
@@ -874,7 +875,7 @@ function Workspace({ user }) {
               </div>
               <CancelBuild build={view.activeBuild} working={displayRoster.some((r) => r.state === "working")} />
             </div>
-            {rail === "preview" && <PreviewPane url={view.previewUrl} verified={view.previewVerified} onPublish={() => send("Publish this, please.")} />}
+            {rail === "preview" && <PreviewPane key={active?.id} onRefresh={active ? () => reopenConversationPreview(active.id, view.previewProjectId) : undefined} building={Boolean(view.activeBuild)} url={view.previewUrl} verified={view.previewVerified} onPublish={() => send("Publish this, please.")} />}
           </aside>
         </div>
       )}
@@ -882,7 +883,7 @@ function Workspace({ user }) {
       {view.previewUrl && (
         <div className={`ct-mobile-sheet ${mobilePreview ? "show" : ""}`}>
           <button className="ct-grab-hit" aria-label="Close preview" onClick={() => setMobilePreview(false)}><span className="ct-grab" /></button>
-          <PreviewPane url={view.previewUrl} verified={view.previewVerified} bare onPublish={() => { setMobilePreview(false); send("Publish this, please."); }} />
+          <PreviewPane key={active?.id} onRefresh={active ? () => reopenConversationPreview(active.id, view.previewProjectId) : undefined} building={Boolean(view.activeBuild)} url={view.previewUrl} verified={view.previewVerified} bare onPublish={() => { setMobilePreview(false); send("Publish this, please."); }} />
         </div>
       )}
 
@@ -1932,24 +1933,6 @@ function AgentRow({ row, compact, progress = "Building…" }) {
   );
 }
 
-function PreviewPane({ url, onPublish, bare = false, verified = true }) {
-  return (
-    <div className="ct-pane" style={bare ? { border: 0, borderRadius: 0, boxShadow: "none", background: "transparent" } : undefined}>
-      <div className="ct-pane-top">
-        <a className="ct-urlpill" href={url} title={url} target="_blank" rel="noreferrer noopener">
-          <span className="ct-lock">●</span><span>{String(url).replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
-        </a>
-        {verified === false && (
-          <span className="ct-unverified" title="The verifier was bypassed for this build. The app compiled and started, but no browser check ran.">Not verified</span>
-        )}
-        <button className="ct-btn" onClick={onPublish}>Publish</button>
-      </div>
-      <div className="ct-pane-frame">
-        <iframe src={url} title="Live preview" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
-      </div>
-    </div>
-  );
-}
 
 function MobileStrip({ roster, working, onPreview, build, progress = "Building…" }) {
   return (

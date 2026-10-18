@@ -11,7 +11,7 @@ export const CONTACT_RESULT = Object.freeze({ OK: "sent", INVALID: "invalid" });
 export const NEWSLETTER_RESULT = Object.freeze({ OK: "success", INVALID: "invalid", DUPLICATE: "duplicate" });
 
 const emailOk = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
-const flatten = (row) => (row ? { id: row.id, ...(row.data || {}) } : null);
+const flatten = (row) => (row ? { ...(row.data || {}), id: row.id } : null);
 
 export function makeContactForm({ entity = "contactMessage", deps = {} } = {}) {
   const db = deps.db || defaultDb;

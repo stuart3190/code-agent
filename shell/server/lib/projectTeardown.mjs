@@ -20,6 +20,9 @@ import { serviceClient } from "./supabase.mjs";
 // would put database schema in front of them.
 export const PROJECT_SCOPED_TABLES = Object.freeze([
   // Per-app backend data belonging to the generated app's own end users.
+  // Explicit child-first cleanup also keeps operational erasure coverage auditable.
+  { table: "app_booking_request_keys", column: "app_id", ownerScoped: false, label: "booking retry records" },
+  { table: "app_booking_reservations", column: "app_id", ownerScoped: false, label: "booking reservations" },
   { table: "entities", column: "app_id", ownerScoped: false, label: "app data" },
   { table: "app_notifications", column: "app_id", ownerScoped: false, label: "app notifications" },
   { table: "app_auth_events", column: "app_id", ownerScoped: false, label: "auth events" },

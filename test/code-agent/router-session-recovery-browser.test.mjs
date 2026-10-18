@@ -1,0 +1,11 @@
+import test from 'node:test';import assert from 'node:assert/strict';import http from 'node:http';import {readFile} from 'node:fs/promises';import {chromium} from 'playwright';
+for(const mode of ['reject','error-state'])test(`browser can recover a ${mode} session without a sign-in redirect`,{timeout:30000},async()=>{
+ const routerSource=await readFile(new URL('../../src/scaffolds/reactVite/lib/modules/router.js',import.meta.url),'utf8'),routingSource=await readFile(new URL('../../src/scaffolds/reactVite/lib/modules/routing.js',import.meta.url),'utf8');
+ const server=http.createServer((req,res)=>{if(req.url==='/router.js'||req.url==='/routing.js'){res.setHeader('Content-Type','text/javascript');return res.end(req.url==='/router.js'?routerSource:routingSource)}res.setHeader('Content-Type','text/html');res.end(`<div role="status">Loading</div><button>Try again</button><script type="module">
+ import {createRouter} from '/router.js';import {compileRoutes} from '/routing.js';let failed=true;
+ const identity={ensure:async()=>{if(failed&&${JSON.stringify(mode)}==='reject')throw Object.assign(new Error('private detail'),{code:'backend_unavailable'})},getState:()=>failed&&${JSON.stringify(mode)}==='error-state'?{status:'error',error:{code:'backend_unavailable'}}:{status:'visitor'}};
+ const router=createRouter({table:compileRoutes([{id:'private',path:'/',guard:'visitor'}]),identity});
+ router.subscribe(s=>{document.querySelector('[role=status]').textContent=s.state==='ready'?'Your ledger':s.state==='error'?'Session unavailable; try again':s.state});
+ document.querySelector('button').onclick=()=>{failed=false;void router.navigate('/')};router.start();</script>`)});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const browser=await chromium.launch({headless:true});try{const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(`http://127.0.0.1:${server.address().port}`);await page.getByText('Session unavailable; try again',{exact:true}).waitFor();assert.equal(new URL(page.url()).pathname,'/');await page.getByRole('button',{name:'Try again'}).click();await page.getByText('Your ledger',{exact:true}).waitFor();assert.deepEqual(errors,[]);}finally{await browser.close();await new Promise(resolve=>server.close(resolve))}
+});

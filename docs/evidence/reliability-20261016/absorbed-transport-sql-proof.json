@@ -1,0 +1,21 @@
+{
+  "passed": 15,
+  "checks": [
+    "pending unresolved call still blocks extra reserve",
+    "reproduces old absorbed-hold retry failure",
+    "absorbed hold no longer blocks retry reservation",
+    "ordinary new hold still consumes ceiling",
+    "retry identity is durable and idempotent",
+    "cross-owner reservation rejected",
+    "invalid recovery funding responsibility rejected",
+    "release preserves absorbed transport provenance",
+    "unambiguous unused retry releases as rejected",
+    "terminal settlement preserves absorbed provenance",
+    "unknown usage creates no invented charges or refunds",
+    "reported usage still consumes pool ceiling",
+    "anon cannot reserve",
+    "authenticated cannot reserve",
+    "separate managed absorption policy conflict reproduced"
+  ],
+  "scope": "isolated production-shaped tables and constraints; no production rows; external foreign keys omitted"
+}

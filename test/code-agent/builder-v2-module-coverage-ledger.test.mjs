@@ -13,7 +13,7 @@ import path from "node:path";
 import {
   BASELINE, BASELINE_FORMAT_VERSIONS, BASELINE_PROMPT_MEASUREMENTS, BASELINE_PROTECTED_PATH_SOURCES,
   BASELINE_RETAINED_FIXTURES, BASELINE_RUNTIME_REFRESH_PATTERN, BASELINE_SNAPSHOT_ROW_FIELDS,
-  COVERAGE_LEDGER, CURRENT_FORMAT_VERSIONS, CURRENT_PROTECTED_PATH_SOURCES, CURRENT_RUNTIME_REFRESH_PATTERN,
+  COVERAGE_LEDGER, CURRENT_FORMAT_VERSIONS, CURRENT_PROMPT_MEASUREMENTS, CURRENT_PROTECTED_PATH_SOURCES, CURRENT_RUNTIME_REFRESH_PATTERN,
   MODULE_CATALOGUE, coverageLedgerReport, ledgerEntry, ledgerRows,
   validateCoverageLedger, workPackageScope,
 } from "../../shell/server/lib/builderV2/platformModules/coverageLedger.mjs";
@@ -156,7 +156,9 @@ test("WP0 — prompt literal measurements are pinned so later packages report a 
     patchSystemPrompt: PATCH_SYSTEM_PROMPT.length,
     compileCorrectionSystemPrompt: COMPILE_CORRECTION_SYSTEM_PROMPT.length,
     headroomFragmentSystemPrompt: HEADROOM_FRAGMENT_SYSTEM_PROMPT.length,
-  }, BASELINE_PROMPT_MEASUREMENTS);
+  }, CURRENT_PROMPT_MEASUREMENTS);
+  assert.equal(BASELINE_PROMPT_MEASUREMENTS.contractSystemPrompt, 12115,
+    "the historical measurement must not be rewritten as prompts evolve");
 });
 
 test("WP0 — the ledger is structurally valid and names only catalogued modules", () => {

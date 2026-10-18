@@ -19,6 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdtemp, mkdir, writeFile, rm, readFile, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { previewTreeEntries, writePreviewTree } from "./previewTree.mjs";
 import {
   ensureCaddy, createContainer, cpInto, connectCaddy, startContainer, stopContainer,
   destroy, containerState, listPreviewContainers, pruneStoppedPreviews, removeDanglingNets,
@@ -178,12 +179,7 @@ function waitReady(label, timeoutMs = Number(process.env.PREVIEW_READY_TIMEOUT_M
 async function injectTree(label, tree) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "provisiond-"));
   try {
-    for (const [rel, contents] of Object.entries(tree)) {
-      if (rel === "vite.config.js") continue;
-      const full = path.join(dir, rel);
-      await mkdir(path.dirname(full), { recursive: true });
-      await writeFile(full, contents, "utf8");
-    }
+    await writePreviewTree(dir, tree);
     await cpInto(label, dir);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -200,6 +196,7 @@ const envFor = (label) => ({
 // refresh tree (HMR). No destroy-on-provision (CP-1's behaviour) — the reaper leaves stopped containers
 // for a fast wake. The capacity guard bites only when a NEW slot would be consumed.
 async function provision(projectId, tree) {
+  previewTreeEntries(tree); // reject malformed paths before provisioning resources
   const label = labelFor(projectId);
   await ensureCaddy(CADDY_CFG);
   const state = await containerState(label);
@@ -221,6 +218,7 @@ async function provision(projectId, tree) {
 }
 
 async function update(projectId, changedFiles) {
+  previewTreeEntries(changedFiles || {});
   const label = labelFor(projectId);
   if ((await containerState(label)) !== "running") return provision(projectId, changedFiles); // wake if reaped
   await injectTree(label, changedFiles || {});
@@ -456,7 +454,8 @@ const server = http.createServer(async (req, res) => {
     }
     return send(res, 404, { error: `no route ${req.method} ${p}` });
   } catch (e) {
-    return send(res, e.code === "capacity" ? 503 : 500, { error: e.message, code: e.code });
+    return send(res, e.code === "capacity" ? 503 : e.code === "bad_preview_tree" ? 400 : 500,
+      { error: e.message, code: e.code });
   }
 });
 

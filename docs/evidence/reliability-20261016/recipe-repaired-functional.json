@@ -1,0 +1,167 @@
+[
+  {
+    "width": 1440,
+    "name": "initial example",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "rice scales to 450g",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "water scales to 900ml",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "salt scales to 3tsp",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "fractional servings",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "zero clears stale results",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "negative clears results",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "blank clears results",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "reset restores servings",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "new decimal ingredient scales",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "ingredient removal updates list",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "reset restores three ingredients",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "guide opens",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "guide return works",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "document fits",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "no runtime errors",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "initial example",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "rice scales to 450g",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "water scales to 900ml",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "salt scales to 3tsp",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "fractional servings",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "zero clears stale results",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "negative clears results",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "blank clears results",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "reset restores servings",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "new decimal ingredient scales",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "ingredient removal updates list",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "reset restores three ingredients",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "guide opens",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "guide return works",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "document fits",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "no runtime errors",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "mobile controls neither covered nor clipped",
+    "ok": true
+  }
+]

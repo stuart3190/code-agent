@@ -1,0 +1,32 @@
+[
+  {
+    "width": 1440,
+    "name": "declared static route navigation works",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "confirmation appears after click",
+    "ok": false
+  },
+  {
+    "width": 1440,
+    "name": "confirmation is backed by reservation",
+    "ok": false
+  },
+  {
+    "width": 390,
+    "name": "declared static route navigation works",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "confirmation appears after click",
+    "ok": false
+  },
+  {
+    "width": 390,
+    "name": "confirmation is backed by reservation",
+    "ok": false
+  }
+]

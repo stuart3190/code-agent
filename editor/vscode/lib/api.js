@@ -2,18 +2,19 @@
 // the control-plane wiring is unit-testable in the repository's node test suite.
 
 "use strict";
+const { normaliseServerOrigin } = require("./connectionSecurity.js");
 
 class ThralloClient {
   constructor({ serverUrl, token, fetchImpl = fetch }) {
-    this.base = String(serverUrl || "").replace(/\/+$/, "");
+    this.base = normaliseServerOrigin(serverUrl);
     this.token = token;
     this.fetch = fetchImpl;
-    if (!/^https?:\/\//.test(this.base)) throw new Error("Server URL must start with http(s)://");
   }
 
   async request(path, options = {}) {
     const response = await this.fetch(`${this.base}${path}`, {
       ...options,
+      redirect: "error",
       headers: {
         ...(options.body ? { "Content-Type": "application/json" } : {}),
         Authorization: `Bearer ${this.token}`,
@@ -67,6 +68,7 @@ class ThralloClient {
     const response = await this.fetch(`${this.base}/api/v1/runs/${runId}/events?after=${after}`, {
       headers: { Authorization: `Bearer ${this.token}`, Accept: "text/event-stream" },
       signal,
+      redirect: "error",
     });
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));

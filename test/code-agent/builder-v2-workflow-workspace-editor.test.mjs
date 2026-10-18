@@ -398,10 +398,11 @@ test("WP9 — booking admits by deterministic rank under concurrency and cancels
   assert.equal((await system.cancelBooking("BK-NOPE")).reason, "not_found");
   assert.equal(await system.remaining("2026-10-01", "evening"), 1, "the seat is released");
 
-  // The 1.1.0 manifest states the concurrency the module actually has.
+  // Shared mode is atomic; legacy mode must not advertise nonexistent CAS.
   const manifest = moduleManifest("thrallo.booking");
-  assert.equal(manifest.version, "1.1.0");
-  assert.equal(manifest.provides.operations.find((row) => row.id === "cancelBooking").concurrency, "versioned");
+  assert.equal(manifest.version, "1.2.0");
+  assert.equal(manifest.provides.operations.find((row) => row.id === "cancelBooking").concurrency, null);
+  assert.equal(manifest.configSchema.properties.shared.default, false);
   assert.ok(manifest.requires.modules.some((row) => row.id === "thrallo.entities"));
   void repository;
 });
@@ -596,4 +597,33 @@ test("WP9 — durable workflow persistence writes one row per workflow and reads
 
   await resumed.cancel();
   assert.equal(db.rows.size, 0, "a cancelled flow leaves no half-finished data behind");
+});
+
+test('optional contract step IDs produce a runnable protected workflow with stable identities', () => {
+  const contract={version:2,summary:'Book an appointment',entities:[],operations:[],journeys:[{id:'book-appointment',title:'Choose a time, review and confirm',steps:[
+    {operates:['bookingDate'],expect:'Date selected'},
+    {operates:['slotId'],expect:'Slot selected'},
+    {operates:['name','email'],expect:'Details complete'},
+    {expect:'Confirmation visible'},
+  ]}]};
+  const options={families:new Set(['workflow'])};
+  const plan=deriveWorkflowPlan(contract,options);
+  assert.deepEqual(plan.workflows[0].steps.map(s=>s.id),['step-1','step-2','step-3','step-4']);
+  assert.deepEqual(deriveWorkflowPlan(contract,options),plan);
+  const definition=compileWorkflow(plan.workflows[0]);
+  const controller=createWorkflow({definition,values:{}});
+  assert.equal(controller.getState().stepId,'step-1');
+  assert.deepEqual(plan.workflows[0].steps[0].fields,['bookingDate']);
+  const spec=deriveBuildSpec(contract);
+  const {tree}=composeCapabilityFoundation({...REACT_VITE},spec.capabilityGraph,{...spec});
+  assert.doesNotMatch(tree[WORKFLOW_COMPOSED_PATH],/"id": "undefined"/);
+});
+
+test('generated workflow IDs avoid explicit IDs without renaming declared transitions', () => {
+  const contract={journeys:[{id:'flow',title:'Review and confirm',steps:[{}, {id:'step-1'}, {id:'review'}, {id:' '}, {id:'step-4'}]}]};
+  const {workflows}=deriveWorkflowPlan(contract,{families:new Set(['workflow'])});
+  assert.deepEqual(workflows[0].steps.map(s=>s.id),['step-1-2','step-1','review','step-4-2','step-4']);
+  assert.doesNotThrow(()=>compileWorkflow(workflows[0]));
+  const duplicates=deriveWorkflowPlan({journeys:[{id:'flow',title:'Review and confirm',steps:[{id:'same'},{id:'same'},{}]}]},{families:new Set(['workflow'])});
+  assert.throws(()=>compileWorkflow(duplicates.workflows[0]),/unique/,'explicit ambiguous declarations remain invalid');
 });

@@ -1,19 +1,13 @@
 import { lookup } from "node:dns/promises";
+import { publicIp } from "./builderV2/assets/safeImageFetch.mjs";
 import { mkdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { chromium } from "@playwright/test";
 
 const MAX_ROUTES = 12;
-const PRIVATE_V4 = [
-  /^10\./, /^127\./, /^169\.254\./, /^192\.168\./,
-  /^172\.(1[6-9]|2\d|3[01])\./, /^0\./,
-];
-
 export function isPrivateAddress(address) {
-  const value = String(address || "").toLowerCase();
-  if (value === "::1" || value.startsWith("fe80:") || value.startsWith("fc") || value.startsWith("fd")) return true;
-  return PRIVATE_V4.some((pattern) => pattern.test(value));
+  return !publicIp(address) || String(address).toLowerCase().startsWith("ff");
 }
 
 export async function safeBrowserUrl(rawUrl, previewOrigin, cache = new Map()) {
@@ -21,6 +15,7 @@ export async function safeBrowserUrl(rawUrl, previewOrigin, cache = new Map()) {
   try { url = new URL(rawUrl); } catch { return false; }
   if (["data:", "blob:", "about:"].includes(url.protocol)) return true;
   if (!['http:', 'https:'].includes(url.protocol)) return false;
+  if (url.username || url.password) return false;
   if (url.origin === previewOrigin) return true;
   if (url.protocol !== "https:") return false;
   const host = url.hostname.toLowerCase();
@@ -104,8 +99,18 @@ export async function runQaBrowser({ previewUrl, runId, artifactRoot = process.e
             })).slice(0, 5),
             unlabeledControls: [...document.querySelectorAll("button,input,select,textarea,a[href]")]
               .filter((el) => {
-                if (el.matches('input[type="hidden"]')) return false;
-                const label = el.getAttribute("aria-label") || el.getAttribute("title") || el.textContent?.trim() || el.getAttribute("placeholder") || el.getAttribute("alt");
+                if (el.matches('input[type="hidden"]') || !el.getClientRects().length) return false;
+                const style = getComputedStyle(el);
+                if (style.visibility === "hidden" || style.visibility === "collapse") return false;
+                const referenced = (el.getAttribute("aria-labelledby") || "").trim().split(/\s+/)
+                  .map(id => document.getElementById(id)?.textContent?.trim() || "").join(" ").trim();
+                const native = [...(el.labels || [])].map(label => label.textContent?.trim() || "").join(" ").trim();
+                const inputType = el.tagName === "INPUT" ? el.type : "";
+                const inputName = ["button", "submit", "reset"].includes(inputType)
+                  ? (el.value || (inputType === "submit" ? "Submit" : inputType === "reset" ? "Reset" : "")) : "";
+                const label = [referenced, el.getAttribute("aria-label"), native, inputName,
+                  el.getAttribute("title"), el.matches("button,a[href]") ? el.textContent : "", el.getAttribute("placeholder"), el.getAttribute("alt")]
+                  .some(value => String(value || "").trim());
                 return !label;
               }).length,
             links: [...document.querySelectorAll("a[href]")].map((a) => a.href),

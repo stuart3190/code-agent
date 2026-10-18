@@ -408,7 +408,7 @@ const ASSEMBLY_PATTERNS = Object.freeze({
     lines: [
       "CAPABILITY STORE STATE — one source of truth, no local mirror of store state:",
       "  const state = useCapabilityState(<store>);           // or (<store>, (s) => s.values)",
-      "  // Re-renders on every store change. Never copy store state into useState.",
+      "  // Requires getState + subscribe; async entityStore/repository objects are not state stores. Never copy store state into useState.",
     ],
   },
   field: {
@@ -425,6 +425,8 @@ const ASSEMBLY_PATTERNS = Object.freeze({
     lines: [
       "ENTITY ACCESS — call the capability directly:",
       "  await store.create(values) / store.get(id) / store.list({ filters }) / store.update(id, values)",
+      "  // Await list() into React state; refresh after create/update/remove. Or useCollection(entity) from ./lib/app.",
+      "  // CRUD has no getState(): never useCapabilityState(entityStore(...)). entityStore returns flat records; repository returns { id, version, values } with fields under values.",
       "  // The runtime establishes the app's visitor session before any protected operation.",
       "  // Do NOT call ensureVisitorSession() first, and do NOT use db.entity() for a capability-owned type.",
     ],
@@ -476,7 +478,7 @@ export function preferredAssemblyBrief(needs = {}) {
 const INSTANCE_METHODS = Object.freeze({
   crud: "makeEntityStore(type) → { list, get, create, update, remove, count, subscribe }",
   session: "signUp({ email, password }); signIn({ email, password }); resetPassword({ email }); confirmReset({ email, code, newPassword }); currentUser(); signOut() — credential methods take ONE object, never positional arguments",
-  booking: "makeBookingSystem(...) → { createBooking, getBooking, listBookings, cancelBooking, remaining }",
+  booking: 'makeBookingSystem({ entity, slots: [{ id, capacity }], shared: true }); shared:true reserves capacity-one slots atomically across visitors. createBooking({ date, slotId, name, email, partySize? }) → { result: "ok"|"invalid"|"over_capacity", booking }; only confirm result==="ok". getBooking(reference, email) → booking|null; cancelBooking(reference, email) → { ok, booking }, listBookings({ filters }), remaining(date, slotId). Map entity field names to these inputs; statuses use BOOKING_STATUS.ACTIVE/CANCELLED. For shared availability call remaining(date, slotId), never infer it from listBookings (private to each visitor). shared:false retains legacy visitor-only capacity; existing records are not automatically migrated.',
   wizard: "makeWizardMachine({ id, steps, onConfirm }) → durable app-scoped state that HYDRATES ITSELF on first subscribe; getState()/subscribe snapshots expose canonical { stepId, stepIndex, values } plus compatible step/currentStep/current aliases; restore() reloads durable state and restore({ stepId, values, ... }) atomically adopts and saves a compatible state; methods { getState, subscribe, hydrate, restore, setValue, select, validateCurrent, next, back, goTo, confirm, cancel, reset }",
   contact: "makeContactForm(...) → { submitContact(fields) }   // NOT .submit",
   newsletter: "makeNewsletter(...) → { subscribe(email) }",

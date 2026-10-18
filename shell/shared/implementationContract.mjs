@@ -410,6 +410,80 @@ function journeyFixtureKeys(steps) {
   return keys;
 }
 
+// A single declared transient seed is an input fixture too: list-valued initial recipe
+// data cannot be typed into verificationValues (which describes primitive UI inputs).
+// Do not borrow persisted records, ambiguous rows, or a seed changed earlier in the journey.
+function transientSeedRows(contract, entity) {
+  if (entity?.storage !== "transient") return null;
+  let rows = contract.sampleData?.[entity.name];
+  if (Array.isArray(contract.sampleData)) {
+    const declarations = contract.sampleData.filter(row => row?.entity === entity.name);
+    if (declarations.length !== 1 || (declarations[0].storage && declarations[0].storage !== "transient")) return null;
+    rows = [declarations[0].values];
+  }
+  return Array.isArray(rows) && rows.length && rows.every(row => row && typeof row === "object" && !Array.isArray(row)) ? rows : null;
+}
+
+function sharedSeedValueIsUnambiguous(contract, field, value) {
+  const owners = (contract.entities || []).flatMap(entity => (entity.fields || [])
+    .filter(candidate => referenceKey(candidate.name) === referenceKey(field.name)).map(candidate => ({ entity, field:candidate })));
+  if (owners.length === 1) return true;
+  // A shared foreign-key-like field can be known even when it appears in multiple entities:
+  // every explicit transient row must agree. Never choose one row from a varying collection.
+  if (!["string", "number", "boolean"].includes(field.type)) return false;
+  return owners.every(owner => {
+    if (owner.field.type !== field.type) return false;
+    const declared = Object.hasOwn(owner.field, "initialValue") ? owner.field.initialValue : owner.field.default;
+    if (declared !== undefined && declared !== value) return false;
+    const rows = transientSeedRows(contract, owner.entity);
+    return rows && rows.every(row => Object.hasOwn(row, owner.field.name) && row[owner.field.name] === value);
+  });
+}
+
+export function transientSeedState(contract, entity) {
+  const rows = transientSeedRows(contract, entity);
+  if (!rows || rows.length !== 1) return {};
+  const state = {};
+  for (const field of entity.fields || []) {
+    const value = rows[0][field.name];
+    if (!Object.hasOwn(rows[0], field.name) || value === null || value === undefined) continue;
+    if (!sharedSeedValueIsUnambiguous(contract, field, value)) continue;
+    const valid = field.type === "json" ? typeof value === "object"
+      : field.type === "array" ? Array.isArray(value)
+      : field.type === "number" ? typeof value === "number" && Number.isFinite(value)
+      : field.type === "boolean" ? typeof value === "boolean" : field.type === "string" && typeof value === "string";
+    const declared = Object.hasOwn(field, "initialValue") ? field.initialValue : field.default;
+    if (declared !== undefined && JSON.stringify(declared) !== JSON.stringify(value)) continue;
+    if (valid) Object.defineProperty(state, field.name, { value, enumerable:true, configurable:true, writable:true });
+  }
+  return state;
+}
+
+function initialTransientFixtureKeys(contract, steps) {
+  const keys = new Set();
+  const first = steps?.[0];
+  if (!first || typeof first.target !== "string" || !first.target.startsWith("/")
+    || first.target.startsWith("//") || (first.operates || []).length) return keys;
+  const changed = new Set();
+  for (const step of steps || []) {
+    for (const field of [...(step.operates || []), ...(step.produces || [])]) changed.add(referenceKey(field));
+    const operations = new Set((step.operates || []).map(normaliseReference));
+    for (const operation of contract.operations || []) {
+      if (!operationKeys(operation).some(key => operations.has(key))) continue;
+      for (const responsibility of operation.responsibilities || []) {
+        for (const field of responsibility.writes || []) changed.add(referenceKey(field));
+      }
+    }
+  }
+  for (const entity of contract.entities || []) {
+    for (const field of Object.keys(transientSeedState(contract, entity))) {
+      const key = referenceKey(field);
+      if (!changed.has(key)) keys.add(key);
+    }
+  }
+  return keys;
+}
+
 function isOutputPrimitive(value) {
   return ["string", "number", "boolean"].includes(typeof value)
     && !(typeof value === "string" && !value.trim());
@@ -574,8 +648,8 @@ export function validateContract(contract) {
             problems.push(`${where} step ${stepIndex + 1} verificationValues names "${field}", which is not an operated entity field`);
           }
           if (!["string", "number", "boolean"].includes(typeof value)
-              || (typeof value === "string" && !value.trim())) {
-            problems.push(`${where} step ${stepIndex + 1} verificationValues.${field} must be a non-empty JSON primitive`);
+              || (typeof value === "string" && value !== "" && !value.trim())) {
+            problems.push(`${where} step ${stepIndex + 1} verificationValues.${field} must be a JSON primitive (use an explicit empty string to clear an input)`);
           }
         }
       }
@@ -624,6 +698,20 @@ export function validateContract(contract) {
       } else if (expectedOutputs) {
         const reached = functionalOutputReach(c, step, journey.steps.slice(0, stepIndex));
         const fixtures = journeyFixtureKeys(journey.steps.slice(0, stepIndex + 1));
+        for (const key of initialTransientFixtureKeys(c, journey.steps.slice(0, stepIndex))) fixtures.add(key);
+        // Earlier asserted functional outputs are known values too (for example a confirmed
+        // status later consumed by cancellation). Requiring them as editable verificationValues
+        // contradicts the rule that verificationValues may only name operated input fields.
+        // Never use this step's own expected output to satisfy its input requirement.
+        for (let priorIndex = 0; priorIndex < stepIndex; priorIndex += 1) {
+          const prior = journey.steps[priorIndex];
+          const priorReach = functionalOutputReach(c, prior, journey.steps.slice(0, priorIndex));
+          for (const [field, value] of Object.entries(prior?.expectedOutputs || {})) {
+            if (isOutputPrimitive(value) && isDeclaredField(c, field) && priorReach.has(referenceKey(field))) {
+              fixtures.add(referenceKey(field));
+            }
+          }
+        }
         const missingInputs = new Map();
         for (const [field, value] of Object.entries(expectedOutputs)) {
           const key = referenceKey(field);
@@ -812,6 +900,9 @@ export function contractBrief(contract) {
           && Object.keys(step.expectedOutputs).length) {
         lines.push(`     computed outputs: ${JSON.stringify(step.expectedOutputs)}`);
       }
+      if (Array.isArray(step.visibleText) && step.visibleText.length) {
+        lines.push(`     visible outcomes: ${JSON.stringify(step.visibleText)}`);
+      }
       lines.push(`  ${i + 1}. ${step.action}${step.target ? ` (${step.target})` : ""} → ${step.expect}`);
     }
     lines.push("");
@@ -827,10 +918,15 @@ export function contractBrief(contract) {
   }
 
   if (contract.entities?.length) {
-    lines.push("PERSISTED DATA — these must go through db.entity(), never component state:");
+    lines.push("DATA MODELS — follow each entity's storage policy:");
     for (const entity of contract.entities) {
       const fields = (entity.fields || []).map((f) => `${f.name}:${f.type}${f.required ? "*" : ""}`).join(", ");
       lines.push(`  - ${entity.name}${entity.owned ? " (owned by the signed-in user)" : ""} { ${fields} }`);
+      lines.push(entityPersistencePolicy(contract, entity.name) === "transient"
+        ? "      transient state: keep it in the composed transient store or local UI state"
+        : "      persistent data: use the composed backend capability; never fake it with component state");
+      const seed = transientSeedState(contract, entity);
+      if (Object.keys(seed).length) lines.push(`      exact initial values (preserve quantities and units): ${JSON.stringify(seed)}`);
       for (const rel of entity.relationships || []) lines.push(`      ${rel}`);
     }
     lines.push("");

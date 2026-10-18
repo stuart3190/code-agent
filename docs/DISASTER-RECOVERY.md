@@ -22,6 +22,16 @@ persistent) and writes `~/thrallo-backups/thrallo-<stamp>/` containing:
 - authoritative production migration-ledger evidence plus the local/applied-state map; and
 - `manifest.json` with per-file row counts, sizes and SHA-256 checksums.
 
+Format 3 captures service-only column-level FK/PK metadata in `backup_relations.json.gz`.
+Before completion, bounded reconciliation adds missing referenced parents and complete immutable
+snapshot/graph children without deleting or replacing captured rows. Snapshot tree hashes, blob
+content, storage coverage and all captured foreign keys must validate. Missing/deleted parents,
+changed identities, exhausted reconciliation bounds or schema/migration changes leave the run
+in its private `.incomplete-*` directory and prevent pruning. The relation catalog and live migration
+identities are checked before and after export. This is still a time-spanning logical export, not
+an MVCC snapshot or point-in-time recovery. A full isolated restore remains required evidence.
+Historical format 2 checksums prove file integrity only; they do not prove cross-table consistency.
+
 Every run is validated immediately after writing. Runs older than
 `THRALLO_BACKUP_KEEP_DAYS` (14) are pruned. Buildr101 backups are separate and untouched.
 
@@ -139,3 +149,26 @@ independent credentials/probe configuration has been supplied and tested.
 - After every schema change, the release pipeline runs fresh reset, lint, schema diff, catalog
   coverage and backup compatibility proofs.
 - Quarterly, rehearse the four-hour RTO from a clean host or namespace and record actual timing.
+
+External restore probe output is JSON Lines. Each sample must contain `host` (the requested
+host), numeric `port` (55320 through 55327), `checkedAt` (ISO timestamp), and `connected: false`.
+Emit each port's sample at least once per minute throughout the drill. Any reachable port,
+missing port, malformed/empty output, wrong host, stale sample or coverage gap fails the drill.
+A successful process exit alone is not isolation evidence. DR health reads the completed
+`result: "pass"` record after `startedAt` in `drill.json`; touching a file or starting a failed
+restore does not refresh the successful-drill timestamp.
+
+
+## Latest isolated recovery evidence
+
+The 2026-10-17 format-3 archive `thrallo-2026-10-17T023702` passed a full isolated
+restore with 97 migrations: 108 tables, 359,387 rows, 446 auth users, 23 storage
+objects and 672 filesystem files. The verifier checked exact rows and content,
+1,795 snapshots, 6,261 graph revisions, runtime links and cross-owner isolation.
+See `docs/evidence/reliability-20261016/backup97-full-restore.json`.
+
+Restore must preserve `bv2_snapshots.build_id`: it participates in snapshot uniqueness.
+Restore contracts and builds before snapshots, defer `bv2_builds.final_snapshot`,
+and apply those links after all parents exist. Clearing snapshot build IDs makes
+identical source trees from different builds collide. This drill proves local logical
+recovery only; password recovery and independent off-host disaster recovery remain separate.

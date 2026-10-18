@@ -350,3 +350,35 @@ test("unpackOutput survives corrupt compressed data honestly", () => {
   assert.match(unpackOutput({ output: null, output_gz: "not-base64-gzip!!" }), /could not be decompressed/);
   assert.equal(unpackOutput({ output: "plain" }), "plain");
 });
+
+test('shared contract references retain structure while every copy redacts secrets', () => {
+  const shared = { output: { type: 'transient_result' }, password: 'private-password', note: 'configured-value-123' };
+  const value = { first: shared, second: shared, array: [shared, shared] };
+  const expected = { output: { type: 'transient_result' }, password: '[REDACTED]', note: '[REDACTED]' };
+  assert.deepEqual(redactDiagnosticValue(value, { env: { API_KEY: 'configured-value-123' } }),
+    { first: expected, second: expected, array: [expected, expected] });
+  assert.equal(shared.password, 'private-password');
+});
+
+test('true object and array cycles remain bounded without suppressing shared siblings', () => {
+  const shared = { name: 'safe' }; shared.self = shared;
+  const array = [shared]; array.push(array);
+  assert.deepEqual(redactDiagnosticValue({ one: shared, two: shared, array }, { env: {} }), {
+    one: {name:'safe',self:'[REDACTED CIRCULAR]'}, two: {name:'safe',self:'[REDACTED CIRCULAR]'},
+    array: [{name:'safe',self:'[REDACTED CIRCULAR]'}, '[REDACTED CIRCULAR]'],
+  });
+});
+
+test('persisted diagnostic contract retains repeated graph references with redaction', async () => {
+  const shared = { type: 'transient_result', secret: 'never-store' };
+  const contract = { operations: [{output:shared}], graph: {output:shared} };
+  const db = fakeDb();
+  const session = await createDiagSession({owner:OWNER,kind:'app_build',client:db,redactionEnv:{}});
+  session.setContract(contract);
+  await settle(session);
+  assert.deepEqual(db.rows.diag_runs[0].contract, {
+    operations:[{output:{type:'transient_result',secret:'[REDACTED]'}}],
+    graph:{output:{type:'transient_result',secret:'[REDACTED]'}},
+  });
+  assert.equal(session.contract, contract);
+});

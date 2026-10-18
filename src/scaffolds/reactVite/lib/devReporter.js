@@ -6,10 +6,24 @@
 // (import.meta.env.DEV guard) and inert when not iframed. Error text only — no app data.
 
 if (import.meta.env.DEV && typeof window !== "undefined" && window.parent !== window) {
+  // Preview apps are separate origins and may be framed by an arbitrary site. Only the
+  // actual product shells (and their explicit local development ports) own this bridge.
+  const shellOrigins = new Set([
+    "https://app.thrallo.com", "https://buildr101.com",
+    "http://localhost:5173", "http://127.0.0.1:5173",
+    "http://localhost:8787", "http://127.0.0.1:8787",
+  ]);
+  const trustedOrigin = (value) => {
+    try { const origin = new URL(value).origin; return shellOrigins.has(origin) ? origin : null; }
+    catch { return null; }
+  };
+  let parentOrigin = trustedOrigin(document.referrer)
+    || trustedOrigin(window.location.ancestorOrigins?.[0]);
   const seen = new Set();
   let sent = 0;
 
   const report = (message, stack) => {
+    if (!parentOrigin) return;
     const key = String(message).slice(0, 200);
     if (seen.has(key) || sent >= 5) return;
     seen.add(key);
@@ -21,7 +35,7 @@ if (import.meta.env.DEV && typeof window !== "undefined" && window.parent !== wi
           message: String(message).slice(0, 500),
           stack: String(stack || "").slice(0, 2000),
         },
-        "*"
+        parentOrigin
       );
     } catch {
       /* parent gone — nothing to do */
@@ -68,13 +82,14 @@ if (import.meta.env.DEV && typeof window !== "undefined" && window.parent !== wi
   };
 
   window.addEventListener("message", (e) => {
-    if (e.source !== window.parent) return;
+    if (e.source !== window.parent || !shellOrigins.has(e.origin)) return;
     const d = e.data;
     if (!d || d.__buildr !== "select-mode") return;
+    parentOrigin = e.origin;
     if (d.on) { selecting = true; document.documentElement.style.cursor = "crosshair"; }
     else exitSelect();
     // ACK so the shell can confirm the bridge is live in this preview (old trees lack it).
-    try { window.parent.postMessage({ __buildr: "select-mode-ack", on: !!d.on }, "*"); } catch {}
+    try { window.parent.postMessage({ __buildr: "select-mode-ack", on: !!d.on }, parentOrigin); } catch {}
   });
 
   document.addEventListener("mouseover", (e) => {
@@ -91,14 +106,26 @@ if (import.meta.env.DEV && typeof window !== "undefined" && window.parent !== wi
     e.stopPropagation();
     const el = e.target;
     clearHover();
+    // Inspect structure, never credentials or values typed into form controls. Work on a
+    // detached clone so selecting an element cannot change the running application's data.
+    const safe = el.cloneNode(true);
+    const controls = [...(safe.matches("input,textarea,select") ? [safe] : []),
+      ...safe.querySelectorAll("input,textarea,select")];
+    for (const control of controls) {
+      control.removeAttribute("value");
+      if (control.tagName === "TEXTAREA") control.textContent = "";
+      if (control.tagName === "SELECT") {
+        for (const option of control.querySelectorAll("option")) option.removeAttribute("selected");
+      }
+    }
     try {
       window.parent.postMessage({
         __buildr: "element-selected",
         tag: el.tagName.toLowerCase(),
-        text: (el.textContent || "").trim().slice(0, 120),
-        outerHTML: el.outerHTML.slice(0, 600),
+        text: (safe.textContent || "").trim().slice(0, 120),
+        outerHTML: safe.outerHTML.slice(0, 600),
         path: cssPath(el),
-      }, "*");
+      }, parentOrigin);
     } catch { /* parent gone */ }
     exitSelect();
   }, true);

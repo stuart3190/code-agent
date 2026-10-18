@@ -1,0 +1,102 @@
+[
+  {
+    "width": 1440,
+    "name": "required title rejected",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "create visible in To do",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "create persists",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "search hides nonmatching",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "clear restores results",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "edit and movement persist",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "no horizontal overflow",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "cancel deletion preserves task",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "deletion persists",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "no runtime errors",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "required title rejected",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "create visible in To do",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "create persists",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "search hides nonmatching",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "clear restores results",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "edit and movement persist",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "no horizontal overflow",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "cancel deletion preserves task",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "deletion persists",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "no runtime errors",
+    "ok": true
+  }
+]

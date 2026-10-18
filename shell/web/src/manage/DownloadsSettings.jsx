@@ -4,6 +4,9 @@
 
 import React, { useEffect, useState } from "react";
 import { SkeletonRows, useCopy } from "./shared.jsx";
+import { apiBase } from "../lib/backend.js";
+
+const releaseUrl = value => typeof value === "string" && value.startsWith("/") ? `${apiBase()}${value}` : value;
 
 function formatSize(bytes) {
   return bytes >= 1073741824 ? `${(bytes / 1073741824).toFixed(2)} GB` : `${Math.round(bytes / 1048576)} MB`;
@@ -15,7 +18,7 @@ export default function DownloadsSettings() {
   const [copied, copy] = useCopy();
 
   useEffect(() => {
-    fetch("/api/v1/downloads")
+    fetch(`${apiBase()}/api/v1/downloads`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("no release"))))
       .then(setRelease)
       .catch(() => setFailed(true));
@@ -44,11 +47,11 @@ export default function DownloadsSettings() {
         {setup && (
           <>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", margin: "10px 0 4px" }}>
-              <a className="ct-btn" style={{ textDecoration: "none" }} href={setup.url} download>
+              <a className="ct-btn" style={{ textDecoration: "none" }} href={releaseUrl(setup.url)} download>
                 Download for Windows
               </a>
               {portable && (
-                <a className="ct-btn-quiet" style={{ textDecoration: "none", border: "1px solid var(--line)" }} href={portable.url} download>
+                <a className="ct-btn-quiet" style={{ textDecoration: "none", border: "1px solid var(--line)" }} href={releaseUrl(portable.url)} download>
                   Portable ZIP · {formatSize(portable.sizeBytes)}
                 </a>
               )}

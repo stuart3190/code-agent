@@ -1,0 +1,45 @@
+{
+  "pass": false,
+  "unavailable": false,
+  "responsive": {
+    "checked": true,
+    "width": 390,
+    "findings": [
+      {
+        "control": "Clear search button",
+        "controlId": "act_6aff3ab1",
+        "kind": "clipped_control",
+        "blocker": "non-scrollable horizontal clipping",
+        "width": 390
+      }
+    ],
+    "unavailable": false,
+    "entry": {
+      "checked": true,
+      "width": 390,
+      "findings": [
+        {
+          "control": "Clear search button",
+          "controlId": "act_6aff3ab1",
+          "kind": "clipped_control",
+          "blocker": "non-scrollable horizontal clipping",
+          "width": 390
+        }
+      ]
+    },
+    "afterInteraction": {
+      "checked": true,
+      "width": 390,
+      "findings": [
+        {
+          "control": "Clear search button",
+          "controlId": "act_6aff3ab1",
+          "kind": "clipped_control",
+          "blocker": "non-scrollable horizontal clipping",
+          "width": 390
+        }
+      ]
+    }
+  },
+  "crashes": []
+}

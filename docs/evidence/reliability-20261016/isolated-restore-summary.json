@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "tables": 106,
+  "tableRows": 311712,
+  "authUsers": 355,
+  "storageObjects": 22,
+  "filesystemObjects": 408,
+  "filesystemDirectories": 150,
+  "blobs": 4429,
+  "snapshots": 1716,
+  "verificationCacheRows": 2045,
+  "graphRevisions": 5118,
+  "shadowRuns": 0,
+  "modelReservations": 2174,
+  "generatedProjectIds": {
+    "bv2Builds": 287,
+    "diagnosticRuns": 331
+  },
+  "runtimeLinks": "valid",
+  "crossOwnerPrincipals": 2
+}

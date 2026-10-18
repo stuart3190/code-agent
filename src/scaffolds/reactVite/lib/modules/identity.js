@@ -37,6 +37,7 @@ export const IDENTITY_ERROR = Object.freeze({
   INVALID_CODE: "invalid_code",
   MEMBER_REQUIRED: "member_required",
   SESSION_EXPIRED: "session_expired",
+  SESSION_REFRESH_TIMEOUT: "session_refresh_timeout",
   BACKEND_UNAVAILABLE: "backend_unavailable",
   UNKNOWN: "identity_error",
 });
@@ -57,6 +58,8 @@ export function classifyIdentityError(error, { operation = null } = {}) {
   const message = String(error?.message || error || "").toLowerCase();
   let code = IDENTITY_ERROR.UNKNOWN;
   if (error?.code && Object.values(IDENTITY_ERROR).includes(error.code)) code = error.code;
+  else if (error?.code === "app_session_refresh_timeout"
+      || message === "the session refresh timed out. please try again in a minute.") code = IDENTITY_ERROR.SESSION_REFRESH_TIMEOUT;
   else if (status === 401 || /invalid (?:login )?credentials|invalid email or password|wrong password/.test(message)) code = IDENTITY_ERROR.INVALID_CREDENTIALS;
   else if (status === 409 || /already (?:registered|exists|taken)|email_taken/.test(message)) code = IDENTITY_ERROR.EMAIL_TAKEN;
   else if (/weak password|password (?:is )?too short|weak_password/.test(message)) code = IDENTITY_ERROR.WEAK_PASSWORD;

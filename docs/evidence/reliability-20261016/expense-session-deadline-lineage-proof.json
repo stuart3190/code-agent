@@ -1,0 +1,19 @@
+{
+  "deployedCommit": "5aed516199ab19599bc79e05756989b1c45b3a68",
+  "publicBuildId": "5fbe6990-c6a5-4a55-87c5-916a52387520",
+  "buildId": "15ba79f2-4381-4cb6-9d2a-c2db1f996ddf",
+  "snapshotId": "d54aa89f-7c86-4957-a0c9-b01e6bbb5297",
+  "contractId": "c3e1f256-43f1-419f-9a9c-f6a8ef8b67e5",
+  "changedFiles": [
+    "src/lib/backend/supabaseBackend.js",
+    "src/lib/capabilities/composed/lock.js"
+  ],
+  "authoredFrontendPreserved": true,
+  "sessionTransportDeadlineCurrent": true,
+  "moduleLockMatchesRuntime": true,
+  "sourceContractDiagnosticBound": true,
+  "modelReservations": 0,
+  "credits": 0,
+  "durationMs": 82584,
+  "limitation": "Retained assisted app verification; not fresh generation."
+}

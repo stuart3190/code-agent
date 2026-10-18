@@ -18,6 +18,8 @@ const config = resolvePublicAuthConfig(environment, { required: true });
 
 process.env.THRALLO_REQUIRE_PUBLIC_AUTH = "1";
 process.env.NODE_ENV = "production";
+// Tailwind resolves its content/config paths from cwd, even with Vite root set.
+process.chdir(WEB_ROOT);
 await build({ root: WEB_ROOT, mode: "production" });
 const proof = await verifyWebAuthArtifact({ distDir: path.join(WEB_ROOT, "dist"), config });
 console.log(JSON.stringify({

@@ -59,7 +59,7 @@ export async function ensureAppVisitorSession({
   if (!auth?.currentUser || !auth?.signIn || !auth?.signUp) {
     throw new Error("ensureAppVisitorSession: app-scoped auth is required.");
   }
-  const current = await auth.currentUser().catch(() => null);
+  const current = await auth.currentUser();
   if (current) return current;
 
   const identity = String(appId || "app");
@@ -103,7 +103,47 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     );
   }
   if (typeof fetchImpl !== "function") throw new Error("createSupabaseBackend: a fetch implementation is required.");
-  const client = createClient(url, anonKey, { global: { fetch: fetchImpl } });
+  const sessionAuthUrl = `${String(url).replace(/\/$/, "")}/auth/v1`;
+  const sessionFetch = async (input, init = {}) => {
+    const rawUrl = String(input?.url || input);
+    const requestUrl = rawUrl.split("?")[0];
+    const method = String(init.method || input?.method || "GET").toUpperCase();
+    const isLookup = requestUrl === `${sessionAuthUrl}/user` && method === "GET";
+    const isRefresh = requestUrl === `${sessionAuthUrl}/token` && method === "POST"
+      && new URL(rawUrl).searchParams.get("grant_type") === "refresh_token";
+    // Bound this read through body consumption. A stalled existing-session check must
+    // settle the identity controller without replacing the user's persisted identity.
+    // Refresh can run before getUser during SDK initialization. Its transport failure
+    // remains retryable to the SDK, preserving the existing stored session. No new
+    // mutation retry is introduced here; other auth mutations are unchanged.
+    if (!isLookup && !isRefresh) return fetchImpl(input, init);
+    const controller = new AbortController();
+    const upstreamSignal = init.signal || input?.signal;
+    const forwardAbort = () => controller.abort(upstreamSignal.reason);
+    if (upstreamSignal?.aborted) forwardAbort();
+    else upstreamSignal?.addEventListener("abort", forwardAbort, { once: true });
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 30_000);
+    timer.unref?.();
+    try {
+      const response = await fetchImpl(input, { ...init, signal: controller.signal });
+      const bytes = await response.arrayBuffer();
+      return new Response([204, 205, 304].includes(response.status) ? null : bytes, {
+        status: response.status, statusText: response.statusText, headers: response.headers,
+      });
+    } catch (error) {
+      if (timedOut) throw Object.assign(new Error(isLookup
+        ? "The session lookup timed out. Please try again."
+        : "The session refresh timed out. Please try again in a minute."), {
+        code: isLookup ? "app_session_lookup_timeout" : "app_session_refresh_timeout", retryable: true,
+      });
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      upstreamSignal?.removeEventListener("abort", forwardAbort);
+    }
+  };
+  const client = createClient(url, anonKey, { global: { fetch: sessionFetch } });
 
   // Normalise a Supabase {data,error} reply into a value-or-throw, so app code can
   // `await` and use try/catch instead of threading error objects through the UI.
@@ -112,24 +152,51 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
     return data;
   };
 
+  const currentSessionUser = async () => {
+    const { data, error } = await client.auth.getUser();
+    // Absence/expiry is authoritative; a failed lookup is not evidence of sign-out.
+    if (error) {
+      if (error.name === "AuthSessionMissingError"
+          || ["session_not_found", "session_expired", "bad_jwt"].includes(error.code)) return null;
+      throw error;
+    }
+    return data?.user ?? null;
+  };
+
   // Per-app auth (PLAN-per-app-auth default lane): when authUrl + appId are configured, sign-up/
   // sign-in go through the platform's app-auth Edge Function, which maps (appId, email) to an
   // app-scoped auth user and returns a REAL session — same email can register in many apps without
   // collision. The session is installed on this client, so db/storage/RLS behave identically.
   const appAuthPost = async (action, payload = {}) => {
-    const res = await fetchImpl(authUrl, {
-      method: "POST",
-      // A publishable API key belongs in `apikey`, not Authorization: Bearer. Authorization is for
-      // an end-user JWT; treating an opaque sb_publishable_ key as a JWT can be rejected before an
-      // Edge Function runs. app-auth is the seam that creates that user session, so none exists yet.
-      headers: { "Content-Type": "application/json", apikey: anonKey },
-      body: JSON.stringify({ action, appId, ...payload }),
-    });
-    const out = await res.json().catch(() => ({}));
-    if (!res.ok) throw Object.assign(new Error(out.error || `auth ${action} failed (${res.status})`), {
-      code: "app_auth_request_failed", status: res.status, action,
-    });
-    return out;
+    const controller = new AbortController();
+    // Bound both connection and response-body reads so the session error screen can retry.
+    // Visitor signup persists its credentials before this call and is idempotent on retry.
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    timer.unref?.();
+    try {
+      const res = await fetchImpl(authUrl, {
+        method: "POST",
+        // Publishable keys belong in apikey; no end-user session exists yet.
+        headers: { "Content-Type": "application/json", apikey: anonKey },
+        body: JSON.stringify({ action, appId, ...payload }),
+        signal: controller.signal,
+      });
+      const out = await res.json().catch((error) => {
+        if (controller.signal.aborted) throw error;
+        return {};
+      });
+      if (!res.ok) throw Object.assign(new Error(out.error || `auth ${action} failed (${res.status})`), {
+        code: "app_auth_request_failed", status: res.status, action,
+      });
+      return out;
+    } catch (error) {
+      if (controller.signal.aborted) throw Object.assign(new Error("The session request timed out. Please try again."), {
+        code: "app_auth_timeout", retryable: true, action,
+      });
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   };
   // Session-returning actions install the session on this client so db/storage/RLS just work.
   const appAuthCall = async (action, payload = {}) => {
@@ -158,8 +225,7 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
           if (error) throw error;
         },
         async currentUser() {
-          const { data } = await client.auth.getUser();
-          const u = data?.user ?? null;
+          const u = await currentSessionUser();
           // Surface the REAL email the person typed, not the app-scoped synthetic address.
           return u ? { ...u, email: u.user_metadata?.app_email || u.email } : null;
         },
@@ -186,8 +252,7 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
           if (error) throw error;
         },
         async currentUser() {
-          const { data } = await client.auth.getUser();
-          return data?.user ?? null;
+          return currentSessionUser();
         },
       };
 
@@ -318,6 +383,35 @@ export function createSupabaseBackend({ url, anonKey, bucket = "uploads", appId 
             .subscribe();
           return () => client.removeChannel(channel);
         },
+      };
+    },
+    // Private transport for the protected booking capability. Availability is aggregate-only;
+    // reservation/cancellation transactions authorize the app visitor inside PostgreSQL.
+    booking(type) {
+      if (!appId) throw new Error("Shared bookings require an app-scoped backend.");
+      const rpc = async (name, args) => {
+        await ensureEntitySession();
+        const parameters = { p_app_id: appId, p_entity_type: type, ...args };
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const request = client.rpc(name, parameters);
+          const response = await (typeof request.abortSignal === "function" && typeof globalThis.AbortSignal?.timeout === "function"
+            ? request.abortSignal(AbortSignal.timeout(10_000)) : request);
+          if (attempt === 0 && response.error && (response.status === 0 || response.status >= 500)) {
+            await new Promise(resolve => setTimeout(resolve, 200));
+            continue;
+          }
+          const data = unwrap(response);
+          // A lost cancellation response followed by an already-cancelled row is success.
+          return attempt > 0 && name === "app_booking_cancel" && data?.reason === "already_cancelled"
+            ? { ...data, ok: true } : data;
+        }
+      };
+      return {
+        reserve: ({ date, slotId, requestId, values }) => rpc("app_booking_reserve", {
+          p_date: date, p_slot_id: slotId, p_request_id: requestId, p_values: values,
+        }),
+        remaining: (date, slotId) => rpc("app_booking_remaining", { p_date: date, p_slot_id: slotId }),
+        cancel: (reference, email) => rpc("app_booking_cancel", { p_reference: reference, p_email: email }),
       };
     },
   };

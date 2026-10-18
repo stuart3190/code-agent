@@ -38,6 +38,7 @@
 // the platform's verify_jwt gate; per-user auth is what this function IS, so there is no user JWT yet.
 
 import { createClient } from "npm:@supabase/supabase-js@2.111.0";
+import { syntheticAppEmail as syntheticEmail } from "../_shared/appIdentity.mjs";
 import {
   UUID_RE, requestOrigin, originIsEligible, projectPreviewOriginIsEligible, hmacHex,
 } from "./policy.mjs";
@@ -47,7 +48,6 @@ const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") || "";
 const RESEND_FROM = Deno.env.get("RESEND_FROM") || "Thrallo <noreply@thrallo.com>";
-const SYNTH_DOMAIN = "apps.thrallo.com";
 const RESET_PEPPER = Deno.env.get("APP_AUTH_RESET_PEPPER") || "";
 
 const RESET_TTL_MIN = 15;
@@ -70,15 +70,6 @@ const cors = (origin: string | null) => ({
 });
 const json = (status: number, body: unknown, origin: string | null = null) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...cors(origin) } });
-
-async function sha256hex(s: string): Promise<string> {
-  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-async function syntheticEmail(appId: string, email: string): Promise<string> {
-  return `u.${(await sha256hex(`${appId}|${email.toLowerCase()}`)).slice(0, 32)}@${SYNTH_DOMAIN}`;
-}
 
 const codeHash = (appId: string, email: string, code: string) =>
   hmacHex(RESET_PEPPER, `${appId}|${email}|${code}`);
@@ -104,14 +95,18 @@ function callerIp(req: Request): string {
 }
 
 // Count rows of `kind` for this key in the last hour, pruning that key's stale (>24h) rows first.
-async function eventCount(kind: string, key: string): Promise<number> {
-  const dayAgo = new Date(Date.now() - 24 * 3600e3).toISOString();
-  await svc.from("app_auth_events").delete().eq("kind", kind).eq("key", key).lt("created_at", dayAgo);
-  const hourAgo = new Date(Date.now() - 3600e3).toISOString();
-  const { count } = await svc
-    .from("app_auth_events").select("id", { count: "exact", head: true })
-    .eq("kind", kind).eq("key", key).gte("created_at", hourAgo);
-  return count ?? 0;
+async function eventCount(kind: string, key: string): Promise<number | null> {
+  try {
+    const dayAgo = new Date(Date.now() - 24 * 3600e3).toISOString();
+    await svc.from("app_auth_events").delete().eq("kind", kind).eq("key", key).lt("created_at", dayAgo);
+    const hourAgo = new Date(Date.now() - 3600e3).toISOString();
+    const { count, error } = await svc
+      .from("app_auth_events").select("id", { count: "exact", head: true })
+      .eq("kind", kind).eq("key", key).gte("created_at", hourAgo);
+    return !error && Number.isInteger(count) && Number(count) >= 0 ? count : null;
+  } catch {
+    return null;
+  }
 }
 
 async function logEvent(kind: string, key: string, appId: string) {
@@ -180,14 +175,19 @@ Deno.serve(async (req: Request) => {
   // ── reset: email a one-time code. 200 no matter what — never reveal whether an account exists.
   if (action === "reset") {
     if (!RESEND_API_KEY || !RESET_PEPPER) return reply(503, { error: "Password reset isn't available yet for this app." });
-    if (await eventCount("reset", ip) >= LIMIT_RESET_PER_IP_H) {
+    const ipRecent = await eventCount("reset", ip);
+    if (ipRecent === null) return reply(503, { error: "Password reset is temporarily unavailable. Try again." });
+    if (ipRecent >= LIMIT_RESET_PER_IP_H) {
       return reply(429, { error: "Too many reset requests — try again later." });
     }
     const hourAgo = new Date(Date.now() - 3600e3).toISOString();
-    const { count: recent } = await svc
+    const { count: recent, error: recentError } = await svc
       .from("app_password_resets").select("id", { count: "exact", head: true })
       .eq("app_id", appId).eq("email", email).gte("created_at", hourAgo);
-    if ((recent ?? 0) >= LIMIT_RESET_PER_TARGET_H) {
+    if (recentError || !Number.isInteger(recent) || Number(recent) < 0) {
+      return reply(503, { error: "Password reset is temporarily unavailable. Try again." });
+    }
+    if (Number(recent) >= LIMIT_RESET_PER_TARGET_H) {
       return reply(429, { error: "Too many reset requests — try again later." });
     }
     await logEvent("reset", ip, appId);
@@ -261,19 +261,30 @@ Deno.serve(async (req: Request) => {
   const synth = await syntheticEmail(appId, email);
   const { data: existing, error: lookupErr } = await svc
     .from("app_users").select("id, auth_user_id, status").eq("app_id", appId).eq("email", email).maybeSingle();
-  if (lookupErr) return reply(500, { error: `lookup failed: ${lookupErr.message}` });
+  if (lookupErr) return reply(503, { error: "Account lookup is temporarily unavailable. Try again." });
+  // Idempotent signup must honor the same account suspension as ordinary sign-in.
+  if (existing && existing.status !== "active") {
+    return reply(403, { error: "This account has been disabled by the app owner." });
+  }
 
   if (action === "signup" && !existing) {
     // Abuse guards: a promo spike is fine; a signup script is not. The platform's own
     // egress (preview verification) skips ONLY the per-IP cap; every other guard applies.
-    if (!platformCaller && await eventCount("signup", ip) >= LIMIT_SIGNUP_PER_IP_H) {
-      return reply(429, { error: "Too many signups from this network — try again later." });
+    if (!platformCaller) {
+      const ipRecent = await eventCount("signup", ip);
+      if (ipRecent === null) return reply(503, { error: "Signup is temporarily unavailable. Try again." });
+      if (ipRecent >= LIMIT_SIGNUP_PER_IP_H) {
+        return reply(429, { error: "Too many signups from this network — try again later." });
+      }
     }
     const hourAgo = new Date(Date.now() - 3600e3).toISOString();
-    const { count: appRecent } = await svc
+    const { count: appRecent, error: appCountError } = await svc
       .from("app_users").select("id", { count: "exact", head: true })
       .eq("app_id", appId).gte("created_at", hourAgo);
-    if ((appRecent ?? 0) >= LIMIT_SIGNUP_PER_APP_H) {
+    if (appCountError || !Number.isInteger(appRecent) || Number(appRecent) < 0) {
+      return reply(503, { error: "Signup is temporarily unavailable. Try again." });
+    }
+    if (Number(appRecent) >= LIMIT_SIGNUP_PER_APP_H) {
       return reply(429, { error: "This app is getting a lot of signups right now — try again in a bit." });
     }
 
@@ -294,47 +305,55 @@ Deno.serve(async (req: Request) => {
       if (createErr && /already.*(regist|exist)/i.test(createErr.message)) { createErr = null; break; }
       if (createErr && attempt === 0) await new Promise((r) => setTimeout(r, 400));
     }
-    if (createErr) return reply(500, { error: `signup failed: ${createErr.message}` });
+    if (createErr) return reply(503, { error: "Account creation could not be confirmed. Try again." });
 
-    if (created) {
-      const { error: mapErr } = await svc.from("app_users").insert({
-        app_id: appId, email, auth_user_id: created.user.id,
-      });
-      if (mapErr && !/duplicate|unique|conflict|23505/i.test(mapErr.message)) {
-        // A real mapping failure: roll back the auth user so a retry works.
-        await svc.auth.admin.deleteUser(created.user.id).catch(() => {});
-        return reply(500, { error: `signup failed: ${mapErr.message}` });
-      }
-      // A duplicate mapping row = we lost the race after user creation; the winner's rows
-      // stand and the sign-in below resolves the session either way.
-      await logEvent("signup", ip, appId);
-      // WP4: an invitation for this address becomes an active membership with the invited role.
-      // Nothing else about authority changes at signup — an uninvited signup is an ordinary member.
-      await svc.from("app_memberships")
-        .update({ auth_user_id: created.user.id, status: "active", updated_at: new Date().toISOString() })
-        .eq("app_id", appId).eq("email", email).eq("status", "invited")
-        .then(() => undefined, () => undefined);
-      // Real event integration 1: the first thing a new end user sees in the app's notification
-      // surface, and proof the surface works from the moment they arrive.
-      await notifyAppUser(appId, created.user.id, "app_welcome", "Welcome",
-        "Your account is ready. This is where you'll see updates.", { kind: "welcome" });
-    }
-  } else if (action === "signup" && existing) {
-    // A visitor retrying their OWN signup (the browser's saved identity) is a sign-in, not
-    // an error; a DIFFERENT password for an existing account still gets the explicit 409.
-    const probe = createClient(SUPABASE_URL, ANON_KEY, { auth: { persistSession: false } });
-    const { error: probeErr } = await probe.auth.signInWithPassword({ email: synth, password });
-    if (probeErr) return reply(409, { error: "An account with this email already exists for this app — sign in instead." });
   } else if (!existing) {
     return reply(401, { error: "Invalid email or password." });
-  } else if (existing.status !== "active") {
-    return reply(403, { error: "This account has been disabled by the app owner." });
   }
 
   // Both paths end in a REAL password sign-in against the synthetic address -> native session.
   const anon = createClient(SUPABASE_URL, ANON_KEY, { auth: { persistSession: false } });
   const { data: signed, error: signErr } = await anon.auth.signInWithPassword({ email: synth, password });
-  if (signErr || !signed.session) return reply(401, { error: "Invalid email or password." });
+  if (signErr || !signed.session) {
+    if (action === "signup" && existing) {
+      return reply(409, { error: "An account with this email already exists for this app — sign in instead." });
+    }
+    return reply(401, { error: "Invalid email or password." });
+  }
+
+  // Password authentication is the authority for recovering an interrupted signup.
+  // Never delete an auth user after an uncertain mapping write: its commit may
+  // have succeeded even when the acknowledgement was lost.
+  let insertedMapping = false;
+  try {
+    let { data: mapping, error: mappingError } = await svc.from("app_users")
+      .select("id,auth_user_id,status").eq("app_id", appId).eq("email", email).maybeSingle();
+    if (mappingError) return reply(503, { error: "Account lookup is temporarily unavailable. Try again." });
+    if (!mapping && action === "signup") {
+      const { error: insertError } = await svc.from("app_users").insert({
+        app_id: appId, email, auth_user_id: signed.user.id,
+      });
+      insertedMapping = !insertError;
+      // Confirm the actual row for successful, duplicate and uncertain writes.
+      // A missing row remains retryable using the same authenticated identity.
+      const confirmed = await svc.from("app_users").select("id,auth_user_id,status")
+        .eq("app_id", appId).eq("email", email).maybeSingle();
+      mapping = confirmed.data;
+      mappingError = confirmed.error;
+    }
+    if (mappingError || !mapping) return reply(503, { error: "Account setup could not be confirmed. Try again." });
+    if (mapping.status !== "active") return reply(403, { error: "This account has been disabled by the app owner." });
+    if (mapping.auth_user_id !== signed.user.id) return reply(403, { error: "Account identity could not be confirmed." });
+  } catch {
+    return reply(503, { error: "Account setup could not be confirmed. Try again." });
+  }
+  if (insertedMapping) {
+    await logEvent("signup", ip, appId);
+    // A self-entered real email is not proof of mailbox ownership. Invited roles
+    // require a separate verified acceptance flow; signup must not activate them.
+    await notifyAppUser(appId, signed.user.id, "app_welcome", "Welcome",
+      "Your account is ready. This is where you'll see updates.", { kind: "welcome" });
+  }
 
   return reply(200, {
     user: { id: signed.user.id, email }, // the REAL email, not the synthetic one

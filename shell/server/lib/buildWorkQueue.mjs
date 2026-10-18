@@ -68,6 +68,26 @@ export async function enqueueBuildWork({
   return Array.isArray(data) ? data[0] : data;
 }
 
+// Public build creation and durable queue payload must commit in one transaction.
+export async function dispatchBuildPipeline({ owner, projectId, buildId, mode,
+  diagRunId = null, budgetApprovalId = null, payload, priority = 0, client = null }) {
+  const { data, error } = await (client || serviceClient()).rpc("build_pipeline_dispatch", {
+    p_owner: owner, p_project_id: projectId, p_build_id: buildId, p_mode: mode,
+    p_diag_run_id: diagRunId, p_budget_approval_id: budgetApprovalId, p_payload: payload,
+    p_priority: Math.max(-100, Math.min(100, Number(priority) || 0)),
+    p_resource_limits: limitsFor("builder_pipeline"),
+  });
+  if (error) throw Object.assign(new Error(`atomic build dispatch: ${error.message}`), { code: error.code });
+  if (typeof data?.existing !== "boolean" || data.job?.owner !== owner
+      || String(data.job?.project_id) !== String(projectId)
+      || (!data.existing && (data.job?.id !== buildId || !data.work?.id))
+      || (data.work && (data.work.owner !== owner || String(data.work.project_id) !== String(projectId)
+        || data.work.build_id !== data.job.id || data.job.work_job_id !== data.work.id))) {
+    throw Object.assign(new Error("atomic dispatch returned inconsistent build authority"), { code: "build_dispatch_identity_mismatch" });
+  }
+  return data;
+}
+
 export async function getBuildWork(owner, jobId, { client = null, includeResult = true } = {}) {
   const db = client || serviceClient();
   const { data: job, error } = await db.from("build_work_jobs").select("*")

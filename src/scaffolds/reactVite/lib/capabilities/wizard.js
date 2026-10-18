@@ -17,7 +17,7 @@ const freezeSnapshot = (value) => {
   return Object.freeze(value);
 };
 
-const flatten = (row) => (row ? { id: row.id, ...(row.data || {}) } : null);
+const flatten = (row) => (row ? { ...(row.data || {}), id: row.id } : null);
 
 /** Durable app-scoped persistence. No browser storage and no visual opinions. */
 export function makeWizardPersistence({ key, entity = "wizardState", deps = {} } = {}) {

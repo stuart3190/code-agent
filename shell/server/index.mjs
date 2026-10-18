@@ -99,7 +99,7 @@ import { handleHistoryList } from "./routes/history.mjs";
 import { handleOnboardingGet, handleOnboardingUpdate } from "./routes/onboarding.mjs";
 import {
   handleConversationEvents, handleConversationGet, handleConversationMessage, handleConversations,
-  handleConversationsBulk,
+  handleConversationsBulk, handleConversationPreview,
 } from "./routes/conversations.mjs";
 import {
   notificationChannels, vapidPublicKey, saveSubscription, removeSubscription,
@@ -682,6 +682,13 @@ const server = http.createServer(async (req, res) => {
       }
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ restored: true, id: row.id, title: row.title }));
+    }
+    const conversationPreviewMatch = p.match(/^\/api\/v1\/conversations\/([0-9a-f-]+)\/preview$/i);
+    if (conversationPreviewMatch && method === "POST") {
+      const owner = await requireOwner(req, res); if (!owner) return;
+      return await handleConversationPreview(req, res, {
+        owner, conversationId: conversationPreviewMatch[1], body: await readJson(req, BODY_LIMITS.standard),
+      });
     }
     const conversationMessageMatch = p.match(/^\/api\/v1\/conversations\/([0-9a-f-]+)\/messages$/i);
     if (conversationMessageMatch && method === "POST") {

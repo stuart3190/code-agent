@@ -166,7 +166,7 @@ test("WP4 — the client policy copy is byte-identical to the server's, and the 
   const edge = await readFile(new URL("../../supabase/functions/app-accounts/index.ts", import.meta.url), "utf8");
   assert.match(edge, /import \{ AccountError, createAccountService \} from "\.\/accountService\.mjs"/);
   const appAuth = await readFile(new URL("../../supabase/functions/app-auth/index.ts", import.meta.url), "utf8");
-  assert.match(appAuth, /app_memberships[\s\S]*status: "active"[\s\S]*eq\("status", "invited"\)/, "signup activates an invitation");
+  assert.doesNotMatch(appAuth, /app_memberships[\s\S]*status: "active"[\s\S]*eq\("status", "invited"\)/, "signup cannot grant an invited role from self-entered email");
 });
 
 test("WP4 — contract typing: an account-shaped entity is platform-owned and its CRUD becomes admin/accounts commands", async () => {

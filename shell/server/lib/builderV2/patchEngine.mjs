@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 import { parse } from "@babel/parser";
 
 export const PROTECTED_PATHS = Object.freeze([
+  /^package-lock\.json$/,
   /^src\/lib\/backend\//,
   /^src\/lib\/visitorSession\.js$/,
   /^src\/lib\/capabilities\//,
@@ -21,51 +22,47 @@ export const PROTECTED_PATHS = Object.freeze([
   /^src\/lib\/app\//,
 ]);
 
-// The strict tool schema the orchestrator will register (strict tools proven since P18:
-// every property required, optionals nullable).
+// Strict, mutually exclusive target branches prevent a decoder-valid null-content
+// whole-file patch. Keep the existing wire keys so retained valid patches remain compatible.
+const PATCH_OPERATIONS_SCHEMA = {
+  type: "array",
+  items: {
+    type: "object", additionalProperties: false, required: ["op", "symbol", "content"],
+    properties: {
+      op: { type: "string", enum: ["replace_symbol", "replace_exact", "insert_after_symbol", "insert_before_symbol", "delete_symbol", "append", "add_import"] },
+      symbol: { type: ["string", "null"], description: "For replace_exact, the complete exact old source excerpt (never only a function/component name); otherwise the indexed symbol name" },
+      content: { type: ["string", "null"], description: "Complete replacement source for the selected symbol or exact old excerpt" },
+    },
+  },
+};
+function patchTargetSchema(target) {
+  const wholeFile = target === "newFile" || target === "replaceFile";
+  return {
+    type: "object", additionalProperties: false,
+    required: ["file", "ops", "newFile", "content", "deleteFile", "replaceFile"],
+    properties: {
+      file: target === "file" ? { type: "string", description: "Existing indexed file to modify with ops" } : { type: "null" },
+      ops: target === "file" ? PATCH_OPERATIONS_SCHEMA : { type: "null" },
+      newFile: target === "newFile" ? { type: "string", description: "Path of a file to CREATE" } : { type: "null" },
+      content: wholeFile ? { type: "string", description: "COMPLETE file source, including CSS; never omit the implementation" } : { type: "null" },
+      deleteFile: target === "deleteFile" ? { type: "string", description: "Existing file to DELETE" } : { type: "null" },
+      replaceFile: target === "replaceFile" ? { type: "string", description: "Existing file to replace with complete content; required for opaque CSS/config files" } : { type: "null" },
+    },
+  };
+}
 export const EMIT_PATCHES_SCHEMA = Object.freeze({
   name: "emit_patches",
-  description: "Apply your changes as symbol-level operations. Every op is validated against "
-    + "the code index; a rejected op comes back with the exact reason. Use newFile for files "
-    + "that do not exist yet; never rewrite a whole existing file through newFile. Files the "
-    + "index cannot parse into symbols (CSS, config) can only change via replaceFile with the "
-    + "COMPLETE new content. For a very large symbol, replace_exact uses `symbol` as the exact "
-    + "old source excerpt and `content` as its replacement; the excerpt must occur exactly once.",
+  description: "Apply changes as validated symbol operations or complete files. Each patch selects exactly "
+    + "one target: file with ops, newFile with complete content, replaceFile with complete content, or deleteFile. "
+    + "All unused keys must be null. Existing opaque CSS/config files require replaceFile and complete CSS/source "
+    + "on that SAME patch. Never split a path and its source across patches. For replace_exact, symbol is the "
+    + "exact old source excerpt and content is its replacement; the excerpt must occur exactly once.",
   strict: true,
   parameters: {
-    type: "object",
-    additionalProperties: false,
-    required: ["patches"],
-    properties: {
-      patches: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["file", "ops", "newFile", "content", "deleteFile", "replaceFile"],
-          properties: {
-            file: { type: ["string", "null"], description: "Existing file to modify with ops" },
-            ops: {
-              type: ["array", "null"],
-              items: {
-                type: "object",
-                additionalProperties: false,
-                required: ["op", "symbol", "content"],
-                properties: {
-                  op: { type: "string", enum: ["replace_symbol", "replace_exact", "insert_after_symbol", "insert_before_symbol", "delete_symbol", "append", "add_import"] },
-                  symbol: { type: ["string", "null"], description: "For replace_exact, the complete exact old source excerpt (never only a function/component name); for symbol operations, the indexed symbol name" },
-                  content: { type: ["string", "null"], description: "Complete replacement source for the selected symbol or exact old excerpt" },
-                },
-              },
-            },
-            newFile: { type: ["string", "null"], description: "Path of a file to CREATE" },
-            content: { type: ["string", "null"], description: "Content for newFile or replaceFile" },
-            deleteFile: { type: ["string", "null"], description: "Path of a file to DELETE" },
-            replaceFile: { type: ["string", "null"], description: "EXISTING file to replace wholesale with `content` — the only way to change files the index treats as opaque (CSS, config)" },
-          },
-        },
-      },
-    },
+    type: "object", additionalProperties: false, required: ["patches"],
+    properties: { patches: { type: "array", items: {
+      anyOf: ["file", "newFile", "replaceFile", "deleteFile"].map(patchTargetSchema),
+    } } },
   },
 });
 
@@ -235,6 +232,29 @@ export const REJECTION = Object.freeze({
   BATCH_ATOMIC_ROLLBACK: "batch_atomic_rollback",   // valid on its own; discarded with its batch
 });
 
+const parseFailureDetail = (probe) => probe.parseError
+  ? `${probe.parseError.message}${probe.parseError.code ? ` [${probe.parseError.code}]` : ""}`
+  : "the source could not be parsed";
+
+// A failed creation never enters the retained tree. A later complete replacement of
+// precisely that rejected path is still a creation repair. Correct the operation only;
+// normal scope, protected-path, syntax and compile gates remain authoritative.
+export function normalizeMissingCreationCorrections(patches, tree, rejectionHistory = []) {
+  const rejectedCreations = new Set(rejectionHistory.filter(row => row.code === REJECTION.SOURCE_PARSE_FAILED
+    && row.operation === "newFile").map(row => row.file));
+  const conversions = [];
+  const normalized = Object.assign([...patches], patches);
+  for (let i = 0; i < patches.length; i += 1) {
+    const patch = patches[i];
+    const file = patch.replaceFile;
+    if (!file || Object.hasOwn(tree, file) || !rejectedCreations.has(file)
+        || patch.newFile || patch.deleteFile || patch.file || patch.ops?.length) continue;
+    normalized[i] = { ...patch, replaceFile: null, newFile: file };
+    conversions.push({ file, from: "replaceFile", to: "newFile", reason: "prior_creation_rejected" });
+  }
+  return { patches: conversions.length ? normalized : patches, conversions };
+}
+
 /**
  * Apply a batch of patches to a tree, validating every operation against the CURRENT index
  * of the file it touches. Returns the new tree plus applied/rejected lists; the input tree
@@ -262,16 +282,26 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
   });
 
   for (const patch of patches || []) {
+    const targets = [patch.file, patch.newFile, patch.replaceFile, patch.deleteFile].filter(Boolean);
+    if (targets.length > 1 || (patch.ops?.length && !patch.file && targets.length)) {
+      reject(patch, null, "A patch must select exactly one operation target: file with ops, newFile with content, "
+        + "replaceFile with complete content, or deleteFile. Put each file edit in its own patch; keep its content on that same object.");
+      continue;
+    }
     // ── create ───────────────────────────────────────────────────────────────────────────
     if (patch.newFile) {
       if (patch.newFile in working) { reject(patch, null, `newFile: ${patch.newFile} already exists — use ops to modify it`, REJECTION.PATCH_NOT_APPLICABLE); continue; }
       if (isProtectedPath(patch.newFile, { tree: working, contract })) { reject(patch, null, `newFile: ${patch.newFile} is protected platform infrastructure`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
-      const probe = indexFile(patch.newFile, patch.content || "");
-      if (probe.opaque && /\.(jsx?|tsx?|mjs|cjs)$/.test(patch.newFile)) {
-        reject(patch, null, `newFile: content for ${patch.newFile} does not parse (unbalanced braces or no structure)`, REJECTION.SOURCE_PARSE_FAILED);
+      if (typeof patch.content !== "string") {
+        reject(patch, null, `newFile: ${patch.newFile} requires an explicit string content; missing/null content cannot create an empty file`);
         continue;
       }
-      working[patch.newFile] = String(patch.content || "");
+      const probe = indexFile(patch.newFile, patch.content);
+      if (probe.opaque && /\.(jsx?|tsx?|mjs|cjs)$/.test(patch.newFile)) {
+        reject(patch, null, `newFile: content for ${patch.newFile} does not parse: ${parseFailureDetail(probe)}`, REJECTION.SOURCE_PARSE_FAILED);
+        continue;
+      }
+      working[patch.newFile] = patch.content;
       applied.push({ signature: opSignature(patch, {}), file: patch.newFile, kind: "newFile" });
       continue;
     }
@@ -280,10 +310,14 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
     if (patch.replaceFile) {
       if (!(patch.replaceFile in working)) { reject(patch, null, `replaceFile: ${patch.replaceFile} does not exist — use newFile to create files`, REJECTION.PATCH_NOT_APPLICABLE); continue; }
       if (isProtectedPath(patch.replaceFile, { tree: working, contract })) { reject(patch, null, `replaceFile: ${patch.replaceFile} is protected platform infrastructure`, REJECTION.WRITE_SCOPE_VIOLATION); continue; }
-      const content = String(patch.content || "");
+      if (typeof patch.content !== "string") {
+        reject(patch, null, `replaceFile: ${patch.replaceFile} requires the complete string content; missing/null content cannot erase an existing file`);
+        continue;
+      }
+      const content = patch.content;
       if (/\.(jsx?|tsx?|mjs|cjs)$/.test(patch.replaceFile)) {
         const probe = indexFile(patch.replaceFile, content);
-        if (probe.opaque) { reject(patch, null, `replaceFile: content for ${patch.replaceFile} does not parse (unbalanced braces or no structure)`, REJECTION.SOURCE_PARSE_FAILED); continue; }
+        if (probe.opaque) { reject(patch, null, `replaceFile: content for ${patch.replaceFile} does not parse: ${parseFailureDetail(probe)}`, REJECTION.SOURCE_PARSE_FAILED); continue; }
       }
       working[patch.replaceFile] = content;
       applied.push({ signature: opSignature(patch, {}), file: patch.replaceFile, kind: "replaceFile" });

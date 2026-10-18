@@ -1,0 +1,80 @@
+{
+  "at": "2026-10-17T18:55:00Z",
+  "attempts": 9,
+  "passed": 9,
+  "results": [
+    {
+      "attempt": 1,
+      "width": 1440,
+      "status": 200,
+      "domMs": 151,
+      "headingMs": 2646,
+      "events": []
+    },
+    {
+      "attempt": 2,
+      "width": 390,
+      "status": 200,
+      "domMs": 192,
+      "headingMs": 3176,
+      "events": []
+    },
+    {
+      "attempt": 3,
+      "width": 320,
+      "status": 200,
+      "domMs": 511,
+      "headingMs": 3042,
+      "events": []
+    },
+    {
+      "attempt": 4,
+      "width": 1440,
+      "status": 200,
+      "domMs": 247,
+      "headingMs": 2816,
+      "events": []
+    },
+    {
+      "attempt": 5,
+      "width": 390,
+      "status": 200,
+      "domMs": 150,
+      "headingMs": 2214,
+      "events": []
+    },
+    {
+      "attempt": 6,
+      "width": 320,
+      "status": 200,
+      "domMs": 115,
+      "headingMs": 2078,
+      "events": []
+    },
+    {
+      "attempt": 7,
+      "width": 1440,
+      "status": 200,
+      "domMs": 167,
+      "headingMs": 2128,
+      "events": []
+    },
+    {
+      "attempt": 8,
+      "width": 390,
+      "status": 200,
+      "domMs": 166,
+      "headingMs": 2114,
+      "events": []
+    },
+    {
+      "attempt": 9,
+      "width": 320,
+      "status": 200,
+      "domMs": 130,
+      "headingMs": 2062,
+      "events": []
+    }
+  ],
+  "limitation": "Earlier blank-load failures remain unexplained; nine passing fresh loads do not prove the issue fixed."
+}

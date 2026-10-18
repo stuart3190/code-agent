@@ -117,3 +117,21 @@ function assertResponsiveLayout(layout) {
     expect(control.height).toBeGreaterThanOrEqual(minimumTarget);
   }
 }
+
+for (const [label, prompt] of [
+  ["guest access obligation", "Build an application to save expense records. The visitor should not have to sign up or sign in. Do not add payments."],
+  ["payment action", "Build a portfolio website. Save contact inquiries. Do not send email or take payments."],
+  ["capability list", "Build a portfolio website. Save contact inquiries. Do not rebuild unrelated features or add payments, authentication, or external services."],
+]) test(`composer respects a negative conjoined ${label}`, async ({ page }) => {
+  let submitted = null;
+  await stubComposer(page, body => { submitted = body; });
+  await page.goto("/");
+  await page.getByPlaceholder(/Describe anything/).fill(prompt);
+  await expect(page.getByLabel("Thrallo build interpretation")).toContainText("Saved data / database");
+  await expect(page.getByLabel("Thrallo build interpretation")).not.toContainText("Payments / subscriptions");
+  await page.getByRole("button", {name:"Send message"}).click();
+  await expect.poll(() => submitted).not.toBeNull();
+  expect(submitted.buildProfile.requirementSignals).toContain("saved_data");
+  expect(submitted.buildProfile.requirementSignals).not.toContain("payments");
+  expect(submitted.buildProfile.requirementSignals).not.toContain("user_accounts");
+});

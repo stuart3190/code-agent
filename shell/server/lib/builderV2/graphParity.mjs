@@ -43,7 +43,13 @@ export function fileGraphPayload(treeIndex, path) {
     meta: symbol.meta || {},
   }));
   const refs = treeIndex.refs.filter((ref) => ref.fromPath === path).map((ref) => {
-    const candidates = ordinalsByName.get(ref.fromSymbol) || [];
+    let candidates = ordinalsByName.get(ref.fromSymbol) || [];
+    // `export function f() { helper(); } export default f;` has two indexed spans
+    // named f, but only the declaration owns the call. References are derived from
+    // each span's meta.calls; use that evidence before rejecting an ambiguous name.
+    // Preserve existing symbol rows/hashes so immutable persisted revisions do not change.
+    if (candidates.length > 1) candidates = candidates.filter(ordinal =>
+      file.symbols[ordinal].meta?.calls?.includes(ref.refName));
     if (candidates.length !== 1) {
       throw new Error(`${path}: reference source symbol ${ref.fromSymbol} is not unique`);
     }

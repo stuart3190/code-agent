@@ -605,10 +605,33 @@ export function verificationDefects({
   // recorded failures that way. Minimal, smoke, bypass, and any unnamed future policy are not.
   const unnamedJourneyRepairable = !minimal && !smoke && policy !== BYPASSED_VERIFIER_POLICY
     && (policy == null || policy === LEGACY_RICH_VERIFIER_POLICY);
+  const reportedResponsiveControls = new Set();
   for (const journey of verdicts.journeys || []) {
     if (["pass", "reused"].includes(journey.status) || journeysWithSteps.has(journey.id)) continue;
     if (journey.setup?.ok === false) continue; // already reported as a prerequisite defect
     if (smoke) {
+      if (journey.classification === VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE
+        && journey.responsiveFindings?.length) {
+        for (const finding of journey.responsiveFindings) {
+          const id = finding.controlId || `responsive:${finding.width}:${finding.control}`;
+          const code = finding.kind === 'clipped_control' ? 'responsive_control_clipped' : 'responsive_control_obstructed';
+          const key = `${code}:${id}`;
+          if (reportedResponsiveControls.has(key)) continue;
+          reportedResponsiveControls.add(key);
+          const token = finding.controlId || finding.control;
+          const files = token ? Object.entries(tree || {}).filter(([file, source]) => generatedSource(file)
+            && typeof source === 'string' && source.includes(token)).map(([file]) => file) : [];
+          const fallback = unique([...(journey.owners || []), ...(journey.fallbackRefs || [])]).filter(generatedSource);
+          defects.push({ code, defectClass: DEFECT_CLASS.INTERACTION, owner: DEFECT_OWNER.APP,
+            tier: REPAIR_TIER.REPAIR, journeyId: null, stepIndex: null,
+            action: 'reflow mobile controls', control: { id, label: finding.control },
+            modules: files.length ? files : fallback, failureRefs: files.length ? files : fallback,
+            evidence: { observed: `At ${finding.width}px, control "${finding.control}" is ${finding.kind === 'clipped_control' ? 'cut off by' : 'covered by'} ${finding.blocker}. Reflow its owning layout so it is usable.`,
+              responsive: finding },
+          });
+        }
+        continue;
+      }
       // The smoke gate drives no contracted steps, so a red smoke verdict is exactly one thing: the
       // application crashed (or rendered nothing) in a real browser. That is the application's
       // defect and a repair CAN act on it: the thrown error is the expectation. It used to be filed
@@ -1115,7 +1138,12 @@ export function defectProgress(before = [], after = []) {
       || comparePosition(nextFrontier.get(journeyId), priorPosition) > 0
   ));
 
-  if (!regressed && advanced) {
+  // Independent, browser-proven layout obstructions share a viewport rather than sequential
+  // journey steps. Removing one while introducing nothing is progress even at the same frontier.
+  const reducedResponsive = introduced.length === 0 && prior.some(defect =>
+    ['responsive_control_clipped', 'responsive_control_obstructed'].includes(defect.code)
+      && resolved.includes(defectSignature(defect)));
+  if (!regressed && (advanced || reducedResponsive)) {
     return { moved: true, resolved, persisted, introduced,
       reason: introduced.length ? "partial_progress" : "progress" };
   }

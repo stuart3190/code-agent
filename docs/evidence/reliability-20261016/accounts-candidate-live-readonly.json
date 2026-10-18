@@ -1,0 +1,31 @@
+{
+  "at": "2026-10-17T19:48:12.353Z",
+  "candidate": "d1782b9",
+  "realDatabaseAndAuth": true,
+  "ownAuditVisitorOnly": true,
+  "readOnlyAccountCommands": true,
+  "checks": [
+    {
+      "name": "own profile",
+      "status": 200,
+      "passed": true
+    },
+    {
+      "name": "own permissions",
+      "status": 200,
+      "passed": true
+    },
+    {
+      "name": "member cannot list members",
+      "status": 403,
+      "passed": true
+    },
+    {
+      "name": "other app identity denied",
+      "status": 401,
+      "passed": true
+    }
+  ],
+  "ownVisitorRefreshSessionsRevoked": true,
+  "limitation": "Exact candidate handler bundled for Node with real Supabase transport; not deployed or qualified in the Edge runtime. No administration or account feature enabled."
+}

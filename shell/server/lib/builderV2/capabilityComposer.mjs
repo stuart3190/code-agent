@@ -162,7 +162,12 @@ export const entityDefinitions = Object.freeze(${jsObject(entitySchema.definitio
 export const entitySchema = compileSchema(entityDefinitions);
 export const repositories = createEntityRepositories({ db, schema: entitySchema });
 
-/** The typed repository for one declared entity: { create, get, update, remove, list, count, subscribe }. */
+/** The typed repository for one declared entity: { create, get, update, remove, list, count, subscribe }.
+ * get/create/update resolve { id, version, createdAt, updatedAt, values }; list resolves an ARRAY
+ * of these records (no data envelope). Read domain fields as record.values.title, never record.title.
+ * Pass plain domain values to create/update. Keep record.id for get/update/remove; keep version
+ * for optimistic concurrency. Use record.values for edit drafts and list filtering/display.
+ */
 export function repository(entity) {
   const found = repositories[String(entity)];
   if (!found) throw new Error(\`No entity "\${entity}" is declared for this application\`);
@@ -267,12 +272,12 @@ import { useRouterState } from "../modules/uiReact.js";
 
 /** The matched route: { path, route, params, state: loading|ready|not_found|forbidden|error, data, navigate, href }. */
 export function useRoute() { return useRouterState(router); }
-/** A concrete href for a route id. Every declared parameter must be supplied. */
+/** A concrete href for a route id or exact declared static path. Parameterised routes require an id and params. */
 export const routeHref = (id, params = {}) => router.href(id, params);
 export const navigate = (target, options) => router.navigate(target, options);
 export const routeIds = Object.freeze(routeTable.routes.map((route) => route.id));
 
-/** An anchor bound to a route id, so a parameterised path is never written by hand. */
+/** An anchor bound to a route id or exact declared static path; parameterised paths are built from params. */
 export function Link({ to, params = {}, replace = false, children, onClick, ...rest }) {
   const href = routeHref(to, params);
   return React.createElement("a", {
@@ -814,7 +819,7 @@ function capabilityFiles(graph, { moduleLock = null, identityPlan = null, identi
     files[`${COMPOSED_ROOT}/crud.js`] = `${banner("crud")}import { makeEntityStore } from "../crud.js";
 
 export const entityStores = Object.freeze({
-${entities.map((entity) => `  ${quote(entity)}: makeEntityStore(${quote(entity)}),`).join("\n")}
+${entities.map((entity) => `  ${entity === "__proto__" ? `[${quote(entity)}]` : quote(entity)}: makeEntityStore(${quote(entity)}),`).join("\n")}
 });
 
 // An entity with no composed store (transient, not owned by the platform, or simply not durable)
@@ -882,7 +887,7 @@ function makeEphemeralEntityStore(type) {
 
 export function entityStore(entityType) {
   const key = String(entityType);
-  const store = entityStores[key];
+  const store = Object.hasOwn(entityStores, key) ? entityStores[key] : null;
   if (store) return store;
   if (!ephemeralStores.has(key)) ephemeralStores.set(key, makeEphemeralEntityStore(key));
   return ephemeralStores.get(key);
@@ -913,7 +918,7 @@ import { capabilityConfiguration } from "../../../extensions/capabilityConfigura
 
 const slots = Array.isArray(capabilityConfiguration.booking?.slots)
   ? capabilityConfiguration.booking.slots : [];
-export const bookingCapability = makeBookingSystem({ entity: ${quote(entity)}, slots });
+export const bookingCapability = makeBookingSystem({ entity: ${quote(entity)}, slots, shared: capabilityConfiguration.booking?.shared === true });
 `;
     interfaces.push({ module: `${COMPOSED_ROOT}/booking.js`, exports: ["bookingCapability"], owns: [entity], operations: booking.supportedOperations });
   }

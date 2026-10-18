@@ -1,0 +1,12 @@
+{
+  "measuredAt": "2026-10-17T15:44:53.323Z",
+  "url": "https://reliability-downlight-20261017.app.thrallo.com/",
+  "releaseId": "9af47546-2c0b-40f7-b043-9c770a2e37a1",
+  "snapshotId": "a0435f9c-c824-457f-924f-d925663f3ec4",
+  "capturedSourceHash": "061ebb40665d00ff42e44f901027e300debef11650f01ebe6ad4bb0e670600ab",
+  "artifactHash": "6d08af99ff358a9389abb6382e6bffbfedb214096190d5e75772d11e005893df",
+  "sourceBytesMatch": true,
+  "sourceDiagnosticMatches": true,
+  "active": true,
+  "verified": true
+}

@@ -1,0 +1,462 @@
+{
+  "preview": {
+    "passed": 45,
+    "checks": [
+      {
+        "width": 1440,
+        "name": "date defaults to local today",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "new guest begins empty without signup",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "zero rejected without creating record",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "integer cents sum 0.10 and 0.20 to 0.30",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "other month excluded from current total",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "month selection uses real saved records",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "summary route preserves selected month",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "summary total matches ledger",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "category totals use same records",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "edit updates actual record and aggregate",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "saved edits survive reload",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "delete updates real records and aggregate",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "layout fits viewport",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "independent guest cannot see saved records",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "own tagged test records cleaned",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "date defaults to local today",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "new guest begins empty without signup",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "zero rejected without creating record",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "integer cents sum 0.10 and 0.20 to 0.30",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "other month excluded from current total",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "month selection uses real saved records",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "summary route preserves selected month",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "summary total matches ledger",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "category totals use same records",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "edit updates actual record and aggregate",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "saved edits survive reload",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "delete updates real records and aggregate",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "layout fits viewport",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "independent guest cannot see saved records",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "own tagged test records cleaned",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "date defaults to local today",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "new guest begins empty without signup",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "zero rejected without creating record",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "integer cents sum 0.10 and 0.20 to 0.30",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "other month excluded from current total",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "month selection uses real saved records",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "summary route preserves selected month",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "summary total matches ledger",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "category totals use same records",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "edit updates actual record and aggregate",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "saved edits survive reload",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "delete updates real records and aggregate",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "layout fits viewport",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "independent guest cannot see saved records",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "own tagged test records cleaned",
+        "ok": true
+      }
+    ]
+  },
+  "published": {
+    "passed": 45,
+    "checks": [
+      {
+        "width": 1440,
+        "name": "date defaults to local today",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "new guest begins empty without signup",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "zero rejected without creating record",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "integer cents sum 0.10 and 0.20 to 0.30",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "other month excluded from current total",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "month selection uses real saved records",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "summary route preserves selected month",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "summary total matches ledger",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "category totals use same records",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "edit updates actual record and aggregate",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "saved edits survive reload",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "delete updates real records and aggregate",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "layout fits viewport",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "independent guest cannot see saved records",
+        "ok": true
+      },
+      {
+        "width": 1440,
+        "name": "own tagged test records cleaned",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "date defaults to local today",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "new guest begins empty without signup",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "zero rejected without creating record",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "integer cents sum 0.10 and 0.20 to 0.30",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "other month excluded from current total",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "month selection uses real saved records",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "summary route preserves selected month",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "summary total matches ledger",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "category totals use same records",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "edit updates actual record and aggregate",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "saved edits survive reload",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "delete updates real records and aggregate",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "layout fits viewport",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "independent guest cannot see saved records",
+        "ok": true
+      },
+      {
+        "width": 390,
+        "name": "own tagged test records cleaned",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "date defaults to local today",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "new guest begins empty without signup",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "zero rejected without creating record",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "integer cents sum 0.10 and 0.20 to 0.30",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "other month excluded from current total",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "month selection uses real saved records",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "summary route preserves selected month",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "summary total matches ledger",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "category totals use same records",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "edit updates actual record and aggregate",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "saved edits survive reload",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "delete updates real records and aggregate",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "layout fits viewport",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "independent guest cannot see saved records",
+        "ok": true
+      },
+      {
+        "width": 320,
+        "name": "own tagged test records cleaned",
+        "ok": true
+      }
+    ]
+  }
+}

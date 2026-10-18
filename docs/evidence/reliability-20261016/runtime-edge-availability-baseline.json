@@ -1,0 +1,25 @@
+{
+  "at": "2026-10-17T19:29:16.818Z",
+  "rows": [
+    {
+      "name": "app-auth",
+      "status": 204
+    },
+    {
+      "name": "app-accounts",
+      "status": 404
+    },
+    {
+      "name": "app-actions",
+      "status": 404
+    },
+    {
+      "name": "app-runtime",
+      "status": 404
+    }
+  ],
+  "managementInventory": [
+    "app-auth"
+  ],
+  "readOnly": true
+}

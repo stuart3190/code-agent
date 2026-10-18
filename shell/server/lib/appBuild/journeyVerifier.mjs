@@ -37,11 +37,32 @@ import {
   verificationVerdict,
 } from "./verifierPolicy.mjs";
 import { SEVERITY, verifierCheckSeverity } from "../builderV2/validationSeverity.mjs";
-import { isKeyboardFocusOnlyStep } from "../builderV2/interactionSemantics.mjs";
+import { isKeyboardFocusOnlyStep, isExplicitRouteLinkStep } from "../builderV2/interactionSemantics.mjs";
 
 const requireCjs = createRequire(import.meta.url);
 
 const STEP_TIMEOUT_MS = 15_000;
+
+// Repetition is an instruction, never a retry policy. Only an unambiguous transient
+// action can be repeated without creating duplicate durable effects.
+export function explicitActionRepetition(action, flows = []) {
+  const matches = [...String(action || "").matchAll(/\b(twice|thrice|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten) times)\b/gi)];
+  if (!matches.length) return { count: 1 };
+  const words = { twice: 2, thrice: 3, one: 1, two: 2, three: 3, four: 4, five: 5,
+    six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+  const token = matches[0][0].toLowerCase().split(" ")[0];
+  const count = words[token] ?? Number(token);
+  const flow = flows[0];
+  const safe = matches.length === 1 && Number.isInteger(count) && count >= 1 && count <= 10
+    && /\b(click|press|tap|activate|increase|decrease|increment|decrement)\b/i.test(action)
+    && !/\b(and|then|before|after|until)\b/i.test(action)
+    && flows.length === 1 && flow?.kind === "action" && flow.control
+    && !flow.persistenceHandoff && !flow.durableLifecycle
+    && !(flow.semanticResponsibilityTypes || []).includes("persistence")
+    && (flow.writes || []).length > 0
+    && flow.writes.every(path => /\.custom\./.test(String(path)) && !String(path).includes(".durable."));
+  return safe ? { count } : { count: null, reason: "explicit repetition has no single bounded transient action" };
+}
 
 // How many times ONE step may advance a step-gated flow to reach its contracted control. A
 // contracted step is one step: needing more than a couple of transitions to reach its own
@@ -2417,7 +2438,7 @@ async function driveSelection(page, step, flow = null, excludedKeys = new Set(),
       drove: false,
       groupKey: group.key,
       status: "pass",
-      detail: `contracted selection "${String(selected?.text || selected?.label || contractedFixture).slice(0, 40)}" was already established for the companion action`,
+      detail: `contracted selection "${String(selected?.text || selected?.label || contractedFixture).slice(0, 40)}" was already established`,
       selectedText: selected?.text || selected?.label || contractedFixture,
       selectedValue: selected?.value ?? contractedFixture,
       groupId: group.groupId,
@@ -2558,7 +2579,7 @@ export function surfaceIncludes(surface, value) {
 // Grouping separators and a trailing unit are not part of the value. The tolerance absorbs
 // binary float noise (0.1 + 0.2) and nothing a person would call a different result.
 function numberTokenPattern() {
-  return /(?<![\d.])[+-]?(?:[$£€¥]\s*)?(?:\d{1,3}(?:[,_\u00a0\u202f ]\d{3})+|\d+)(?:\.\d+)?(?:\s*[a-zA-Zµμ%][a-zA-Zµμ%0-9²³]*)?(?![\d])/gu;
+  return /(?<![\d.])[+-]?(?:[$£€¥]\s*)?(?:\d{1,3}(?:[,_\u00a0\u202f ]\d{3})+|\d+)(?:\.\d+)?(?:[eE][+-]?\d+)?(?:\s*[a-zA-Zµμ%][a-zA-Zµμ%0-9²³]*)?(?![\d])/gu;
 }
 
 function parseNumericToken(token) {
@@ -2568,10 +2589,13 @@ function parseNumericToken(token) {
   if (body.startsWith("+")) body = body.slice(1).trim();
   else if (body.startsWith("-")) { sign = -1; body = body.slice(1).trim(); }
   body = body.replace(/^[$£€¥]\s*/, "");
-  body = body.replace(/\s*[a-zA-Zµμ%][a-zA-Zµμ%0-9²³]*$/u, "");
-  body = body.replace(/[,_\u00a0\u202f ]/g, "");
-  if (!/^\d+(?:\.\d+)?$/.test(body)) return null;
-  const value = sign * Number(body);
+  body = body.replace(/[,_\s]/g, "");
+  // Capture the exponent as part of the number before considering an optional
+  // unit suffix. Stripping letters first turns 1e3 into 1 and can falsely pass.
+  const match = body.match(/^(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?:[a-zA-Zµμ%][a-zA-Zµμ%0-9²³]*)?$/u);
+  if (!match) return null;
+  const value = sign * Number(match[1]);
+  if (value === 0 && /[1-9]/.test(match[1].split(/[eE]/)[0])) return null;
   return Number.isFinite(value) ? value : null;
 }
 
@@ -2586,8 +2610,12 @@ function looseNumber(value) {
 }
 
 function numbersClose(expected, actual) {
-  const scale = Math.max(Math.abs(expected), Math.abs(actual), 1);
-  return Math.abs(expected - actual) <= Math.max(1e-6, scale * 1e-6);
+  if (expected === actual) return true;
+  // Counts and other integer outputs must not acquire a relative tolerance:
+  // a one-in-a-million off-by-one is still a different result.
+  if (Number.isInteger(expected) && Number.isInteger(actual)) return false;
+  const scale = Math.max(Math.abs(expected), Math.abs(actual), Number.MIN_VALUE);
+  return Math.abs(expected - actual) <= Number.EPSILON * scale * 4;
 }
 
 function surfaceHasNumber(surface, expected) {
@@ -2608,18 +2636,57 @@ function surfaceHasPrimitive(surface, expected) {
   return surfaceIncludes(surface, expected);
 }
 
+function roundedOutputPresentation(surface, expected) {
+  if (typeof expected !== "number" || !Number.isFinite(expected) || Number.isInteger(expected)) return null;
+  const tokens = String(surface ?? "").normalize("NFKC").match(numberTokenPattern()) || [];
+  for (const token of tokens) {
+    const numericPrefix = token.match(/^[+-]?(?:[$£€¥]\s*)?(?:\d{1,3}(?:[,_\u00a0\u202f ]\d{3})+|\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?/u);
+    const decimals = numericPrefix?.[1]?.length;
+    const exponent = Number(numericPrefix?.[2] || 0);
+    // Integer differences remain failures. A printed decimal can expose a missing
+    // presentation-precision contract, but it must never silently widen numeric equality.
+    if (!decimals || decimals > 12) continue;
+    const actual = parseNumericToken(token);
+    if (actual === null || numbersClose(expected, actual)) continue;
+    const roundingRadius = 0.5 * 10 ** (exponent - decimals);
+    if (Math.abs(expected - actual) <= roundingRadius + Number.EPSILON * Math.max(1, Math.abs(expected)) * 4) {
+      return { observed: actual, decimalPlaces: decimals };
+    }
+  }
+  return null;
+}
+
 /**
  * Contract-policy facts for a step's expectedOutputs. Numbers are compared as numbers.
  * Exported so a verdict can be proven without a browser.
  */
-export function computedOutputFacts(surface, expectedOutputs) {
+export function computedOutputFacts(surface, expectedOutputs, { inputSurface = "" } = {}) {
   const entries = expectedOutputs && typeof expectedOutputs === "object" && !Array.isArray(expectedOutputs)
     ? Object.entries(expectedOutputs).filter(([, value]) => ["string", "number", "boolean"].includes(typeof value)
       && !(typeof value === "string" && !String(value).trim()))
     : [];
-  const computedOutputs = entries.map(([field, expected]) => ({ field, expected }));
+  // A boolean state flag does not declare its presentation: resultVisible=true does not
+  // require the word "true" on screen, and an unrelated "true" cannot prove that state.
+  // Until a contract supplies an observable binding, abstain rather than repairing the app
+  // to print internal state. An explicitly requested literal string remains verifiable.
+  const unobservableComputedOutputs = entries.filter(([, expected]) => typeof expected === "boolean")
+    .map(([field, expected]) => ({ field, expected }));
+  const candidates = entries.filter(([, expected]) => typeof expected !== "boolean")
+    .map(([field, expected]) => ({ field, expected }));
+  // A value present only in an editable input proves what was entered, not what the
+  // application computed. Without an output binding this is a contract gap, not a
+  // reason to rewrite a potentially valid editable-result interface.
+  const inputOnlyComputedOutputs = candidates.filter(row => !surfaceHasPrimitive(surface, row.expected)
+    && surfaceHasPrimitive(inputSurface, row.expected));
+  const precisionAmbiguousComputedOutputs = candidates.filter(row => !inputOnlyComputedOutputs.includes(row)
+    && !surfaceHasPrimitive(surface, row.expected)).flatMap(row => {
+      const presentation = roundedOutputPresentation(surface, row.expected);
+      return presentation ? [{ ...row, ...presentation }] : [];
+    });
+  const computedOutputs = candidates.filter(row => !inputOnlyComputedOutputs.includes(row)
+    && !precisionAmbiguousComputedOutputs.some(ambiguous => ambiguous.field === row.field));
   const missingComputedOutputs = computedOutputs.filter((row) => !surfaceHasPrimitive(surface, row.expected));
-  return { computedOutputs, missingComputedOutputs };
+  return { computedOutputs, missingComputedOutputs, unobservableComputedOutputs, inputOnlyComputedOutputs, precisionAmbiguousComputedOutputs };
 }
 
 // Operation-transition copy such as "duplicated object disappears" proves the immediate action,
@@ -3074,6 +3141,9 @@ async function runStep(page, step, {
   await waitForActiveSurface(page, 5_000);
   const action = String(step.action || "");
   const expect = String(step.expect || "");
+  const repetition = explicitActionRepetition(action, interactionFlows);
+  if (repetition.reason) return verificationVerdict(VERIFICATION_RESULT_CLASS.CONTRACT_INCOMPLETE,
+    repetition.reason, { drove: false, controlEvidence: { repetition } });
   const observationOnly = isObservationOnlyStep(step, interactionFlows, { verifierPolicy });
   let drove = false;
   // Set when a CONTRACTED action kind has already driven this step, so the generic keyword click
@@ -3086,6 +3156,8 @@ async function runStep(page, step, {
   // Structured selection facts: the contracted value was already selected on entry, and a
   // hidden contract-scaffolding action was applied by the selection itself.
   let selectionEstablished = false;
+  let selectionOnlyEstablished = false;
+  let selectionTexts = null;
   let selectionAutoApplied = false;
   // The contracted input's owning form was submitted by the driver: the submission is then an
   // action of this step, proven by the surface it changed.
@@ -3216,8 +3288,33 @@ async function runStep(page, step, {
   const actionRoute = action.match(/(?:^|\s)(\/[^\s,;]+)/)?.[1] || null;
   // `step.route` is the resolved declared route (routeResolution.mjs); it outranks the prose target.
   const route = concreteRouteTarget(step.route) || concreteRouteTarget(step.target) || concreteRouteTarget(actionRoute);
+  const routeLink = minimal && isExplicitRouteLinkStep(step) && interactionFlows.every(flow =>
+    flow.kind === "navigation" || (flow.kind === "action" && !flow.operationId
+      && !flow.reads?.length && !flow.writes?.length));
   let routeNavigated = false;
-  if (route) {
+  if (route && routeLink) {
+    // Exercise the offered hyperlink from the current surface. Opening the destination
+    // directly would conceal a missing/dead navigation control.
+    const destination = new URL(route, previewUrl).href;
+    const links = page.getByRole("link");
+    let offered = null;
+    for (let index = 0, count = await links.count(); index < count; index += 1) {
+      const link = links.nth(index);
+      if (!await link.isVisible().catch(() => false)) continue;
+      const href = await link.getAttribute("href");
+      if (!href) continue;
+      try { if (new URL(href, page.url()).href === destination) { offered = link; break; } } catch {}
+    }
+    if (!offered) return verificationVerdict(VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
+      `no visible navigation link targets the contracted route ${route}`, { drove: false });
+    try { await offered.click({ timeout: 5_000 }); } catch {
+      return verificationVerdict(VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE,
+        `the navigation link to ${route} could not be activated`, { drove: false });
+    }
+    await waitForActiveSurface(page);
+    drove = true;
+    routeNavigated = true;
+  } else if (route) {
     await page.goto(new URL(route, previewUrl).href, { waitUntil: "domcontentloaded" }).catch(() => {});
     drove = true;
     routeNavigated = true;
@@ -3261,7 +3358,7 @@ async function runStep(page, step, {
   // A routed composite step must continue after opening its destination. Treat only a pure
   // navigation/recovery step as completed by the route change; value and action flows on that
   // destination still have to be driven and proved.
-  const routedComposite = routeNavigated && interactionFlows.some((flow) => (
+  const routedComposite = routeNavigated && !routeLink && interactionFlows.some((flow) => (
     !["navigation", "recovery"].includes(flow.kind)
   ));
   const navigated = drove && !routedComposite;
@@ -3593,9 +3690,10 @@ async function runStep(page, step, {
       // One contracted step can set several independent filters. A fixture may deliberately keep
       // one at its current sentinel while another filter makes the real transition. Treat the
       // exact current value as that field's established precondition, but only for a compound
-      // selection and only when at least one sibling selection actually moves.
+      // selection and only when at least one sibling selection actually moves in legacy mode.
+      // Contract policy can observe the exact declared default without inventing a transition.
       const compoundSelection = selectionFlows.length > 1;
-      const selectionOptions = { allowAlreadySelected: Boolean(companionAction) || compoundSelection };
+      const selectionOptions = { allowAlreadySelected: minimal || Boolean(companionAction) || compoundSelection };
       const outcomes = [];
       const used = new Set();
       const advances = [];
@@ -3666,95 +3764,107 @@ async function runStep(page, step, {
         selectedTexts: outcomes.map((row) => row.selectedText).filter(Boolean),
         terminalOutcomeProven: outcomes.some((row) => row.terminalOutcomeProven === true),
         controlEvidence: { selections: outcomes.map((row) => row.controlEvidence), flowAdvances: advances } };
-      if (compoundSelection && !selectionResult.drove && !companionAction) {
+      if (!minimal && compoundSelection && !selectionResult.drove && !companionAction) {
         return { ...selectionResult, status: "fail",
           detail: "every contracted selection value was already selected, so no transition was observed" };
       }
-      if (!companionAction) return selectionResult;
-      // A generated selection surface can expose a hidden action-identity proxy whose handler
-      // simply replays the already-selected value. That proxy is contract scaffolding, not a
-      // second customer operation: the visible select/card handler has already produced the
-      // transient result. Recognize only the narrow established-state shape: one exact contracted
-      // selection, one hidden machine identity, a non-durable action that reads that selection's
-      // state, no explicit Apply/Save-style instruction, and the exact expected result already
-      // visible. Visible controls, explicit activations and durable mutations remain mandatory.
-      let autoAppliedSelectionAction = null;
-      const establishedSelection = selectionFlows.length === 1 && !selectionResult.drove
-        && outcomes[0]?.controlEvidence?.precondition === "already_selected";
-      const transitionedSelection = selectionFlows.length === 1 && selectionResult.drove;
-      const selectionStatePath = selectionFlows[0]?.control?.statePath || null;
-      const consumesSelection = selectionStatePath
-        && (companionAction.reads || []).includes(selectionStatePath);
-      const writesDurableState = Boolean(companionAction.durableLifecycle)
-        || (companionAction.writes || []).some((path) => String(path).includes(".durable."));
-      const explicitlyRequestsActivation = /\b(click|press|tap|submit|apply|activate|run|trigger|confirm|save|delete|remove|clear|reset)\b/i
-        .test(action);
-      if ((establishedSelection || transitionedSelection)
-        && companionAction.kind === "action" && consumesSelection
-        && !writesDurableState && !explicitlyRequestsActivation && companionAction.control?.machineId) {
-        const presentation = await contractedActionPresentation(page, companionAction.control.machineId);
-        // The proxy's result is proven structurally: the selected option's own label is rendered
-        // somewhere OUTSIDE the selection control (the transient result reflects the selection).
-        const selectedLabels = unique(outcomes.flatMap((row) => [row.selectedText, row.selectedValue,
-          ...((row.controlEvidence?.selectedOptions || []).flatMap((option) => typeof option === "string" ? [option]
-            : [option?.label, option?.text, option?.value]))]).filter((value) => typeof value === "string" && value.trim()));
-        const expectationEvidence = presentation.candidateCount === 1 && presentation.perceivableCount === 0
-          ? await (async () => {
-            // An established selection is proven by its label rendered outside the control; a
-            // selection that just TRANSITIONED is proven by the surface change it caused.
-            const reflected = await selectionReflectedOutsideControl(page, selectionFlows[0].control?.machineId, selectedLabels);
-            const surfaceChanged = transitionedSelection
-              && (await page.evaluate(() => document.body?.innerText || "").catch(() => textBefore)) !== textBefore;
-            return { met: reflected || surfaceChanged, reflected, surfaceChanged, selectedLabels };
-          })()
-          : { met: false, selectedLabels };
-        selectionEstablished = establishedSelection;
-        if (expectationEvidence.met) {
-          selectionAutoApplied = true;
-          autoAppliedSelectionAction = {
-            selectionControl: selectionFlows[0].control?.machineId || null,
-            actionControl: companionAction.control.machineId,
-            matchedBy: establishedSelection
-              ? "established_selection_auto_applied_action"
-              : "selection_transition_auto_applied_action",
-            candidateCount: presentation.candidateCount,
-            perceivableCount: presentation.perceivableCount,
-            expectationEvidence,
-          };
-          const evidenceKey = establishedSelection
-            ? "establishedSelectionAction" : "selectionTransitionAction";
-          selectionResult.controlEvidence[evidenceKey] = autoAppliedSelectionAction;
-        }
-      }
-      if (!selectionOwnedOperation && selectionResult.drove) {
-        selectionOwnedOperation = await selectionOwnedCollectionOperation();
-      }
-      if (selectionOwnedOperation?.ok) {
-        selectionResult.terminalOutcomeProven = true;
-        selectionResult.controlEvidence.selectionOwnedOperation = selectionOwnedOperation;
-      }
-      // The scaffold stamps a coalesced selection/operation pair on one representative repeated
-      // option. Equivalent members execute that same handler even when only the representative
-      // carries the opaque attributes. Once a real selection transition has run, activating the
-      // representative action identity would perform the operation a second time on the wrong
-      // member. This shortcut requires both identities on the same option; a separate Apply/Save
-      // control therefore remains mandatory.
-      const selectionOwnedActionIndex = companionAction.control?.machineId
-        ? outcomes.findIndex((row) => row.selectionOwnedActionIds?.includes(companionAction.control.machineId))
-        : -1;
-      const selectionOwnedAction = selectionResult.drove && selectionOwnedActionIndex >= 0
-        ? { selectionControl: selectionFlows[selectionOwnedActionIndex]?.control?.machineId || null,
-          actionControl: companionAction.control.machineId }
-        : null;
-      if (selectionOwnedAction) selectionResult.controlEvidence.selectionOwnedAction = selectionOwnedAction;
-      drove = drove || selectionResult.drove;
-      controlEvidence = { ...(controlEvidence || {}), ...selectionResult.controlEvidence };
-      // A selection-owned operation runs through the option's onSelect handler. It still has to
-      // prove the operation's contracted outcome below, but the driver must not click a second
-      // prose-matched control after the semantic option already triggered it.
-      if (selectionResult.terminalOutcomeProven || selectionOwnedAction
-        || autoAppliedSelectionAction || !companionAction.control) {
+      if (!companionAction && !minimal) return selectionResult;
+      if (!companionAction) {
+        // The exact fixture's selected state is observable even when it was the default.
+        // Continue through structured output checks: selecting correctly cannot hide a
+        // wrong calculated result declared on this same step.
+        selectionEstablished = true;
+        selectionOnlyEstablished = true;
+        selectionTexts = selectionResult.selectedTexts;
+        drove = drove || selectionResult.drove;
         contractDriven = true;
+        controlEvidence = { ...(controlEvidence || {}), ...selectionResult.controlEvidence };
+      } else {
+        // A generated selection surface can expose a hidden action-identity proxy whose handler
+        // simply replays the already-selected value. That proxy is contract scaffolding, not a
+        // second customer operation: the visible select/card handler has already produced the
+        // transient result. Recognize only the narrow established-state shape: one exact contracted
+        // selection, one hidden machine identity, a non-durable action that reads that selection's
+        // state, no explicit Apply/Save-style instruction, and the exact expected result already
+        // visible. Visible controls, explicit activations and durable mutations remain mandatory.
+        let autoAppliedSelectionAction = null;
+        const establishedSelection = selectionFlows.length === 1 && !selectionResult.drove
+          && outcomes[0]?.controlEvidence?.precondition === "already_selected";
+        const transitionedSelection = selectionFlows.length === 1 && selectionResult.drove;
+        const selectionStatePath = selectionFlows[0]?.control?.statePath || null;
+        const consumesSelection = selectionStatePath
+          && (companionAction.reads || []).includes(selectionStatePath);
+        const writesDurableState = Boolean(companionAction.durableLifecycle)
+          || (companionAction.writes || []).some((path) => String(path).includes(".durable."));
+        const explicitlyRequestsActivation = /\b(click|press|tap|submit|apply|activate|run|trigger|confirm|save|delete|remove|clear|reset)\b/i
+          .test(action);
+        if ((establishedSelection || transitionedSelection)
+          && companionAction.kind === "action" && consumesSelection
+          && !writesDurableState && !explicitlyRequestsActivation && companionAction.control?.machineId) {
+          const presentation = await contractedActionPresentation(page, companionAction.control.machineId);
+          // The proxy's result is proven structurally: the selected option's own label is rendered
+          // somewhere OUTSIDE the selection control (the transient result reflects the selection).
+          const selectedLabels = unique(outcomes.flatMap((row) => [row.selectedText, row.selectedValue,
+            ...((row.controlEvidence?.selectedOptions || []).flatMap((option) => typeof option === "string" ? [option]
+              : [option?.label, option?.text, option?.value]))]).filter((value) => typeof value === "string" && value.trim()));
+          const expectationEvidence = presentation.candidateCount === 1 && presentation.perceivableCount === 0
+            ? await (async () => {
+              // An established selection is proven by its label rendered outside the control; a
+              // selection that just TRANSITIONED is proven by the surface change it caused.
+              const reflected = await selectionReflectedOutsideControl(page, selectionFlows[0].control?.machineId, selectedLabels);
+              const surfaceChanged = transitionedSelection
+                && (await page.evaluate(() => document.body?.innerText || "").catch(() => textBefore)) !== textBefore;
+              return { met: reflected || surfaceChanged, reflected, surfaceChanged, selectedLabels };
+            })()
+            : { met: false, selectedLabels };
+          selectionEstablished = establishedSelection;
+          if (expectationEvidence.met) {
+            selectionAutoApplied = true;
+            autoAppliedSelectionAction = {
+              selectionControl: selectionFlows[0].control?.machineId || null,
+              actionControl: companionAction.control.machineId,
+              matchedBy: establishedSelection
+                ? "established_selection_auto_applied_action"
+                : "selection_transition_auto_applied_action",
+              candidateCount: presentation.candidateCount,
+              perceivableCount: presentation.perceivableCount,
+              expectationEvidence,
+            };
+            const evidenceKey = establishedSelection
+              ? "establishedSelectionAction" : "selectionTransitionAction";
+            selectionResult.controlEvidence[evidenceKey] = autoAppliedSelectionAction;
+          }
+        }
+        if (!selectionOwnedOperation && selectionResult.drove) {
+          selectionOwnedOperation = await selectionOwnedCollectionOperation();
+        }
+        if (selectionOwnedOperation?.ok) {
+          selectionResult.terminalOutcomeProven = true;
+          selectionResult.controlEvidence.selectionOwnedOperation = selectionOwnedOperation;
+        }
+        // The scaffold stamps a coalesced selection/operation pair on one representative repeated
+        // option. Equivalent members execute that same handler even when only the representative
+        // carries the opaque attributes. Once a real selection transition has run, activating the
+        // representative action identity would perform the operation a second time on the wrong
+        // member. This shortcut requires both identities on the same option; a separate Apply/Save
+        // control therefore remains mandatory.
+        const selectionOwnedActionIndex = companionAction.control?.machineId
+          ? outcomes.findIndex((row) => row.selectionOwnedActionIds?.includes(companionAction.control.machineId))
+          : -1;
+        const selectionOwnedAction = selectionResult.drove && selectionOwnedActionIndex >= 0
+          ? { selectionControl: selectionFlows[selectionOwnedActionIndex]?.control?.machineId || null,
+            actionControl: companionAction.control.machineId }
+          : null;
+        if (selectionOwnedAction) selectionResult.controlEvidence.selectionOwnedAction = selectionOwnedAction;
+        drove = drove || selectionResult.drove;
+        controlEvidence = { ...(controlEvidence || {}), ...selectionResult.controlEvidence };
+        // A selection-owned operation runs through the option's onSelect handler. It still has to
+        // prove the operation's contracted outcome below, but the driver must not click a second
+        // prose-matched control after the semantic option already triggered it.
+        if (selectionResult.terminalOutcomeProven || selectionOwnedAction
+          || autoAppliedSelectionAction || !companionAction.control) {
+          contractDriven = true;
+        }
       }
     } else {
       const outcome = await driveSelection(page, step);
@@ -3858,6 +3968,20 @@ async function runStep(page, step, {
           || Boolean(removalSpec) || resetExpected,
         preferredMemberMarker: removalBaseline.targetPresent ? removalBaseline.marker : null,
       });
+      if (repetition.count > 1) {
+        activation.requestedActivations = repetition.count;
+        activation.completedActivations = activated ? 1 : 0;
+        while (activated && activation.completedActivations < repetition.count) {
+          activated = await activateContractedControl(page, contractedAction.control, {
+            verifierPolicy, evidence: activation,
+          });
+          if (activated) activation.completedActivations += 1;
+        }
+        // Never let a partial sequence qualify through an implicit-operation fallback.
+        if (!activated) return { drove: activation.completedActivations > 0, status: "undriveable",
+          detail: `completed ${activation.completedActivations} of ${repetition.count} explicit activations`,
+          controlEvidence: { ...(controlEvidence || {}), activation } };
+      }
       // Hand-wired generated forms may carry the contracted FIELD identity without carrying the
       // companion action identity. The only safe fallback is that field's own form submit; never
       // another form and never a keyword-selected page button.
@@ -3917,6 +4041,9 @@ async function runStep(page, step, {
       // names no explicit activation, and the contracted result became freshly visible. Durable
       // mutations and explicit click/apply/reset steps still require their own control identity.
       if (!activated && contractedAction.kind === "action" && filledContractedInputs.length
+        && !contractedAction.persistenceHandoff && !contractedAction.durableLifecycle
+        && !(contractedAction.semanticResponsibilityTypes || []).includes("persistence")
+        && !(contractedAction.writes || []).some(path => String(path).includes(".durable."))
         && !/\b(click|press|tap|submit|apply|activate|run|trigger|confirm|save|delete|remove|clear|reset)\b/i.test(action)) {
         const inputWrites = new Set(filledContractedInputs.flatMap((flow) => flow.writes || []));
         const consumesFilledInput = (contractedAction.reads || []).some((path) => inputWrites.has(path));
@@ -3937,6 +4064,21 @@ async function runStep(page, step, {
             activation.expectationEvidence = expectationEvidence;
             activation.stateChanged = autoAppliedStateChanged || undefined;
             delete activation.reason;
+          } else if (minimal && !(step.expectedOutputs && Object.keys(step.expectedOutputs).length)
+            && !contractedAction.persistenceHandoff && !contractedAction.durableLifecycle
+            && !(contractedAction.semanticResponsibilityTypes || []).includes("persistence")
+            && !(contractedAction.writes || []).some(path => String(path).includes(".durable."))) {
+            const presentation = await contractedActionPresentation(page, contractedAction.control.machineId);
+            if (presentation.candidateCount === 0) {
+              // A repeated negative input may legitimately leave the same error visible. The
+              // input was driven, but this contract provides no independently checkable output
+              // for its implicit operation. Do not invent an Apply button or call this a pass.
+              return verificationVerdict(VERIFICATION_RESULT_CLASS.CONTRACT_INCOMPLETE,
+                "the input accepted its fixture, but the implicit transient operation has no independently observable result transition",
+                { drove, controlEvidence: { ...(controlEvidence || {}), activation,
+                  implicitOperationEvidence: { operationId: contractedAction.operationId || null,
+                    consumesFilledInput: true, stateChanged: false } } });
+            }
           }
         }
       }
@@ -4070,9 +4212,57 @@ async function runStep(page, step, {
       ? Object.values(step.verificationValues).map((value) => String(value ?? "")) : []),
   ].filter(Boolean));
   const structuredFacts = async () => {
-    const surface = await page.evaluate(() => [document.body?.innerText || "",
-      ...[...document.querySelectorAll("input, textarea, select")].map((el) => String(el.value ?? ""))].join("\n"))
-      .catch(() => "");
+    const { surface, outputSurface, inputSurface } = await page.evaluate(() => {
+      // Values are useful for visible read-only outputs and driven controls, but a hidden
+      // field must never satisfy a promise that a result is visible to the visitor.
+      const visibleControl = (el) => {
+        if (el.type === "hidden" || ![...el.getClientRects()].some(rect => rect.width > 0 && rect.height > 0)
+          || ["hidden", "collapse"].includes(getComputedStyle(el).visibility)) return false;
+        for (let node = el; node instanceof Element; node = node.parentElement) {
+          const style = getComputedStyle(node);
+          if (style.display === "none"
+            || Number(style.opacity) === 0 || style.contentVisibility === "hidden") return false;
+        }
+        return true;
+      };
+      const text = [];
+      let previousRect = null;
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const value = String(node.textContent || "");
+        const parent = node.parentElement;
+        if (!value.trim() || !parent || parent.closest("script,style,template,noscript,input,textarea,select")) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        // A display:contents parent has no box, but its text range can still be painted.
+        const rects = [...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0);
+        if (!rects.length) continue;
+        if (["hidden", "collapse"].includes(getComputedStyle(parent).visibility)) continue;
+        let hidden = false;
+        for (let ancestor = parent; ancestor; ancestor = ancestor.parentElement) {
+          const style = getComputedStyle(ancestor);
+          if (style.display === "none" || Number(style.opacity) === 0 || style.contentVisibility === "hidden") { hidden = true; break; }
+        }
+        if (!hidden) {
+          const first = rects[0];
+          const contiguous = previousRect && Math.abs(first.left - previousRect.right) <= 1
+            && first.top < previousRect.bottom && first.bottom > previousRect.top;
+          // Preserve a number split across adjacent inline spans, without merging separate
+          // quantities from different rows/columns into an invented number.
+          if (text.length && !contiguous) text.push("\n");
+          text.push(value);
+          previousRect = rects.at(-1);
+        }
+      }
+      const controls = [...document.querySelectorAll("input, textarea, select")].filter(visibleControl);
+      const values = elements => elements.map(el => String(el.value ?? ""));
+      const outputs = controls.filter(el => el.readOnly || el.disabled);
+      return {
+        surface: [text.join(""), ...values(controls)].join("\n"),
+        outputSurface: [text.join(""), ...values(outputs)].join("\n"),
+        inputSurface: values(controls.filter(el => !el.readOnly && !el.disabled)).join("\n"),
+      };
+    }).catch(() => ({ surface: "", outputSurface: "", inputSurface: "" }));
     return {
       route, routeReached: route ? routeMatchesCurrent(page.url(), route, previewUrl) : false, currentPath: new URL(page.url()).pathname,
       expectedValues: expectedVisibleValues,
@@ -4098,9 +4288,9 @@ async function runStep(page, step, {
       explicitVisibleText: Array.isArray(step.visibleText) ? step.visibleText.map(String) : [],
       explicitVisibleTextMissing: (Array.isArray(step.visibleText) ? step.visibleText.map(String) : [])
         .filter((text) => !surfaceIncludes(surface, text)),
-      ...computedOutputFacts(surface, step.expectedOutputs),
+      ...computedOutputFacts(outputSurface, step.expectedOutputs, { inputSurface }),
       observedStateChanged,
-      observationOnly,
+      observationOnly: observationOnly || selectionOnlyEstablished,
     };
   };
   const pollBudget = !drove ? 0 : commits ? 20_000 : 10_000;
@@ -4453,6 +4643,7 @@ async function runStep(page, step, {
     // survived. It never outlives one verifyJourneys call, so nothing crosses a build or a user.
     runEvidence.set(durableRecordKey(mutationFlow), { ...durable });
   }
+  if (selectionTexts) outcome.selectedTexts = selectionTexts;
   return controlEvidence ? { ...outcome, controlEvidence } : outcome;
 }
 
@@ -4523,6 +4714,15 @@ export function structuredStepVerdict({
     checks.push({ kind: "visible_text", ok: !missing.length,
       detail: !missing.length ? "the contract's declared visible text is present"
         : `declared visible text missing: ${missing.slice(0, 3).map((text) => JSON.stringify(text)).join(", ")}` });
+    const numericMissing = missing.filter(text => /\p{N}/u.test(String(text)));
+    if (numericMissing.length) {
+      // Copy is advisory, but dropping an unseen quantity can certify an app that never
+      // displays its computed results. Do not guess whether alternate wording/rounding is
+      // correct: require a structured output assertion before this step can qualify.
+      checks.push({ kind: "computed_output", ok: false, inconclusive: true, contractIncomplete: true,
+        detail: `unobserved numeric text needs structured output evidence: ${numericMissing.slice(0, 3)
+          .map(text => JSON.stringify(text)).join(", ")}` });
+    }
   }
   const computedOutputs = Array.isArray(facts.computedOutputs) ? facts.computedOutputs : [];
   if (computedOutputs.length) {
@@ -4531,6 +4731,21 @@ export function structuredStepVerdict({
       detail: missing.length === 0 ? `${computedOutputs.length} computed output(s) match`
         : `computed output wrong or missing: ${missing.slice(0, 4).map((row) => (
           `${row.field} expected ${JSON.stringify(row.expected)}`)).join(", ")}` });
+  }
+  if (facts.unobservableComputedOutputs?.length) {
+    checks.push({ kind: "computed_output", ok: false, inconclusive: true, contractIncomplete: true,
+      detail: `boolean output state needs an observable binding: ${facts.unobservableComputedOutputs
+        .map(row => row.field).join(", ")}` });
+  }
+  if (facts.inputOnlyComputedOutputs?.length) {
+    checks.push({ kind: "computed_output", ok: false, inconclusive: true, contractIncomplete: true,
+      detail: `expected output matches only editable input; needs an observable output binding: ${facts.inputOnlyComputedOutputs
+        .map(row => row.field).join(", ")}` });
+  }
+  if (facts.precisionAmbiguousComputedOutputs?.length) {
+    checks.push({ kind: "computed_output", ok: false, inconclusive: true, contractIncomplete: true,
+      detail: `numeric output needs declared display precision: ${facts.precisionAmbiguousComputedOutputs
+        .map(row => `${row.field} expected ${row.expected}, observed ${row.observed} (${row.decimalPlaces} decimal places)`).join(", ")}` });
   }
   if (collectionStateRequired) {
     if (facts.memberStructured && facts.collectionRegionFound === false && !collectionStateSatisfied) {
@@ -4573,7 +4788,8 @@ export function structuredStepVerdict({
   // The contract's declared outcome (route, values, visible text, computed output, member,
   // removal, reset, next control) is the stronger evidence: when every declared outcome is
   // present, an action that repainted nothing still reached its contracted result.
-  const declaredOutcomeChecks = checks.filter((check) => ["route", "values", "visible_text", "computed_output", "collection", "removal", "reset"].includes(check.kind));
+  const declaredOutcomeChecks = checks.filter((check) => !check.contractIncomplete
+    && ["route", "values", "visible_text", "computed_output", "collection", "removal", "reset"].includes(check.kind));
   const declaredSatisfied = declaredOutcomeChecks.length > 0 && declaredOutcomeChecks.every((check) => check.ok);
   if (semanticNavigation) {
     const ok = changed || declaredSatisfied;
@@ -4589,8 +4805,12 @@ export function structuredStepVerdict({
         : "the contracted mutation fired through its control but nothing on the surface changed and no entered value or new reference rendered" });
   } else if (facts.actionDeclared) {
     const ok = Boolean(changed || mutationWithValues || facts.nextControlVisible || facts.actionAutoApplied || declaredSatisfied);
-    checks.push({ kind: "action", ok,
+    const outcomeUnbound = !ok && !declaredOutcomeChecks.length
+      && (facts.unobservableComputedOutputs?.length > 0 || facts.inputOnlyComputedOutputs?.length > 0
+        || facts.precisionAmbiguousComputedOutputs?.length > 0);
+    checks.push({ kind: "action", ok, ...(outcomeUnbound ? { inconclusive: true, contractIncomplete: true } : {}),
       detail: ok ? "the contracted action fired through its control and changed the surface"
+        : outcomeUnbound ? "the action's only declared output has no observable binding"
         : "the contracted action fired through its control but produced no observable state change" });
   }
   if (facts.flowStartDeclared) {
@@ -4610,7 +4830,7 @@ export function structuredStepVerdict({
   }
   if (facts.selectionDeclared) {
     checks.push({ kind: "selection", ok: Boolean(facts.selectionProven),
-      detail: facts.selectionProven ? "the contracted selection transitioned" : "the contracted selection did not transition" });
+      detail: facts.selectionProven ? "the contracted selection matches its required value" : "the contracted selection did not match its required value" });
   }
   const ratio = wanted.length ? found.length / wanted.length : 1;
   const proseAdvisory = wanted.length && ratio < 0.5
@@ -4634,9 +4854,15 @@ export function structuredStepVerdict({
     return verificationVerdict(VERIFICATION_RESULT_CLASS.PASS, checks.map((check) => check.detail).join(" · "),
       { drove, checks, advisories: [...proseAdvisory, ...undeclared] });
   }
-  if (failing.every((check) => check.inconclusive)) {
+  const blockingFailures = failing.filter(check => check.inconclusive
+    || verifierCheckSeverity(check.kind) !== SEVERITY.ADVISORY);
+  if (blockingFailures.length && blockingFailures.every((check) => check.inconclusive)) {
+    if (blockingFailures.some((check) => check.contractIncomplete)) {
+      return verificationVerdict(VERIFICATION_RESULT_CLASS.CONTRACT_INCOMPLETE,
+        blockingFailures.map((check) => check.detail).join("; "), { drove, contractIncomplete: true, checks });
+    }
     return verificationVerdict(VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE,
-      failing.map((check) => check.detail).join("; "), { drove, checks });
+      blockingFailures.map((check) => check.detail).join("; "), { drove, checks });
   }
   if ((!drove || !actionProven) && !facts.observationOnly) {
     return verificationVerdict(VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE,

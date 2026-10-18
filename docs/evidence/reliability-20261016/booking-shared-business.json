@@ -1,0 +1,82 @@
+{
+  "checks": [
+    {
+      "name": "two simultaneous visitors produce exactly one confirmation",
+      "pass": true
+    },
+    {
+      "name": "loser gets actionable capacity diagnostic",
+      "pass": true
+    },
+    {
+      "name": "other visitor sees occupied slot unavailable",
+      "pass": true
+    },
+    {
+      "name": "known reference and email do not expose another visitor contact record",
+      "pass": true
+    },
+    {
+      "name": "wrong email rejected",
+      "pass": true
+    },
+    {
+      "name": "own booking survives navigation",
+      "pass": true
+    },
+    {
+      "name": "1440 cancellation persists",
+      "pass": true
+    },
+    {
+      "name": "cancellation frees slot for another visitor",
+      "pass": true
+    },
+    {
+      "name": "other visitor reserves freed slot",
+      "pass": true
+    },
+    {
+      "name": "390 cancellation persists",
+      "pass": true
+    },
+    {
+      "name": "1440 no horizontal overflow",
+      "pass": true
+    },
+    {
+      "name": "1440 navigation available",
+      "pass": true
+    },
+    {
+      "name": "1440 no runtime errors",
+      "pass": true
+    },
+    {
+      "name": "390 no horizontal overflow",
+      "pass": true
+    },
+    {
+      "name": "390 navigation available",
+      "pass": true
+    },
+    {
+      "name": "390 no runtime errors",
+      "pass": true
+    }
+  ],
+  "failure": null,
+  "date": "2026-10-22",
+  "bookings": [
+    {
+      "width": 1440,
+      "reference": "BK-16C585FF32A2",
+      "email": "shared-1440-1792193337083@example.com"
+    },
+    {
+      "width": 390,
+      "reference": "BK-84D10ED0C669",
+      "email": "shared-390-1792193341157@example.com"
+    }
+  ]
+}

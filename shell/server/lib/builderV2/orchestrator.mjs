@@ -16,11 +16,14 @@ import { describeErrorChain } from "./buildFailure.mjs";
 import path from "node:path";
 
 import { indexTree } from "./indexer.mjs";
+import { mountDeclaredControllers } from "./controllerMount.mjs";
+import { normalizeScaffoldPatchForms } from "./scaffoldPatchForms.mjs";
 import { memoryGraph } from "./graphStore.mjs";
-import { applyPatches, escalationPlan, patchOutcomes, REJECTION } from "./patchEngine.mjs";
+import { applyPatches, escalationPlan, normalizeMissingCreationCorrections, patchOutcomes, REJECTION, isProtectedPath } from "./patchEngine.mjs";
 import { completionEligibility } from "./contractTiering.mjs";
 import { deriveBuildSpec, journeysInMountedScreenUnit, scopeBuildSpec } from "./buildSpec.mjs";
 import { refreshAutoBuildProfile } from "../../../shared/buildProfile.mjs";
+import { refreshUnmodifiedPreviewBridge } from "./previewBridgeUpgrade.mjs";
 import { coreGenerationScope, preprocessCandidateTree, staticCandidateVerdict } from "./preRepairPipeline.mjs";
 import { deriveVerificationManifest } from "./verificationManifest.mjs";
 import { advisoryMessages, partitionFindings } from "./validationSeverity.mjs";
@@ -41,7 +44,7 @@ import {
   defectEvidence, defectWriteBoundary, previousAttemptNotes, defectProgress, defectSignature, mergeDefectAttribution,
   verificationDefectRecords,
 } from "./verificationDefects.mjs";
-import { REPAIR_OWNERSHIP, governRepairRound, reclassifyStalledDefects } from "./repairGovernance.mjs";
+import { REPAIR_OWNERSHIP, governRepairRound, reclassifyStalledDefects, causalRepairBoundary } from "./repairGovernance.mjs";
 import { createSnapshotStore } from "./snapshotStore.mjs";
 import { serviceClient } from "../supabase.mjs";
 import { generationPolicyFor } from "./generationPolicy.mjs";
@@ -409,7 +412,16 @@ export function createOrchestrator({
   });
 
   const abortIfRequested = (signal) => {
-    if (signal?.aborted) throw Object.assign(new Error("Builder V2 build cancelled."), {
+    if (!signal?.aborted) return;
+    const reason = signal.reason;
+    // Lease loss and shutdown are platform interruptions, not a customer cancellation.
+    // Keep the candidate checkpoint and preserve the cause for settlement/recovery.
+    if (reason?.code && reason.code !== "cancelled") {
+      throw Object.assign(new Error(`Builder V2 interrupted: ${reason.message || reason.code}`, { cause: reason }), {
+        code: `platform_${reason.code}`, classification: "platform", retryable: true,
+      });
+    }
+    throw Object.assign(new Error("Builder V2 build cancelled.", { cause: reason }), {
       name: "AbortError", code: "cancelled",
     });
   };
@@ -427,12 +439,23 @@ export function createOrchestrator({
         refreshed[path] = source;
       }
     }
-    return refreshed;
+    return refreshUnmodifiedPreviewBridge(refreshed, currentPlatform);
   };
 
   // WP1: one derivation entry point so every spec in this build resolves modules against the same
   // declared deployment availability.
   const deriveSpec = (contract, options = {}) => deriveBuildSpec(contract, { ...options, availability: moduleAvailability });
+
+  const retainDerivedContract = async ({ owner, projectId, buildId, spec, retained = false }) => {
+    try {
+      const stored = await events.contract?.({ owner, projectId, buildId, contract: spec.contract,
+        tiers: spec.tiers, bindings: spec.bindings, intents: spec.imageIntents || [], retained });
+      if (stored?.id) await buildStore.update(buildId, { contract_id: stored.id });
+    } catch (cause) {
+      throw Object.assign(new Error("Unable to retain the build's exact implementation contract", { cause }),
+        { code: "platform_contract_persistence_failed" });
+    }
+  };
 
   const refreshDeterministicFoundation = (tree, spec) => {
     // A resumed snapshot may carry an older module lock. The refresh below still adopts the
@@ -517,7 +540,7 @@ export function createOrchestrator({
    * Returns { ok, tree } or { ok:false, problems }.
    */
   async function buildIncrement({ step, owner, projectId, buildId, contract, tiers, bindings, tree, assets, journeys,
-    editRequest = null, initialProblems = [], checkpointReason = `working:${step}`,
+    editRequest = null, originalRequest = null, initialProblems = [], checkpointReason = `working:${step}`,
     parentSnapshotId = null, signal = null, spec = null, attemptPolicy = null, initialRepairScope = null,
     protocolRetryLimit = maxNoOpRetries,
     // Which ALLOWANCE this increment draws on, when the caller already knows. The reservation
@@ -560,6 +583,7 @@ export function createOrchestrator({
     // and would silently drop them — the first version of this did exactly that.
     const splitRequests = new Set();
     const splitFindings = [];
+    let stylesheetCorrectionRequested = false;
     // ONE derived specification, narrowed to this increment's journeys. Every view below —
     // module plan, interaction contract, per-module contracts, persistence ownership — is a
     // projection of the same object rather than an independent re-reading of the contract.
@@ -633,8 +657,9 @@ export function createOrchestrator({
         ...(protocolCorrectionDispatch ? protocolRegenerateFiles : []),
       ])];
       if (protocolCorrectionDispatch) protocolRegenerateFiles.clear();
-      const patches = await patchesFn({ step: dispatchStep, originalStep: step, owner, projectId, buildId, attempt,
+      const emittedPatches = await patchesFn({ step: dispatchStep, originalStep: step, owner, projectId, buildId, attempt,
         contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null,
+        originalRequest,
         editRequest: repairScope?.instruction || contractCorrectionScope?.instruction || editRequest,
         modulePlan, moduleContracts, repairScope, moduleCorrectionScope: contractCorrectionScope, headroomScope,
         repairBoundary, regenerateFiles, advisory: [...splitFindings, ...advisory],
@@ -642,6 +667,15 @@ export function createOrchestrator({
           : protocolCorrectionDispatch ? "final_patch_protocol_correction"
           : scopeRejectionCorrection ? "scope_rejection_correction" : null,
         spec: scoped, signal });
+      const recoveredForms = normalizeScaffoldPatchForms(emittedPatches, working, {
+        modulePlan: scoped.modulePlan, scaffoldGraph: scoped.scaffoldGraph, baseline });
+      for (const conversion of recoveredForms.conversions) {
+        log(`${step}: recovered complete scaffold payload ${conversion.file} (${conversion.reason})`);
+      }
+      const { patches, conversions } = normalizeMissingCreationCorrections(recoveredForms.patches, working, rejectionHistory);
+      for (const conversion of conversions) {
+        log(`${step}: corrected ${conversion.file} from replaceFile to newFile because its prior creation was rejected`);
+      }
       // The model lane may have split an oversized, not-yet-dispatched prompt into one bounded
       // continuation. Enforce that internal write boundary exactly like a validator-owned scope;
       // the following full-tree gates still decide whether more work is required.
@@ -712,10 +746,15 @@ export function createOrchestrator({
       }
       let deterministicEntryChanges = [];
       if (!applied.modularityFailed && applied.tree) {
+        const mounted = mountDeclaredControllers(applied.tree, { modulePlan: scoped.modulePlan,
+          scaffoldGraph: scoped.scaffoldGraph });
+        applied.tree = mounted.tree;
+        deterministicEntryChanges.push(...mounted.changes);
+        if (mounted.changes.length) log(`${step}: mounted declared controllers in ${mounted.changes.map(row => row.file).join(", ")}`);
         const alignedEntry = transformWizardEntryState(applied.tree, { contract });
         if (alignedEntry.changes.length) {
           applied.tree = alignedEntry.tree;
-          deterministicEntryChanges = alignedEntry.changes;
+          deterministicEntryChanges.push(...alignedEntry.changes);
           log(`${step}: deterministic flow-entry identity — ${wizardEntryTransformSummary(alignedEntry)}`);
         }
       }
@@ -961,6 +1000,31 @@ export function createOrchestrator({
       });
       await events.checkpoint?.({ owner, projectId, buildId, snapshot: latestCandidate,
         tree: applied.tree, reason: `candidate:${step}:${attempt}`, promotable: false });
+
+      // A rejected stylesheet can leave JSX perfectly runnable but entirely unstyled. Finish
+      // that explicitly attempted file once, retaining clean siblings and using the existing
+      // bounded correction allowance. This is patch completion, not a visual-style heuristic.
+      const rejectedStylesheets = [...new Set(retainedPatchRejections.map(row => row.file)
+        .filter(file => typeof file === 'string' && /^src\/.+\.css$/.test(file)
+          && !isProtectedPath(file, { tree: applied.tree, contract })))];
+      if (step === 'core' && retainedPartial && rejectedStylesheets.length
+        && !internalHeadroomSplit && !stylesheetCorrectionRequested && scheduleCorrectionRetry()) {
+        stylesheetCorrectionRequested = true;
+        working = applied.tree;
+        rejections = retainedPatchRejections.filter(row => rejectedStylesheets.includes(row.file));
+        problems = rejections.map(row => row.reason);
+        repairScope = { kind: 'stylesheet_patch_correction', files: rejectedStylesheets,
+          readOnlyFiles: filesChanged.filter(file => /\.[jt]sx$/.test(file) && !isProtectedPath(file, { tree: applied.tree, contract })),
+          allowedFiles: rejectedStylesheets, allowedPrefixes: [],
+          instruction: `Finish the rejected stylesheet patch(es) [${rejectedStylesheets.join(', ')}]. `
+            + 'Emit the COMPLETE CSS as string content on the same replaceFile/newFile patch. '
+            + 'Keep existing scaffold directives and implement the styles used by the retained screens. '
+            + 'Every clean JSX/helper sibling is already retained; do not regenerate or edit it.' };
+        contractCorrectionScope = null;
+        log(`${step}: retained ${filesChanged.length} clean file(s); completing rejected stylesheet(s) `
+          + `[${rejectedStylesheets.join(', ')}] through bounded correction allowance`);
+        continue;
+      }
 
       if (internalHeadroomSplit && rejectedHeadroomScope) {
         working = applied.tree;
@@ -1356,12 +1420,7 @@ export function createOrchestrator({
             });
           }
         }
-        const persistedContract = await events.contract?.({ owner, projectId, buildId, contract, tiers,
-          bindings, intents });
-        if (persistedContract?.id) {
-          try { await buildStore.update(buildId, { contract_id: persistedContract.id }); }
-          catch (error) { log(`contract id update failed: ${error.message}`); }
-        }
+        await retainDerivedContract({ owner, projectId, buildId, spec });
 
         // Capability proof is proportional to the validated contract. Static sites stop after the
         // zero-network runtime/config proof; account and entity probes run only when contracted.
@@ -1450,7 +1509,7 @@ export function createOrchestrator({
         // 4. CORE: every journey in the essential product screen's model-owned write unit.
         await setState("core");
         const core = await buildIncrement({
-          step: "core", owner, projectId, buildId, contract, tiers: coreGenerationTiers,
+          step: "core", originalRequest: request, owner, projectId, buildId, contract, tiers: coreGenerationTiers,
           bindings, tree, assets: resolved, journeys: coreJourneys, checkpointReason: "working:core",
           parentSnapshotId: workingSnapshot.id, signal, spec,
           attemptPolicy: buildAttemptPolicy,
@@ -1684,14 +1743,7 @@ export function createOrchestrator({
             if (mode === "causal_dependency_repair") {
               const graph = memoryGraph(owner, projectId, indexTree(currentTree));
               const owners = [...new Set(actionable.flatMap((defect) => defect.modules || []))];
-              const allowedFiles = [...new Set(owners.flatMap((path) => [path,
-                ...graph.neighbors(path, { depth: 1, direction: "both" }),
-              ]))].filter((path) => typeof currentTree[path] === "string").sort().slice(0, 18);
-              boundary = allowedFiles.length ? {
-                kind: "browser_repair_dependency_boundary", allowedFiles, allowedPrefixes: [],
-                instruction: "The exact owner repair did not resolve the structural defect. Repair only the "
-                  + "evidence-supported direct owner, caller, or dependency files in this boundary.",
-              } : null;
+              boundary = causalRepairBoundary({ owners, graph, tree: currentTree, contract });
             } else if (mode === "owner_module_regeneration" && regenerate.length) {
               boundary = { kind: "browser_owner_regeneration_boundary", allowedFiles: regenerate,
                 allowedPrefixes: [], instruction: "Regenerate only the proven owner modules." };
@@ -1700,7 +1752,7 @@ export function createOrchestrator({
             // whatever it may write; a fix that cannot see the consumer of the export it changes
             // is not a feasible fix.
             if (boundary && governance.contextFiles.length) {
-              boundary = { ...boundary, contextFiles: governance.contextFiles
+              boundary = { ...boundary, contextFiles: [...new Set([...(boundary.contextFiles || []), ...governance.contextFiles])]
                 .filter((path) => !(boundary.allowedFiles || []).includes(path)) };
             }
             rounds += 1;
@@ -1727,7 +1779,7 @@ export function createOrchestrator({
             let repair;
             try {
               repair = await buildIncrement({
-                step: "repair", owner, projectId, buildId, contract,
+                step: "repair", originalRequest: request, owner, projectId, buildId, contract,
                 tiers: generationTiers, bindings,
                 tree: currentTree, assets: resolved, journeys: repairJourneys,
                 initialProblems: evidence, checkpointReason: `working:${label}:${rounds}`,
@@ -1939,7 +1991,7 @@ export function createOrchestrator({
           let corrected;
           try {
             corrected = await buildIncrement({
-              step: "repair", owner, projectId, buildId, contract, tiers: coreGenerationTiers,
+              step: "repair", originalRequest: request, owner, projectId, buildId, contract, tiers: coreGenerationTiers,
               bindings, tree, assets: resolved, journeys: coreJourneys, initialProblems: evidence,
               checkpointReason: `working:mechanics:${mechanicsCorrections}`,
               parentSnapshotId: workingSnapshot?.id || null, signal, spec,
@@ -2076,7 +2128,7 @@ export function createOrchestrator({
           await setState(step);
           const startTree = await snapshotStore.materialize(owner, candidate.id);
           const increment = await buildIncrement({
-            step, owner, projectId, buildId, contract, tiers, bindings, tree: startTree, assets: resolved,
+            step, originalRequest: request, owner, projectId, buildId, contract, tiers, bindings, tree: startTree, assets: resolved,
             journeys: [journey], checkpointReason: `working:${step}`, parentSnapshotId: candidate.id,
             signal, spec,
             attemptPolicy: buildAttemptPolicy,
@@ -2320,6 +2372,7 @@ export function createOrchestrator({
         const spec = deriveSpec(contract, { userCritical });
         source.tree = refreshDeterministicFoundation(source.tree, spec);
         contract = spec.contract;
+        await retainDerivedContract({ owner, projectId, buildId, spec, retained: true });
         const { tiers, bindings } = spec;
         const attemptPolicy = generationPolicyFor(sourceBuild?.profile || "simple", {
           simpleAttempts: maxCoreAttempts, simpleCorrections: maxPrecompileCorrections,
@@ -2438,8 +2491,10 @@ export function createOrchestrator({
           try { await snapshotStore.discardWorking(owner, projectId, buildId); }
           catch (cleanupError) { log(`cancelled repair checkpoint cleanup failed: ${cleanupError.message}`); }
         }
-        return finish(cancelled ? "cancelled" : "failed",
-          { error: error.message });
+        return finish(cancelled ? "cancelled" : "failed", {
+          error: describeErrorChain(error).replace(/\n\s*/g, " <- "),
+          ...(!cancelled && error?.code ? { failureClassification: String(error.code) } : {}),
+        });
       }
     },
 
@@ -2469,6 +2524,7 @@ export function createOrchestrator({
         const spec = deriveSpec(contract, { userCritical });
         const tree = refreshDeterministicFoundation(source.tree, spec);
         contract = spec.contract;
+        await retainDerivedContract({ owner, projectId, buildId, spec, retained: true });
         const journeys = contract.journeys || [];
         const conformance = validateModuleConformance(tree, {
           contract, modulePlan: spec.modulePlan, moduleContracts: spec.moduleContracts,
@@ -2513,7 +2569,10 @@ export function createOrchestrator({
           parentSnapshotId: source.snapshotId, providerCalls: 0 });
       } catch (error) {
         const cancelled = error?.code === "cancelled" || error?.name === "AbortError";
-        return finish(cancelled ? "cancelled" : "failed", { error: error.message });
+        return finish(cancelled ? "cancelled" : "failed", {
+          error: describeErrorChain(error),
+          ...(!cancelled && error?.code ? { failureClassification: String(error.code) } : {}),
+        });
       }
     },
 
@@ -2525,7 +2584,7 @@ export function createOrchestrator({
      * contract call, no asset search: everything persistent is simply resumed.
      */
     async runEdit({ owner, projectId, request, contract, maxRepairs = maxJourneyRepairs,
-      userCritical = [], signal = null }) {
+      userCritical = [], sourceSnapshotId = null, signal = null }) {
       const buildId = await buildStore.create({
         owner, project_id: projectId, profile: "edit", request, state: "created",
         verifier_policy: verifierPolicy,
@@ -2548,6 +2607,11 @@ export function createOrchestrator({
         contract = spec.contract;
         const ctx = await this.resumeContext(owner, projectId);
         if (!ctx) return finish("blocked", { error: "no green snapshot to edit — run a build first" });
+        if (sourceSnapshotId && ctx.snapshotId !== sourceSnapshotId) return finish("blocked", {
+          error: "The verified source changed while its implementation contract was being resolved. Retry the edit against the current source.",
+          failureClassification: "platform_source_changed",
+        });
+        await retainDerivedContract({ owner, projectId, buildId, spec, retained: true });
         // Capability/backend modules are platform-owned and upgrade on iterate. Legacy adoption
         // gains new reliable behaviours without asking a model to recreate protected code.
         ctx.tree = refreshDeterministicFoundation(ctx.tree, spec);
@@ -2604,7 +2668,10 @@ export function createOrchestrator({
           try { await snapshotStore.discardWorking(owner, projectId, buildId); }
           catch (cleanupError) { log(`cancelled edit checkpoint cleanup failed: ${cleanupError.message}`); }
         }
-        return finish(cancelled ? "cancelled" : "failed", { error: error.message });
+        return finish(cancelled ? "cancelled" : "failed", {
+          error: describeErrorChain(error),
+          ...(!cancelled && error?.code ? { failureClassification: String(error.code) } : {}),
+        });
       }
     },
   };
