@@ -88,10 +88,11 @@ export function memorySnapshotStorage() {
 }
 
 export function createSnapshotStore(storage = memorySnapshotStorage()) {
-  async function reusableReadySnapshot(owner, projectId, treeHash, entries, assetManifest) {
+  async function reusableReadySnapshot(owner, projectId, treeHash, entries, assetManifest, buildId) {
     const existing = (await storage.listSnapshots(owner, projectId))
       .find((snapshot) => snapshot.owner === owner && snapshot.project_id === projectId
         && snapshot.tree_hash === treeHash && snapshot.state === "ready"
+        && (snapshot.build_id || null) === (buildId || null)
         && canonicalJson(snapshot.asset_manifest || []) === canonicalJson(assetManifest || []));
     if (!existing) return null;
     const expected = entries.map((entry) => `${entry.path}:${entry.contentHash}`).sort();
@@ -128,10 +129,10 @@ export function createSnapshotStore(storage = memorySnapshotStorage()) {
       }
       const expectedTreeHash = treeHashFromPairs(entries.map((e) => [e.path, e.contentHash]));
 
-      // Snapshot identity is content-addressed per project. A repair that restores the exact
-      // previous green bytes must reuse that immutable row rather than fail its unique index or
-      // create duplicate history. Manifest and blob bytes are re-proven before reuse.
-      const existing = await reusableReadySnapshot(owner, projectId, expectedTreeHash, entries, assetManifest);
+      // Blob bytes are deduplicated per owner; snapshot qualification belongs to one build.
+      // A retry within that build reuses its byte-proven row. Another build gets a distinct
+      // snapshot so promotion cannot confuse historical qualification with current verification.
+      const existing = await reusableReadySnapshot(owner, projectId, expectedTreeHash, entries, assetManifest, buildId);
       if (existing) return existing;
 
       // 2. snapshot row is born INERT.
@@ -147,7 +148,7 @@ export function createSnapshotStore(storage = memorySnapshotStorage()) {
       } catch (error) {
         // Concurrent identical finalisation may have won after the first probe. Reuse only a fully
         // ready, byte-proven winner; an incomplete/broken row still fails loudly and is retryable.
-        const winner = await reusableReadySnapshot(owner, projectId, expectedTreeHash, entries, assetManifest);
+        const winner = await reusableReadySnapshot(owner, projectId, expectedTreeHash, entries, assetManifest, buildId);
         if (winner) return winner;
         throw error;
       }
@@ -238,13 +239,22 @@ export function createSnapshotStore(storage = memorySnapshotStorage()) {
         await storage.updateSnapshot(id, { state: "corrupt" });
         throw new Error("snapshot corrupt: manifest file count mismatch");
       }
-      for (const entry of manifest) {
-        const content = await storage.getBlob(owner, entry.contentHash);
-        if (content === null || sha256(String(content)) !== entry.contentHash) {
-          await storage.updateSnapshot(id, { state: "corrupt" });
-          throw new Error(`snapshot corrupt: blob bytes do not match content hash for ${entry.path}`);
+      // Small batches reduce serial network latency without unbounded database fan-out.
+      // Settle every in-flight read before propagating a failure; never publish a partial tree.
+      for (let offset = 0; offset < manifest.length; offset += 4) {
+        const batch = manifest.slice(offset, offset + 4);
+        const results = await Promise.allSettled(batch.map(entry => storage.getBlob(owner, entry.contentHash)));
+        for (let i = 0; i < batch.length; i += 1) {
+          const entry = batch[i];
+          const result = results[i];
+          if (result.status === "rejected") throw result.reason;
+          const content = result.value;
+          if (content === null || sha256(String(content)) !== entry.contentHash) {
+            await storage.updateSnapshot(id, { state: "corrupt" });
+            throw new Error(`snapshot corrupt: blob bytes do not match content hash for ${entry.path}`);
+          }
+          tree[entry.path] = content;
         }
-        tree[entry.path] = content;
       }
       const materializedHash = treeHashFromPairs(manifest.map((entry) => [entry.path, sha256(String(tree[entry.path]))]));
       if (materializedHash !== snapshot.tree_hash) {
@@ -315,6 +325,9 @@ export function createSnapshotStore(storage = memorySnapshotStorage()) {
         if (keep.has(snapshot.id)) continue;
         await storage.deleteSnapshot(snapshot.id);
         removedSnapshots.push(snapshot.id);
+      }
+      if (storage.supportsSafeBlobSweep === false) {
+        return { removedSnapshots, removedBlobs: [], blobSweepDeferred: true };
       }
       // Blob sweep — this owner only, and referenced means referenced by ANY of the owner's
       // surviving snapshots in ANY project: per-owner dedup means two projects can share a

@@ -77,16 +77,24 @@ export async function handleBillingPortal(_req, res, owner) {
 }
 
 // Unauthenticated Stripe webhook; the signature check inside handleSubscriptionEvent is the
-// authentication. Returns 501 while billing stays unconfigured so Stripe never retries.
-export async function handleBillingWebhook(req, res, rawBody) {
-  if (!thralloWebhookConfigured()) {
-    return sendJson(res, 501, { error: "Thrallo billing webhook is not configured" });
+// authentication. Configuration/storage outages remain retryable; signature failures
+// are client errors. Never return provider or database diagnostics to this public route.
+export async function handleBillingWebhook(req, res, rawBody, {
+  configured = thralloWebhookConfigured,
+  handleEvent = handleSubscriptionEvent,
+} = {}) {
+  if (!configured()) {
+    return sendJson(res, 503, { error: "Thrallo billing webhook is not configured" });
   }
   try {
-    const result = await handleSubscriptionEvent(rawBody, req.headers["stripe-signature"]);
+    const result = await handleEvent(rawBody, req.headers["stripe-signature"]);
     return sendJson(res, 200, result);
   } catch (error) {
-    return sendJson(res, 400, { error: error.message });
+    if (error?.type === "StripeSignatureVerificationError") {
+      return sendJson(res, 400, { error: "Invalid webhook signature" });
+    }
+    console.error("[thrallo-billing] Webhook processing failed; delivery should retry.");
+    return sendJson(res, 503, { error: "Billing processing is temporarily unavailable. Please retry." });
   }
 }
 

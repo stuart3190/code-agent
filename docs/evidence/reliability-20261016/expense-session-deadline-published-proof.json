@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-17T20:07:36.758Z",
+  "deployedCommit": "5aed516199ab19599bc79e05756989b1c45b3a68",
+  "buildId": "15ba79f2-4381-4cb6-9d2a-c2db1f996ddf",
+  "width": 390,
+  "failedLookups": 1,
+  "visitorAuthRequests": 0,
+  "requestWaitMs": 30294,
+  "requestAborted": true,
+  "retryRecovered": true,
+  "existingVisitorCredentialsUnchanged": true,
+  "limitation": "Controlled transport fault against an owned retained app; not fresh generation."
+}

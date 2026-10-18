@@ -352,7 +352,7 @@ test("14R cancellation removes only that build's unpromoted working checkpoints"
   assert.deepEqual(await snapshots.materialize("owner", resumable.id), { "src/a.js": "b" });
 });
 
-test("14R an exact repaired tree reuses its byte-proven content-addressed snapshot", async () => {
+test("14R identical repaired bytes retain a distinct current-build qualification", async () => {
   const snapshots = createSnapshotStore();
   const tree = { "src/App.jsx": "export default function App(){ return <main>green</main>; }" };
   const green = await snapshots.createSnapshot("owner", "project", tree, {
@@ -362,8 +362,13 @@ test("14R an exact repaired tree reuses its byte-proven content-addressed snapsh
   const repaired = await snapshots.createSnapshot("owner", "project", tree, {
     buildId: "repair-build", parent: green.id, reason: "working:resumed-repair",
   });
-  assert.equal(repaired.id, green.id);
-  assert.equal(repaired.reused, true);
+  assert.notEqual(repaired.id, green.id);
+  assert.equal(repaired.build_id, "repair-build");
+  const retry = await snapshots.createSnapshot("owner", "project", tree, {
+    buildId: "repair-build", parent: green.id, reason: "working:resumed-repair",
+  });
+  assert.equal(retry.id, repaired.id);
+  assert.equal(retry.reused, true);
   assert.deepEqual(await snapshots.materialize("owner", repaired.id), tree);
   assert.equal(await snapshots.pointer("owner", "project", "green"), green.id);
 });

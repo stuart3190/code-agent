@@ -1,0 +1,11 @@
+{
+  "at": "2026-10-17T19:46:11.042Z",
+  "fixtureOnly": true,
+  "operations": [
+    "fulfilled",
+    "fulfilled"
+  ],
+  "activeAdmins": 0,
+  "concurrentLastAdminGuardFailed": true,
+  "limitation": "In-memory service reproduction; account Edge is undeployed and feature disabled. No customer rows accessed."
+}

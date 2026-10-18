@@ -44,8 +44,7 @@ async function withBilling(run) {
 function subscription({ id = "sub_1", price = STARTER, status = "active", schedule = null } = {}) {
   return {
     id, status, customer: "cus_1", created: 1_000, schedule, metadata: {},
-    current_period_start: PERIOD_END - 2_592_000, current_period_end: PERIOD_END,
-    items: { data: [{ id: "si_1", price: { id: price } }] },
+    items: { data: [{ id: "si_1", price: { id: price }, current_period_start: PERIOD_END - 2_592_000, current_period_end: PERIOD_END }] },
   };
 }
 
@@ -54,6 +53,7 @@ function subscription({ id = "sub_1", price = STARTER, status = "active", schedu
 function fakeStripe({ subs = [] } = {}) {
   const calls = [];
   const idempotent = new Map();
+  const released = new Set();
   const once = (key, produce) => {
     if (key && idempotent.has(key)) return idempotent.get(key);
     const value = produce();
@@ -102,18 +102,23 @@ function fakeStripe({ subs = [] } = {}) {
     subscriptionSchedules: {
       create: async (params, opts = {}) => once(opts.idempotencyKey, () => {
         calls.push(`schedules.create:${params.from_subscription}`);
-        const schedule = { id: `sched_${api.schedules.length + 1}`, phases: [{ start_date: 1_000 }] };
+        const schedule = { id: `sched_${api.schedules.length + 1}`, status: "active", subscription: params.from_subscription, current_phase: { start_date: 1_000 }, phases: [{ start_date: 1_000 }] };
         api.schedules.push(schedule);
         const target = api.subs.find((s) => s.id === params.from_subscription);
         if (target) target.schedule = schedule.id;
         return schedule;
       }),
+      retrieve: async id => api.schedules.find(s => s.id === id),
       update: async (id, params) => {
+        if (released.has(id)) throw Error('released schedules cannot be updated');
+        const stored = api.schedules.find(s => s.id === id);
+        if (stored) Object.assign(stored, params);
         calls.push(`schedules.update:${id}:${params.phases.map((p) => p.items[0].price).join(">")}`);
         return { id, ...params };
       },
       release: async (id) => {
         calls.push(`schedules.release:${id}`);
+        released.add(id);
         for (const s of api.subs) if (s.schedule === id) s.schedule = null;
         return { id, status: "released" };
       },
@@ -265,6 +270,7 @@ test("the scheduled downgrade lands via the webhook and clears the pending state
       type: "customer.subscription.updated",
       data: { object: subscription({ price: STARTER, schedule: "sched_1" }) },
     };
+    stripe.subs = [stripe.event.data.object];
 
     const result = await handleSubscriptionEvent("raw", "sig", { store, stripe });
 
@@ -349,3 +355,37 @@ test("past_due subscriptions are repaired, never duplicated", async () => {
     assert.ok(stripe.calls.some((c) => c.startsWith("subscriptions.update:sub_1")));
   });
 });
+
+test('unknown downgrade boundary fails before releasing or creating schedules',async()=>{await withBilling(async()=>{
+ const store=new MemoryCodeAgentStore();await seed(store,{plan:'pro'});const sub=subscription({price:PRO,schedule:'sched_existing'});delete sub.items.data[0].current_period_end;
+ const stripe=fakeStripe({subs:[sub]});await assert.rejects(startPlanCheckout(OWNER,'starter',{store,stripe}),error=>error.code==='billing_period_unavailable');assert.equal(stripe.calls.some(call=>call.startsWith('schedules.')),false);
+});});
+
+for(const cancelPending of [false,true])test(`repeating a downgrade does not update a released schedule (${cancelPending})`,async()=>{await withBilling(async()=>{
+ const store=new MemoryCodeAgentStore();await seed(store,{plan:'pro'});const stripe=fakeStripe({subs:[subscription({price:PRO})]});
+ await startPlanCheckout(OWNER,'starter',{store,stripe});const first=(await store.getSubscription(OWNER)).stripe_schedule_id;
+ if(cancelPending)await startPlanCheckout(OWNER,'pro',{store,stripe});
+ const result=await startPlanCheckout(OWNER,'starter',{store,stripe});assert.equal(result.planChange.pendingPlan,'starter');
+ const last=(await store.getSubscription(OWNER)).stripe_schedule_id;if(cancelPending)assert.notEqual(last,first);else assert.equal(last,first);
+ assert.equal(stripe.calls.filter(c=>c.startsWith('schedules.create:')).length,cancelPending?2:1);
+});});
+
+test('downgrade resumes an attached schedule after creation acknowledgement is lost',async()=>{await withBilling(async()=>{
+ const store=new MemoryCodeAgentStore();await seed(store,{plan:'pro'});const stripe=fakeStripe({subs:[subscription({price:PRO})]});const create=stripe.subscriptionSchedules.create;
+ stripe.subscriptionSchedules.create=async(...args)=>{await create(...args);throw Error('lost create acknowledgement');};
+ const result=await startPlanCheckout(OWNER,'starter',{store,stripe});assert.equal(result.planChange.pendingPlan,'starter');assert.equal(stripe.schedules.length,1);assert.equal(stripe.calls.filter(c=>c.startsWith('schedules.release:')).length,0);
+});});
+test('downgrade retry confirms already-committed phases without rewriting them',async()=>{await withBilling(async()=>{
+ const store=new MemoryCodeAgentStore();await seed(store,{plan:'pro'});const stripe=fakeStripe({subs:[subscription({price:PRO})]});const update=stripe.subscriptionSchedules.update;
+ stripe.subscriptionSchedules.update=async(...args)=>{await update(...args);throw Error('lost phase acknowledgement');};
+ await assert.rejects(startPlanCheckout(OWNER,'starter',{store,stripe}),/lost phase acknowledgement/);
+ const result=await startPlanCheckout(OWNER,'starter',{store,stripe});assert.equal(result.planChange.pendingPlan,'starter');assert.equal(stripe.calls.filter(c=>c.startsWith('schedules.create:')).length,1);assert.equal(stripe.calls.filter(c=>c.startsWith('schedules.update:')).length,1);assert.equal(stripe.calls.filter(c=>c.startsWith('schedules.release:')).length,0);
+});});
+test('concurrent identical downgrades create and configure one schedule',async()=>{await withBilling(async()=>{
+ const store=new MemoryCodeAgentStore();await seed(store,{plan:'pro'});const stripe=fakeStripe({subs:[subscription({price:PRO})]});await Promise.all([1,2,3].map(()=>startPlanCheckout(OWNER,'starter',{store,stripe})));
+ assert.equal(stripe.calls.filter(c=>c.startsWith('schedules.create:')).length,1);assert.equal(stripe.calls.filter(c=>c.startsWith('schedules.update:')).length,1);
+});});
+test('downgrade refuses a schedule bound to a different subscription',async()=>{await withBilling(async()=>{
+ const store=new MemoryCodeAgentStore();await seed(store,{plan:'pro'});const stripe=fakeStripe({subs:[subscription({price:PRO,schedule:'sched_other'})]});stripe.subscriptionSchedules.retrieve=async()=>({id:'sched_other',status:'active',subscription:'sub_other',current_phase:{start_date:1000},phases:[]});
+ await assert.rejects(startPlanCheckout(OWNER,'starter',{store,stripe}),e=>e.code==='billing_schedule_unavailable');assert.equal(stripe.calls.some(c=>c.startsWith('schedules.update:')||c.startsWith('schedules.release:')),false);
+});});

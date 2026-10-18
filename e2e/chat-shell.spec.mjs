@@ -759,3 +759,29 @@ test("advanced approval resumes exactly one build and reconstructs after refresh
   await expect(page.getByTestId("cancel-build").locator("visible=true")).toBeVisible();
   await expect.poll(() => approveCalls).toBe(1);
 });
+
+test("expired preview restarts directly without sending another chat message", async ({ page }) => {
+  await stubApi(page);
+  let restarts = 0; let messages = 0;
+  await page.route("**/api/v1/conversations/c1/messages", route => { messages++; return route.fulfill({json:{}}); });
+  await page.route("**/api/v1/conversations/c1/preview", async route => {
+    restarts++;
+    expect(route.request().method()).toBe("POST");
+    expect(route.request().postDataJSON()).toEqual({projectId:"p1"});
+    expect(route.request().headers().authorization).toBe("Bearer e2e-fake-token");
+    if (restarts === 1) return route.fulfill({status:503,json:{error:"Preview temporarily unavailable"}});
+    return route.fulfill({json:{url:"https://demo.preview.thrallo.com/",projectId:"p1"}});
+  });
+  await page.goto("/");
+  await page.getByPlaceholder(/Describe anything/).fill("Build me a pomodoro timer called FocusFlow");
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("Preview ready")).toBeVisible();
+  if (isNarrow(page)) await page.locator(".ct-preview-thumb").click();
+  const pane = page.locator(isNarrow(page) ? ".ct-mobile-sheet.show" : ".ct-rail.preview");
+  await pane.getByRole("button", {name:"Restart preview",exact:true}).click();
+  await expect(pane.getByRole("alert")).toHaveText("Preview temporarily unavailable");
+  await pane.getByRole("button", {name:"Restart preview",exact:true}).click();
+  await expect(pane.getByRole("alert")).toHaveCount(0);
+  await expect(pane.getByRole("button", {name:"Restart preview",exact:true})).toBeEnabled();
+  expect(restarts).toBe(2); expect(messages).toBe(0);
+});

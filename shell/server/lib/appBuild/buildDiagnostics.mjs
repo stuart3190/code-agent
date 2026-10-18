@@ -60,11 +60,17 @@ export function redactDiagnosticValue(value, options = {}, seen = new WeakSet())
   if (typeof value !== "object") return redactDiagnosticText(String(value), options);
   if (seen.has(value)) return "[REDACTED CIRCULAR]";
   seen.add(value);
-  if (Array.isArray(value)) return value.map((entry) => redactDiagnosticValue(entry, options, seen));
-  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
-    key,
-    SENSITIVE_FIELD_NAME.test(key) ? REDACTED : redactDiagnosticValue(entry, options, seen),
-  ]));
+  try {
+    if (Array.isArray(value)) return value.map((entry) => redactDiagnosticValue(entry, options, seen));
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
+      key,
+      SENSITIVE_FIELD_NAME.test(key) ? REDACTED : redactDiagnosticValue(entry, options, seen),
+    ]));
+  } finally {
+    // Only ancestors form a cycle. Derived contracts deliberately share ordinary objects
+    // between graphs; each occurrence must retain its shape and undergo full redaction.
+    seen.delete(value);
+  }
 }
 
 function now() { return new Date().toISOString(); }

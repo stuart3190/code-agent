@@ -55,7 +55,7 @@ test("C6 — reset hashes are peppered HMACs, not reusable raw digests", async (
 });
 
 test("C6 — edge handler proves registry/origin eligibility before auth creation and atomically claims reset codes", async () => {
-  const source = await readFile(new URL("../../supabase/functions/app-auth/index.ts", import.meta.url), "utf8");
+  const source = await readFile(process.env.APP_AUTH_TEST_SOURCE || new URL("../../supabase/functions/app-auth/index.ts", import.meta.url), "utf8");
   const eligibility = source.indexOf("await eligibleApplication(appId, origin)");
   const createUser = source.indexOf("svc.auth.admin.createUser");
   assert.ok(eligibility > 0 && eligibility < createUser, "eligibility gates every user-creation path");

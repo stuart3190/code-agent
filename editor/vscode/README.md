@@ -11,3 +11,7 @@ review the diff beside your editor and approve or decline the pull request. Fail
 a preserved workspace can be resumed in place.
 
 Package with `npx vsce package` from this directory (no build step — plain JavaScript).
+
+### Server connections
+
+Set `thrallo.serverUrl` in user settings; workspace settings cannot override this credential destination. Use an HTTPS origin (no path, query, credentials or fragment). HTTP is supported only for localhost, 127.0.0.1 and ::1 development. Each origin has its own token. Reconnect when moving an older custom-server connection to this version; existing legacy tokens are read only for the default `https://app.thrallo.com` origin. API redirects are refused, so configure the server’s final canonical origin.

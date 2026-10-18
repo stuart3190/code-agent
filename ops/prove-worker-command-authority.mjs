@@ -1,0 +1,21 @@
+import {execFileSync} from 'node:child_process';import {readFile} from 'node:fs/promises';import assert from 'node:assert/strict';
+const name=`thrallo-worker-command-proof-${process.pid}`;
+const sql=q=>execFileSync('docker',['exec','-i',name,'psql','-U','postgres','-qAt','-v','ON_ERROR_STOP=1'],{input:q,encoding:'utf8',stdio:['pipe','pipe','pipe']}).trim();
+let started=false;const checks=[];const check=(name,fn)=>{fn();checks.push(name);};
+try{execFileSync('docker',['run','--rm','-d','--name',name,'--network','none','--memory','256m','--cpus','1','--pids-limit','128','-e','POSTGRES_PASSWORD=isolated-proof','postgres:17-alpine','-c','shared_buffers=16MB'],{stdio:'pipe'});started=true;
+let ready=false;for(let i=0;i<120;i++){try{sql('select 1');ready=true;break;}catch{await new Promise(r=>setTimeout(r,250));}}if(!ready)throw Error('isolated postgres unavailable');
+sql(`create role anon;create role authenticated;create role service_role;create table public.build_worker_nodes(worker_id text primary key,version text,state text,job_types text[],current_job_id uuid,metadata jsonb,heartbeat_at timestamptz default now());grant all on public.build_worker_nodes to service_role;`);
+sql(await readFile(new URL('../supabase/migrations/20261017004248_worker_command_state_authority.sql',import.meta.url),'utf8'));
+const beat=(state,id='proof',extra='{}')=>JSON.parse(sql(`set role service_role;select row_to_json(n) from public.build_worker_heartbeat('${id}','release','${state}',array['builder_pipeline'],null,'${extra}') n;`));
+check('initial environment drain respected',()=>assert.equal(beat('draining','initial').state,'draining'));
+check('active registration succeeds',()=>assert.equal(beat('active').state,'active'));
+check('stale heartbeat cannot erase drain',()=>{sql("update build_worker_nodes set state='draining' where worker_id='proof'");const n=beat('active');assert.equal(n.state,'draining');assert.equal(n.metadata.observedState,'active');});
+check('process acknowledgement separate from command',()=>assert.equal(beat('draining').metadata.observedState,'draining'));
+check('stale drain heartbeat cannot erase resume',()=>{sql("update build_worker_nodes set state='active' where worker_id='proof'");const n=beat('draining');assert.equal(n.state,'active');assert.equal(n.metadata.observedState,'draining');});
+check('pause survives background heartbeat',()=>{sql("update build_worker_nodes set state='paused' where worker_id='proof'");assert.equal(beat('active').state,'paused');});
+check('caller metadata cannot forge observed acknowledgement',()=>assert.equal(beat('active','proof','{"observedState":"draining","pid":123}').metadata.observedState,'active'));
+check('process shutdown remains authoritative',()=>assert.equal(beat('stopped').state,'stopped'));
+check('late heartbeat cannot resurrect stopped worker',()=>assert.equal(beat('active').state,'stopped'));
+for(const role of ['anon','authenticated'])check(`${role} cannot heartbeat`,()=>assert.throws(()=>sql(`set role ${role};select public.build_worker_heartbeat('x','x','active','{}',null);`),/permission denied/));
+console.log(JSON.stringify({passed:checks.length,checks}));
+}finally{if(started)execFileSync('docker',['rm','-f',name],{stdio:'pipe'});}

@@ -1,0 +1,59 @@
+{
+  "projectId": "e67331f2-fa48-4ba0-a389-00b65911ffe5",
+  "snapshotId": "3fad0c8b-0223-49c6-9e60-a5d13c643c30",
+  "modelCalls": 0,
+  "beforeBlocking": [
+    {
+      "code": "scaffold_composition_invalid",
+      "message": "mounted scaffold screen is still unimplemented: src/screens/scaffold/PocketLedgerScreen.jsx"
+    },
+    {
+      "code": "scaffold_composition_invalid",
+      "message": "mounted scaffold screen is still unimplemented: src/screens/scaffold/SummaryScreen.jsx"
+    },
+    {
+      "code": "scaffold_composition_invalid",
+      "message": "mounted scaffold screen is still unimplemented: src/screens/scaffold/PocketLedgerScreen.jsx"
+    },
+    {
+      "code": "scaffold_composition_invalid",
+      "message": "mounted scaffold screen is still unimplemented: src/screens/scaffold/SummaryScreen.jsx"
+    },
+    {
+      "code": "scaffold_composition_invalid",
+      "message": "src/screens/scaffold/PocketLedgerScreen.jsx must render shared journey controller src/components/create-monthly-expenses/CreateMonthlyExpensesFlow.jsx exactly once (found 0)"
+    },
+    {
+      "code": "journey_surface_unreachable",
+      "message": "src/components/create-monthly-expenses/CreateMonthlyExpensesFlow.jsx implements contracted work but is unreachable from the mounted live application"
+    },
+    {
+      "code": "journey_surface_unreachable",
+      "message": "src/extensions/custom/create-monthly-expenses.js implements contracted work but is unreachable from the mounted live application"
+    },
+    {
+      "code": "journey_surface_unreachable",
+      "message": "src/extensions/custom/edit-and-delete-expense.js implements contracted work but is unreachable from the mounted live application"
+    },
+    {
+      "code": "journey_surface_unreachable",
+      "message": "src/extensions/custom/reject-invalid-expense.js implements contracted work but is unreachable from the mounted live application"
+    },
+    {
+      "code": "journey_surface_unreachable",
+      "message": "src/extensions/custom/view-monthly-summary.js implements contracted work but is unreachable from the mounted live application"
+    }
+  ],
+  "afterBlocking": [
+    {
+      "code": "scaffold_composition_invalid",
+      "message": "mounted scaffold screen is still unimplemented: src/screens/scaffold/SummaryScreen.jsx"
+    },
+    {
+      "code": "scaffold_composition_invalid",
+      "message": "mounted scaffold screen is still unimplemented: src/screens/scaffold/SummaryScreen.jsx"
+    }
+  ],
+  "stillBlocked": true,
+  "change": "Mount only declared shared controller in untouched PocketLedgerScreen; preserve SummaryScreen placeholder and controller source."
+}

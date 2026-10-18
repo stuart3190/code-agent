@@ -8,6 +8,7 @@
 // (advisory — the browser decides whether the surface still works) so repair can replace it with
 // the module's record shape instead of patching the wrapper.
 
+import { lintTypedRecordAccess } from "./recordAccessLint.mjs";
 import { isProtectedPath } from "../patchEngine.mjs";
 
 export const RECORD_SHAPE_LINT_VERSION = 1;
@@ -27,6 +28,7 @@ export function lintRecordShapeWrappers(tree, { installed = null } = {}) {
   if (!typed) return { version: RECORD_SHAPE_LINT_VERSION, installed: false, findings };
   for (const [file, source] of Object.entries(tree || {})) {
     if (!GENERATED_SOURCE.test(file) || isProtectedPath(file, { tree }) || typeof source !== "string") continue;
+    findings.push(...lintTypedRecordAccess(source, file));
     for (const { pattern, why } of WRAPPER_PATTERNS) {
       const match = pattern.exec(source);
       if (!match) continue;

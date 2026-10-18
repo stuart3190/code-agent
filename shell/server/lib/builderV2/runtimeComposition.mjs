@@ -12,6 +12,7 @@ import { rm } from "node:fs/promises";
 
 import { clone, fromScaffold } from "../../../../src/engine/fileTree.mjs";
 import { REACT_VITE } from "../../../../src/scaffolds/reactVite.mjs";
+import { createCandidateFindingsRecorder } from "./candidateFindings.mjs";
 import { patchOutcomes } from "./patchEngine.mjs";
 import { classifyComplexity } from "../appBuild/buildProfile.mjs";
 import { createBudgetLedger } from "../appBuild/budgetLedger.mjs";
@@ -43,6 +44,7 @@ import { createOrchestrator, supabaseBuildStore } from "./orchestrator.mjs";
 import { recordFacts } from "./knowledge.mjs";
 import { routeV2Step } from "./router.mjs";
 import { createSnapshotStore } from "./snapshotStore.mjs";
+import { loadSourceContract } from "./sourceContract.mjs";
 import {
   loadIndex, persistIndex, supabaseSnapshotStorage,
 } from "./supabaseTwins.mjs";
@@ -175,14 +177,6 @@ async function routingHistory(client, owner) {
     cost: Number(row.actual_credits || 0),
     verified: states.get(row.build_id) === "green",
   }));
-}
-
-async function loadProjectContract(client, owner, projectId) {
-  const { data: stored, error } = await client.from("bv2_contracts").select("contract")
-    .eq("owner", owner).eq("project_id", projectId)
-    .order("version", { ascending: false }).limit(1).maybeSingle();
-  if (error) throw new Error(`Builder V2 contract load: ${error.message}`);
-  return stored?.contract || null;
 }
 
 function changedModuleCount(context = {}) {
@@ -411,18 +405,24 @@ export function createBuilderV2Runtime({
     }
   }
 
-  async function persistAndProveGraph({ owner, projectId, buildId, tree }) {
-    const expected = indexTree(tree);
-    const manifest = manifestOf(expected);
-    await persistIndex(owner, projectId, expected, { client });
-    const actual = await loadIndex(owner, projectId, manifest, { client });
-    const parity = compareGraphIndexes(expected, actual, { owner, projectId, buildId });
-    if (!parity.clean) {
-      throw Object.assign(new Error(`Builder V2 graph parity failed: ${JSON.stringify(parity.mismatches)}`), {
-        code: "graph_parity", parity,
+  async function persistAndProveGraph({ owner, projectId, buildId, tree, snapshot }) {
+    try {
+      const expected = indexTree(tree);
+      const manifest = manifestOf(expected);
+      await persistIndex(owner, projectId, expected, { client });
+      const actual = await loadIndex(owner, projectId, manifest, { client });
+      const parity = compareGraphIndexes(expected, actual, { owner, projectId, buildId });
+      if (!parity.clean) {
+        throw Object.assign(new Error(`Builder V2 graph parity failed: ${JSON.stringify(parity.mismatches)}`), {
+          code: "graph_parity", parity,
+        });
+      }
+      return parity;
+    } catch (cause) {
+      throw Object.assign(new Error("Application index could not be persisted", { cause }), {
+        code: "platform_graph_persistence_failed", classification: "platform", checkpointId: snapshot?.id || null,
       });
     }
-    return parity;
   }
 
   return {
@@ -632,12 +632,15 @@ export function createBuilderV2Runtime({
             ...row, settledRecoveryCost: Math.max(0, Number(budget?.consumedCredits || 0) - before),
           });
         },
-        contract: async ({ owner: eventOwner, projectId: eventProject, buildId, contract, tiers, bindings, intents }) => {
+        contract: async ({ owner: eventOwner, projectId: eventProject, buildId, contract, tiers, bindings, intents, retained = false }) => {
           diag.setContract?.(contract);
           await diag.flush?.();
           const stored = await persistContract(eventOwner, eventProject, {
             buildId, contract, tiers, bindings, intents,
           }, { client });
+          // Retained execution records its precise contract without rewriting account/settings
+          // policy or replacing the project's planning knowledge as a side effect of a retry.
+          if (retained) return stored;
           // WP4: the account policy the app-accounts service enforces for this application is the
           // typed contract's — declared roles and profile fields — recorded beside the contract.
           // The table is optional on a deployment; an absent one is reported once, never fatal.
@@ -704,6 +707,7 @@ export function createBuilderV2Runtime({
           await recordFacts(eventOwner, eventProject, [{ kind, key, value, sourceBuild: buildId }]);
         },
       };
+      events.candidateFindings = createCandidateFindingsRecorder({ telemetry: events.telemetry, emit });
       const recordRetrieval = async ({ owner: eventOwner, buildId, step, query, included, omittedCount, tokens }) => {
         const { error } = await client.from("bv2_retrieval_traces").insert({
           owner: eventOwner, build_id: buildId, step, query, included,
@@ -898,7 +902,12 @@ export function createBuilderV2Runtime({
         log: (line) => emit("stdout", line),
       });
 
-      const contract = mode === "build" ? null : await loadProjectContract(client, owner, projectId);
+      const retainedContract = mode === "build" ? null : await loadSourceContract({
+        client, snapshotStore, owner, projectId,
+        sourceBuildId: ["resume_repair", "resume_verify"].includes(mode) ? String(input.sourceBuildId || "") : null,
+      });
+      const contract = retainedContract?.contract || null;
+      if (retainedContract) log(`source contract ${retainedContract.id} selected through ${retainedContract.via}`);
       if (mode !== "build" && !contract) {
         throw Object.assign(new Error("This Builder V2 project has no durable implementation contract."), {
           code: "v2_contract_missing",
@@ -919,7 +928,8 @@ export function createBuilderV2Runtime({
             ? await orchestrator.runVerifyFromCheckpoint({
               owner, projectId, sourceBuildId: String(input.sourceBuildId || ""), request, contract, signal,
             })
-          : await orchestrator.runEdit({ owner, projectId, request, contract, maxRepairs, signal });
+          : await orchestrator.runEdit({ owner, projectId, request, contract, maxRepairs,
+            sourceSnapshotId: retainedContract?.sourceSnapshotId || null, signal });
 
       if (result.state !== "green") {
         const failureCode = result.failureClassification || result.stopReason || result.state;
@@ -959,7 +969,9 @@ export function createBuilderV2Runtime({
         p_owner: owner, p_project_id: projectId, p_build_id: activeBuildId,
         p_snapshot_id: result.snapshotId, p_preview_url: previewResult.url,
       });
-      if (projectError) throw new Error(`verified project projection: ${projectError.message}`);
+      if (projectError) throw Object.assign(new Error(`verified project projection: ${projectError.message}`, { cause: projectError }), {
+        code: "platform_projection_failed", classification: "platform", retryable: true, checkpointId: result.snapshotId,
+      });
       terminalSettled = true;
       const settlement = projection?.settlement || null;
       const customerStatus = customerBuildStatus({ internalState: "green",

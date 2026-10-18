@@ -6,7 +6,7 @@
 
 import { generateContract } from "../appBuild/contractAgent.mjs";
 import { entitiesForOperations } from "./entityScope.mjs";
-import { contractBrief } from "../../../shared/implementationContract.mjs";
+import { contractBrief, transientSeedState } from "../../../shared/implementationContract.mjs";
 import { managedUsageGuard } from "../buildJobs.mjs";
 import { expectationKeywords } from "../appBuild/journeyVerifier.mjs";
 import {
@@ -92,11 +92,15 @@ against a code index. Rules:
   contains Pexels assets, render a visible footer link to Pexels and link each available
   photographer name to that asset's photoUrl.
 - Every user-visible outcome named in the journeys must appear as real, reachable UI text.
+- Apply requested edit/remove operations to initial example records as well as newly added records.
+  Only make example records read-only when the contract or user explicitly requires that restriction.
 - A declared operation has one stable machine action identity across every assigned journey. When
   multiple journeys exercise the same operation, reuse one existing action control and preserve
   its machine identity; never replace it with a journey-specific action identity or duplicate it.
   With useSemanticAction, set name to the operationId and label to the journey-facing accessible
-  copy. A literal data-thrallo-action must equal the supplied control.machineId.
+  copy. Its buttonProps defaults to type="button": inside a form, put type="submit" AFTER
+  the spread to use onSubmit, or bind a real onActivate handler. Never leave both paths inert.
+  A literal data-thrallo-action must equal the supplied control.machineId.
 - A contracted control's verificationValue is the authoritative non-secret synthetic browser
   fixture for its domain rule. Configure sample data and validation so that exact value has the
   valid/invalid meaning stated by the journey. A selectable card/button/radio option must expose
@@ -111,6 +115,9 @@ against a code index. Rules:
   the passed identifier. Never reject that identifier against private module-local records unless
   those records are themselves a declared input, and never recreate a controller-owned domain
   collection independently inside an extension.
+- Custom behavior operations return plain value records containing their outputs, not React state
+  updater functions. Keep the updater in the UI: setState(current => ({ ...current, ...result })).
+  Compute result from the explicit current input values; do not spread a function as a result record.
 - Keep components small; compose unique screens and bounded helpers behind the mounted slots.
 - When a mounted screen's module plan names a shared journey controller, render that controller
   exactly once. It owns the screen's contracted controls and interaction state. Do not mount a
@@ -231,6 +238,20 @@ export function renderPrecompileRepairContext(tree, { repairScope, onRetrieval =
     ...interfaces.map((path) => ({ path, form: "interface", reason: "required persistence interface",
       tokens: Math.ceil(interfaceText(path).length / 4) })),
   ];
+  // CSS repair needs the actual retained markup, not invented class names. Keep this
+  // read-only and bounded; the write allowlist remains the rejected stylesheet(s) alone.
+  const markup = [];
+  let remainingMarkup = 30_000;
+  if (repairScope?.kind === "stylesheet_patch_correction") {
+    for (const path of [...new Set(repairScope.readOnlyFiles || [])].sort()) {
+      if (remainingMarkup <= 0 || !/^src\/(?:components|screens)\/.*\.[jt]sx$/.test(path)
+        || typeof tree?.[path] !== "string" || files.includes(path)) continue;
+      const source = tree[path], excerpt = source.slice(0, Math.min(12_000, remainingMarkup));
+      remainingMarkup -= excerpt.length;
+      markup.push(`// ${path} — READ ONLY retained markup${excerpt.length < source.length ? " (excerpt)" : ""}\n${excerpt}`);
+      included.push({ path, form: excerpt.length < source.length ? "excerpt" : "full", reason: "read-only CSS consumers", tokens: Math.ceil(excerpt.length / 4) });
+    }
+  }
   const tokens = included.reduce((sum, row) => sum + row.tokens, 0);
   onRetrieval?.({
     query: { step: "repair", kind: repairScope?.kind, files, capabilityPaths: repairScope?.capabilityPaths || [] },
@@ -245,6 +266,7 @@ export function renderPrecompileRepairContext(tree, { repairScope, onRetrieval =
     "",
     "RELEVANT INTERFACES:",
     ...interfaces.map(interfaceText),
+    ...(markup.length ? ["", "READ-ONLY CSS CONSUMERS — style these existing classes and elements; do not edit these files or invent unused replacement classes:", ...markup] : []),
   ].join("\n");
 }
 
@@ -660,7 +682,24 @@ function renderHeadroomScreenMountPrompt({
   return parts.join("\n");
 }
 
-export function renderPatchPrompt({
+export function renderPatchPrompt(options) {
+  const prompt = renderScopedPatchPrompt(options);
+  const original = typeof options.originalRequest === "string" ? options.originalRequest.trim() : "";
+  if (!original) return prompt;
+  // Keep the user's requirements as source evidence alongside the lossy derived contract.
+  // The actual rendered prompt is still measured by reservation/headroom admission.
+  return [
+    "ORIGINAL PRODUCT REQUEST (requirement fidelity):",
+    original,
+    "Apply these requirements only within this dispatch's contracted journeys and writable modules. "
+      + "Do not expand the approved capability or repair scope. Preserve defaults, exclusions and "
+      + "behavioral details that a contract summary may omit. Verification fixtures are test inputs, "
+      + "not production defaults or the only allowed values; explicit user seed data is distinct.",
+    "", prompt,
+  ].join("\n");
+}
+
+function renderScopedPatchPrompt({
   step, originalStep = step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null,
   projectKnowledge = null, onRetrieval = null, modulePlan = [], moduleContracts = null,
   repairScope = null, moduleCorrectionScope = null, headroomScope = null, repairBoundary = null,
@@ -854,6 +893,9 @@ export function renderPatchPrompt({
         : scopedJourney.steps || [],
     })),
     entities: scopedContract.entities || [],
+    initialTransientState: Object.fromEntries((scopedContract.entities || [])
+      .map(entity => [entity.name, transientSeedState(scopedContract, entity)])
+      .filter(([, state]) => Object.keys(state).length)),
     operations: scopedOperations,
     routes: scopedContract.routes || [],
     dependencyPlan: scopedContract.dependencyPlan || null,
@@ -1027,8 +1069,8 @@ export function renderPatchPrompt({
   }
   if (regenerateFiles.length) {
     parts.push("", "MANDATORY WHOLE-FILE ESCALATION — repeated symbol operations could not land:",
-      ...regenerateFiles.map((file) => `- ${file}`),
-      "For each listed file, emit exactly one replaceFile operation containing the COMPLETE current file plus the required fix. Do not use newFile or symbol operations for these files. Preserve all clean retained sibling work.");
+      ...regenerateFiles.map((file) => `- ${file}: ${Object.hasOwn(tree, file) ? "exists — use replaceFile" : "missing — use newFile"}`),
+      "For each listed existing file, emit exactly one replaceFile operation with COMPLETE corrected content. For each listed missing file, emit exactly one newFile operation. Do not use symbol operations. Preserve all clean retained sibling work.");
   }
   if (compactHeadroomProblems.length) {
     parts.push("", "VERIFICATION FAILED on your last tree — fix these and re-emit patches:",
@@ -1680,7 +1722,18 @@ export async function runReservedDispatch({
           `transport interruption could not be absorbed: ${absorbError.message}`), { code: "billing_settlement_failed" }),
         { reservationId: hold.id, providerRequestId: error?.providerRequestId || null });
       }
-      return runReservedDispatch({ ...dispatchArguments, transportRetries: Number(transportRetries) + 1 });
+      try {
+        return await runReservedDispatch({ ...dispatchArguments, transportRetries: Number(transportRetries) + 1 });
+      } catch (retryError) {
+        if (["budget_ceiling", "step_budget_ceiling", "account_budget", "customer_envelope_exhausted",
+          "recovery_envelope_exhausted", "customer_completion_reserve", "recovery_completion_reserve"].includes(retryError.code)) {
+          retryError.cause ||= error;
+          retryError.classification = error.classification || "platform";
+          retryError.customerActionRequired = false;
+          retryError.transportRetryAdmissionFailed = true;
+        }
+        throw retryError;
+      }
     }
     throw replayUnsafe(error, { reservationId: hold.id, providerRequestId: error?.providerRequestId || null });
   }
@@ -1898,7 +1951,7 @@ export function createModelLanes({
       return outcome.contract;
     },
 
-    patchesFn: async ({ owner, projectId, buildId, step, originalStep, attempt = 1, contract, tiers, tree, journey, rejections, problems, editRequest,
+    patchesFn: async ({ owner, projectId, buildId, step, originalStep, attempt = 1, contract, tiers, tree, journey, rejections, problems, editRequest, originalRequest = null,
       modulePlan = [], moduleContracts = null, repairScope = null, moduleCorrectionScope = null,
       headroomScope: requestedHeadroomScope = null, repairBoundary = null,
       regenerateFiles = [], advisory = [], spec = null, signal = null }) => {
@@ -1939,7 +1992,7 @@ export function createModelLanes({
             ? HEADROOM_FRAGMENT_SYSTEM_PROMPT
             : compileScoped ? COMPILE_CORRECTION_SYSTEM_PROMPT : fullSystemPrompt;
           prompt = renderPatchPrompt({
-            step, originalStep, contract, tiers, tree, journey, rejections, problems: dispatchProblems, editRequest,
+            step, originalStep, contract, tiers, tree, journey, rejections, problems: dispatchProblems, editRequest, originalRequest,
             projectKnowledge: headroomScope ? null : projectKnowledge, modulePlan, moduleContracts,
             repairScope, moduleCorrectionScope, headroomScope, repairBoundary, regenerateFiles, advisory,
             capabilityGraph: spec?.capabilityGraph || contract?.capabilityGraph || null,

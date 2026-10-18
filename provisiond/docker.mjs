@@ -14,7 +14,12 @@ export const CADDY_NAME = "buildr-caddy";
 // (Caddyfile.tls serves *.app.buildr101.com from /publish/<label>).
 export const PUBLISH_ROOT = process.env.PUBLISH_DIR || path.join(os.homedir(), "publish");
 export const CADDY_IMAGE = "caddy:2-alpine";
-export const BASE_IMAGE = "buildr-preview-base:latest";
+export function previewBaseImage(env = process.env) {
+  const configured = String(env.THRALLO_PREVIEW_IMAGE || "").trim();
+  if (configured && !/^sha256:[0-9a-f]{64}$/.test(configured)) throw new Error("THRALLO_PREVIEW_IMAGE must be an immutable image digest");
+  return configured || "buildr-preview-base:latest";
+}
+export const BASE_IMAGE = previewBaseImage();
 
 // CP-4 isolation: the proxy net has a FIXED subnet so Caddy can claim a known static IP, and its
 // listener binds to that IP ONLY (see Caddyfile* `bind`). Caddy is also `network connect`'d to every

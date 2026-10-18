@@ -12,7 +12,7 @@ import { db as defaultDb } from "../backend/index.js";
 
 function flatten(row) {
   if (!row) return null;
-  return { id: row.id, createdAt: row.created_at, ...(row.data || {}) };
+  return { createdAt: row.created_at, ...(row.data || {}), id: row.id };
 }
 
 export function makeEntityStore(type, deps = {}) {

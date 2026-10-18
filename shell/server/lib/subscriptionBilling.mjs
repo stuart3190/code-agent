@@ -355,13 +355,18 @@ async function changeExistingPlan({ client, store, owner, planId, subscription }
     return { plan: planId, applied: "unchanged", message: `You are already on ${planName(planId)}.` };
   }
 
+  const isUpgrade = PLAN_RANK[planId] > PLAN_RANK[currentPlan];
+  const periodEnd = subscriptionPeriod(subscription).end;
+  if (!isUpgrade && (!Number.isFinite(periodEnd) || periodEnd <= 0)) {
+    throw billingError("The current billing period could not be confirmed. Please retry.", 503, "billing_period_unavailable");
+  }
+
   // Any pending change is superseded by an explicit new choice.
-  if (scheduleId) {
+  if (scheduleId && isUpgrade) {
     await client.subscriptionSchedules.release(scheduleId);
     await store.upsertSubscription(owner, { pending_plan: null, pending_plan_at: null, stripe_schedule_id: null });
   }
 
-  const isUpgrade = PLAN_RANK[planId] > PLAN_RANK[currentPlan];
   // Same intent twice (a double click) is one Stripe operation, not two invoices.
   const idempotencyKey = `thrallo:plan:${owner}:${subscription.id}:${item.price.id}->${targetPrice}`;
 
@@ -381,17 +386,45 @@ async function changeExistingPlan({ client, store, owner, planId, subscription }
   }
 
   // Downgrade: hold the current plan until the period ends, then switch.
-  const periodEnd = subscription.current_period_end;
-  const schedule = await client.subscriptionSchedules.create(
-    { from_subscription: subscription.id },
-    { idempotencyKey: `${idempotencyKey}:schedule` },
-  );
-  await client.subscriptionSchedules.update(schedule.id, {
+  let schedule;
+  if (scheduleId) {
+    schedule = await client.subscriptionSchedules.retrieve(scheduleId);
+  } else {
+    try {
+      schedule = await client.subscriptionSchedules.create(
+        { from_subscription: subscription.id },
+        { idempotencyKey: `${idempotencyKey}:schedule:${crypto.randomUUID()}` },
+      );
+    } catch (error) {
+      // Creation can commit before its response is lost. Resume the attached
+      // schedule instead of creating or releasing another one on retry.
+      const current = await client.subscriptions.retrieve(subscription.id);
+      const attached = typeof current?.schedule === "string" ? current.schedule : current?.schedule?.id;
+      if (!attached || current?.id !== subscription.id || String(current.customer) !== String(subscription.customer)) throw error;
+      schedule = await client.subscriptionSchedules.retrieve(attached);
+    }
+  }
+  if (!schedule?.id || ["released", "canceled", "completed"].includes(schedule.status)
+      || String(schedule.subscription?.id || schedule.subscription) !== subscription.id) {
+    throw billingError("The current billing schedule could not be confirmed. Please retry.", 503, "billing_schedule_unavailable");
+  }
+  const phaseStart = schedule.current_phase?.start_date ?? schedule.phases?.[0]?.start_date;
+  if (!Number.isFinite(phaseStart) || phaseStart <= 0) {
+    throw billingError("The current billing schedule could not be confirmed. Please retry.", 503, "billing_schedule_unavailable");
+  }
+  const phases = (schedule.phases || []).filter(phase => phase.start_date >= phaseStart);
+  const hasPrice = (phase, price) => phase?.items?.length === 1
+    && (phase.items[0].price?.id || phase.items[0].price) === price
+    && Number(phase.items[0].quantity ?? 1) === 1;
+  const alreadyScheduled = schedule.end_behavior === "release" && phases.length === 2
+    && phases[0].start_date === phaseStart && phases[0].end_date === periodEnd && hasPrice(phases[0], item.price.id)
+    && phases[1].start_date === periodEnd && hasPrice(phases[1], targetPrice);
+  if (!alreadyScheduled) await client.subscriptionSchedules.update(schedule.id, {
     end_behavior: "release",
     phases: [
       {
         items: [{ price: item.price.id, quantity: 1 }],
-        start_date: schedule.phases[0].start_date,
+        start_date: phaseStart,
         end_date: periodEnd,
         proration_behavior: "none",
       },
@@ -401,7 +434,7 @@ async function changeExistingPlan({ client, store, owner, planId, subscription }
         proration_behavior: "none",
       },
     ],
-  });
+  }, { idempotencyKey: `${idempotencyKey}:phases:${schedule.id}:${crypto.randomUUID()}` });
   const effectiveAt = unixIso(periodEnd);
   await store.upsertSubscription(owner, {
     pending_plan: planId, pending_plan_at: effectiveAt, stripe_schedule_id: schedule.id,
@@ -439,20 +472,42 @@ function formatDate(iso) {
  */
 export async function setCancellation(owner, cancel, { store = codeAgentStore(), stripe = null } = {}) {
   if (!optionalEnv("THRALLO_STRIPE_SECRET_KEY")) throw notConfigured();
-  const record = await ownerSubscription(owner, { store });
-  if (!record.stripe_subscription_id) {
-    throw billingError("There is no paid subscription to change", 409, "no_subscription");
-  }
   const client = stripe || stripeClient();
   return withOwnerLock(owner, async () => {
-    const updated = await client.subscriptions.update(record.stripe_subscription_id, {
-      cancel_at_period_end: !!cancel,
-    }, { idempotencyKey: `thrallo:cancel:${owner}:${record.stripe_subscription_id}:${cancel ? 1 : 0}` });
+    const record = { ...await store.getSubscription(owner) };
+    if (!record.stripe_subscription_id || !record.stripe_customer_id) {
+      throw billingError("There is no paid subscription to change", 409, "no_subscription");
+    }
+    const wanted = !!cancel;
+    const confirmed = value => value?.id === record.stripe_subscription_id
+      && String(value.customer) === record.stripe_customer_id
+      && typeof value.cancel_at_period_end === "boolean";
+    const current = await client.subscriptions.retrieve(record.stripe_subscription_id);
+    if (!confirmed(current)) throw billingError("Subscription identity could not be confirmed. Please retry.", 503, "cancellation_unconfirmed");
+    if (["canceled", "incomplete_expired"].includes(current.status)) {
+      throw billingError("There is no paid subscription to change", 409, "no_subscription");
+    }
+    // A repeated intent (including retry after a lost acknowledgement) needs no
+    // provider write. A genuine later toggle needs a new key, never a cached key
+    // from an earlier cancel/reactivate cycle. SDK retries retain this key.
+    const updated = current.cancel_at_period_end === wanted ? current
+      : await client.subscriptions.update(record.stripe_subscription_id, {
+        cancel_at_period_end: wanted,
+      }, { idempotencyKey: `thrallo:cancel:${owner}:${record.stripe_subscription_id}:${crypto.randomUUID()}` });
+    if (!confirmed(updated) || updated.cancel_at_period_end !== wanted) {
+      throw billingError("Cancellation state could not be confirmed. Please retry.", 503, "cancellation_unconfirmed");
+    }
     // Written through immediately as well as by the webhook. The webhook is authoritative, but it
     // arrives whenever it arrives — and a customer who has just cancelled must not be shown
     // "renews on the 12th" while they wait for it.
-    const endsAt = unixIso(updated.current_period_end) || record.current_period_end;
-    await store.upsertSubscription(owner, { cancel_at_period_end: !!cancel });
+    const period = subscriptionPeriod(updated);
+    const endsAt = unixIso(period.end) || record.current_period_end;
+    const saved = await store.updateSubscriptionFromSnapshot(owner, record, {
+      cancel_at_period_end: wanted,
+      ...(period.start ? { current_period_start: unixIso(period.start) } : {}),
+      ...(period.end ? { current_period_end: unixIso(period.end) } : {}),
+    });
+    if (!saved) throw billingError("Subscription changed during this request. Please retry.", 503, "cancellation_unconfirmed");
     return {
       cancelAtPeriodEnd: !!cancel,
       endsAt,
@@ -509,7 +564,7 @@ export async function handleSubscriptionEvent(rawBody, signature, {
       return { received: true, owner: contract.owner, creditsGranted: contract.credits };
     }
     if (!owner || !session.subscription) return { received: true, ignored: "no owner or subscription" };
-    const ownerRecord = await ownerSubscription(owner, { store });
+    const ownerRecord = { ...await store.getSubscription(owner) };
     if (!ownerRecord.stripe_customer_id || ownerRecord.stripe_customer_id !== String(session.customer || "")) {
       return { received: true, ignored: "subscription customer does not match owner" };
     }
@@ -520,7 +575,7 @@ export async function handleSubscriptionEvent(rawBody, signature, {
     if (String(subscription.customer || "") !== ownerRecord.stripe_customer_id) {
       return { received: true, ignored: "subscription customer mismatch" };
     }
-    return applySubscription(store, owner, subscription);
+    return reconcileSubscription(client, store, owner, subscription, ownerRecord, subscription);
   }
 
   if (["refund.created", "refund.updated"].includes(event.type)) {
@@ -571,10 +626,17 @@ export async function handleSubscriptionEvent(rawBody, signature, {
   if (["customer.subscription.updated", "customer.subscription.deleted"].includes(event.type)) {
     const subscription = event.data.object;
     const existing = await store.findSubscriptionByStripeCustomer(String(subscription.customer));
-    const owner = existing?.owner || subscription.metadata?.thrallo_owner;
+    // Customer binding is established during authenticated checkout. Metadata
+    // alone must not attach an unrelated Stripe customer to an existing owner.
+    const owner = existing?.owner;
     if (!owner) return { received: true, ignored: "unknown customer" };
     if (event.type === "customer.subscription.deleted") {
-      await store.upsertSubscription(owner, {
+      // Cancelling an older duplicate must not revoke a newer subscription.
+      // Match again in the write, since checkout can replace it after this read.
+      if (!existing || !subscription.id || existing.stripe_subscription_id !== subscription.id) {
+        return { received: true, ignored: "deleted subscription is not current" };
+      }
+      const cleared = await store.updateSubscriptionIfCurrent(owner, String(subscription.customer), subscription.id, {
         plan: "free",
         status: "active",
         stripe_subscription_id: null,
@@ -587,12 +649,38 @@ export async function handleSubscriptionEvent(rawBody, signature, {
         pending_plan_at: null,
         stripe_schedule_id: null,
       });
+      if (!cleared) return { received: true, ignored: "subscription changed before deletion applied" };
       return { received: true, owner, plan: "free" };
     }
-    return applySubscription(store, owner, subscription);
+    return reconcileSubscription(client, store, owner, subscription, { ...existing });
   }
 
   return { received: true, ignored: event.type };
+}
+
+async function reconcileSubscription(client, store, owner, subscription, expected, latest = null) {
+  // Event snapshots can arrive out of order. Read Stripe's current object,
+  // and only write if the local entitlement still matches the observed row.
+  latest ||= await client.subscriptions.retrieve(subscription.id);
+  if (!latest || latest.id !== subscription.id || String(latest.customer) !== String(subscription.customer)) {
+    throw new Error("Subscription identity could not be confirmed");
+  }
+  if (expected.stripe_subscription_id && expected.stripe_subscription_id !== latest.id) {
+    if (!["active", "trialing", "past_due", "unpaid", "incomplete"].includes(latest.status)) {
+      return { received: true, ignored: "ended subscription is not current" };
+    }
+    const current = await client.subscriptions.retrieve(expected.stripe_subscription_id);
+    if (!current || current.id !== expected.stripe_subscription_id || String(current.customer) !== String(subscription.customer)) {
+      throw new Error("Current subscription identity could not be confirmed");
+    }
+    if (["active", "trialing", "past_due", "unpaid", "incomplete"].includes(current.status)) {
+      if (!Number.isFinite(current.created) || !Number.isFinite(latest.created)) {
+        throw new Error("Subscription ordering could not be confirmed");
+      }
+      if (current.created >= latest.created) latest = current;
+    }
+  }
+  return applySubscription(store, owner, latest, { expected });
 }
 
 async function validateTopupMetadata({ store, metadata = {}, customer }) {
@@ -641,7 +729,7 @@ async function topupReversalContract({ client, store, event }) {
   return { ...contract, credits: Math.min(contract.credits, contract.credits * (reversed / paid)) };
 }
 
-async function applySubscription(store, owner, subscription) {
+async function applySubscription(store, owner, subscription, { expected = null } = {}) {
   const priceId = subscription.items?.data?.[0]?.price?.id;
   const plan = priceToPlan(priceId);
   if (!plan) {
@@ -665,25 +753,40 @@ async function applySubscription(store, owner, subscription) {
   // arrival of the target plan is exactly what proves the pending change is no longer pending.
   const scheduleId = typeof subscription.schedule === "string"
     ? subscription.schedule : subscription.schedule?.id || null;
-  const existing = await store.getSubscription(owner).catch(() => null);
+  const existing = expected || await store.getSubscription(owner);
   const pendingSatisfied = existing?.pending_plan && existing.pending_plan === plan;
   const clearPending = pendingSatisfied || !scheduleId;
 
-  await store.upsertSubscription(owner, {
+  const period = subscriptionPeriod(subscription);
+  const patch = {
     plan: status === "cancelled" ? "free" : plan,
     status: status === "cancelled" ? "active" : status,
     stripe_customer_id: String(subscription.customer),
     stripe_subscription_id: status === "cancelled" ? null : subscription.id,
-    current_period_start: unixIso(subscription.current_period_start),
-    current_period_end: unixIso(subscription.current_period_end),
+    current_period_start: status === "cancelled" ? null : unixIso(period.start),
+    current_period_end: status === "cancelled" ? null : unixIso(period.end),
     // Stripe is the authority here too. Without it the billing panel told a customer who had
     // cancelled that their plan "renews" on the very date it was going to end.
     cancel_at_period_end: status === "cancelled" ? false : !!subscription.cancel_at_period_end,
     ...(clearPending
       ? { pending_plan: null, pending_plan_at: null, stripe_schedule_id: null }
       : { stripe_schedule_id: scheduleId }),
-  });
+  };
+  if (expected) {
+    const saved = await store.updateSubscriptionFromSnapshot(owner, expected, patch);
+    if (!saved) throw new Error("Subscription changed during reconciliation; retry delivery");
+  } else await store.upsertSubscription(owner, patch);
   return { received: true, owner, plan, status, ...(clearPending ? {} : { pendingPlan: existing?.pending_plan }) };
+}
+
+function subscriptionPeriod(subscription) {
+  // Basil and later API versions put the billing period on the subscribed item.
+  // Root fields remain a compatibility fallback for historical event fixtures.
+  const item = subscription.items?.data?.[0];
+  return {
+    start: item?.current_period_start ?? subscription.current_period_start,
+    end: item?.current_period_end ?? subscription.current_period_end,
+  };
 }
 
 function unixIso(seconds) {

@@ -9,7 +9,8 @@ const { ThralloClient, describeEvent, TERMINAL_STATES } = require("./lib/api.js"
 const { buildLocalIndex, queryLocalIndex, isIndexableFile } = require("./lib/localIndex.js");
 const { rewriteIndexHtml, connectHtml } = require("./lib/conversationPanel.js");
 
-const TOKEN_KEY = "thrallo.apiToken";
+const { configuredServerOrigin, readTokenForOrigin, storeTokenForOrigin,
+  deleteTokenForOrigin, connectionStateKey } = require("./lib/connectionSecurity.js");
 
 let conversationPanel = null;
 
@@ -35,12 +36,18 @@ function activate(context) {
     vscode.commands.registerCommand("thrallo.showLatestRun", (item) => showLatestRun(item)),
     vscode.commands.registerCommand("thrallo.showOutput", () => output.show(true)),
     vscode.commands.registerCommand("thrallo.openConversation", () => openConversation(context)),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (!event.affectsConfiguration("thrallo.serverUrl")) return;
+      client = null;
+      restoreConnection(context).then(() => refreshOpenConversation(context))
+        .catch(() => vscode.window.showErrorMessage("Thrallo could not restore this server connection. Check your user settings and reconnect."));
+    }),
     vscode.languages.registerInlineCompletionItemProvider(
       { pattern: "**" },
       new ThralloCompletionProvider(),
     ),
   );
-  restoreConnection(context);
+  restoreConnection(context).catch(() => vscode.window.showErrorMessage("Thrallo could not restore this server connection. Check your user settings and reconnect."));
 
   // Thrallo Desktop (Phase 23): the conversation surface is the primary view of the fork —
   // it opens itself on startup. In stock VS Code the panel stays behind its command.
@@ -129,10 +136,12 @@ function wireWorkspaceContext(context, panel) {
 
 async function renderConversation(context, panel, indexPath, appRoot) {
   const fs = require("fs");
-  const token = await context.secrets.get(TOKEN_KEY);
+  const origin = serverUrl();
+  const token = await readTokenForOrigin(context.secrets, origin);
+  if (origin !== serverUrl()) return;
   // Skip the no-op rewrite when the same state is already showing (webview reloads reset
   // the thread scroll; only re-render on a real state change).
-  const stateKey = `${token ? "app" : "connect"}:${indexPath}`;
+  const stateKey = `${connectionStateKey(origin, token)}:${indexPath}`;
   if (panel.__thralloState === stateKey) return;
   panel.__thralloState = stateKey;
   if (!fs.existsSync(indexPath)) {
@@ -149,10 +158,17 @@ async function renderConversation(context, panel, indexPath, appRoot) {
   panel.webview.html = rewriteIndexHtml(html, {
     assetBase: panel.webview.asWebviewUri(appRoot).toString(),
     cspSource: panel.webview.cspSource,
-    server: serverUrl(),
+    server: origin,
     token,
     version: vscode.extensions.getExtension("thrallo.thrallo")?.packageJSON?.version || null,
   });
+}
+
+async function refreshOpenConversation(context) {
+  if (!conversationPanel) return;
+  const appRoot = vscode.Uri.joinPath(context.extensionUri, "media", "app");
+  const indexPath = require("path").join(appRoot.fsPath, "index.html");
+  await renderConversation(context, conversationPanel, indexPath, appRoot);
 }
 
 // Bounded local workspace index: built inside the editor, refreshed lazily after saves.
@@ -273,44 +289,45 @@ function setStatus(text, { spin = false, tooltip = "" } = {}) {
 }
 
 async function restoreConnection(context) {
-  const token = await context.secrets.get(TOKEN_KEY);
-  if (!token) return;
-  buildClient(token);
+  const origin = serverUrl();
+  const token = await readTokenForOrigin(context.secrets, origin);
+  if (origin !== serverUrl()) return;
+  client = token ? new ThralloClient({ serverUrl: origin, token }) : null;
   treeProvider.refresh();
 }
 
 function serverUrl() {
-  return vscode.workspace.getConfiguration("thrallo").get("serverUrl") || "https://app.thrallo.com";
-}
-
-function buildClient(token) {
-  client = new ThralloClient({ serverUrl: serverUrl(), token });
+  return configuredServerOrigin(vscode.workspace.getConfiguration("thrallo"));
 }
 
 async function connect(context) {
+  const origin = serverUrl();
   const token = await vscode.window.showInputBox({
-    prompt: `Paste a Thrallo API token from ${serverUrl()} → Settings → API tokens`,
+    prompt: `Paste a Thrallo API token from ${origin} → Settings → API tokens`,
     password: true,
     ignoreFocusOut: true,
     validateInput: (value) => (value?.startsWith("thrallo_pat_") ? null : "Tokens start with thrallo_pat_"),
   });
   if (!token) return;
-  buildClient(token.trim());
+  const candidate = new ThralloClient({ serverUrl: origin, token: token.trim() });
   try {
-    await client.listAgents();
+    await candidate.listAgents();
   } catch (error) {
-    client = null;
     vscode.window.showErrorMessage(`Thrallo connection failed: ${error.message}`);
     return;
   }
-  await context.secrets.store(TOKEN_KEY, token.trim());
+  await storeTokenForOrigin(context.secrets, origin, token.trim());
+  if (origin !== serverUrl()) return;
+  client = candidate;
+  await refreshOpenConversation(context);
   vscode.window.showInformationMessage("Connected to Thrallo.");
   treeProvider.refresh();
 }
 
 async function disconnect(context) {
-  await context.secrets.delete(TOKEN_KEY);
+  await deleteTokenForOrigin(context.secrets, serverUrl());
   client = null;
+  await refreshOpenConversation(context);
   treeProvider.refresh();
   vscode.window.showInformationMessage("Disconnected from Thrallo.");
 }

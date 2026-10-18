@@ -167,6 +167,7 @@ export function deriveBuildSpec(rawContract, { userCritical = [], journeys = nul
   const enriched = { ...plannedContract, interactionContract: finalInteractionContract,
     dependencyPlan, capabilityGraph, scaffoldGraph, ...(moduleLock ? { moduleLock } : {}) };
   const tiers = tierContract(enriched, { userCritical });
+  const intents = imageIntents(plannedContract);
   const moduleContracts = buildModuleGenerationContracts({
     contract: enriched, modulePlan: finalModulePlan, interactionContract: finalInteractionContract,
     bindings, journeys, capabilityGraph,
@@ -190,7 +191,9 @@ export function deriveBuildSpec(rawContract, { userCritical = [], journeys = nul
   const routeVerdict = { ok: routePlan.verdict.ok, problems: routePlan.verdict.problems.map((problem) => `route_plan: ${problem}`) };
   return {
     version: BUILD_SPEC_VERSION,
-    contract: enriched,
+    // One canonical contract is executed, diagnosed and persisted. Do not let
+    // persistence silently add/replace derived metadata on a different object.
+    contract: { ...enriched, tiers, imageIntents: intents },
     journeys,
     buildProfile,
     entities: plannedContract?.entities || [],
@@ -217,7 +220,7 @@ export function deriveBuildSpec(rawContract, { userCritical = [], journeys = nul
     scaffoldCompositionPlan: scaffoldPlan,
     moduleContracts,
     persistencePlan: persistenceOwnershipPlan(enriched, journeys, finalModulePlan),
-    imageIntents: imageIntents(plannedContract),
+    imageIntents: intents,
     verdict: {
       ok: interactionVerdict.ok && graphVerdict.ok && scaffoldVerdict.ok && profileVerdict.ok && moduleVerdict.ok
         && ownershipVerdict.ok && schemaVerdict.ok && routeVerdict.ok,

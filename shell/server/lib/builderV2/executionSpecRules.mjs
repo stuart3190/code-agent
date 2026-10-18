@@ -19,6 +19,8 @@ export const SCAFFOLD_COMPOSITION_RULES = Object.freeze([
   "BrowserRouter or any nested router inside a screen: the composed shell owns the router.",
   "Select each custom-extension operation with a literal second-argument context such as",
   "{ operation: \"<operationId>\" }. The explicit legacy key operationId is also supported.",
+  "That object literal belongs at the CALL SITE. Declare the function as function run(inputs, context)",
+  "or function run(inputs, { operation }); a literal string is never a valid destructuring parameter.",
   "At every custom-extension call site, pass the selected operation's declared inputKeys as explicit",
   "object properties. An object spread is not proof that a differently named domain field satisfies the interface.",
 ]);

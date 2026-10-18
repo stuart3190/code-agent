@@ -408,6 +408,35 @@ test("P0-3a: an entity the capability graph did compose keeps its durable store"
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
+test("entity names inherited from Object.prototype resolve to real isolated stores", async () => {
+  const { dir, url } = await loadComposed();
+  try {
+    const { entityStore } = await import(url(CRUD));
+    for (const name of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+      const store = entityStore(name);
+      const row = await store.create({ name });
+      assert.equal((await store.get(row.id)).name, name);
+      assert.equal(await store.count(), 1);
+      assert.equal(entityStore(name), store);
+    }
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("a composed __proto__ entity remains a durable own property", async () => {
+  const graph = structuredClone(spec.capabilityGraph);
+  graph.nodes.find((node) => node.id === "capability:crud").entities = ["__proto__", "constructor"];
+  const tree = composeCapabilityFoundation(REACT_VITE, graph).tree;
+  const { dir, url } = await loadComposed({ [CRUD]: tree[CRUD] });
+  try {
+    const { entityStores, entityStore } = await import(url(CRUD));
+    for (const name of ["__proto__", "constructor"]) {
+      assert.equal(Object.hasOwn(entityStores, name), true);
+      assert.deepEqual(entityStore(name), { durable: true, type: name });
+    }
+    assert.equal(Object.getPrototypeOf(entityStores), Object.prototype);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
 // ── P0-3 (b): the static lint ─────────────────────────────────────────────────────────────────
 
 test("P0-3b: entityStore() for a contract entity with no composed store is advisory, with file and line", () => {

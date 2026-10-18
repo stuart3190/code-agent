@@ -154,3 +154,169 @@ browserTest("an unreachable preview is UNAVAILABLE (platform), never an applicat
   assert.ok(result.journeys.every((j) => j.status === "undriveable" && j.classification === VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE));
   assert.equal(result.fatalErrors.length, 0);
 });
+
+
+browserTest("persistent mobile panel obstruction fails without comparing text or numbers", async () => {
+  const html=`<html><body><main><h1>Calculator</h1><button style="position:absolute;top:100px;left:20px;width:120px;height:50px">Metres</button><aside aria-label="Calculator status" style="display:none;position:absolute;top:90px;left:10px;width:200px;height:100px;background:white">Ready</aside></main><style>@media(max-width:500px){aside{display:block!important}}</style></body></html>`;
+  const {server,url}=await serve({'/':html});
+  try { const result=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});
+    assert.equal(result.pass,false); assert.equal(result.smoke.responsive.findings.length,1);
+    assert.ok(result.journeys.every(j=>j.classification===VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE));
+    assert.match(result.journeys[0].detail,/Mobile 390px.*Metres.*Calculator status/);
+    assert.equal(result.smoke.crashes.length,0);
+  } finally {server.close();}
+});
+
+browserTest("an intentional modal covering background controls is not a responsive defect", async () => {
+  const html=`<html><body><h1>App</h1><button style="position:absolute;top:100px;left:20px;width:120px;height:50px">Background</button><section role="dialog" aria-modal="true" style="position:absolute;inset:0;background:white"><h2>Confirm</h2><button>Close</button></section></body></html>`;
+  const {server,url}=await serve({'/':html});
+  try {const result=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});assert.equal(result.pass,true);assert.equal(result.smoke.responsive.findings.length,0);}finally{server.close();}
+});
+
+browserTest("mobile inspection preserves result state produced by desktop interactions", async () => {
+  const html=`<html><body><h1>Calculator</h1><button style="position:absolute;top:100px;left:20px;width:120px;height:50px">Metres</button><button id="calc" style="position:absolute;top:250px" onclick="document.querySelector('aside').hidden=false">Calculate</button><aside hidden aria-label="Result" style="position:absolute;top:90px;left:400px;width:200px;height:100px;background:white">9 lights</aside><style>@media(max-width:500px){aside{left:10px!important}}</style></body></html>`;
+  const {server,url}=await serve({'/':html});
+  try{const result=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});assert.equal(result.pass,false);assert.match(result.journeys[0].detail,/Mobile 390px.*Metres.*Result/);}finally{server.close();}
+});
+
+for (const [name, content, expectedPass, phase] of [
+  ["visible platform error boundary", '<main data-scaffold-boundary="error" role="alert">This screen could not load</main>', false, "load"],
+  ["platform boundary after activation", `<button onclick="document.getElementById('root').innerHTML='<main data-scaffold-boundary=error>This screen could not load</main>'">Open</button>`, false, "activate"],
+  ["hidden platform boundary", '<main hidden data-scaffold-boundary="error">This screen could not load</main><h1>Working app</h1>', true],
+  ["ordinary validation alert", '<main role="alert">Please enter a valid length</main>', true],
+]) {
+  browserTest(name + " is classified by platform marker visibility", async () => {
+    const { server, url } = await serve({ "/": `<html><body><div id="root">${content}</div></body></html>` });
+    try {
+      const result = await smokeVerifyJourneys({ previewUrl: url, contract: journeysOnly, timeoutMs: 20_000, browser });
+      assert.equal(result.pass, expectedPass, JSON.stringify(result.smoke));
+      if (!expectedPass) {
+        assert.equal(result.smoke.crashes[0].phase, phase);
+        assert.match(result.fatalErrors[0], /platform error boundary/);
+        assert.ok(result.journeys.every(j => j.classification === VERIFICATION_RESULT_CLASS.FATAL_RUNTIME_FAILURE));
+      }
+    } finally { server.close(); }
+  });
+}
+
+for (const [name, css, expectedPass] of [
+  ['below-fold clipped control is inspected without activating it', 'html,body{overflow-x:clip}main{width:500px;margin-top:1200px}', false],
+  ['below-fold horizontal scrolling board is intentional', 'main{width:350px;overflow-x:auto;margin-top:1200px}', true],
+  ['root clipping masks mobile control overflow', 'html,body{overflow-x:clip}main{width:500px}', false],
+  ['hidden container clips a control', 'main{width:350px;overflow:hidden}', false],
+  ['horizontal scrolling board is intentional', 'main{width:350px;overflow-x:auto}', true],
+  ['responsive controls fit without clipping', 'main{width:100%}button{margin-left:10px!important}', true],
+  ['fully offscreen drawer is not a clipping finding', 'html,body{overflow-x:clip}button{margin-left:600px!important}', true],
+]) {
+  browserTest(name, async () => {
+    const html=`<html><head><style>body{margin:0}button{margin-left:320px;width:160px;height:50px}@media(max-width:500px){${css}}</style></head><body><h1>Task board</h1><main><button data-thrallo-action="act_create">Create task</button></main></body></html>`;
+    const {server,url}=await serve({'/':html});
+    try {
+      const result=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});
+      assert.equal(result.pass,expectedPass,JSON.stringify(result.smoke));
+      if(!expectedPass) {
+        assert.equal(result.smoke.responsive.findings[0].kind,'clipped_control');
+        assert.equal(result.journeys[0].responsiveFindings[0].controlId,'act_create');
+        assert.match(result.journeys[0].detail,/Create task.*cut off by.*clipping/);
+        assert.equal(result.journeys[0].classification,VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE);
+      }
+    }finally{server.close();}
+  });
+}
+
+for (const phase of ['load','activate','console-only']) {
+  browserTest(`caught boundary exception retains its diagnostic (${phase})`,async()=>{
+    const effect=`console.error('scaffold screen render failed',new Error('recipe.ingredients.map is not a function'));${phase==='console-only'?'':`document.getElementById('root').innerHTML='<main data-scaffold-boundary="error">This screen could not load</main>';`}`;
+    const html=`<html><body><div id="root"><h1>Recipe</h1><button id="go">Scale</button></div><script>${phase==='load'?effect:`document.getElementById('go').onclick=()=>{${effect}};`}</script></body></html>`;
+    const {server,url}=await serve({'/':html});
+    try {
+      const result=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});
+      assert.equal(result.pass,phase==='console-only');
+      if(phase!=='console-only') {
+        assert.equal(result.smoke.crashes[0].phase,phase);
+        assert.match(result.smoke.crashes[0].message,/recipe.ingredients.map is not a function/);
+        assert.match(result.journeys[0].detail,/recipe.ingredients.map is not a function/);
+        assert.ok(result.smoke.crashes[0].stack.length>0);
+      }
+    }finally{server.close();}
+  });
+}
+
+browserTest('entry mobile clipping cannot be hidden by an activation that opens a modal', async () => {
+  const html=`<html><body><main><h1>Tasks</h1><button style="margin-left:330px;width:150px" onclick="document.querySelector('dialog').showModal()">Clear search</button></main><dialog><h2>Details</h2></dialog><style>@media(max-width:500px){html,body{overflow-x:clip}main{width:500px}}</style></body></html>`;
+  const {server,url}=await serve({'/':html});
+  try {const result=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});
+    assert.equal(result.pass,false);assert.equal(result.smoke.responsive.entry.findings.length,1);
+    assert.equal(result.smoke.responsive.afterInteraction.findings.length,0);
+    assert.equal(result.smoke.responsive.findings.length,1);
+    assert.match(result.journeys[0].detail,/Clear search.*cut off/);
+  }finally{server.close();}
+});
+
+browserTest('a leading internal guide link cannot hide a crashing calculator control', async()=>{
+ const {server,url}=await serve({'/':'<html><body><h1>Calculator</h1><a href="/guide">Guide</a><button onclick="document.body.innerHTML=\'\'">Calculate</button></body></html>','/guide':'<html><body><h1>Guide</h1><a href="/">Back</a></body></html>'});
+ try{const r=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});assert.equal(r.pass,false);assert.match(r.smoke.crashes[0].control,/Calculate/);assert.equal(r.smoke.controls.activated,2);}finally{server.close();}
+});
+browserTest('working controls after a leading guide link are actually activated', async()=>{
+ const {server,url}=await serve({'/':'<html><body><h1>Calculator</h1><a href="/guide">Guide</a><input aria-label="Length"/><button>Calculate</button></body></html>','/guide':'<html><body><h1>Guide</h1><a href="/">Back</a></body></html>'});
+ try{const r=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});assert.equal(r.pass,true);assert.equal(r.smoke.controls.activated,3);}finally{server.close();}
+});
+
+browserTest('narrow mobile layout catches font-dependent controls that fit at 390px',async()=>{
+ const {server,url}=await serve({'/':'<html><body><main><h1>Tasks</h1><button style="margin-left:280px;width:85px">Clear search</button></main><style>html,body{margin:0;overflow-x:clip}main{min-width:366px}</style></body></html>'});
+ try{const r=await smokeVerifyJourneys({previewUrl:url,contract:journeysOnly,browser});assert.equal(r.pass,false);assert.deepEqual(r.smoke.responsive.entry.widths,[390,320]);assert.equal(r.smoke.responsive.entry.samples[0].findings.length,0);assert.equal(r.smoke.responsive.entry.samples[1].findings[0].width,320);assert.equal(r.smoke.responsive.findings.length,1);assert.match(r.journeys[0].detail,/Mobile 320px/);}finally{server.close();}
+});
+
+browserTest("hidden DOM controls do not certify a blank preview as rendered", async () => {
+  const { server, url } = await serve({ "/": '<html><body><div id="root" style="display:none"><button>Invisible</button><input type="hidden" value="42"></div></body></html>' });
+  try {
+    const result = await smokeVerifyJourneys({ previewUrl: url, contract: journeysOnly, timeoutMs: 10_000, browser });
+    assert.equal(result.pass, false, JSON.stringify(result.smoke));
+    assert.equal(result.unavailable, false);
+    assert.equal(result.smoke.render.rendered, false);
+    assert.match(result.fatalErrors[0], /nothing rendered/);
+  } finally { server.close(); }
+});
+
+browserTest("a visible text-only preview remains valid without interactive controls", async () => {
+  const { server, url } = await serve({ "/": '<html><body><div id="root"><p>A readable portfolio</p></div></body></html>' });
+  try {
+    const result = await smokeVerifyJourneys({ previewUrl: url, contract: journeysOnly, timeoutMs: 30_000, browser });
+    assert.equal(result.pass, true, JSON.stringify(result.smoke));
+    assert.equal(result.smoke.render.controls, 0);
+  } finally { server.close(); }
+});
+
+for (const style of ['opacity:0', 'visibility:hidden', 'content-visibility:hidden']) {
+  browserTest(`invisible ancestor (${style}) cannot satisfy the render gate`, async () => {
+    const { server, url } = await serve({ '/': `<html><body><div style="${style}"><div id="root"><p>Hidden result</p><button>Hidden action</button></div></div></body></html>` });
+    try {
+      const result = await smokeVerifyJourneys({ previewUrl: url, contract: journeysOnly, timeoutMs: 10_000, browser });
+      assert.equal(result.pass, false, JSON.stringify(result.smoke));
+      assert.equal(result.smoke.render.rendered, false);
+    } finally { server.close(); }
+  });
+}
+
+for (const [name, content] of [
+  ['display contents text', '<div style="display:contents">Visible portfolio</div>'],
+  ['graphical canvas', '<canvas width="100" height="100"></canvas>'],
+  ['graphical SVG', '<svg width="100" height="100"><circle cx="50" cy="50" r="40" /></svg>'],
+]) {
+  browserTest(`${name} still satisfies the render gate`, async () => {
+    const { server, url } = await serve({ '/': `<html><body><div id="root">${content}</div></body></html>` });
+    try {
+      const result = await smokeVerifyJourneys({ previewUrl: url, contract: journeysOnly, timeoutMs: 30_000, browser });
+      assert.equal(result.pass, true, JSON.stringify(result.smoke));
+    } finally { server.close(); }
+  });
+}
+
+browserTest('a control hiding the root is a fatal activation failure', async () => {
+  const { server, url } = await serve({ '/': '<html><body><div id="root"><button onclick="this.parentElement.style.display=\'none\'">Hide application</button></div></body></html>' });
+  try {
+    const result = await smokeVerifyJourneys({ previewUrl: url, contract: journeysOnly, timeoutMs: 30_000, browser });
+    assert.equal(result.pass, false, JSON.stringify(result.smoke));
+    assert.equal(result.smoke.crashes[0].phase, 'activate');
+  } finally { server.close(); }
+});

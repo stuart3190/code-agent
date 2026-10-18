@@ -1,0 +1,89 @@
+{
+  "source": "Connected Supabase list_migrations and read-only schema_migrations query on zczgvcsokfafuyognvwx",
+  "capturedAt": "2026-10-17T02:34:30.543397+00:00",
+  "baseVersion": "20260919120000",
+  "ledgerCount": 97,
+  "note": "October 6 policy already applied before this audit; October 16 trigger grants applied after isolated PostgreSQL proof. Existing version drift preserved. Local byte hashes identify reviewed files; remote statements were separately inspected. Build-scoped snapshot identity applied after isolated PostgreSQL unique-index proof; no data rewritten. Opt-in shared single-slot reservation tables applied after isolated concurrent PostgreSQL proof; existing rows unchanged. Service-only credit aggregation applied after isolated >1000-row and role-grant proof; no ledger rows changed.",
+  "migrations": [
+    {
+      "appliedOrder": 88,
+      "version": "20261006080000",
+      "name": "bv2_widen_verifier_policy_smoke_bypassed",
+      "filename": "20261006080000_bv2_widen_verifier_policy_smoke_bypassed.sql",
+      "localCanonicalSqlSha256": "161df6e244a3753a72326763f4e487d7b2df7b37e33d09bf99a4ca87fff90367",
+      "appliedVersion": "20261006183159"
+    },
+    {
+      "appliedOrder": 89,
+      "version": "20261016210929",
+      "name": "restrict_internal_audit_trigger_functions",
+      "filename": "20261016210929_restrict_internal_audit_trigger_functions.sql",
+      "localCanonicalSqlSha256": "60f9fcc83f53ba50472be98c71bcc4607767641d7fa01e4f673f65c830f4c32a",
+      "appliedVersion": "20261016210929"
+    },
+    {
+      "appliedOrder": 90,
+      "version": "20261016215408",
+      "name": "scope_snapshot_identity_to_qualifying_build",
+      "filename": "20261016215408_scope_snapshot_identity_to_qualifying_build.sql",
+      "localCanonicalSqlSha256": "6e79a6d11101749f64558f93514d3ba5e28b5ae3ce24725151e98b28eb097679",
+      "appliedVersion": "20261016215408"
+    },
+    {
+      "appliedOrder": 91,
+      "version": "20261016232358",
+      "name": "shared_single_slot_bookings",
+      "filename": "20261016232358_shared_single_slot_bookings.sql",
+      "localCanonicalSqlSha256": "48c641792d128d0e830f85aa132cb8520f27a44a73a3ae5a04e23d5e79c89581",
+      "appliedVersion": "20261016232358"
+    },
+    {
+      "appliedOrder": 92,
+      "version": "20261016235852",
+      "name": "credit_balance_totals",
+      "filename": "20261016235852_credit_balance_totals.sql",
+      "localCanonicalSqlSha256": "b23510ccfbda1bcee75a76647d379c9ad42a7164988d6b0adff036903706f62a",
+      "appliedVersion": "20261016235852"
+    },
+    {
+      "appliedOrder": 93,
+      "version": "20261017004248",
+      "name": "worker_command_state_authority",
+      "filename": "20261017004248_worker_command_state_authority.sql",
+      "localCanonicalSqlSha256": "097568a2920ea8709fcd0858a619f29b807d4c80cd3bf1d0246b866e16187744",
+      "appliedVersion": "20261017004248"
+    },
+    {
+      "appliedOrder": 94,
+      "version": "20261017014446",
+      "name": "absorbed_transport_retry_headroom",
+      "filename": "20261017014446_absorbed_transport_retry_headroom.sql",
+      "localCanonicalSqlSha256": "2e332ac8aabe8947e931bc021063572bb27dd6ec07d681d6b3d704fda67c38eb",
+      "appliedVersion": "20261017014446"
+    },
+    {
+      "appliedOrder": 95,
+      "version": "20261017015857",
+      "name": "customer_transport_liability_reconciliation",
+      "filename": "20261017015857_customer_transport_liability_reconciliation.sql",
+      "localCanonicalSqlSha256": "7dcff3818bdf868da3921718fb4ce677f82ed8faaa410fcfe10c9a99b0e717d5",
+      "appliedVersion": "20261017015857"
+    },
+    {
+      "appliedOrder": 96,
+      "version": "20261017021631",
+      "name": "graph_context_rebinding",
+      "filename": "20261017021631_graph_context_rebinding.sql",
+      "localCanonicalSqlSha256": "fc618977f6eafff4c33cc02de6dac66d3d890fb9b5576fd664fea6cbe881c0fc",
+      "appliedVersion": "20261017021631"
+    },
+    {
+      "appliedOrder": 97,
+      "version": "20261017023404",
+      "name": "backup_relation_catalog",
+      "filename": "20261017023404_backup_relation_catalog.sql",
+      "localCanonicalSqlSha256": "9fb864aaca3937538af1693d101561a14c41ad9c8e7cacc1bf07ac041743be8f",
+      "appliedVersion": "20261017023404"
+    }
+  ]
+}

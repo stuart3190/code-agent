@@ -6,8 +6,8 @@ FROM node:22-alpine
 WORKDIR /app
 
 # Install the fixed reactVite scaffold deps once (cached until package.json changes).
-COPY package.json ./
-RUN npm install
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
 
 # The entrypoint writes vite.config.js from env, then runs the dev server.
 COPY entrypoint.sh /entrypoint.sh

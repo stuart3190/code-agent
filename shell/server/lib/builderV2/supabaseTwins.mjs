@@ -14,7 +14,7 @@
 import crypto from "node:crypto";
 import { serviceClient } from "../supabase.mjs";
 import { memoryGraph } from "./graphStore.mjs";
-import { INDEXER_VERSION, treeHashOf } from "./indexer.mjs";
+import { INDEXER_VERSION, treeHashOf, resolveTreeIndex } from "./indexer.mjs";
 import { fileGraphHash, fileGraphPayload, manifestOf } from "./graphParity.mjs";
 
 const sha256 = (text) => crypto.createHash("sha256").update(text).digest("hex");
@@ -25,6 +25,16 @@ const ARTIFACT_BUCKET = process.env.CODE_AGENT_ARTIFACT_BUCKET || "thrallo-artif
 function unwrap({ data, error }, what) {
   if (error) throw new Error(`${what}: ${error.message}`);
   return data;
+}
+
+// PostgREST caps unpaginated results. Never infer a complete manifest/reference set from it.
+async function completeRows(query, key, label) {
+  const rows = []; const page = 250;
+  for (let offset = 0; ; offset += page) {
+    const batch = unwrap(await query().order(key).range(offset, offset + page - 1), label);
+    rows.push(...(batch || []));
+    if (!batch || batch.length < page) return rows;
+  }
 }
 
 // ── graph persistence (commit I) ──────────────────────────────────────────────────────────────
@@ -141,6 +151,13 @@ export async function loadIndex(owner, projectId, manifest, { client = serviceCl
       integrity.push({ path, revisionId: revision.id, problem: "graph hash differs", expected: revision.graph_hash, actual: computed });
     }
   }
+  // Stored targets belong to the tree at first persistence. Validate that immutable
+  // payload above before deriving targets for the requested manifest. Never mask corruption.
+  if (!missing.length && !incomplete.length && !integrity.length) {
+    const resolved = resolveTreeIndex(files);
+    loaded.edges = resolved.edges;
+    loaded.refs = resolved.refs;
+  }
   return loaded;
 }
 
@@ -167,6 +184,9 @@ export async function supabaseGraph(owner, projectId, manifest, { client = servi
  */
 export function supabaseSnapshotStorage({ client = serviceClient(), bucket = ARTIFACT_BUCKET } = {}) {
   return {
+    // A paginated client-side mark/sweep is not atomic with snapshot creation.
+    // Retain orphan bytes until a database-atomic collector with a grace period exists.
+    supportsSafeBlobSweep: false,
     async putBlob(owner, contentHash, content) {
       const body = String(content);
       if (sha256(body) !== contentHash) throw new Error("blob content does not match content hash");
@@ -215,7 +235,9 @@ export function supabaseSnapshotStorage({ client = serviceClient(), bucket = ART
       if (!row) return null;
       if (row.content !== null && row.content !== undefined) return row.content;
       const { data, error } = await client.storage.from(bucket).download(row.storage_path);
-      if (error) return null; // missing object = corrupt, caller marks the snapshot
+      if (error) throw Object.assign(new Error(`snapshot blob download failed: ${error.message}`), {
+        code: "platform_blob_read_failed", classification: "platform", retryable: true, cause: error,
+      });
       return Buffer.from(await data.arrayBuffer()).toString("utf8");
     },
 
@@ -250,11 +272,11 @@ export function supabaseSnapshotStorage({ client = serviceClient(), bucket = ART
       return unwrap(await client.from("bv2_snapshots").select("*").eq("id", id).maybeSingle(), "snapshot read");
     },
     async listSnapshots(owner, projectId) {
-      return unwrap(await client.from("bv2_snapshots").select("*")
-        .eq("owner", owner).eq("project_id", projectId), "snapshot list");
+      return completeRows(() => client.from("bv2_snapshots").select("*")
+        .eq("owner", owner).eq("project_id", projectId), "id", "snapshot list");
     },
     async listOwnerSnapshots(owner) {
-      return unwrap(await client.from("bv2_snapshots").select("*").eq("owner", owner), "snapshot owner list");
+      return completeRows(() => client.from("bv2_snapshots").select("*").eq("owner", owner), "id", "snapshot owner list");
     },
     async deleteSnapshot(id) {
       unwrap(await client.from("bv2_snapshots").delete().eq("id", id), "snapshot delete");
@@ -266,8 +288,8 @@ export function supabaseSnapshotStorage({ client = serviceClient(), bucket = ART
         .insert(entries.map((e) => ({ snapshot_id: id, path: e.path, content_hash: e.contentHash }))), "manifest insert");
     },
     async getManifest(id) {
-      const rows = unwrap(await client.from("bv2_snapshot_files").select("path,content_hash")
-        .eq("snapshot_id", id), "manifest read");
+      const rows = await completeRows(() => client.from("bv2_snapshot_files").select("path,content_hash")
+        .eq("snapshot_id", id), "path", "manifest read");
       return rows.map((r) => ({ path: r.path, contentHash: r.content_hash }));
     },
 

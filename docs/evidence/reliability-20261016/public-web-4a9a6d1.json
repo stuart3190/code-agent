@@ -1,0 +1,16 @@
+{
+  "commit": "4a9a6d15dcd42486387385ad22e5517d0090f36b",
+  "ok": true,
+  "assets": [
+    {
+      "path": "/assets/index-CoUfjYEs.js",
+      "bytes": 609858,
+      "sha256": "a0c6b5bec345da870d0a879ab7684e525416a502633c67215327ebbd459e9f0c"
+    },
+    {
+      "path": "/assets/index-VT-MiC6V.css",
+      "bytes": 112202,
+      "sha256": "3d22209cb28ac85b5591b96ff6e5355c72be42a2edc69249b00e6b4a7cd24795"
+    }
+  ]
+}

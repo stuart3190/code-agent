@@ -161,10 +161,42 @@ const NEGATED_CAPABILITY = new RegExp(
   "gi",
 );
 
+// A shared negative imperative also governs a conjoined action: "do not send email or take
+// payments". Keep the scope bounded and stop at sentence/adversative boundaries; a later
+// positive payment requirement must remain visible to inference.
+const NEGATED_PAYMENT_ACTION = new RegExp(
+  `\\b(?:do not|does not|don't|doesn't|must not|should not|will not|never)\\s+`
+  + `(?:${NEGATED_CLAUSE}{1,48}\\s+(?:or|nor)\\s+)?`
+  + `(?:implement|integrate|use|process|take|accept|enable|support)\\s+`
+  + `(?:real(?:-money|\\s+money)?\\s+)?(?:payments?|billing|checkout|subscriptions?)\\b`, "gi",
+);
+
+// Conjoined prohibitions share their leading negative: "do not rebuild X or add Y".
+// Restrict the verbs to introducing capabilities; "do not disable billing" must not erase
+// billing. Stop before an adversative or an explicitly new affirmative comma clause.
+const NEGATED_INTRODUCING_VERB = "(?:send|rebuild|implement|integrate|use|process|take|accept|enable|support|add|include|require|need)";
+const NEGATED_LIST_TAIL = "(?:(?!\\b(?:but|however)\\b|,\\s*(?:then\\s+)?(?:save|store|create|build|add|enable|require|include)\\b)[^.!?;\\n])";
+const NEGATED_ACTION_CHAIN = new RegExp(
+  `\\b(?:do not|does not|don't|doesn't|must not|should not|will not|never)\\s+${NEGATED_INTRODUCING_VERB}\\b`
+  + `${NEGATED_LIST_TAIL}{0,80}\\b(?:or|nor)\\s+${NEGATED_INTRODUCING_VERB}\\b${NEGATED_LIST_TAIL}*`, "gi",
+);
+
+// Guest access is often expressed as a negated obligation, not "no authentication".
+// Remove only explicit auth actions. Qualified restrictions ("sign in with a password")
+// still imply authentication, as do later affirmative clauses.
+const AUTH_ACCESS_ACTION = "(?:sign[ -]?(?:up|in)|log[ -]?in|register|create\\s+(?:an?\\s+)?(?:user\\s+)?account)";
+const NEGATED_AUTH_OBLIGATION = new RegExp(
+  `\\b(?:(?:should|must|do|does|will|would)\\s+not|(?:shouldn|mustn|don|doesn|won|wouldn)['’]t)\\s+`
+  + `(?:(?:have|need)\\s+to\\s+)?${AUTH_ACCESS_ACTION}(?:\\s+(?:or|nor)\\s+${AUTH_ACCESS_ACTION})*\\b`
+  + `(?!\\s+(?:with|using|via|unless)\\b)`, "gi",
+);
+
 function withoutNegatedRequirements(value) {
   NEGATED_INFRASTRUCTURE.lastIndex = 0;
   NEGATED_CAPABILITY.lastIndex = 0;
   const stripped = normalizeClauseWhitespace(value)
+    .replace(NEGATED_AUTH_OBLIGATION, "")
+    .replace(NEGATED_ACTION_CHAIN, "")
     // A comma-separated exclusion such as "no payments, accounts, or admin backend" previously
     // stopped at the first recognized capability (`accounts`) and left `backend` behind as a
     // positive durability signal. Consume the complete negated infrastructure clause, while an
@@ -172,7 +204,7 @@ function withoutNegatedRequirements(value) {
     // Verb forms ("do not use", "must not include", "never use") are the same exclusion.
     .replace(NEGATED_INFRASTRUCTURE, "")
     .replace(
-      /\b(?:do not|does not|don't|doesn't|must not|should not|will not|never)\s+(?:implement|integrate|use|process|take|accept|enable|support)\s+(?:real(?:-money|\s+money)?\s+)?(?:payments?|billing|checkout|subscriptions?)\b/gi,
+      NEGATED_PAYMENT_ACTION,
       "",
     )
     .replace(

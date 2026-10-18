@@ -1,0 +1,12 @@
+{
+  "measuredAt": "2026-10-17T19:22:22.457Z",
+  "url": "https://reliability-expense-assisted-20261017.app.thrallo.com/",
+  "releaseId": "79baef55-c2c8-4bc3-9dd8-cae7f2f1fc05",
+  "snapshotId": "2f1016b5-58a6-43ea-823e-394ecf3e498c",
+  "capturedSourceHash": "8bc06d6ee5951dcfa93c652e30eef6c22695fe8472449217664be4189613c388",
+  "artifactHash": "0390ffb85bdf851c13dceb9377f3bed62cbd6bc67c80e6adfa50135fabe71273",
+  "sourceBytesMatch": true,
+  "sourceDiagnosticMatches": true,
+  "active": true,
+  "verified": true
+}

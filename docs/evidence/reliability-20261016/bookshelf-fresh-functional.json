@@ -1,0 +1,102 @@
+[
+  {
+    "width": 1440,
+    "name": "honest initial empty state",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "blank required fields rejected",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "book saved visibly",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "title and status edited",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "edits survive reload",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "nonmatching status filtered",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "matching status restored",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "no horizontal overflow",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "confirmed deletion survives reload",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "no browser runtime errors",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "honest initial empty state",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "blank required fields rejected",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "book saved visibly",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "title and status edited",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "edits survive reload",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "nonmatching status filtered",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "matching status restored",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "no horizontal overflow",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "confirmed deletion survives reload",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "no browser runtime errors",
+    "ok": true
+  }
+]

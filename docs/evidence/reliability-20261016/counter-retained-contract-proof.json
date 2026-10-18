@@ -1,0 +1,30 @@
+{
+  "measuredAt": "2026-10-17T16:15:08.419Z",
+  "deployedCommit": "5742ad8a187d545135278e9fa62594c6cad8812d",
+  "projectId": "1b778109-5358-4a49-acb7-d96d62d38a00",
+  "buildId": "418fc952-1226-450e-bae0-34313e21c68c",
+  "contractId": "0c495c5f-29f2-4c56-9d6f-787aafbe3bc5",
+  "snapshotId": "4bec25be-eae9-424d-8d9d-86905b7e6681",
+  "diagnosticMatchesRedactedDerivedSource": true,
+  "nonCyclicGraphReferencesPreserved": true,
+  "contractMatchesDerivedSource": true,
+  "snapshotBoundToBuild": true,
+  "sourceTreeUnchanged": false,
+  "generatedFrontendUnchanged": true,
+  "refreshedPlatformFiles": [
+    "src/lib/app/index.js",
+    "src/lib/app/routing.js",
+    "src/lib/backend/index.js",
+    "src/lib/backend/supabaseBackend.js",
+    "src/lib/capabilities/booking.js",
+    "src/lib/capabilities/composed/crud.js",
+    "src/lib/capabilities/composed/lock.js",
+    "src/lib/capabilities/react.js",
+    "src/lib/modules/routing.js"
+  ],
+  "modelReservations": 0,
+  "spentCredits": 0,
+  "platformSuccess": true,
+  "durationMs": 82929,
+  "limitation": "Zero-model retained build qualification, not fresh-generation success."
+}

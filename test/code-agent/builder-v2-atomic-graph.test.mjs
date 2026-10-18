@@ -173,3 +173,33 @@ test("C4 — garbage collection preserves revisions pinned by valid shadow and s
   assert.equal(deleted, 0);
   assert.equal(client.table("bv2_file_revisions").length, 3);
 });
+
+for (const scenario of ['added target', 'removed target', 'ambiguous symbol']) {
+  test(`cached intrinsic graph rebinds ${scenario} without rewriting stored payload`, async () => {
+    const client = createFakeBv2Supabase();
+    const caller = { 'src/a.js': 'import { target } from "./b.js"; export function caller() { return target(); }' };
+    const target = { 'src/b.js': 'export function target() { return 1; }' };
+    const other = { 'src/c.js': 'export function target() { return 2; }' };
+    const initial = indexTree(scenario === 'added target' ? caller : { ...caller, ...target });
+    const expected = indexTree(scenario === 'removed target' ? caller : { ...caller, ...target, ...(scenario === 'ambiguous symbol' ? other : {}) });
+    await persistIndex(OWNER_A, PROJECT, initial, { client });
+    // Write only newly introduced files. The real SQL proof covers the reuse RPC;
+    // this test independently exercises loading cached facts from differing contexts.
+    await persistIndex(OWNER_A, PROJECT, indexTree({ ...target, ...other }), { client });
+    const before = structuredClone(client.table('bv2_file_revisions'));
+    const loaded = await loadIndex(OWNER_A, PROJECT, manifestOf(expected), { client });
+    const proof = compareGraphIndexes(expected, loaded, { owner: OWNER_A, projectId: PROJECT });
+    assert.equal(proof.clean, true, JSON.stringify(proof.mismatches));
+    assert.deepEqual(client.table('bv2_file_revisions'), before);
+    const old = await loadIndex(OWNER_A, PROJECT, manifestOf(initial), { client });
+    assert.equal(compareGraphIndexes(initial, old, { owner: OWNER_A, projectId: PROJECT }).clean, true);
+  });
+}
+
+test('context rebinding never conceals persisted target corruption', async () => {
+  const { client, memory } = await roundTrip();
+  client.table('bv2_symbol_refs')[0].resolved_path = 'src/forged.js';
+  const loaded = await loadIndex(OWNER_A, PROJECT, manifestOf(memory), { client });
+  assert.ok(loaded.integrity.some(row => row.problem === 'graph hash differs'));
+  await assert.rejects(supabaseGraph(OWNER_A, PROJECT, manifestOf(memory), { client }), /stale/);
+});

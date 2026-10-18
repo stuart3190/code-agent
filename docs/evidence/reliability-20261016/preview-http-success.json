@@ -1,0 +1,21 @@
+{
+  "checks": [
+    {
+      "name": "authenticated explicit-project preview recovery succeeds",
+      "pass": true,
+      "status": 200
+    },
+    {
+      "name": "returned preview is reachable",
+      "pass": true,
+      "status": 200
+    },
+    {
+      "name": "preview-ready event persists exact owner project",
+      "pass": true
+    }
+  ],
+  "failure": null,
+  "temporaryConversationRemoved": true,
+  "sessionScope": "local only; no email sent"
+}

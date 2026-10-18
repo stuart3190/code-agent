@@ -22,11 +22,11 @@ import {
 import { ADVANCE_ACTION_ID, actionIdFor, controlIdFor } from "./verificationManifest.mjs";
 import {
   contractUsesDurablePersistence, entityPersistencePolicy, operationUsesDurablePersistence,
-  verificationFixtureFields,
+  verificationFixtureFields, transientSeedState,
 } from "../../../shared/implementationContract.mjs";
 import { AUTH_CREDENTIAL_FIELDS, contractUsesPlatformAuthentication } from "../../../shared/implementationContract.mjs";
 import { isSessionOperation } from "../../../shared/implementationContract.mjs";
-import { isKeyboardFocusOnlyStep } from "./interactionSemantics.mjs";
+import { isKeyboardFocusOnlyStep, isExplicitRouteLinkStep } from "./interactionSemantics.mjs";
 import { operationReadEntityNames } from "./entityScope.mjs";
 
 export const INTERACTION_CONTRACT_VERSION = 2;
@@ -205,7 +205,14 @@ const transientStateDefaults = (contract, journey) => {
       }
     }
   }
-  return defaults;
+  const first = journey?.steps?.[0];
+  const entersFreshRoute = typeof first?.target === "string" && first.target.startsWith("/")
+    && !first.target.startsWith("//") && !list(first.operates).length;
+  // The declared initial state exists before any operation, including operations inferred
+  // from value controls whose IDs are not explicitly listed in this journey.
+  const seeds = entersFreshRoute ? Object.fromEntries((contract.entities || [])
+    .flatMap(entity => Object.entries(transientSeedState(contract, entity)))) : {};
+  return { ...defaults, ...seeds };
 };
 const IDENTITY_FIELD = /(?:id|key|reference)$/i;
 const DERIVED_SELECTION_FIELD = /(?:name|title|label|description|price|cost|amount|value|pence|cents|remaining|capacity|date|status|image|url)$/i;
@@ -337,6 +344,7 @@ export function structuredRouteTarget(value = "") {
 }
 
 function actionKinds(step, context = {}) {
+  if (isExplicitRouteLinkStep(step)) return ["navigation"];
   const intents = actionIntents(step);
   const kinds = [];
   if (intents.has(ACTION_INTENT.SELECTION)) kinds.push("selection");
@@ -388,14 +396,27 @@ function actionKinds(step, context = {}) {
  *
  * A contracted negative-validation step ("enter an invalid email address") could not be driven:
  * value generation always produced a realistic, VALID value, so a correct application's validation
- * never fired and the step failed the app for working. Intent is read from the action alone —
- * never from the expectation, or every step mentioning a validation message would start entering
- * rubbish.
+ * never fired and the step failed the app for working. An explicit invalid action is authoritative. Concrete verification fixtures may also
+ * specify a negative test through an affirmative feedback expectation; expectation alone
+ * never invents an invalid value.
  */
 export function inputValidity(step) {
   const action = String(step?.action || "");
   if (/\binvalid\b/i.test(action)) return "invalid";
   if (/\bvalid\b/i.test(action)) return "valid";
+  // A concrete negative fixture can name the value ("enter zero") instead of the
+  // adjective "invalid". Require both the explicit fixture and affirmative feedback
+  // expectation; mentioning validation alone must not turn normal input into a negative test.
+  const fixtures = Object.values(step?.verificationValues || {});
+  if (fixtures.some(value => value === "" || typeof value === "number" || typeof value === "string")
+    && /\b(?:enter|type|fill|clear|set)\b/i.test(action)) {
+    const expectation = String(step?.expect || "");
+    const feedback = /\b(?:invalid|required|validation|error)(?:[- ]+[a-z]+){0,5} +(?:feedback|message)\b/ig;
+    for (const match of expectation.matchAll(feedback)) {
+      const prefix = expectation.slice(0, match.index);
+      if (!/\b(?:no|without|hide|clear|remove)(?: +[a-z]+){0,3} +$/i.test(prefix)) return "invalid";
+    }
+  }
   return "unspecified";
 }
 
@@ -1538,6 +1559,29 @@ export function normalizeInteractionStateDependencies(plan) {
     const consumer = flows[consumerIndex];
     for (const originalPath of [...(consumer.reads || [])]) {
       let path = originalPath;
+      // A reused transient operation can retain an external-input path from its first
+      // invocation. When this occurrence explicitly types that same field, its immediate
+      // producer is the current draft, not the earlier starting value.
+      const field = String(path).startsWith(`${consumer.journeyId}.input.`)
+        ? String(path).slice(`${consumer.journeyId}.input.`.length) : null;
+      if (field && consumer.kind === "action" && consumer.operationId
+        && !consumer.persistenceHandoff && !consumer.durableLifecycle
+        && !(consumer.semanticResponsibilityTypes || []).includes("persistence")
+        && !(consumer.writes || []).some(value => String(value).includes(".durable."))) {
+        const draft = `${consumer.journeyId}.draft.${field}`;
+        const producer = flows.slice(0, consumerIndex).findLast(flow =>
+          flow.journeyId === consumer.journeyId && flow.stepIndex === consumer.stepIndex
+          && ["input", "selection"].includes(flow.kind) && flow.control?.logicalField === field
+          && flow.control.statePath === draft && (flow.writes || []).includes(draft));
+        if (producer) {
+          consumer.reads = unique((consumer.reads || []).map(value => value === originalPath ? draft : value));
+          consumer.dependsOn = unique((consumer.dependsOn || []).map(value => value === originalPath ? draft : value));
+          rebindings.push({ journeyId:consumer.journeyId, fromStatePath:originalPath, toStatePath:draft,
+            producerInteractionId:producer.id, consumerInteractionId:consumer.id,
+            reason:"same_step_control_input" });
+          path = draft;
+        }
+      }
       const prior = flows.slice(0, consumerIndex).some((flow) => flow.journeyId === consumer.journeyId
         && (flow.writes || []).includes(path));
       if (prior || stateAvailableAtJourneyStart(plan, consumer.journeyId, path,
@@ -1735,6 +1779,10 @@ export function composeCapabilityGraphInteractions(plan, graph, contract) {
         operationId: operation.operationId,
         entity: operation.entity || null,
         durableOperation: durablePersistence ? durablePersistence.capabilityMethod : null,
+        // A custom state transition can hand off to a deterministic repository. Its semantic
+        // owner stays custom; retain the separate persistence owner for cancellation validation.
+        durableCapability: durablePersistence
+          ? factoryFor(canonicalCapabilityId(durablePersistence.capabilityId) || durablePersistence.capabilityId) : null,
         durableLifecycle: durablePersistence
           ? `${durablePersistence.capabilityId || "crud"}:${operation.entity}` : flow.durableLifecycle,
         // Record inputs are not all instances of the first entity in the app.
@@ -2186,7 +2234,7 @@ export function validateInteractionContract(plan, { capabilityGraph = null, oper
     if (flow.kind === "mutation" && !(flow.reads || []).length) problems.push(`${flow.id} mutation consumes no contracted input state`);
     // Any bound durable capability may own cancellation; the registry decides which, not a
     // hardcoded factory name.
-    if (flow.kind === "cancellation" && !flow.capability) {
+    if (flow.kind === "cancellation" && !flow.capability && !flow.durableCapability) {
       problems.push(`${flow.id} cancellation has no durable operation owner`);
     }
     if (flow.control && (!flow.control.accessibleName || !(flow.control.roles || []).length)) {
@@ -2281,10 +2329,12 @@ export function assemblyNeeds(plan, bindings = []) {
     // Durable records are implied by what the journeys DO — a mutation, a lookup, a recovery or
     // a cancellation — not by which capability happens to declare an entity name.
     entities: ["mutation", "lookup", "recovery", "cancellation"].some((kind) => kinds.has(kind)),
-    // A store only holds screen state when there is in-progress state to hold or records to
-    // render. Every contract binds the generic entity store, so its mere presence proves nothing.
-    capabilityState: Boolean(draftStateOwner(bindings))
-      || ["mutation", "lookup", "recovery", "cancellation"].some((kind) => kinds.has(kind)),
+    // Async repositories expose records through promises, not getState snapshots. Recommending
+    // useCapabilityState for every mutation made successful saves render an empty list forever.
+    capabilityState: bindings.some((binding) => {
+      const methods = FACTORY_METHODS[factoryFor(binding.name)] || [];
+      return methods.includes("getState") && methods.includes("subscribe");
+    }),
     // A durable multi-step flow that can be completed or abandoned reaches a TERMINAL state its
     // store refuses to edit and restores on the next visit. A live run stalled on exactly that.
     terminalReset: Boolean(draftStateOwner(bindings))
@@ -2513,7 +2563,15 @@ export function collectInteractionControls(tree) {
       const accessibleName = ariaLabel || labelledByText || label?.text || title || null;
       const nameAttr = attr(opening, "name");
       const placeholder = attr(opening, "placeholder");
-      const type = String(attr(opening, "type") || (String(tag).toLowerCase().includes("textarea") ? "textarea" : "text")).toLowerCase();
+      const attributes = opening.attributes || [];
+      const lastSpread = attributes.findLastIndex(row => row.type === "JSXSpreadAttribute");
+      const lastType = attributes.findLastIndex(row => row.type === "JSXAttribute" && row.name?.name === "type");
+      // A spread can supply or override the native type. The absence of a literal type is not
+      // evidence of text input (semantic inputProps commonly carry type="number").
+      const typeUnknown = lastSpread >= 0 && lastType <= lastSpread
+        || lastType >= 0 && !literal(attributes[lastType].value);
+      const type = typeUnknown ? null : String(lastType >= 0 ? literal(attributes[lastType].value)
+        : String(tag).toLowerCase().includes("textarea") ? "textarea" : "text").toLowerCase();
       const changeHandlerSource = [attrSource(raw, opening, "onChange"), attrSource(raw, opening, "onInput")].filter(Boolean).join(" ");
       const resolvedHandlerSource = handlerDefinition(String(raw), changeHandlerSource);
       const valueSource = [attrSource(raw, opening, "value"), attrSource(raw, opening, "defaultValue"),

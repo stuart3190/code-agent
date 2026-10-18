@@ -1,0 +1,14 @@
+{
+  "buildId": "4bc2d614-6c28-4a70-a823-c315c6927c90",
+  "reason": "Protected workflow composition generated duplicate undefined step IDs; operator stopped audit repair churn.",
+  "customerPoolCredits": 3.38056,
+  "serviceCredit": {
+    "delta": 3.3806,
+    "kind": "service_credit",
+    "bucket": "bundle",
+    "ref": "bv2-terminal:4bc2d614-6c28-4a70-a823-c315c6927c90"
+  },
+  "appendOnly": true,
+  "originalSettlementRetained": true,
+  "idempotent": false
+}

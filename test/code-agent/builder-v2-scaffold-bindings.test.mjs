@@ -36,10 +36,13 @@ export const flow = makeWizardMachine({
   persistence: null,
 });`,
   "src/App.jsx": `import { useSyncExternalStore } from "react";
-import { useCapabilityState, useSemanticField, useSemanticSelection, useStatusRegion } from "./lib/capabilities";
+import { useCapabilityState, useSemanticField, useSemanticSelection, useStatusRegion, makeEntityStore } from "./lib/capabilities";
 import { flow } from "./data/flow.js";
 
+const invalidRepository = makeEntityStore("book");
+function InvalidRepository() { const state = useCapabilityState(invalidRepository); return <p>{state?.records?.length || "empty"}</p>; }
 export default function App() {
+  if (new URLSearchParams(window.location.search).has("invalidRepository")) return <InvalidRepository />;
   const state = useCapabilityState(flow, (snapshot) => snapshot.values);
   const rawState = useSyncExternalStore(flow.subscribe, flow.getState, flow.getState);
   const email = useSemanticField({ name: "customerEmail", value: state.customerEmail || "", type: "email",
@@ -160,4 +163,15 @@ test("useCapabilityState re-renders from the store, not from local component sta
   } finally {
     await browser.close();
   }
+});
+
+
+test("an async CRUD repository cannot silently masquerade as an empty reactive store", { ...needsBrowser }, async () => {
+  const { chromium } = requireCjs("playwright"); const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();const errors=[];page.on("pageerror", error=>errors.push(error.message));
+    await page.goto(baseUrl + "?invalidRepository=1", { waitUntil: "networkidle" });
+    assert.ok(errors.some(message=>message.includes("getState() and subscribe()") && message.includes("useCollection(entity)")), JSON.stringify(errors));
+    assert.equal(await page.getByText("empty",{exact:true}).count(),0,"invalid state is not rendered as an honest empty collection");
+  } finally { await browser.close(); }
 });

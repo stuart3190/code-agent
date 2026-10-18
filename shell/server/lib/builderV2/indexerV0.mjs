@@ -160,6 +160,13 @@ export function indexTree(tree, fileIndexer = indexFile) {
   const files = new Map();
   for (const [path, source] of Object.entries(tree)) files.set(path, fileIndexer(path, source));
 
+  return resolveTreeIndex(files);
+}
+
+/** Rebind cached intrinsic file facts to this manifest's project context. */
+export function resolveTreeIndex(files) {
+  const tree = Object.fromEntries([...files.keys()].map(path => [path, true]));
+
   // Project-wide symbol table: name -> defining paths.
   const definers = new Map();
   for (const [path, index] of files) {

@@ -197,7 +197,7 @@ function harness({ contract = CONTRACT, contractFn = null, failJourneys = [], pa
   const orchestrator = createOrchestrator({
     contractFn: contractFn || (async () => contract),
     patchesFn: async (ctx) => {
-      patchCalls.push({ step: ctx.step, originalStep: ctx.originalStep, dispatchReason: ctx.dispatchReason,
+      patchCalls.push({ step: ctx.step, originalStep: ctx.originalStep, originalRequest: ctx.originalRequest, dispatchReason: ctx.dispatchReason,
         rejections: ctx.rejections.length, problems: ctx.problems, regenerateFiles: ctx.regenerateFiles,
         journeyIds: (ctx.spec?.journeys || []).map((journey) => journey.id),
         repairBoundary: ctx.repairBoundary, treeFiles: Object.keys(ctx.tree || {}) });
@@ -541,6 +541,30 @@ test("WP8 — machine-taught patch rejection: round 1 rejected op, round 2 recei
   assert.equal(result.state, "green");
   assert.equal(patchCalls.filter((c) => c.step === "core").length, 2);
   assert.equal(patchCalls[1].rejections, 1, "round 2 was briefed with the rejection");
+});
+
+test("a valid replacement recovers a parser-rejected creation without another model dispatch", async () => {
+  const file = "src/lib/layoutCalculation.js";
+  let calls = 0;
+  const h = harness({ patchPlan: {
+    core: ({ rejections, tree }) => {
+      calls += 1;
+      if (calls === 1) return [{ newFile: file,
+        content: 'export function calculate(input, { operation: "calculate-layout" }) { return input; }' }];
+      assert.equal(Object.hasOwn(tree, file), false);
+      assert.ok(rejections.some(row => row.code === "source_parse_failed" && row.operation === "newFile"));
+      return [...CORE_PATCH.map(patch => ({ ...patch,
+        content: `import "../../lib/layoutCalculation.js";\n${patch.content}` })),
+      { replaceFile: file, content: "export function calculate(input, context) { return input; }" }];
+    },
+    "increment:newsletter-signup": () => NEWSLETTER_PATCH,
+    "increment:browse-info": () => BROWSE_PATCH,
+  } });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "proj-rejected-creation", request: "booking site" });
+  assert.equal(result.state, "green", JSON.stringify(result));
+  assert.equal(calls, 2, "one failed emission and one valid correction suffice");
+  assert.equal(h.patchCalls.filter(call => call.step === "correction").length, 0);
+  assert.ok(h.patchCalls.some(call => call.treeFiles.includes(file)), "accepted creation survives into subsequent steps");
 });
 
 test("the last candidate correction escalates a rejected file to complete replacement", async () => {
@@ -1449,4 +1473,88 @@ test("REPAIR GOVERNANCE — a control bound nowhere keeps the application as own
   assert.ok(boundaries.includes("browser_owner_regeneration_boundary"), `the owner was regenerated: ${JSON.stringify(boundaries)}`);
   assert.deepEqual(result.repairReclassified, []);
   assert.notEqual(result.stopReason, "repair_reclassified_undetermined");
+});
+
+
+test("lease loss after browser evidence retains the candidate and platform cause", async () => {
+  const controller = new AbortController();
+  const h = harness({ journeysFn: async ({ journeys }) => {
+    controller.abort(Object.assign(new Error("durable lease renewal deadline elapsed"), { code: "lease_lost" }));
+    return { journeys: journeys.map(j => ({ id: j.id, status: "pass" })) };
+  } });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "lease-loss", request: "booking site", signal: controller.signal });
+  assert.equal(result.state, "failed", JSON.stringify(result));
+  assert.equal(result.failureClassification, "platform_lease_lost");
+  assert.match(result.error, /durable lease renewal deadline elapsed/);
+  assert.ok(result.workingSnapshotId);
+  const tree = await h.snapshotStore.materialize("o", result.workingSnapshotId);
+  assert.ok(tree["src/screens/scaffold/BookingScreen.jsx"]);
+});
+
+test("explicit customer cancellation still stops as cancelled", async () => {
+  const controller = new AbortController();
+  const h = harness({ journeysFn: async ({ journeys }) => {
+    controller.abort(Object.assign(new Error("cancel requested"), { code: "cancelled" }));
+    return { journeys: journeys.map(j => ({ id: j.id, status: "pass" })) };
+  } });
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "customer-cancel", request: "booking site", signal: controller.signal });
+  assert.equal(result.state, "cancelled", JSON.stringify(result));
+});
+
+test('rejected core stylesheet is finished without regenerating clean screens', async()=>{
+ let correctionCalls=0;const css='@tailwind base;\n@tailwind components;\n@tailwind utilities;\nmain { max-width: 70rem; margin: auto; padding: 2rem; }\n';
+ const h=harness({patchPlan:{
+  core:()=>[...CORE_PATCH,{replaceFile:'src/index.css',content:null}],
+  correction:ctx=>{correctionCalls++;assert.equal(ctx.repairScope.kind,'stylesheet_patch_correction');assert.deepEqual(ctx.repairScope.allowedFiles,['src/index.css']);assert.ok(ctx.repairScope.readOnlyFiles.includes('src/screens/scaffold/BookingScreen.jsx'));assert.equal(ctx.tree['src/screens/scaffold/BookingScreen.jsx'],CORE_PATCH[0].content);return [{replaceFile:'src/index.css',content:css}];},
+  'increment:newsletter-signup':()=>NEWSLETTER_PATCH,'increment:browse-info':()=>BROWSE_PATCH,
+ }});
+ const result=await h.orchestrator.runBuild({owner:'o',projectId:'style-recovery',request:'booking site'});
+ assert.equal(result.state,'green',JSON.stringify(result));assert.equal(correctionCalls,1);
+ assert.equal(h.patchCalls.filter(c=>c.step==='core').length,1);
+ const tree=await h.snapshotStore.materialize('o',result.snapshotId);assert.equal(tree['src/index.css'],css);
+});
+
+test('stylesheet completion never targets protected platform CSS',async()=>{
+ const h=harness({patchPlan:{core:()=>[...CORE_PATCH,{replaceFile:'src/lib/modules/platform.css',content:null}],
+ 'increment:newsletter-signup':()=>NEWSLETTER_PATCH,'increment:browse-info':()=>BROWSE_PATCH}});
+ const result=await h.orchestrator.runBuild({owner:'o',projectId:'protected-style',request:'booking site'});
+ assert.equal(result.state,'green',JSON.stringify(result));assert.equal(h.patchCalls.some(c=>c.step==='correction'),false);
+});
+test('repeated invalid stylesheet corrections stop within the existing allowance and retain clean source',async()=>{
+ let calls=0;const h=harness({patchPlan:{core:()=>[...CORE_PATCH,{replaceFile:'src/index.css',content:null}],
+ correction:()=>{calls++;return [{replaceFile:'src/index.css',content:null}];}}});
+ const result=await h.orchestrator.runBuild({owner:'o',projectId:'invalid-style',request:'booking site'});
+ assert.equal(result.state,'blocked',JSON.stringify(result));assert.equal(calls,2);
+ assert.ok(h.checkpoints.some(c=>c.tree['src/screens/scaffold/BookingScreen.jsx']===CORE_PATCH[0].content));
+ assert.equal(await h.snapshotStore.pointer('o','invalid-style','green'),null);
+});
+
+test("fresh generation carries the original requirements through core and later increments", async () => {
+  const h = harness();
+  const request = "Booking site. Default the date to today, allow any future date, and keep initial records editable.";
+  const result = await h.orchestrator.runBuild({ owner: "o", projectId: "source-fidelity", request });
+  assert.equal(result.state, "green", JSON.stringify(result));
+  assert.ok(h.patchCalls.some(call => call.step === "core"));
+  assert.ok(h.patchCalls.some(call => call.step.startsWith("increment:")));
+  for (const call of h.patchCalls) assert.equal(call.originalRequest, request);
+});
+
+test("retained expense patch forms recover authored screens and CSS but still obey failing journey gates", async () => {
+  const { readFileSync } = await import("node:fs");
+  const fixture = JSON.parse(readFileSync(new URL("./fixtures/reliability-20261016/expense-unmounted-controller.json", import.meta.url)));
+  const h = harness({ contract: fixture.contract,
+    assetService: { resolveIntents:async()=>({resolved:[],providerCalls:0}),assetManifestFor:async()=>[] },
+    patchPlan: { core:()=>fixture.patches },
+    failJourneys: fixture.contract.journeys.map(j=>j.id), maxJourneyRepairs:0,
+  });
+  const result = await h.orchestrator.runBuild({owner:"o",projectId:"expense-controller-replay",request:"Pocket Ledger"});
+  assert.notEqual(result.state,"green");
+  const summary="src/screens/scaffold/SummaryScreen.jsx";
+  const candidate = h.checkpoints.find(event => event.tree?.[summary]?.includes("Category totals"));
+  assert.ok(candidate, "the real patch pipeline must retain complete supplied screens and stylesheet");
+  assert.equal(candidate.tree["src/components/create-monthly-expenses/CreateMonthlyExpensesFlow.jsx"],fixture.sources["src/components/create-monthly-expenses/CreateMonthlyExpensesFlow.jsx"]);
+  assert.equal(candidate.tree[summary],fixture.patches.find(p=>p.file===summary).ops[0].content);
+  assert.equal(candidate.tree["src/index.css"],fixture.patches.find(p=>p.newFile==="src/index.css").content);
+  assert.equal(h.patchCalls.length,1,"recoverable patch form errors require no extra model dispatch");
+  assert.equal(await h.snapshotStore.pointer("o","expense-controller-replay","green"),null);
 });

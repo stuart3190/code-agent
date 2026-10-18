@@ -84,5 +84,8 @@ try {
   await db.from("published_sites").delete().eq("owner", owner);
   await db.from("project_logs").delete().eq("owner", owner);
   await db.from("projects").delete().eq("owner", owner);
-  await db.auth.admin.deleteUser(owner).catch(() => {});
+  // Revoke the disposable session before deleting its identity.
+  await browserClient.auth.signOut({ scope: "global" });
+  const { error: deleteError } = await db.auth.admin.deleteUser(owner);
+  if (deleteError) throw new Error(`auth fixture cleanup failed: ${deleteError.message}`);
 }

@@ -1,0 +1,4642 @@
+{
+  "auth": {
+    "model": "none",
+    "rules": [
+      "no login is shown",
+      "no user account is required to calculate",
+      "no calculation is persisted after page reload"
+    ],
+    "required": false
+  },
+  "tiers": {
+    "essential": {
+      "entities": [
+        "calculation"
+      ],
+      "journeys": [
+        "calculate-custom-spacing"
+      ],
+      "operations": [
+        "calculate-downlights"
+      ]
+    },
+    "secondary": {
+      "entities": [],
+      "journeys": [
+        "calculate-default-spacing",
+        "calculate-in-feet",
+        "show-validation"
+      ],
+      "operations": []
+    }
+  },
+  "routes": [
+    {
+      "auth": false,
+      "name": "Calculator",
+      "path": "/",
+      "purpose": "One-screen Downlight Calculator with dimension inputs, unit selection, optional spacing input, calculate action, and results card."
+    }
+  ],
+  "states": [
+    {
+      "empty": "before calculation, the result card is hidden and helper text says to enter room details",
+      "error": "no backend error state is needed because no network request is made",
+      "loading": "no loading state is shown because the calculator is local and instant",
+      "success": "a result card shows the large downlight count, rows by columns layout, estimated spacing, spacing source, and disclaimer",
+      "surface": "calculator screen",
+      "validation": "non-positive length, non-positive width, or non-positive preferred spacing shows a visible validation message"
+    }
+  ],
+  "summary": "Downlight Calculator is a clean one-screen tool that estimates downlight quantity, grid layout, spacing, and a guide-only disclaimer from room dimensions and optional preferred spacing.",
+  "version": 2,
+  "deferred": [
+    {
+      "item": "login and saved calculation history",
+      "reason": "the request explicitly says no login and no persistence are needed"
+    },
+    {
+      "item": "professional lighting design engine",
+      "reason": "the requested output is only a basic guide and the disclaimer directs users to consider detailed design factors"
+    },
+    {
+      "item": "electrical code compliance checking",
+      "reason": "regulations vary by location and the request only asks for a simple homeowner or tradesperson calculator"
+    },
+    {
+      "item": "ceiling height, beam angle, lumens, dimming, room use, and fixture photometric inputs",
+      "reason": "these factors are named for the disclaimer, not as requested calculator inputs"
+    }
+  ],
+  "entities": [
+    {
+      "name": "calculation",
+      "owned": false,
+      "fields": [
+        {
+          "name": "roomLength",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "roomWidth",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "preferredSpacing",
+          "type": "number",
+          "required": false
+        },
+        {
+          "name": "numberOfDownlights",
+          "type": "number",
+          "required": false
+        },
+        {
+          "name": "gridRows",
+          "type": "number",
+          "required": false
+        },
+        {
+          "name": "gridColumns",
+          "type": "number",
+          "required": false
+        },
+        {
+          "name": "estimatedSpacing",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "spacingSource",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "disclaimer",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "validationMessage",
+          "type": "string",
+          "required": false
+        }
+      ],
+      "storage": "transient",
+      "relationships": []
+    }
+  ],
+  "journeys": [
+    {
+      "id": "calculate-custom-spacing",
+      "stage": "primary_journey",
+      "steps": [
+        {
+          "action": "open the calculator",
+          "expect": "the one-screen calculator is visible with labelled inputs and a calculate button",
+          "target": "/",
+          "visibleText": [
+            "Downlight Calculator",
+            "Room length",
+            "Room width",
+            "Units",
+            "Preferred spacing",
+            "Calculate"
+          ]
+        },
+        {
+          "action": "enter room length and width",
+          "expect": "the entered length and width remain visible in the inputs",
+          "target": "room dimension inputs",
+          "operates": [
+            "roomLength",
+            "roomWidth"
+          ],
+          "primitive": "textbox",
+          "verificationValues": {
+            "roomWidth": "4",
+            "roomLength": "6"
+          }
+        },
+        {
+          "action": "enter a preferred spacing",
+          "expect": "the preferred spacing value remains visible in the input",
+          "target": "preferred spacing input",
+          "operates": [
+            "preferredSpacing"
+          ],
+          "primitive": "textbox",
+          "verificationValues": {
+            "preferredSpacing": "1.5"
+          }
+        },
+        {
+          "reads": [
+            "roomLength",
+            "roomWidth",
+            "unit",
+            "preferredSpacing"
+          ],
+          "action": "press calculate",
+          "expect": "a large result card shows the estimated downlight count, grid, spacing and disclaimer",
+          "target": "calculate button",
+          "operates": [
+            "calculate-downlights"
+          ],
+          "produces": [
+            "numberOfDownlights",
+            "gridRows",
+            "gridColumns",
+            "estimatedSpacing",
+            "spacingSource",
+            "disclaimer"
+          ],
+          "visibleText": [
+            "12 downlights",
+            "3 rows \u00d7 4 columns",
+            "Estimated spacing",
+            "custom spacing",
+            "This is a guide only. Lighting design should consider ceiling height, beam angle, lumens, room use, and electrical regulations."
+          ]
+        }
+      ],
+      "title": "A user calculates downlights with a custom preferred spacing",
+      "priority": "primary",
+      "acceptance": [
+        "calculating a 6 m by 4 m room with 1.5 m preferred spacing visibly returns 12 downlights",
+        "the result visibly includes a 3 rows \u00d7 4 columns suggested layout",
+        "the disclaimer is visible in the result card"
+      ]
+    },
+    {
+      "id": "calculate-default-spacing",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the calculator",
+          "expect": "the calculator opens with preferred spacing empty and ready to use",
+          "target": "/",
+          "visibleText": [
+            "Downlight Calculator",
+            "Preferred spacing",
+            "Leave blank to use the default"
+          ]
+        },
+        {
+          "action": "enter room length and width",
+          "expect": "the entered dimensions are visible and preferred spacing is still blank",
+          "target": "room dimension inputs",
+          "operates": [
+            "roomLength",
+            "roomWidth"
+          ],
+          "primitive": "textbox",
+          "verificationValues": {
+            "roomWidth": "3",
+            "roomLength": "5"
+          }
+        },
+        {
+          "reads": [
+            "roomLength",
+            "roomWidth",
+            "unit"
+          ],
+          "action": "press calculate while preferred spacing is blank",
+          "expect": "the result uses the sensible default spacing and shows the estimate",
+          "target": "calculate button",
+          "operates": [
+            "calculate-downlights"
+          ],
+          "produces": [
+            "numberOfDownlights",
+            "gridRows",
+            "gridColumns",
+            "estimatedSpacing",
+            "spacingSource",
+            "disclaimer"
+          ],
+          "visibleText": [
+            "6 downlights",
+            "2 rows \u00d7 3 columns",
+            "using default 1.8 m spacing",
+            "This is a guide only. Lighting design should consider ceiling height, beam angle, lumens, room use, and electrical regulations."
+          ]
+        }
+      ],
+      "title": "A user calculates downlights without entering preferred spacing",
+      "priority": "secondary",
+      "acceptance": [
+        "leaving preferred spacing blank still produces a visible downlight estimate",
+        "the result explicitly states that default 1.8 m spacing was used"
+      ]
+    },
+    {
+      "id": "calculate-in-feet",
+      "stage": "supporting",
+      "steps": [
+        {
+          "action": "open the calculator",
+          "expect": "the calculator shows a units selector",
+          "target": "/",
+          "visibleText": [
+            "Units",
+            "Metres",
+            "Feet"
+          ]
+        },
+        {
+          "action": "select feet as the unit",
+          "expect": "feet is visibly selected as the active unit",
+          "target": "units selector",
+          "operates": [
+            "unit"
+          ],
+          "primitive": "selection",
+          "verificationValues": {
+            "unit": "feet"
+          }
+        },
+        {
+          "action": "enter room dimensions",
+          "expect": "the entered room dimensions are visible",
+          "target": "room dimension inputs",
+          "operates": [
+            "roomLength",
+            "roomWidth"
+          ],
+          "primitive": "textbox",
+          "verificationValues": {
+            "roomWidth": "10",
+            "roomLength": "12"
+          }
+        },
+        {
+          "action": "enter preferred spacing in feet",
+          "expect": "the preferred spacing in feet is visible",
+          "target": "preferred spacing input",
+          "operates": [
+            "preferredSpacing"
+          ],
+          "primitive": "textbox",
+          "verificationValues": {
+            "preferredSpacing": "4"
+          }
+        },
+        {
+          "reads": [
+            "roomLength",
+            "roomWidth",
+            "unit",
+            "preferredSpacing"
+          ],
+          "action": "press calculate",
+          "expect": "the result is shown using feet labels",
+          "target": "calculate button",
+          "operates": [
+            "calculate-downlights"
+          ],
+          "produces": [
+            "numberOfDownlights",
+            "gridRows",
+            "gridColumns",
+            "estimatedSpacing",
+            "spacingSource",
+            "disclaimer"
+          ],
+          "visibleText": [
+            "9 downlights",
+            "3 rows \u00d7 3 columns",
+            "ft",
+            "custom spacing"
+          ]
+        }
+      ],
+      "title": "A user calculates using feet instead of metres",
+      "priority": "secondary",
+      "acceptance": [
+        "selecting feet changes the unit labels used in the result",
+        "a 12 ft by 10 ft room with 4 ft spacing visibly returns 9 downlights"
+      ]
+    },
+    {
+      "id": "show-validation",
+      "stage": "polish",
+      "steps": [
+        {
+          "action": "open the calculator",
+          "expect": "the calculator form is visible",
+          "target": "/",
+          "visibleText": [
+            "Downlight Calculator",
+            "Calculate"
+          ]
+        },
+        {
+          "action": "enter an invalid room length and a valid width",
+          "expect": "the entered values remain visible in the inputs",
+          "target": "room dimension inputs",
+          "operates": [
+            "roomLength",
+            "roomWidth"
+          ],
+          "primitive": "textbox",
+          "verificationValues": {
+            "roomWidth": "4",
+            "roomLength": "0"
+          }
+        },
+        {
+          "reads": [
+            "roomLength",
+            "roomWidth"
+          ],
+          "action": "press calculate",
+          "expect": "a visible validation message appears and no downlight count result is shown",
+          "target": "calculate button",
+          "operates": [
+            "calculate-downlights"
+          ],
+          "produces": [
+            "validationMessage"
+          ],
+          "visibleText": [
+            "Enter a room length greater than 0"
+          ]
+        }
+      ],
+      "title": "A user sees validation when dimensions are not usable",
+      "priority": "secondary",
+      "acceptance": [
+        "a zero room length shows a visible validation message",
+        "invalid dimensions do not show a calculated downlight count"
+      ]
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "a1",
+      "kind": "ui",
+      "journey": "calculate-custom-spacing",
+      "statement": "the home route shows the product name Downlight Calculator and labelled controls for room length, room width, units, preferred spacing, and calculate"
+    },
+    {
+      "id": "a2",
+      "kind": "functional",
+      "journey": "calculate-custom-spacing",
+      "statement": "a 6 m by 4 m room with 1.5 m preferred spacing returns visible text containing 12 downlights and 3 rows \u00d7 4 columns"
+    },
+    {
+      "id": "a3",
+      "kind": "content",
+      "journey": "calculate-custom-spacing",
+      "statement": "a calculation result always displays the guide-only disclaimer mentioning ceiling height, beam angle, lumens, room use, and electrical regulations"
+    },
+    {
+      "id": "a4",
+      "kind": "functional",
+      "journey": "calculate-default-spacing",
+      "statement": "leaving preferred spacing blank returns a visible estimate and states that default spacing was used"
+    },
+    {
+      "id": "a5",
+      "kind": "validation",
+      "journey": "show-validation",
+      "statement": "entering 0 for room length and pressing calculate shows Enter a room length greater than 0 and does not show a downlight count"
+    }
+  ],
+  "operations": [
+    {
+      "id": "calculate-downlights",
+      "kind": "read",
+      "entity": "calculation",
+      "journey": "calculate-custom-spacing",
+      "description": "Calculate a transient downlight estimate from room dimensions, selected units, and optional preferred spacing.",
+      "responsibilities": [
+        {
+          "type": "functional",
+          "reads": [
+            "roomLength",
+            "roomWidth",
+            "unit",
+            "preferredSpacing"
+          ],
+          "writes": [
+            "numberOfDownlights",
+            "gridRows",
+            "gridColumns",
+            "estimatedSpacing",
+            "spacingSource",
+            "disclaimer",
+            "validationMessage"
+          ],
+          "behavior": "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice."
+        }
+      ]
+    }
+  ],
+  "projectType": "tool",
+  "buildProfile": {
+    "version": 1,
+    "confidence": 0.45,
+    "inferenceSource": "auto",
+    "resolvedBuildType": "auto",
+    "applicationSubtype": "auto",
+    "requestedBuildType": "auto",
+    "requirementSignals": []
+  },
+  "imageIntents": [
+    {
+      "slot": "hero",
+      "intent": "Downlight Calculator is a clean one-screen tool that estimates downlight quantit",
+      "orientation": "landscape"
+    }
+  ],
+  "integrations": [
+    {
+      "name": "none",
+      "purpose": "",
+      "required": false
+    }
+  ],
+  "scaffoldGraph": {
+    "edges": [
+      {
+        "to": "screen:calculator-screen",
+        "from": "scaffold:app_shell",
+        "type": "mounts"
+      },
+      {
+        "to": "scaffold:app_shell",
+        "from": "journey:calculate-custom-spacing",
+        "type": "uses"
+      },
+      {
+        "to": "scaffold:app_shell",
+        "from": "journey:calculate-default-spacing",
+        "type": "uses"
+      },
+      {
+        "to": "scaffold:app_shell",
+        "from": "journey:calculate-in-feet",
+        "type": "uses"
+      },
+      {
+        "to": "scaffold:app_shell",
+        "from": "journey:show-validation",
+        "type": "uses"
+      },
+      {
+        "to": "screen:calculator-screen",
+        "from": "journey:calculate-custom-spacing",
+        "type": "renders_on"
+      },
+      {
+        "to": "capability:interaction-primitives",
+        "from": "screen:calculator-screen",
+        "type": "adapts"
+      },
+      {
+        "to": "custom_behavior:calculate-custom-spacing",
+        "from": "screen:calculator-screen",
+        "type": "adapts"
+      },
+      {
+        "to": "custom_behavior:calculate-custom-spacing",
+        "from": "screen:calculator-screen",
+        "type": "extends"
+      },
+      {
+        "to": "screen:calculator-screen",
+        "from": "journey:calculate-default-spacing",
+        "type": "renders_on"
+      },
+      {
+        "to": "capability:interaction-primitives",
+        "from": "screen:calculator-screen",
+        "type": "adapts"
+      },
+      {
+        "to": "custom_behavior:calculate-default-spacing",
+        "from": "screen:calculator-screen",
+        "type": "adapts"
+      },
+      {
+        "to": "custom_behavior:calculate-default-spacing",
+        "from": "screen:calculator-screen",
+        "type": "extends"
+      },
+      {
+        "to": "screen:calculator-screen",
+        "from": "journey:calculate-in-feet",
+        "type": "renders_on"
+      },
+      {
+        "to": "capability:interaction-primitives",
+        "from": "screen:calculator-screen",
+        "type": "adapts"
+      },
+      {
+        "to": "custom_behavior:calculate-in-feet",
+        "from": "screen:calculator-screen",
+        "type": "adapts"
+      },
+      {
+        "to": "custom_behavior:calculate-in-feet",
+        "from": "screen:calculator-screen",
+        "type": "extends"
+      },
+      {
+        "to": "screen:calculator-screen",
+        "from": "journey:show-validation",
+        "type": "renders_on"
+      },
+      {
+        "to": "capability:interaction-primitives",
+        "from": "screen:calculator-screen",
+        "type": "adapts"
+      },
+      {
+        "to": "custom_behavior:show-validation",
+        "from": "screen:calculator-screen",
+        "type": "adapts"
+      },
+      {
+        "to": "custom_behavior:show-validation",
+        "from": "screen:calculator-screen",
+        "type": "extends"
+      }
+    ],
+    "routes": [
+      {
+        "module": "src/screens/scaffold/CalculatorScreen.jsx",
+        "screenId": "calculator-screen",
+        "mountedBy": "scaffold:app_shell",
+        "routeName": "Calculator",
+        "routePath": "/",
+        "exportName": "default",
+        "journeyIds": [
+          "calculate-custom-spacing",
+          "calculate-default-spacing",
+          "calculate-in-feet",
+          "show-validation"
+        ]
+      }
+    ],
+    "screens": [
+      {
+        "owner": "screen:calculator-screen",
+        "module": "src/screens/scaffold/CalculatorScreen.jsx",
+        "screenId": "calculator-screen",
+        "mountedBy": "scaffold:app_shell",
+        "routeName": "Calculator",
+        "routePath": "/",
+        "exportName": "default"
+      }
+    ],
+    "version": 3,
+    "families": [
+      {
+        "id": "scaffold:app_shell",
+        "status": "proven",
+        "purpose": "Mount the application, resolve routes, and contain render/loading failures.",
+        "version": "1.0.0",
+        "scaffoldId": "app_shell",
+        "extensionPoints": [
+          "mounted_screen",
+          "navigation_chrome"
+        ],
+        "optionalCapabilities": [],
+        "requiredCapabilities": [],
+        "verificationContract": {
+          "screenMounted": true,
+          "errorContained": true,
+          "routeReachable": true
+        }
+      }
+    ],
+    "extensions": [
+      {
+        "reads": [
+          "calculate-custom-spacing.draft.roomLength",
+          "calculate-custom-spacing.draft.roomWidth",
+          "calculate-custom-spacing.input.unit",
+          "calculate-custom-spacing.draft.preferredSpacing",
+          "calculate-custom-spacing.draft.unit"
+        ],
+        "inputs": [
+          "calculate-custom-spacing.draft.roomLength",
+          "calculate-custom-spacing.draft.roomWidth",
+          "calculate-custom-spacing.input.unit",
+          "calculate-custom-spacing.draft.preferredSpacing",
+          "calculate-custom-spacing.draft.unit"
+        ],
+        "module": "src/extensions/custom/calculate-custom-spacing.js",
+        "source": "capability_graph",
+        "writes": [
+          "calculate-custom-spacing.custom.numberOfDownlights",
+          "calculate-custom-spacing.custom.gridRows",
+          "calculate-custom-spacing.custom.gridColumns",
+          "calculate-custom-spacing.custom.estimatedSpacing",
+          "calculate-custom-spacing.custom.spacingSource",
+          "calculate-custom-spacing.custom.disclaimer",
+          "calculate-custom-spacing.custom.validationMessage"
+        ],
+        "outputs": [
+          "calculate-custom-spacing.custom.numberOfDownlights",
+          "calculate-custom-spacing.custom.gridRows",
+          "calculate-custom-spacing.custom.gridColumns",
+          "calculate-custom-spacing.custom.estimatedSpacing",
+          "calculate-custom-spacing.custom.spacingSource",
+          "calculate-custom-spacing.custom.disclaimer",
+          "calculate-custom-spacing.custom.validationMessage"
+        ],
+        "extensionId": "custom_behavior:calculate-custom-spacing",
+        "allowedFiles": [
+          "src/extensions/custom/calculate-custom-spacing.js"
+        ],
+        "owningJourneys": [
+          "calculate-custom-spacing"
+        ],
+        "stateOwnership": {
+          "owns": [
+            "calculate-custom-spacing.custom.numberOfDownlights",
+            "calculate-custom-spacing.custom.gridRows",
+            "calculate-custom-spacing.custom.gridColumns",
+            "calculate-custom-spacing.custom.estimatedSpacing",
+            "calculate-custom-spacing.custom.spacingSource",
+            "calculate-custom-spacing.custom.disclaimer",
+            "calculate-custom-spacing.custom.validationMessage"
+          ],
+          "journey": "calculate-custom-spacing"
+        },
+        "requiredExports": [
+          "runCalculateCustomSpacingCustomBehavior"
+        ],
+        "integrationPoints": [
+          "mounted_screen"
+        ],
+        "operationContracts": [
+          {
+            "inputs": [
+              "calculate-custom-spacing.draft.roomLength",
+              "calculate-custom-spacing.draft.roomWidth",
+              "calculate-custom-spacing.input.unit",
+              "calculate-custom-spacing.draft.preferredSpacing"
+            ],
+            "outputs": [
+              "calculate-custom-spacing.custom.numberOfDownlights",
+              "calculate-custom-spacing.custom.gridRows",
+              "calculate-custom-spacing.custom.gridColumns",
+              "calculate-custom-spacing.custom.estimatedSpacing",
+              "calculate-custom-spacing.custom.spacingSource",
+              "calculate-custom-spacing.custom.disclaimer",
+              "calculate-custom-spacing.custom.validationMessage"
+            ],
+            "inputKeys": [
+              "roomLength",
+              "roomWidth",
+              "unit",
+              "preferredSpacing"
+            ],
+            "selectors": [
+              "calculate-downlights",
+              "read",
+              "calculate-downlights:functional-1"
+            ],
+            "operationId": "calculate-downlights",
+            "responsibilityId": "calculate-downlights:functional-1"
+          }
+        ],
+        "verificationSemantics": {
+          "actions": [
+            "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "action"
+          ],
+          "observe": [
+            "a large result card shows the estimated downlight count, grid, spacing and disclaimer"
+          ],
+          "stateChange": [
+            "calculate-custom-spacing.custom.numberOfDownlights",
+            "calculate-custom-spacing.custom.gridRows",
+            "calculate-custom-spacing.custom.gridColumns",
+            "calculate-custom-spacing.custom.estimatedSpacing",
+            "calculate-custom-spacing.custom.spacingSource",
+            "calculate-custom-spacing.custom.disclaimer",
+            "calculate-custom-spacing.custom.validationMessage"
+          ],
+          "durableMutation": false,
+          "persistenceHandoff": []
+        }
+      },
+      {
+        "reads": [
+          "calculate-default-spacing.draft.roomLength",
+          "calculate-default-spacing.draft.roomWidth",
+          "calculate-default-spacing.input.unit",
+          "calculate-default-spacing.input.preferredSpacing",
+          "calculate-default-spacing.draft.unit"
+        ],
+        "inputs": [
+          "calculate-default-spacing.draft.roomLength",
+          "calculate-default-spacing.draft.roomWidth",
+          "calculate-default-spacing.input.unit",
+          "calculate-default-spacing.input.preferredSpacing",
+          "calculate-default-spacing.draft.unit"
+        ],
+        "module": "src/extensions/custom/calculate-default-spacing.js",
+        "source": "capability_graph",
+        "writes": [
+          "calculate-default-spacing.custom.numberOfDownlights",
+          "calculate-default-spacing.custom.gridRows",
+          "calculate-default-spacing.custom.gridColumns",
+          "calculate-default-spacing.custom.estimatedSpacing",
+          "calculate-default-spacing.custom.spacingSource",
+          "calculate-default-spacing.custom.disclaimer",
+          "calculate-default-spacing.custom.validationMessage"
+        ],
+        "outputs": [
+          "calculate-default-spacing.custom.numberOfDownlights",
+          "calculate-default-spacing.custom.gridRows",
+          "calculate-default-spacing.custom.gridColumns",
+          "calculate-default-spacing.custom.estimatedSpacing",
+          "calculate-default-spacing.custom.spacingSource",
+          "calculate-default-spacing.custom.disclaimer",
+          "calculate-default-spacing.custom.validationMessage"
+        ],
+        "extensionId": "custom_behavior:calculate-default-spacing",
+        "allowedFiles": [
+          "src/extensions/custom/calculate-default-spacing.js"
+        ],
+        "owningJourneys": [
+          "calculate-default-spacing"
+        ],
+        "stateOwnership": {
+          "owns": [
+            "calculate-default-spacing.custom.numberOfDownlights",
+            "calculate-default-spacing.custom.gridRows",
+            "calculate-default-spacing.custom.gridColumns",
+            "calculate-default-spacing.custom.estimatedSpacing",
+            "calculate-default-spacing.custom.spacingSource",
+            "calculate-default-spacing.custom.disclaimer",
+            "calculate-default-spacing.custom.validationMessage"
+          ],
+          "journey": "calculate-default-spacing"
+        },
+        "requiredExports": [
+          "runCalculateDefaultSpacingCustomBehavior"
+        ],
+        "integrationPoints": [
+          "mounted_screen"
+        ],
+        "operationContracts": [
+          {
+            "inputs": [
+              "calculate-default-spacing.draft.roomLength",
+              "calculate-default-spacing.draft.roomWidth",
+              "calculate-default-spacing.input.unit",
+              "calculate-default-spacing.input.preferredSpacing"
+            ],
+            "outputs": [
+              "calculate-default-spacing.custom.numberOfDownlights",
+              "calculate-default-spacing.custom.gridRows",
+              "calculate-default-spacing.custom.gridColumns",
+              "calculate-default-spacing.custom.estimatedSpacing",
+              "calculate-default-spacing.custom.spacingSource",
+              "calculate-default-spacing.custom.disclaimer",
+              "calculate-default-spacing.custom.validationMessage"
+            ],
+            "inputKeys": [
+              "roomLength",
+              "roomWidth",
+              "unit",
+              "preferredSpacing"
+            ],
+            "selectors": [
+              "calculate-downlights",
+              "read",
+              "calculate-downlights:functional-1"
+            ],
+            "operationId": "calculate-downlights",
+            "responsibilityId": "calculate-downlights:functional-1"
+          }
+        ],
+        "verificationSemantics": {
+          "actions": [
+            "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "action"
+          ],
+          "observe": [
+            "the result uses the sensible default spacing and shows the estimate"
+          ],
+          "stateChange": [
+            "calculate-default-spacing.custom.numberOfDownlights",
+            "calculate-default-spacing.custom.gridRows",
+            "calculate-default-spacing.custom.gridColumns",
+            "calculate-default-spacing.custom.estimatedSpacing",
+            "calculate-default-spacing.custom.spacingSource",
+            "calculate-default-spacing.custom.disclaimer",
+            "calculate-default-spacing.custom.validationMessage"
+          ],
+          "durableMutation": false,
+          "persistenceHandoff": []
+        }
+      },
+      {
+        "reads": [
+          "calculate-in-feet.draft.roomLength",
+          "calculate-in-feet.draft.roomWidth",
+          "calculate-in-feet.draft.unit",
+          "calculate-in-feet.draft.preferredSpacing"
+        ],
+        "inputs": [
+          "calculate-in-feet.draft.roomLength",
+          "calculate-in-feet.draft.roomWidth",
+          "calculate-in-feet.draft.unit",
+          "calculate-in-feet.draft.preferredSpacing"
+        ],
+        "module": "src/extensions/custom/calculate-in-feet.js",
+        "source": "capability_graph",
+        "writes": [
+          "calculate-in-feet.custom.numberOfDownlights",
+          "calculate-in-feet.custom.gridRows",
+          "calculate-in-feet.custom.gridColumns",
+          "calculate-in-feet.custom.estimatedSpacing",
+          "calculate-in-feet.custom.spacingSource",
+          "calculate-in-feet.custom.disclaimer",
+          "calculate-in-feet.custom.validationMessage"
+        ],
+        "outputs": [
+          "calculate-in-feet.custom.numberOfDownlights",
+          "calculate-in-feet.custom.gridRows",
+          "calculate-in-feet.custom.gridColumns",
+          "calculate-in-feet.custom.estimatedSpacing",
+          "calculate-in-feet.custom.spacingSource",
+          "calculate-in-feet.custom.disclaimer",
+          "calculate-in-feet.custom.validationMessage"
+        ],
+        "extensionId": "custom_behavior:calculate-in-feet",
+        "allowedFiles": [
+          "src/extensions/custom/calculate-in-feet.js"
+        ],
+        "owningJourneys": [
+          "calculate-in-feet"
+        ],
+        "stateOwnership": {
+          "owns": [
+            "calculate-in-feet.custom.numberOfDownlights",
+            "calculate-in-feet.custom.gridRows",
+            "calculate-in-feet.custom.gridColumns",
+            "calculate-in-feet.custom.estimatedSpacing",
+            "calculate-in-feet.custom.spacingSource",
+            "calculate-in-feet.custom.disclaimer",
+            "calculate-in-feet.custom.validationMessage"
+          ],
+          "journey": "calculate-in-feet"
+        },
+        "requiredExports": [
+          "runCalculateInFeetCustomBehavior"
+        ],
+        "integrationPoints": [
+          "mounted_screen"
+        ],
+        "operationContracts": [
+          {
+            "inputs": [
+              "calculate-in-feet.draft.roomLength",
+              "calculate-in-feet.draft.roomWidth",
+              "calculate-in-feet.draft.unit",
+              "calculate-in-feet.draft.preferredSpacing"
+            ],
+            "outputs": [
+              "calculate-in-feet.custom.numberOfDownlights",
+              "calculate-in-feet.custom.gridRows",
+              "calculate-in-feet.custom.gridColumns",
+              "calculate-in-feet.custom.estimatedSpacing",
+              "calculate-in-feet.custom.spacingSource",
+              "calculate-in-feet.custom.disclaimer",
+              "calculate-in-feet.custom.validationMessage"
+            ],
+            "inputKeys": [
+              "roomLength",
+              "roomWidth",
+              "unit",
+              "preferredSpacing"
+            ],
+            "selectors": [
+              "calculate-downlights",
+              "read",
+              "calculate-downlights:functional-1"
+            ],
+            "operationId": "calculate-downlights",
+            "responsibilityId": "calculate-downlights:functional-1"
+          }
+        ],
+        "verificationSemantics": {
+          "actions": [
+            "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "action"
+          ],
+          "observe": [
+            "the result is shown using feet labels"
+          ],
+          "stateChange": [
+            "calculate-in-feet.custom.numberOfDownlights",
+            "calculate-in-feet.custom.gridRows",
+            "calculate-in-feet.custom.gridColumns",
+            "calculate-in-feet.custom.estimatedSpacing",
+            "calculate-in-feet.custom.spacingSource",
+            "calculate-in-feet.custom.disclaimer",
+            "calculate-in-feet.custom.validationMessage"
+          ],
+          "durableMutation": false,
+          "persistenceHandoff": []
+        }
+      },
+      {
+        "reads": [
+          "show-validation.draft.roomLength",
+          "show-validation.draft.roomWidth",
+          "show-validation.input.unit",
+          "show-validation.input.preferredSpacing"
+        ],
+        "inputs": [
+          "show-validation.draft.roomLength",
+          "show-validation.draft.roomWidth",
+          "show-validation.input.unit",
+          "show-validation.input.preferredSpacing"
+        ],
+        "module": "src/extensions/custom/show-validation.js",
+        "source": "capability_graph",
+        "writes": [
+          "show-validation.custom.numberOfDownlights",
+          "show-validation.custom.gridRows",
+          "show-validation.custom.gridColumns",
+          "show-validation.custom.estimatedSpacing",
+          "show-validation.custom.spacingSource",
+          "show-validation.custom.disclaimer",
+          "show-validation.custom.validationMessage"
+        ],
+        "outputs": [
+          "show-validation.custom.numberOfDownlights",
+          "show-validation.custom.gridRows",
+          "show-validation.custom.gridColumns",
+          "show-validation.custom.estimatedSpacing",
+          "show-validation.custom.spacingSource",
+          "show-validation.custom.disclaimer",
+          "show-validation.custom.validationMessage"
+        ],
+        "extensionId": "custom_behavior:show-validation",
+        "allowedFiles": [
+          "src/extensions/custom/show-validation.js"
+        ],
+        "owningJourneys": [
+          "show-validation"
+        ],
+        "stateOwnership": {
+          "owns": [
+            "show-validation.custom.numberOfDownlights",
+            "show-validation.custom.gridRows",
+            "show-validation.custom.gridColumns",
+            "show-validation.custom.estimatedSpacing",
+            "show-validation.custom.spacingSource",
+            "show-validation.custom.disclaimer",
+            "show-validation.custom.validationMessage"
+          ],
+          "journey": "show-validation"
+        },
+        "requiredExports": [
+          "runShowValidationCustomBehavior"
+        ],
+        "integrationPoints": [
+          "mounted_screen"
+        ],
+        "operationContracts": [
+          {
+            "inputs": [
+              "show-validation.draft.roomLength",
+              "show-validation.draft.roomWidth",
+              "show-validation.input.unit",
+              "show-validation.input.preferredSpacing"
+            ],
+            "outputs": [
+              "show-validation.custom.numberOfDownlights",
+              "show-validation.custom.gridRows",
+              "show-validation.custom.gridColumns",
+              "show-validation.custom.estimatedSpacing",
+              "show-validation.custom.spacingSource",
+              "show-validation.custom.disclaimer",
+              "show-validation.custom.validationMessage"
+            ],
+            "inputKeys": [
+              "roomLength",
+              "roomWidth",
+              "unit",
+              "preferredSpacing"
+            ],
+            "selectors": [
+              "calculate-downlights",
+              "read",
+              "calculate-downlights:functional-1"
+            ],
+            "operationId": "calculate-downlights",
+            "responsibilityId": "calculate-downlights:functional-1"
+          }
+        ],
+        "verificationSemantics": {
+          "actions": [
+            "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "action"
+          ],
+          "observe": [
+            "a visible validation message appears and no downlight count result is shown"
+          ],
+          "stateChange": [
+            "show-validation.custom.numberOfDownlights",
+            "show-validation.custom.gridRows",
+            "show-validation.custom.gridColumns",
+            "show-validation.custom.estimatedSpacing",
+            "show-validation.custom.spacingSource",
+            "show-validation.custom.disclaimer",
+            "show-validation.custom.validationMessage"
+          ],
+          "durableMutation": false,
+          "persistenceHandoff": []
+        }
+      }
+    ],
+    "protectedFiles": [
+      "src/lib/scaffolds/composed/ScaffoldApp.jsx"
+    ],
+    "stateOwnership": [
+      {
+        "ownership": {
+          "owns": [
+            "active route"
+          ],
+          "excludes": [
+            "domain state",
+            "durable records"
+          ]
+        },
+        "scaffoldNodeId": "scaffold:app_shell"
+      }
+    ],
+    "dependencyOrder": [
+      "scaffold:app_shell"
+    ],
+    "registryVersion": 1,
+    "routeResolution": {
+      "issues": [],
+      "version": 1,
+      "journeys": {
+        "show-validation": {
+          "unresolved": [],
+          "transitions": [
+            {
+              "basis": "target_path",
+              "routePath": "/",
+              "stepIndex": 0
+            }
+          ],
+          "initialBasis": "target_path",
+          "initialRoute": "/"
+        },
+        "calculate-in-feet": {
+          "unresolved": [],
+          "transitions": [
+            {
+              "basis": "target_path",
+              "routePath": "/",
+              "stepIndex": 0
+            }
+          ],
+          "initialBasis": "target_path",
+          "initialRoute": "/"
+        },
+        "calculate-custom-spacing": {
+          "unresolved": [],
+          "transitions": [
+            {
+              "basis": "target_path",
+              "routePath": "/",
+              "stepIndex": 0
+            }
+          ],
+          "initialBasis": "target_path",
+          "initialRoute": "/"
+        },
+        "calculate-default-spacing": {
+          "unresolved": [],
+          "transitions": [
+            {
+              "basis": "target_path",
+              "routePath": "/",
+              "stepIndex": 0
+            }
+          ],
+          "initialBasis": "target_path",
+          "initialRoute": "/"
+        }
+      }
+    },
+    "journeyOwnership": [
+      {
+        "screenId": "calculator-screen",
+        "journeyId": "calculate-custom-spacing",
+        "routePath": "/",
+        "extensionIds": [
+          "custom_behavior:calculate-custom-spacing"
+        ],
+        "mountedModule": "src/screens/scaffold/CalculatorScreen.jsx",
+        "scaffoldNodeIds": [
+          "scaffold:app_shell"
+        ],
+        "capabilityNodeIds": [
+          "capability:interaction-primitives",
+          "custom_behavior:calculate-custom-spacing"
+        ]
+      },
+      {
+        "screenId": "calculator-screen",
+        "journeyId": "calculate-default-spacing",
+        "routePath": "/",
+        "extensionIds": [
+          "custom_behavior:calculate-default-spacing"
+        ],
+        "mountedModule": "src/screens/scaffold/CalculatorScreen.jsx",
+        "scaffoldNodeIds": [
+          "scaffold:app_shell"
+        ],
+        "capabilityNodeIds": [
+          "capability:interaction-primitives",
+          "custom_behavior:calculate-default-spacing"
+        ]
+      },
+      {
+        "screenId": "calculator-screen",
+        "journeyId": "calculate-in-feet",
+        "routePath": "/",
+        "extensionIds": [
+          "custom_behavior:calculate-in-feet"
+        ],
+        "mountedModule": "src/screens/scaffold/CalculatorScreen.jsx",
+        "scaffoldNodeIds": [
+          "scaffold:app_shell"
+        ],
+        "capabilityNodeIds": [
+          "capability:interaction-primitives",
+          "custom_behavior:calculate-in-feet"
+        ]
+      },
+      {
+        "screenId": "calculator-screen",
+        "journeyId": "show-validation",
+        "routePath": "/",
+        "extensionIds": [
+          "custom_behavior:show-validation"
+        ],
+        "mountedModule": "src/screens/scaffold/CalculatorScreen.jsx",
+        "scaffoldNodeIds": [
+          "scaffold:app_shell"
+        ],
+        "capabilityNodeIds": [
+          "capability:interaction-primitives",
+          "custom_behavior:show-validation"
+        ]
+      }
+    ],
+    "persistenceOwnership": [
+      {
+        "ownership": {
+          "owns": [],
+          "delegatesToCapabilities": true
+        },
+        "scaffoldNodeId": "scaffold:app_shell"
+      }
+    ],
+    "expectedModuleSurface": {
+      "routes": 1,
+      "entities": 1,
+      "softMaximum": 22,
+      "extremeMaximum": 39,
+      "customExtensions": 4,
+      "scaffoldFamilies": 1,
+      "deterministicFiles": 4,
+      "expectedGeneratedModules": 13
+    },
+    "journeyRouteOwnership": [
+      {
+        "screenId": "calculator-screen",
+        "journeyId": "calculate-custom-spacing",
+        "routePath": "/",
+        "stepIndex": 0,
+        "extensionIds": [
+          "custom_behavior:calculate-custom-spacing"
+        ],
+        "mountedModule": "src/screens/scaffold/CalculatorScreen.jsx",
+        "scaffoldNodeIds": [
+          "scaffold:app_shell"
+        ],
+        "capabilityNodeIds": [
+          "capability:interaction-primitives",
+          "custom_behavior:calculate-custom-spacing"
+        ]
+      },
+      {
+        "screenId": "calculator-screen",
+        "journeyId": "calculate-default-spacing",
+        "routePath": "/",
+        "stepIndex": 0,
+        "extensionIds": [
+          "custom_behavior:calculate-default-spacing"
+        ],
+        "mountedModule": "src/screens/scaffold/CalculatorScreen.jsx",
+        "scaffoldNodeIds": [
+          "scaffold:app_shell"
+        ],
+        "capabilityNodeIds": [
+          "capability:interaction-primitives",
+          "custom_behavior:calculate-default-spacing"
+        ]
+      },
+      {
+        "screenId": "calculator-screen",
+        "journeyId": "calculate-in-feet",
+        "routePath": "/",
+        "stepIndex": 0,
+        "extensionIds": [
+          "custom_behavior:calculate-in-feet"
+        ],
+        "mountedModule": "src/screens/scaffold/CalculatorScreen.jsx",
+        "scaffoldNodeIds": [
+          "scaffold:app_shell"
+        ],
+        "capabilityNodeIds": [
+          "capability:interaction-primitives",
+          "custom_behavior:calculate-in-feet"
+        ]
+      },
+      {
+        "screenId": "calculator-screen",
+        "journeyId": "show-validation",
+        "routePath": "/",
+        "stepIndex": 0,
+        "extensionIds": [
+          "custom_behavior:show-validation"
+        ],
+        "mountedModule": "src/screens/scaffold/CalculatorScreen.jsx",
+        "scaffoldNodeIds": [
+          "scaffold:app_shell"
+        ],
+        "capabilityNodeIds": [
+          "capability:interaction-primitives",
+          "custom_behavior:show-validation"
+        ]
+      }
+    ],
+    "crossScaffoldInterfaces": []
+  },
+  "dependencyPlan": {
+    "version": 1,
+    "installMode": "sandbox_baked",
+    "requirements": [],
+    "networkDuringCompile": false
+  },
+  "capabilityGraph": {
+    "edges": [
+      {
+        "to": "calculate-custom-spacing:4:action",
+        "from": "calculate-custom-spacing:2:input:roomlength",
+        "type": "data_flow",
+        "state": [
+          "calculate-custom-spacing.draft.roomLength"
+        ]
+      },
+      {
+        "to": "calculate-custom-spacing:4:action",
+        "from": "calculate-custom-spacing:2:input:roomwidth",
+        "type": "data_flow",
+        "state": [
+          "calculate-custom-spacing.draft.roomWidth"
+        ]
+      },
+      {
+        "to": "calculate-custom-spacing:4:action",
+        "from": "calculate-custom-spacing:3:input:preferredspacing",
+        "type": "data_flow",
+        "state": [
+          "calculate-custom-spacing.draft.preferredSpacing"
+        ]
+      },
+      {
+        "to": "calculate-default-spacing:3:action",
+        "from": "calculate-default-spacing:2:input:roomlength",
+        "type": "data_flow",
+        "state": [
+          "calculate-default-spacing.draft.roomLength"
+        ]
+      },
+      {
+        "to": "calculate-default-spacing:3:action",
+        "from": "calculate-default-spacing:2:input:roomwidth",
+        "type": "data_flow",
+        "state": [
+          "calculate-default-spacing.draft.roomWidth"
+        ]
+      },
+      {
+        "to": "calculate-in-feet:5:action",
+        "from": "calculate-in-feet:2:selection:unit",
+        "type": "data_flow",
+        "state": [
+          "calculate-in-feet.draft.unit"
+        ]
+      },
+      {
+        "to": "calculate-in-feet:5:action",
+        "from": "calculate-in-feet:3:input:roomlength",
+        "type": "data_flow",
+        "state": [
+          "calculate-in-feet.draft.roomLength"
+        ]
+      },
+      {
+        "to": "calculate-in-feet:5:action",
+        "from": "calculate-in-feet:3:input:roomwidth",
+        "type": "data_flow",
+        "state": [
+          "calculate-in-feet.draft.roomWidth"
+        ]
+      },
+      {
+        "to": "calculate-in-feet:5:action",
+        "from": "calculate-in-feet:4:input:preferredspacing",
+        "type": "data_flow",
+        "state": [
+          "calculate-in-feet.draft.preferredSpacing"
+        ]
+      },
+      {
+        "to": "show-validation:3:action",
+        "from": "show-validation:2:input:roomlength",
+        "type": "data_flow",
+        "state": [
+          "show-validation.draft.roomLength"
+        ]
+      },
+      {
+        "to": "show-validation:3:action",
+        "from": "show-validation:2:input:roomwidth",
+        "type": "data_flow",
+        "state": [
+          "show-validation.draft.roomWidth"
+        ]
+      },
+      {
+        "to": "capability:session",
+        "from": "capability:crud",
+        "type": "depends_on",
+        "state": []
+      }
+    ],
+    "nodes": [
+      {
+        "id": "capability:crud",
+        "type": "deterministic_capability",
+        "proven": true,
+        "outputs": {
+          "records": "flat entity records",
+          "mutations": "persisted entity record or void"
+        },
+        "version": "1.0.0",
+        "entities": [],
+        "journeys": [],
+        "protected": true,
+        "provenance": "platform_registry",
+        "capabilityId": "crud",
+        "dependencies": [
+          "session"
+        ],
+        "interactions": [],
+        "testContract": [
+          "create",
+          "read",
+          "update",
+          "delete"
+        ],
+        "configuration": null,
+        "requiredInputs": {
+          "factory": [
+            "entityType"
+          ],
+          "operations": {
+            "get": [
+              "id"
+            ],
+            "create": [
+              "values"
+            ],
+            "remove": [
+              "id"
+            ],
+            "update": [
+              "id",
+              "partialValues"
+            ]
+          }
+        },
+        "stateOwnership": {
+          "owns": "entity records",
+          "scope": "application and authenticated or visitor owner"
+        },
+        "compositionModule": "src/lib/capabilities/composed/crud.js",
+        "requiredOperations": [],
+        "supportedOperations": [
+          "list",
+          "get",
+          "create",
+          "update",
+          "remove",
+          "count",
+          "subscribe"
+        ],
+        "persistenceSemantics": {
+          "owner": "generated backend entity API",
+          "durable": true,
+          "mergeUpdates": true,
+          "browserStorage": false
+        },
+        "verificationSemantics": {
+          "actions": [
+            "create",
+            "read",
+            "update",
+            "delete"
+          ],
+          "observe": [
+            "returned record",
+            "reload or reopen read"
+          ],
+          "stateChange": "entity record mutation",
+          "durableMutation": true
+        },
+        "compatibleUiInteractionPrimitives": [
+          "field",
+          "selection",
+          "action",
+          "status"
+        ]
+      },
+      {
+        "id": "capability:session",
+        "type": "deterministic_capability",
+        "proven": true,
+        "outputs": {
+          "current": "user or null",
+          "session": "authenticated user or app-scoped visitor",
+          "signedOut": "signed-out session state",
+          "resetRequested": "password reset request accepted"
+        },
+        "version": "1.1.0",
+        "entities": [],
+        "journeys": [],
+        "protected": true,
+        "provenance": "platform_registry",
+        "capabilityId": "session",
+        "dependencies": [],
+        "interactions": [],
+        "testContract": [
+          "current",
+          "ensure",
+          "recover",
+          "signUp",
+          "signIn",
+          "signOut",
+          "resetPassword",
+          "confirmReset"
+        ],
+        "configuration": null,
+        "requiredInputs": {
+          "factory": [],
+          "operations": {
+            "signIn": [
+              "email",
+              "password"
+            ],
+            "signUp": [
+              "email",
+              "password"
+            ],
+            "confirmReset": [
+              "email",
+              "code",
+              "newPassword"
+            ],
+            "resetPassword": [
+              "email"
+            ]
+          }
+        },
+        "stateOwnership": {
+          "owns": "authentication and session identity",
+          "scope": "browser and generated backend"
+        },
+        "compositionModule": "src/lib/capabilities/composed/session.js",
+        "requiredOperations": [],
+        "supportedOperations": [
+          "ensure",
+          "recover",
+          "current",
+          "signUp",
+          "signIn",
+          "signOut",
+          "resetPassword",
+          "confirmReset"
+        ],
+        "persistenceSemantics": {
+          "owner": "generated auth runtime",
+          "durable": true,
+          "browserStorage": "runtime-owned only"
+        },
+        "verificationSemantics": {
+          "actions": [
+            "establish",
+            "recover",
+            "signUp",
+            "signIn",
+            "signOut",
+            "resetPassword",
+            "confirmReset"
+          ],
+          "observe": [
+            "authorized operation succeeds",
+            "current user",
+            "signed-out state"
+          ],
+          "stateChange": "session identity",
+          "durableMutation": false
+        },
+        "compatibleUiInteractionPrimitives": [
+          "field",
+          "action",
+          "status"
+        ]
+      },
+      {
+        "id": "capability:interaction-primitives",
+        "type": "deterministic_capability",
+        "proven": true,
+        "outputs": {
+          "state": "reactive capability snapshot or action state",
+          "bindings": "accessible props with stable machine identity"
+        },
+        "version": "1.0.0",
+        "entities": [],
+        "journeys": [
+          "calculate-custom-spacing",
+          "calculate-default-spacing",
+          "calculate-in-feet",
+          "show-validation"
+        ],
+        "protected": true,
+        "provenance": "platform_registry",
+        "capabilityId": "interaction-primitives",
+        "dependencies": [],
+        "interactions": [
+          "calculate-custom-spacing:1:navigation",
+          "calculate-custom-spacing:2:input:roomlength",
+          "calculate-custom-spacing:2:input:roomwidth",
+          "calculate-custom-spacing:3:input:preferredspacing",
+          "calculate-custom-spacing:4:action",
+          "calculate-default-spacing:1:navigation",
+          "calculate-default-spacing:2:input:roomlength",
+          "calculate-default-spacing:2:input:roomwidth",
+          "calculate-default-spacing:3:action",
+          "calculate-in-feet:1:navigation",
+          "calculate-in-feet:2:selection:unit",
+          "calculate-in-feet:3:input:roomlength",
+          "calculate-in-feet:3:input:roomwidth",
+          "calculate-in-feet:4:input:preferredspacing",
+          "calculate-in-feet:5:action",
+          "show-validation:1:navigation",
+          "show-validation:2:input:roomlength",
+          "show-validation:2:input:roomwidth",
+          "show-validation:3:action"
+        ],
+        "testContract": [
+          "field accepts value",
+          "selection becomes observable",
+          "action changes state",
+          "status announced"
+        ],
+        "configuration": null,
+        "requiredInputs": {
+          "factory": [],
+          "operations": {
+            "field": [
+              "name",
+              "value",
+              "onChange"
+            ],
+            "action": [
+              "name",
+              "onActivate"
+            ],
+            "selection": [
+              "name",
+              "value",
+              "onSelect"
+            ]
+          }
+        },
+        "stateOwnership": {
+          "owns": "ephemeral React action status only",
+          "scope": "rendered component"
+        },
+        "compositionModule": "src/lib/capabilities/composed/interaction-primitives.js",
+        "requiredOperations": [],
+        "supportedOperations": [
+          "subscribe_state",
+          "run_action",
+          "field",
+          "selection",
+          "action",
+          "flow_advance",
+          "status"
+        ],
+        "persistenceSemantics": {
+          "owner": "none",
+          "durable": false,
+          "browserStorage": false
+        },
+        "verificationSemantics": {
+          "actions": [
+            "fill",
+            "select",
+            "activate",
+            "advance",
+            "observe"
+          ],
+          "observe": [
+            "opaque control identity",
+            "accessible name",
+            "selected, value, or status transition"
+          ],
+          "stateChange": "control value, selection, or action result",
+          "durableMutation": false
+        },
+        "compatibleUiInteractionPrimitives": [
+          "field",
+          "selection",
+          "action",
+          "flow_advance",
+          "status"
+        ]
+      },
+      {
+        "id": "custom_behavior:calculate-custom-spacing",
+        "type": "custom_behavior",
+        "proven": false,
+        "outputs": [
+          "calculate-custom-spacing.custom.numberOfDownlights",
+          "calculate-custom-spacing.custom.gridRows",
+          "calculate-custom-spacing.custom.gridColumns",
+          "calculate-custom-spacing.custom.estimatedSpacing",
+          "calculate-custom-spacing.custom.spacingSource",
+          "calculate-custom-spacing.custom.disclaimer",
+          "calculate-custom-spacing.custom.validationMessage"
+        ],
+        "version": "1.0.0",
+        "journeys": [
+          "calculate-custom-spacing"
+        ],
+        "extension": {
+          "module": "src/extensions/custom/calculate-custom-spacing.js",
+          "interface": "runCalculateCustomSpacingCustomBehavior(inputs, context) -> declared outputs",
+          "requiredExports": [
+            "runCalculateCustomSpacingCustomBehavior"
+          ]
+        },
+        "protected": false,
+        "provenance": "generated_extension",
+        "capabilityId": null,
+        "dependencies": [],
+        "interactions": [
+          "calculate-custom-spacing:4:action"
+        ],
+        "testContract": [
+          {
+            "inputs": [
+              "calculate-custom-spacing.draft.roomLength",
+              "calculate-custom-spacing.draft.roomWidth",
+              "calculate-custom-spacing.input.unit",
+              "calculate-custom-spacing.draft.preferredSpacing"
+            ],
+            "outputs": [
+              "calculate-custom-spacing.custom.numberOfDownlights",
+              "calculate-custom-spacing.custom.gridRows",
+              "calculate-custom-spacing.custom.gridColumns",
+              "calculate-custom-spacing.custom.estimatedSpacing",
+              "calculate-custom-spacing.custom.spacingSource",
+              "calculate-custom-spacing.custom.disclaimer",
+              "calculate-custom-spacing.custom.validationMessage"
+            ],
+            "behavior": "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "operationId": "calculate-downlights",
+            "responsibilityId": "calculate-downlights:functional-1",
+            "persistenceSource": null,
+            "persistenceHandoff": null
+          },
+          {
+            "reads": [
+              "calculate-custom-spacing.draft.roomLength",
+              "calculate-custom-spacing.draft.roomWidth",
+              "calculate-custom-spacing.draft.unit",
+              "calculate-custom-spacing.draft.preferredSpacing",
+              "calculate-custom-spacing.input.unit"
+            ],
+            "writes": [
+              "calculate-custom-spacing.custom.numberOfDownlights",
+              "calculate-custom-spacing.custom.gridRows",
+              "calculate-custom-spacing.custom.gridColumns",
+              "calculate-custom-spacing.custom.estimatedSpacing",
+              "calculate-custom-spacing.custom.spacingSource",
+              "calculate-custom-spacing.custom.disclaimer",
+              "calculate-custom-spacing.custom.validationMessage"
+            ],
+            "observe": "a large result card shows the estimated downlight count, grid, spacing and disclaimer",
+            "interactionId": "calculate-custom-spacing:4:action"
+          }
+        ],
+        "requiredInputs": [
+          "calculate-custom-spacing.draft.roomLength",
+          "calculate-custom-spacing.draft.roomWidth",
+          "calculate-custom-spacing.input.unit",
+          "calculate-custom-spacing.draft.preferredSpacing",
+          "calculate-custom-spacing.draft.unit"
+        ],
+        "stateOwnership": {
+          "owns": [
+            "calculate-custom-spacing.custom.numberOfDownlights",
+            "calculate-custom-spacing.custom.gridRows",
+            "calculate-custom-spacing.custom.gridColumns",
+            "calculate-custom-spacing.custom.estimatedSpacing",
+            "calculate-custom-spacing.custom.spacingSource",
+            "calculate-custom-spacing.custom.disclaimer",
+            "calculate-custom-spacing.custom.validationMessage"
+          ],
+          "journey": "calculate-custom-spacing"
+        },
+        "supportedOperations": [
+          "read",
+          "action"
+        ],
+        "persistenceSemantics": {
+          "owner": "bounded custom transformation; durable state is read from or handed off to composed capabilities",
+          "durable": false,
+          "sources": [],
+          "handoffs": [],
+          "browserStorage": false
+        },
+        "verificationSemantics": {
+          "actions": [
+            "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "action"
+          ],
+          "observe": [
+            "a large result card shows the estimated downlight count, grid, spacing and disclaimer"
+          ],
+          "stateChange": [
+            "calculate-custom-spacing.custom.numberOfDownlights",
+            "calculate-custom-spacing.custom.gridRows",
+            "calculate-custom-spacing.custom.gridColumns",
+            "calculate-custom-spacing.custom.estimatedSpacing",
+            "calculate-custom-spacing.custom.spacingSource",
+            "calculate-custom-spacing.custom.disclaimer",
+            "calculate-custom-spacing.custom.validationMessage"
+          ],
+          "durableMutation": false,
+          "persistenceHandoff": []
+        },
+        "operationResponsibilities": [
+          {
+            "id": "calculate-downlights:functional-1",
+            "type": "custom_functional",
+            "owner": "custom_behavior:calculate-custom-spacing",
+            "reads": [
+              "calculate-custom-spacing.draft.roomLength",
+              "calculate-custom-spacing.draft.roomWidth",
+              "calculate-custom-spacing.input.unit",
+              "calculate-custom-spacing.draft.preferredSpacing"
+            ],
+            "entity": "calculation",
+            "writes": [
+              "calculate-custom-spacing.custom.numberOfDownlights",
+              "calculate-custom-spacing.custom.gridRows",
+              "calculate-custom-spacing.custom.gridColumns",
+              "calculate-custom-spacing.custom.estimatedSpacing",
+              "calculate-custom-spacing.custom.spacingSource",
+              "calculate-custom-spacing.custom.disclaimer",
+              "calculate-custom-spacing.custom.validationMessage"
+            ],
+            "behavior": "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "operationId": "calculate-downlights",
+            "capabilityId": null,
+            "outputEffect": null,
+            "declaredReads": [
+              "roomLength",
+              "roomWidth",
+              "unit",
+              "preferredSpacing"
+            ],
+            "customBehavior": "custom_behavior:calculate-custom-spacing",
+            "declaredWrites": [
+              "numberOfDownlights",
+              "gridRows",
+              "gridColumns",
+              "estimatedSpacing",
+              "spacingSource",
+              "disclaimer",
+              "validationMessage"
+            ],
+            "interactionIds": [
+              "calculate-custom-spacing:4:action"
+            ],
+            "capabilityMethod": null,
+            "persistenceSource": null,
+            "semanticOperation": "read",
+            "persistenceHandoff": null,
+            "requestedCapability": null,
+            "downstreamDependencies": [],
+            "requiresTransformation": true,
+            "requestedCapabilityMethod": null
+          }
+        ],
+        "compatibleUiInteractionPrimitives": [
+          "action"
+        ]
+      },
+      {
+        "id": "custom_behavior:calculate-default-spacing",
+        "type": "custom_behavior",
+        "proven": false,
+        "outputs": [
+          "calculate-default-spacing.custom.numberOfDownlights",
+          "calculate-default-spacing.custom.gridRows",
+          "calculate-default-spacing.custom.gridColumns",
+          "calculate-default-spacing.custom.estimatedSpacing",
+          "calculate-default-spacing.custom.spacingSource",
+          "calculate-default-spacing.custom.disclaimer",
+          "calculate-default-spacing.custom.validationMessage"
+        ],
+        "version": "1.0.0",
+        "journeys": [
+          "calculate-default-spacing"
+        ],
+        "extension": {
+          "module": "src/extensions/custom/calculate-default-spacing.js",
+          "interface": "runCalculateDefaultSpacingCustomBehavior(inputs, context) -> declared outputs",
+          "requiredExports": [
+            "runCalculateDefaultSpacingCustomBehavior"
+          ]
+        },
+        "protected": false,
+        "provenance": "generated_extension",
+        "capabilityId": null,
+        "dependencies": [],
+        "interactions": [
+          "calculate-default-spacing:3:action"
+        ],
+        "testContract": [
+          {
+            "inputs": [
+              "calculate-default-spacing.draft.roomLength",
+              "calculate-default-spacing.draft.roomWidth",
+              "calculate-default-spacing.input.unit",
+              "calculate-default-spacing.input.preferredSpacing"
+            ],
+            "outputs": [
+              "calculate-default-spacing.custom.numberOfDownlights",
+              "calculate-default-spacing.custom.gridRows",
+              "calculate-default-spacing.custom.gridColumns",
+              "calculate-default-spacing.custom.estimatedSpacing",
+              "calculate-default-spacing.custom.spacingSource",
+              "calculate-default-spacing.custom.disclaimer",
+              "calculate-default-spacing.custom.validationMessage"
+            ],
+            "behavior": "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "operationId": "calculate-downlights",
+            "responsibilityId": "calculate-downlights:functional-1",
+            "persistenceSource": null,
+            "persistenceHandoff": null
+          },
+          {
+            "reads": [
+              "calculate-default-spacing.draft.roomLength",
+              "calculate-default-spacing.draft.roomWidth",
+              "calculate-default-spacing.draft.unit",
+              "calculate-default-spacing.input.unit",
+              "calculate-default-spacing.input.preferredSpacing"
+            ],
+            "writes": [
+              "calculate-default-spacing.custom.numberOfDownlights",
+              "calculate-default-spacing.custom.gridRows",
+              "calculate-default-spacing.custom.gridColumns",
+              "calculate-default-spacing.custom.estimatedSpacing",
+              "calculate-default-spacing.custom.spacingSource",
+              "calculate-default-spacing.custom.disclaimer",
+              "calculate-default-spacing.custom.validationMessage"
+            ],
+            "observe": "the result uses the sensible default spacing and shows the estimate",
+            "interactionId": "calculate-default-spacing:3:action"
+          }
+        ],
+        "requiredInputs": [
+          "calculate-default-spacing.draft.roomLength",
+          "calculate-default-spacing.draft.roomWidth",
+          "calculate-default-spacing.input.unit",
+          "calculate-default-spacing.input.preferredSpacing",
+          "calculate-default-spacing.draft.unit"
+        ],
+        "stateOwnership": {
+          "owns": [
+            "calculate-default-spacing.custom.numberOfDownlights",
+            "calculate-default-spacing.custom.gridRows",
+            "calculate-default-spacing.custom.gridColumns",
+            "calculate-default-spacing.custom.estimatedSpacing",
+            "calculate-default-spacing.custom.spacingSource",
+            "calculate-default-spacing.custom.disclaimer",
+            "calculate-default-spacing.custom.validationMessage"
+          ],
+          "journey": "calculate-default-spacing"
+        },
+        "supportedOperations": [
+          "read",
+          "action"
+        ],
+        "persistenceSemantics": {
+          "owner": "bounded custom transformation; durable state is read from or handed off to composed capabilities",
+          "durable": false,
+          "sources": [],
+          "handoffs": [],
+          "browserStorage": false
+        },
+        "verificationSemantics": {
+          "actions": [
+            "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "action"
+          ],
+          "observe": [
+            "the result uses the sensible default spacing and shows the estimate"
+          ],
+          "stateChange": [
+            "calculate-default-spacing.custom.numberOfDownlights",
+            "calculate-default-spacing.custom.gridRows",
+            "calculate-default-spacing.custom.gridColumns",
+            "calculate-default-spacing.custom.estimatedSpacing",
+            "calculate-default-spacing.custom.spacingSource",
+            "calculate-default-spacing.custom.disclaimer",
+            "calculate-default-spacing.custom.validationMessage"
+          ],
+          "durableMutation": false,
+          "persistenceHandoff": []
+        },
+        "operationResponsibilities": [
+          {
+            "id": "calculate-downlights:functional-1",
+            "type": "custom_functional",
+            "owner": "custom_behavior:calculate-default-spacing",
+            "reads": [
+              "calculate-default-spacing.draft.roomLength",
+              "calculate-default-spacing.draft.roomWidth",
+              "calculate-default-spacing.input.unit",
+              "calculate-default-spacing.input.preferredSpacing"
+            ],
+            "entity": "calculation",
+            "writes": [
+              "calculate-default-spacing.custom.numberOfDownlights",
+              "calculate-default-spacing.custom.gridRows",
+              "calculate-default-spacing.custom.gridColumns",
+              "calculate-default-spacing.custom.estimatedSpacing",
+              "calculate-default-spacing.custom.spacingSource",
+              "calculate-default-spacing.custom.disclaimer",
+              "calculate-default-spacing.custom.validationMessage"
+            ],
+            "behavior": "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "operationId": "calculate-downlights",
+            "capabilityId": null,
+            "outputEffect": null,
+            "declaredReads": [
+              "roomLength",
+              "roomWidth",
+              "unit",
+              "preferredSpacing"
+            ],
+            "customBehavior": "custom_behavior:calculate-default-spacing",
+            "declaredWrites": [
+              "numberOfDownlights",
+              "gridRows",
+              "gridColumns",
+              "estimatedSpacing",
+              "spacingSource",
+              "disclaimer",
+              "validationMessage"
+            ],
+            "interactionIds": [
+              "calculate-default-spacing:3:action"
+            ],
+            "capabilityMethod": null,
+            "persistenceSource": null,
+            "semanticOperation": "read",
+            "persistenceHandoff": null,
+            "requestedCapability": null,
+            "downstreamDependencies": [],
+            "requiresTransformation": true,
+            "requestedCapabilityMethod": null
+          }
+        ],
+        "compatibleUiInteractionPrimitives": [
+          "action"
+        ]
+      },
+      {
+        "id": "custom_behavior:calculate-in-feet",
+        "type": "custom_behavior",
+        "proven": false,
+        "outputs": [
+          "calculate-in-feet.custom.numberOfDownlights",
+          "calculate-in-feet.custom.gridRows",
+          "calculate-in-feet.custom.gridColumns",
+          "calculate-in-feet.custom.estimatedSpacing",
+          "calculate-in-feet.custom.spacingSource",
+          "calculate-in-feet.custom.disclaimer",
+          "calculate-in-feet.custom.validationMessage"
+        ],
+        "version": "1.0.0",
+        "journeys": [
+          "calculate-in-feet"
+        ],
+        "extension": {
+          "module": "src/extensions/custom/calculate-in-feet.js",
+          "interface": "runCalculateInFeetCustomBehavior(inputs, context) -> declared outputs",
+          "requiredExports": [
+            "runCalculateInFeetCustomBehavior"
+          ]
+        },
+        "protected": false,
+        "provenance": "generated_extension",
+        "capabilityId": null,
+        "dependencies": [],
+        "interactions": [
+          "calculate-in-feet:5:action"
+        ],
+        "testContract": [
+          {
+            "inputs": [
+              "calculate-in-feet.draft.roomLength",
+              "calculate-in-feet.draft.roomWidth",
+              "calculate-in-feet.draft.unit",
+              "calculate-in-feet.draft.preferredSpacing"
+            ],
+            "outputs": [
+              "calculate-in-feet.custom.numberOfDownlights",
+              "calculate-in-feet.custom.gridRows",
+              "calculate-in-feet.custom.gridColumns",
+              "calculate-in-feet.custom.estimatedSpacing",
+              "calculate-in-feet.custom.spacingSource",
+              "calculate-in-feet.custom.disclaimer",
+              "calculate-in-feet.custom.validationMessage"
+            ],
+            "behavior": "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "operationId": "calculate-downlights",
+            "responsibilityId": "calculate-downlights:functional-1",
+            "persistenceSource": null,
+            "persistenceHandoff": null
+          },
+          {
+            "reads": [
+              "calculate-in-feet.draft.roomLength",
+              "calculate-in-feet.draft.roomWidth",
+              "calculate-in-feet.draft.unit",
+              "calculate-in-feet.draft.preferredSpacing"
+            ],
+            "writes": [
+              "calculate-in-feet.custom.numberOfDownlights",
+              "calculate-in-feet.custom.gridRows",
+              "calculate-in-feet.custom.gridColumns",
+              "calculate-in-feet.custom.estimatedSpacing",
+              "calculate-in-feet.custom.spacingSource",
+              "calculate-in-feet.custom.disclaimer",
+              "calculate-in-feet.custom.validationMessage"
+            ],
+            "observe": "the result is shown using feet labels",
+            "interactionId": "calculate-in-feet:5:action"
+          }
+        ],
+        "requiredInputs": [
+          "calculate-in-feet.draft.roomLength",
+          "calculate-in-feet.draft.roomWidth",
+          "calculate-in-feet.draft.unit",
+          "calculate-in-feet.draft.preferredSpacing"
+        ],
+        "stateOwnership": {
+          "owns": [
+            "calculate-in-feet.custom.numberOfDownlights",
+            "calculate-in-feet.custom.gridRows",
+            "calculate-in-feet.custom.gridColumns",
+            "calculate-in-feet.custom.estimatedSpacing",
+            "calculate-in-feet.custom.spacingSource",
+            "calculate-in-feet.custom.disclaimer",
+            "calculate-in-feet.custom.validationMessage"
+          ],
+          "journey": "calculate-in-feet"
+        },
+        "supportedOperations": [
+          "read",
+          "action"
+        ],
+        "persistenceSemantics": {
+          "owner": "bounded custom transformation; durable state is read from or handed off to composed capabilities",
+          "durable": false,
+          "sources": [],
+          "handoffs": [],
+          "browserStorage": false
+        },
+        "verificationSemantics": {
+          "actions": [
+            "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "action"
+          ],
+          "observe": [
+            "the result is shown using feet labels"
+          ],
+          "stateChange": [
+            "calculate-in-feet.custom.numberOfDownlights",
+            "calculate-in-feet.custom.gridRows",
+            "calculate-in-feet.custom.gridColumns",
+            "calculate-in-feet.custom.estimatedSpacing",
+            "calculate-in-feet.custom.spacingSource",
+            "calculate-in-feet.custom.disclaimer",
+            "calculate-in-feet.custom.validationMessage"
+          ],
+          "durableMutation": false,
+          "persistenceHandoff": []
+        },
+        "operationResponsibilities": [
+          {
+            "id": "calculate-downlights:functional-1",
+            "type": "custom_functional",
+            "owner": "custom_behavior:calculate-in-feet",
+            "reads": [
+              "calculate-in-feet.draft.roomLength",
+              "calculate-in-feet.draft.roomWidth",
+              "calculate-in-feet.draft.unit",
+              "calculate-in-feet.draft.preferredSpacing"
+            ],
+            "entity": "calculation",
+            "writes": [
+              "calculate-in-feet.custom.numberOfDownlights",
+              "calculate-in-feet.custom.gridRows",
+              "calculate-in-feet.custom.gridColumns",
+              "calculate-in-feet.custom.estimatedSpacing",
+              "calculate-in-feet.custom.spacingSource",
+              "calculate-in-feet.custom.disclaimer",
+              "calculate-in-feet.custom.validationMessage"
+            ],
+            "behavior": "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "operationId": "calculate-downlights",
+            "capabilityId": null,
+            "outputEffect": null,
+            "declaredReads": [
+              "roomLength",
+              "roomWidth",
+              "unit",
+              "preferredSpacing"
+            ],
+            "customBehavior": "custom_behavior:calculate-in-feet",
+            "declaredWrites": [
+              "numberOfDownlights",
+              "gridRows",
+              "gridColumns",
+              "estimatedSpacing",
+              "spacingSource",
+              "disclaimer",
+              "validationMessage"
+            ],
+            "interactionIds": [
+              "calculate-in-feet:5:action"
+            ],
+            "capabilityMethod": null,
+            "persistenceSource": null,
+            "semanticOperation": "read",
+            "persistenceHandoff": null,
+            "requestedCapability": null,
+            "downstreamDependencies": [],
+            "requiresTransformation": true,
+            "requestedCapabilityMethod": null
+          }
+        ],
+        "compatibleUiInteractionPrimitives": [
+          "action"
+        ]
+      },
+      {
+        "id": "custom_behavior:show-validation",
+        "type": "custom_behavior",
+        "proven": false,
+        "outputs": [
+          "show-validation.custom.numberOfDownlights",
+          "show-validation.custom.gridRows",
+          "show-validation.custom.gridColumns",
+          "show-validation.custom.estimatedSpacing",
+          "show-validation.custom.spacingSource",
+          "show-validation.custom.disclaimer",
+          "show-validation.custom.validationMessage"
+        ],
+        "version": "1.0.0",
+        "journeys": [
+          "show-validation"
+        ],
+        "extension": {
+          "module": "src/extensions/custom/show-validation.js",
+          "interface": "runShowValidationCustomBehavior(inputs, context) -> declared outputs",
+          "requiredExports": [
+            "runShowValidationCustomBehavior"
+          ]
+        },
+        "protected": false,
+        "provenance": "generated_extension",
+        "capabilityId": null,
+        "dependencies": [],
+        "interactions": [
+          "show-validation:3:action"
+        ],
+        "testContract": [
+          {
+            "inputs": [
+              "show-validation.draft.roomLength",
+              "show-validation.draft.roomWidth",
+              "show-validation.input.unit",
+              "show-validation.input.preferredSpacing"
+            ],
+            "outputs": [
+              "show-validation.custom.numberOfDownlights",
+              "show-validation.custom.gridRows",
+              "show-validation.custom.gridColumns",
+              "show-validation.custom.estimatedSpacing",
+              "show-validation.custom.spacingSource",
+              "show-validation.custom.disclaimer",
+              "show-validation.custom.validationMessage"
+            ],
+            "behavior": "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "operationId": "calculate-downlights",
+            "responsibilityId": "calculate-downlights:functional-1",
+            "persistenceSource": null,
+            "persistenceHandoff": null
+          },
+          {
+            "reads": [
+              "show-validation.draft.roomLength",
+              "show-validation.draft.roomWidth",
+              "show-validation.input.unit",
+              "show-validation.input.preferredSpacing"
+            ],
+            "writes": [
+              "show-validation.custom.numberOfDownlights",
+              "show-validation.custom.gridRows",
+              "show-validation.custom.gridColumns",
+              "show-validation.custom.estimatedSpacing",
+              "show-validation.custom.spacingSource",
+              "show-validation.custom.disclaimer",
+              "show-validation.custom.validationMessage"
+            ],
+            "observe": "a visible validation message appears and no downlight count result is shown",
+            "interactionId": "show-validation:3:action"
+          }
+        ],
+        "requiredInputs": [
+          "show-validation.draft.roomLength",
+          "show-validation.draft.roomWidth",
+          "show-validation.input.unit",
+          "show-validation.input.preferredSpacing"
+        ],
+        "stateOwnership": {
+          "owns": [
+            "show-validation.custom.numberOfDownlights",
+            "show-validation.custom.gridRows",
+            "show-validation.custom.gridColumns",
+            "show-validation.custom.estimatedSpacing",
+            "show-validation.custom.spacingSource",
+            "show-validation.custom.disclaimer",
+            "show-validation.custom.validationMessage"
+          ],
+          "journey": "show-validation"
+        },
+        "supportedOperations": [
+          "read",
+          "action"
+        ],
+        "persistenceSemantics": {
+          "owner": "bounded custom transformation; durable state is read from or handed off to composed capabilities",
+          "durable": false,
+          "sources": [],
+          "handoffs": [],
+          "browserStorage": false
+        },
+        "verificationSemantics": {
+          "actions": [
+            "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "action"
+          ],
+          "observe": [
+            "a visible validation message appears and no downlight count result is shown"
+          ],
+          "stateChange": [
+            "show-validation.custom.numberOfDownlights",
+            "show-validation.custom.gridRows",
+            "show-validation.custom.gridColumns",
+            "show-validation.custom.estimatedSpacing",
+            "show-validation.custom.spacingSource",
+            "show-validation.custom.disclaimer",
+            "show-validation.custom.validationMessage"
+          ],
+          "durableMutation": false,
+          "persistenceHandoff": []
+        },
+        "operationResponsibilities": [
+          {
+            "id": "calculate-downlights:functional-1",
+            "type": "custom_functional",
+            "owner": "custom_behavior:show-validation",
+            "reads": [
+              "show-validation.draft.roomLength",
+              "show-validation.draft.roomWidth",
+              "show-validation.input.unit",
+              "show-validation.input.preferredSpacing"
+            ],
+            "entity": "calculation",
+            "writes": [
+              "show-validation.custom.numberOfDownlights",
+              "show-validation.custom.gridRows",
+              "show-validation.custom.gridColumns",
+              "show-validation.custom.estimatedSpacing",
+              "show-validation.custom.spacingSource",
+              "show-validation.custom.disclaimer",
+              "show-validation.custom.validationMessage"
+            ],
+            "behavior": "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "operationId": "calculate-downlights",
+            "capabilityId": null,
+            "outputEffect": null,
+            "declaredReads": [
+              "roomLength",
+              "roomWidth",
+              "unit",
+              "preferredSpacing"
+            ],
+            "customBehavior": "custom_behavior:show-validation",
+            "declaredWrites": [
+              "numberOfDownlights",
+              "gridRows",
+              "gridColumns",
+              "estimatedSpacing",
+              "spacingSource",
+              "disclaimer",
+              "validationMessage"
+            ],
+            "interactionIds": [
+              "show-validation:3:action"
+            ],
+            "capabilityMethod": null,
+            "persistenceSource": null,
+            "semanticOperation": "read",
+            "persistenceHandoff": null,
+            "requestedCapability": null,
+            "downstreamDependencies": [],
+            "requiresTransformation": true,
+            "requestedCapabilityMethod": null
+          }
+        ],
+        "compatibleUiInteractionPrimitives": [
+          "action"
+        ]
+      }
+    ],
+    "version": 2,
+    "journeys": [
+      {
+        "state": [
+          "calculate-custom-spacing.draft.roomLength",
+          "calculate-custom-spacing.draft.roomWidth",
+          "calculate-custom-spacing.draft.preferredSpacing",
+          "calculate-custom-spacing.draft.unit",
+          "calculate-custom-spacing.input.unit",
+          "calculate-custom-spacing.custom.numberOfDownlights",
+          "calculate-custom-spacing.custom.gridRows",
+          "calculate-custom-spacing.custom.gridColumns",
+          "calculate-custom-spacing.custom.estimatedSpacing",
+          "calculate-custom-spacing.custom.spacingSource",
+          "calculate-custom-spacing.custom.disclaimer",
+          "calculate-custom-spacing.custom.validationMessage"
+        ],
+        "entities": [
+          "calculation"
+        ],
+        "dataFlows": [
+          {
+            "reads": [],
+            "writes": [],
+            "interactionId": "calculate-custom-spacing:1:navigation",
+            "semanticOwner": null,
+            "customBehavior": null,
+            "capabilityMethod": null,
+            "responsibilities": [],
+            "downstreamDependencies": []
+          },
+          {
+            "reads": [],
+            "writes": [
+              "calculate-custom-spacing.draft.roomLength"
+            ],
+            "interactionId": "calculate-custom-spacing:2:input:roomlength",
+            "semanticOwner": null,
+            "customBehavior": null,
+            "capabilityMethod": null,
+            "responsibilities": [],
+            "downstreamDependencies": []
+          },
+          {
+            "reads": [],
+            "writes": [
+              "calculate-custom-spacing.draft.roomWidth"
+            ],
+            "interactionId": "calculate-custom-spacing:2:input:roomwidth",
+            "semanticOwner": null,
+            "customBehavior": null,
+            "capabilityMethod": null,
+            "responsibilities": [],
+            "downstreamDependencies": []
+          },
+          {
+            "reads": [],
+            "writes": [
+              "calculate-custom-spacing.draft.preferredSpacing"
+            ],
+            "interactionId": "calculate-custom-spacing:3:input:preferredspacing",
+            "semanticOwner": null,
+            "customBehavior": null,
+            "capabilityMethod": null,
+            "responsibilities": [],
+            "downstreamDependencies": []
+          },
+          {
+            "reads": [
+              "calculate-custom-spacing.draft.roomLength",
+              "calculate-custom-spacing.draft.roomWidth",
+              "calculate-custom-spacing.draft.unit",
+              "calculate-custom-spacing.draft.preferredSpacing",
+              "calculate-custom-spacing.input.unit"
+            ],
+            "writes": [
+              "calculate-custom-spacing.custom.numberOfDownlights",
+              "calculate-custom-spacing.custom.gridRows",
+              "calculate-custom-spacing.custom.gridColumns",
+              "calculate-custom-spacing.custom.estimatedSpacing",
+              "calculate-custom-spacing.custom.spacingSource",
+              "calculate-custom-spacing.custom.disclaimer",
+              "calculate-custom-spacing.custom.validationMessage"
+            ],
+            "interactionId": "calculate-custom-spacing:4:action",
+            "semanticOwner": "custom_behavior:calculate-custom-spacing",
+            "customBehavior": "custom_behavior:calculate-custom-spacing",
+            "capabilityMethod": null,
+            "responsibilities": [
+              "calculate-downlights:functional-1"
+            ],
+            "downstreamDependencies": []
+          }
+        ],
+        "journeyId": "calculate-custom-spacing",
+        "customBehavior": "custom_behavior:calculate-custom-spacing",
+        "requiredNodeIds": [
+          "capability:interaction-primitives",
+          "custom_behavior:calculate-custom-spacing"
+        ],
+        "durableStateOwner": null,
+        "operationResponsibilities": [
+          {
+            "entity": "calculation",
+            "journeyId": "calculate-custom-spacing",
+            "stepIndex": 3,
+            "operationId": "calculate-downlights",
+            "responsibilities": [
+              {
+                "id": "calculate-downlights:functional-1",
+                "type": "custom_functional",
+                "owner": "custom_behavior:calculate-custom-spacing",
+                "reads": [
+                  "calculate-custom-spacing.draft.roomLength",
+                  "calculate-custom-spacing.draft.roomWidth",
+                  "calculate-custom-spacing.input.unit",
+                  "calculate-custom-spacing.draft.preferredSpacing"
+                ],
+                "entity": "calculation",
+                "writes": [
+                  "calculate-custom-spacing.custom.numberOfDownlights",
+                  "calculate-custom-spacing.custom.gridRows",
+                  "calculate-custom-spacing.custom.gridColumns",
+                  "calculate-custom-spacing.custom.estimatedSpacing",
+                  "calculate-custom-spacing.custom.spacingSource",
+                  "calculate-custom-spacing.custom.disclaimer",
+                  "calculate-custom-spacing.custom.validationMessage"
+                ],
+                "behavior": "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+                "operationId": "calculate-downlights",
+                "capabilityId": null,
+                "outputEffect": null,
+                "declaredReads": [
+                  "roomLength",
+                  "roomWidth",
+                  "unit",
+                  "preferredSpacing"
+                ],
+                "customBehavior": "custom_behavior:calculate-custom-spacing",
+                "declaredWrites": [
+                  "numberOfDownlights",
+                  "gridRows",
+                  "gridColumns",
+                  "estimatedSpacing",
+                  "spacingSource",
+                  "disclaimer",
+                  "validationMessage"
+                ],
+                "interactionIds": [
+                  "calculate-custom-spacing:4:action"
+                ],
+                "capabilityMethod": null,
+                "persistenceSource": null,
+                "semanticOperation": "read",
+                "persistenceHandoff": null,
+                "requestedCapability": null,
+                "downstreamDependencies": [],
+                "requiresTransformation": true,
+                "requestedCapabilityMethod": null
+              }
+            ]
+          }
+        ],
+        "uiInteractionRequirements": [
+          {
+            "kind": "input",
+            "machineId": "ctl_1231ba7e",
+            "primitive": "number",
+            "interactionId": "calculate-custom-spacing:2:input:roomlength"
+          },
+          {
+            "kind": "input",
+            "machineId": "ctl_5b3deac6",
+            "primitive": "number",
+            "interactionId": "calculate-custom-spacing:2:input:roomwidth"
+          },
+          {
+            "kind": "input",
+            "machineId": "ctl_7bc99263",
+            "primitive": "number",
+            "interactionId": "calculate-custom-spacing:3:input:preferredspacing"
+          },
+          {
+            "kind": "action",
+            "machineId": "act_865859d3",
+            "primitive": "button",
+            "interactionId": "calculate-custom-spacing:4:action"
+          }
+        ]
+      },
+      {
+        "state": [
+          "calculate-default-spacing.draft.roomLength",
+          "calculate-default-spacing.draft.roomWidth",
+          "calculate-default-spacing.draft.unit",
+          "calculate-default-spacing.input.unit",
+          "calculate-default-spacing.input.preferredSpacing",
+          "calculate-default-spacing.custom.numberOfDownlights",
+          "calculate-default-spacing.custom.gridRows",
+          "calculate-default-spacing.custom.gridColumns",
+          "calculate-default-spacing.custom.estimatedSpacing",
+          "calculate-default-spacing.custom.spacingSource",
+          "calculate-default-spacing.custom.disclaimer",
+          "calculate-default-spacing.custom.validationMessage"
+        ],
+        "entities": [
+          "calculation"
+        ],
+        "dataFlows": [
+          {
+            "reads": [],
+            "writes": [],
+            "interactionId": "calculate-default-spacing:1:navigation",
+            "semanticOwner": null,
+            "customBehavior": null,
+            "capabilityMethod": null,
+            "responsibilities": [],
+            "downstreamDependencies": []
+          },
+          {
+            "reads": [],
+            "writes": [
+              "calculate-default-spacing.draft.roomLength"
+            ],
+            "interactionId": "calculate-default-spacing:2:input:roomlength",
+            "semanticOwner": null,
+            "customBehavior": null,
+            "capabilityMethod": null,
+            "responsibilities": [],
+            "downstreamDependencies": []
+          },
+          {
+            "reads": [],
+            "writes": [
+              "calculate-default-spacing.draft.roomWidth"
+            ],
+            "interactionId": "calculate-default-spacing:2:input:roomwidth",
+            "semanticOwner": null,
+            "customBehavior": null,
+            "capabilityMethod": null,
+            "responsibilities": [],
+            "downstreamDependencies": []
+          },
+          {
+            "reads": [
+              "calculate-default-spacing.draft.roomLength",
+              "calculate-default-spacing.draft.roomWidth",
+              "calculate-default-spacing.draft.unit",
+              "calculate-default-spacing.input.unit",
+              "calculate-default-spacing.input.preferredSpacing"
+            ],
+            "writes": [
+              "calculate-default-spacing.custom.numberOfDownlights",
+              "calculate-default-spacing.custom.gridRows",
+              "calculate-default-spacing.custom.gridColumns",
+              "calculate-default-spacing.custom.estimatedSpacing",
+              "calculate-default-spacing.custom.spacingSource",
+              "calculate-default-spacing.custom.disclaimer",
+              "calculate-default-spacing.custom.validationMessage"
+            ],
+            "interactionId": "calculate-default-spacing:3:action",
+            "semanticOwner": "custom_behavior:calculate-default-spacing",
+            "customBehavior": "custom_behavior:calculate-default-spacing",
+            "capabilityMethod": null,
+            "responsibilities": [
+              "calculate-downlights:functional-1"
+            ],
+            "downstreamDependencies": []
+          }
+        ],
+        "journeyId": "calculate-default-spacing",
+        "customBehavior": "custom_behavior:calculate-default-spacing",
+        "requiredNodeIds": [
+          "capability:interaction-primitives",
+          "custom_behavior:calculate-default-spacing"
+        ],
+        "durableStateOwner": null,
+        "operationResponsibilities": [
+          {
+            "entity": "calculation",
+            "journeyId": "calculate-default-spacing",
+            "stepIndex": 2,
+            "operationId": "calculate-downlights",
+            "responsibilities": [
+              {
+                "id": "calculate-downlights:functional-1",
+                "type": "custom_functional",
+                "owner": "custom_behavior:calculate-default-spacing",
+                "reads": [
+                  "calculate-default-spacing.draft.roomLength",
+                  "calculate-default-spacing.draft.roomWidth",
+                  "calculate-default-spacing.input.unit",
+                  "calculate-default-spacing.input.preferredSpacing"
+                ],
+                "entity": "calculation",
+                "writes": [
+                  "calculate-default-spacing.custom.numberOfDownlights",
+                  "calculate-default-spacing.custom.gridRows",
+                  "calculate-default-spacing.custom.gridColumns",
+                  "calculate-default-spacing.custom.estimatedSpacing",
+                  "calculate-default-spacing.custom.spacingSource",
+                  "calculate-default-spacing.custom.disclaimer",
+                  "calculate-default-spacing.custom.validationMessage"
+                ],
+                "behavior": "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+                "operationId": "calculate-downlights",
+                "capabilityId": null,
+                "outputEffect": null,
+                "declaredReads": [
+                  "roomLength",
+                  "roomWidth",
+                  "unit",
+                  "preferredSpacing"
+                ],
+                "customBehavior": "custom_behavior:calculate-default-spacing",
+                "declaredWrites": [
+                  "numberOfDownlights",
+                  "gridRows",
+                  "gridColumns",
+                  "estimatedSpacing",
+                  "spacingSource",
+                  "disclaimer",
+                  "validationMessage"
+                ],
+                "interactionIds": [
+                  "calculate-default-spacing:3:action"
+                ],
+                "capabilityMethod": null,
+                "persistenceSource": null,
+                "semanticOperation": "read",
+                "persistenceHandoff": null,
+                "requestedCapability": null,
+                "downstreamDependencies": [],
+                "requiresTransformation": true,
+                "requestedCapabilityMethod": null
+              }
+            ]
+          }
+        ],
+        "uiInteractionRequirements": [
+          {
+            "kind": "input",
+            "machineId": "ctl_1231ba7e",
+            "primitive": "number",
+            "interactionId": "calculate-default-spacing:2:input:roomlength"
+          },
+          {
+            "kind": "input",
+            "machineId": "ctl_5b3deac6",
+            "primitive": "number",
+            "interactionId": "calculate-default-spacing:2:input:roomwidth"
+          },
+          {
+            "kind": "action",
+            "machineId": "act_865859d3",
+            "primitive": "button",
+            "interactionId": "calculate-default-spacing:3:action"
+          }
+        ]
+      },
+      {
+        "state": [
+          "calculate-in-feet.draft.unit",
+          "calculate-in-feet.draft.roomLength",
+          "calculate-in-feet.draft.roomWidth",
+          "calculate-in-feet.draft.preferredSpacing",
+          "calculate-in-feet.custom.numberOfDownlights",
+          "calculate-in-feet.custom.gridRows",
+          "calculate-in-feet.custom.gridColumns",
+          "calculate-in-feet.custom.estimatedSpacing",
+          "calculate-in-feet.custom.spacingSource",
+          "calculate-in-feet.custom.disclaimer",
+          "calculate-in-feet.custom.validationMessage"
+        ],
+        "entities": [
+          "calculation"
+        ],
+        "dataFlows": [
+          {
+            "reads": [],
+            "writes": [],
+            "interactionId": "calculate-in-feet:1:navigation",
+            "semanticOwner": null,
+            "customBehavior": null,
+            "capabilityMethod": null,
+            "responsibilities": [],
+            "downstreamDependencies": []
+          },
+          {
+            "reads": [],
+            "writes": [
+              "calculate-in-feet.draft.unit"
+            ],
+            "interactionId": "calculate-in-feet:2:selection:unit",
+            "semanticOwner": null,
+            "customBehavior": null,
+            "capabilityMethod": null,
+            "responsibilities": [],
+            "downstreamDependencies": []
+          },
+          {
+            "reads": [],
+            "writes": [
+              "calculate-in-feet.draft.roomLength"
+            ],
+            "interactionId": "calculate-in-feet:3:input:roomlength",
+            "semanticOwner": null,
+            "customBehavior": null,
+            "capabilityMethod": null,
+            "responsibilities": [],
+            "downstreamDependencies": []
+          },
+          {
+            "reads": [],
+            "writes": [
+              "calculate-in-feet.draft.roomWidth"
+            ],
+            "interactionId": "calculate-in-feet:3:input:roomwidth",
+            "semanticOwner": null,
+            "customBehavior": null,
+            "capabilityMethod": null,
+            "responsibilities": [],
+            "downstreamDependencies": []
+          },
+          {
+            "reads": [],
+            "writes": [
+              "calculate-in-feet.draft.preferredSpacing"
+            ],
+            "interactionId": "calculate-in-feet:4:input:preferredspacing",
+            "semanticOwner": null,
+            "customBehavior": null,
+            "capabilityMethod": null,
+            "responsibilities": [],
+            "downstreamDependencies": []
+          },
+          {
+            "reads": [
+              "calculate-in-feet.draft.roomLength",
+              "calculate-in-feet.draft.roomWidth",
+              "calculate-in-feet.draft.unit",
+              "calculate-in-feet.draft.preferredSpacing"
+            ],
+            "writes": [
+              "calculate-in-feet.custom.numberOfDownlights",
+              "calculate-in-feet.custom.gridRows",
+              "calculate-in-feet.custom.gridColumns",
+              "calculate-in-feet.custom.estimatedSpacing",
+              "calculate-in-feet.custom.spacingSource",
+              "calculate-in-feet.custom.disclaimer",
+              "calculate-in-feet.custom.validationMessage"
+            ],
+            "interactionId": "calculate-in-feet:5:action",
+            "semanticOwner": "custom_behavior:calculate-in-feet",
+            "customBehavior": "custom_behavior:calculate-in-feet",
+            "capabilityMethod": null,
+            "responsibilities": [
+              "calculate-downlights:functional-1"
+            ],
+            "downstreamDependencies": []
+          }
+        ],
+        "journeyId": "calculate-in-feet",
+        "customBehavior": "custom_behavior:calculate-in-feet",
+        "requiredNodeIds": [
+          "capability:interaction-primitives",
+          "custom_behavior:calculate-in-feet"
+        ],
+        "durableStateOwner": null,
+        "operationResponsibilities": [
+          {
+            "entity": "calculation",
+            "journeyId": "calculate-in-feet",
+            "stepIndex": 4,
+            "operationId": "calculate-downlights",
+            "responsibilities": [
+              {
+                "id": "calculate-downlights:functional-1",
+                "type": "custom_functional",
+                "owner": "custom_behavior:calculate-in-feet",
+                "reads": [
+                  "calculate-in-feet.draft.roomLength",
+                  "calculate-in-feet.draft.roomWidth",
+                  "calculate-in-feet.draft.unit",
+                  "calculate-in-feet.draft.preferredSpacing"
+                ],
+                "entity": "calculation",
+                "writes": [
+                  "calculate-in-feet.custom.numberOfDownlights",
+                  "calculate-in-feet.custom.gridRows",
+                  "calculate-in-feet.custom.gridColumns",
+                  "calculate-in-feet.custom.estimatedSpacing",
+                  "calculate-in-feet.custom.spacingSource",
+                  "calculate-in-feet.custom.disclaimer",
+                  "calculate-in-feet.custom.validationMessage"
+                ],
+                "behavior": "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+                "operationId": "calculate-downlights",
+                "capabilityId": null,
+                "outputEffect": null,
+                "declaredReads": [
+                  "roomLength",
+                  "roomWidth",
+                  "unit",
+                  "preferredSpacing"
+                ],
+                "customBehavior": "custom_behavior:calculate-in-feet",
+                "declaredWrites": [
+                  "numberOfDownlights",
+                  "gridRows",
+                  "gridColumns",
+                  "estimatedSpacing",
+                  "spacingSource",
+                  "disclaimer",
+                  "validationMessage"
+                ],
+                "interactionIds": [
+                  "calculate-in-feet:5:action"
+                ],
+                "capabilityMethod": null,
+                "persistenceSource": null,
+                "semanticOperation": "read",
+                "persistenceHandoff": null,
+                "requestedCapability": null,
+                "downstreamDependencies": [],
+                "requiresTransformation": true,
+                "requestedCapabilityMethod": null
+              }
+            ]
+          }
+        ],
+        "uiInteractionRequirements": [
+          {
+            "kind": "selection",
+            "machineId": "ctl_e8b51a07",
+            "primitive": "button",
+            "interactionId": "calculate-in-feet:2:selection:unit"
+          },
+          {
+            "kind": "input",
+            "machineId": "ctl_1231ba7e",
+            "primitive": "number",
+            "interactionId": "calculate-in-feet:3:input:roomlength"
+          },
+          {
+            "kind": "input",
+            "machineId": "ctl_5b3deac6",
+            "primitive": "number",
+            "interactionId": "calculate-in-feet:3:input:roomwidth"
+          },
+          {
+            "kind": "input",
+            "machineId": "ctl_7bc99263",
+            "primitive": "number",
+            "interactionId": "calculate-in-feet:4:input:preferredspacing"
+          },
+          {
+            "kind": "action",
+            "machineId": "act_865859d3",
+            "primitive": "button",
+            "interactionId": "calculate-in-feet:5:action"
+          }
+        ]
+      },
+      {
+        "state": [
+          "show-validation.draft.roomLength",
+          "show-validation.draft.roomWidth",
+          "show-validation.input.unit",
+          "show-validation.input.preferredSpacing",
+          "show-validation.custom.numberOfDownlights",
+          "show-validation.custom.gridRows",
+          "show-validation.custom.gridColumns",
+          "show-validation.custom.estimatedSpacing",
+          "show-validation.custom.spacingSource",
+          "show-validation.custom.disclaimer",
+          "show-validation.custom.validationMessage"
+        ],
+        "entities": [
+          "calculation"
+        ],
+        "dataFlows": [
+          {
+            "reads": [],
+            "writes": [],
+            "interactionId": "show-validation:1:navigation",
+            "semanticOwner": null,
+            "customBehavior": null,
+            "capabilityMethod": null,
+            "responsibilities": [],
+            "downstreamDependencies": []
+          },
+          {
+            "reads": [],
+            "writes": [
+              "show-validation.draft.roomLength"
+            ],
+            "interactionId": "show-validation:2:input:roomlength",
+            "semanticOwner": null,
+            "customBehavior": null,
+            "capabilityMethod": null,
+            "responsibilities": [],
+            "downstreamDependencies": []
+          },
+          {
+            "reads": [],
+            "writes": [
+              "show-validation.draft.roomWidth"
+            ],
+            "interactionId": "show-validation:2:input:roomwidth",
+            "semanticOwner": null,
+            "customBehavior": null,
+            "capabilityMethod": null,
+            "responsibilities": [],
+            "downstreamDependencies": []
+          },
+          {
+            "reads": [
+              "show-validation.draft.roomLength",
+              "show-validation.draft.roomWidth",
+              "show-validation.input.unit",
+              "show-validation.input.preferredSpacing"
+            ],
+            "writes": [
+              "show-validation.custom.numberOfDownlights",
+              "show-validation.custom.gridRows",
+              "show-validation.custom.gridColumns",
+              "show-validation.custom.estimatedSpacing",
+              "show-validation.custom.spacingSource",
+              "show-validation.custom.disclaimer",
+              "show-validation.custom.validationMessage"
+            ],
+            "interactionId": "show-validation:3:action",
+            "semanticOwner": "custom_behavior:show-validation",
+            "customBehavior": "custom_behavior:show-validation",
+            "capabilityMethod": null,
+            "responsibilities": [
+              "calculate-downlights:functional-1"
+            ],
+            "downstreamDependencies": []
+          }
+        ],
+        "journeyId": "show-validation",
+        "customBehavior": "custom_behavior:show-validation",
+        "requiredNodeIds": [
+          "capability:interaction-primitives",
+          "custom_behavior:show-validation"
+        ],
+        "durableStateOwner": null,
+        "operationResponsibilities": [
+          {
+            "entity": "calculation",
+            "journeyId": "show-validation",
+            "stepIndex": 2,
+            "operationId": "calculate-downlights",
+            "responsibilities": [
+              {
+                "id": "calculate-downlights:functional-1",
+                "type": "custom_functional",
+                "owner": "custom_behavior:show-validation",
+                "reads": [
+                  "show-validation.draft.roomLength",
+                  "show-validation.draft.roomWidth",
+                  "show-validation.input.unit",
+                  "show-validation.input.preferredSpacing"
+                ],
+                "entity": "calculation",
+                "writes": [
+                  "show-validation.custom.numberOfDownlights",
+                  "show-validation.custom.gridRows",
+                  "show-validation.custom.gridColumns",
+                  "show-validation.custom.estimatedSpacing",
+                  "show-validation.custom.spacingSource",
+                  "show-validation.custom.disclaimer",
+                  "show-validation.custom.validationMessage"
+                ],
+                "behavior": "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+                "operationId": "calculate-downlights",
+                "capabilityId": null,
+                "outputEffect": null,
+                "declaredReads": [
+                  "roomLength",
+                  "roomWidth",
+                  "unit",
+                  "preferredSpacing"
+                ],
+                "customBehavior": "custom_behavior:show-validation",
+                "declaredWrites": [
+                  "numberOfDownlights",
+                  "gridRows",
+                  "gridColumns",
+                  "estimatedSpacing",
+                  "spacingSource",
+                  "disclaimer",
+                  "validationMessage"
+                ],
+                "interactionIds": [
+                  "show-validation:3:action"
+                ],
+                "capabilityMethod": null,
+                "persistenceSource": null,
+                "semanticOperation": "read",
+                "persistenceHandoff": null,
+                "requestedCapability": null,
+                "downstreamDependencies": [],
+                "requiresTransformation": true,
+                "requestedCapabilityMethod": null
+              }
+            ]
+          }
+        ],
+        "uiInteractionRequirements": [
+          {
+            "kind": "input",
+            "machineId": "ctl_1231ba7e",
+            "primitive": "number",
+            "interactionId": "show-validation:2:input:roomlength"
+          },
+          {
+            "kind": "input",
+            "machineId": "ctl_5b3deac6",
+            "primitive": "number",
+            "interactionId": "show-validation:2:input:roomwidth"
+          },
+          {
+            "kind": "action",
+            "machineId": "act_865859d3",
+            "primitive": "button",
+            "interactionId": "show-validation:3:action"
+          }
+        ]
+      }
+    ],
+    "buildProfile": {
+      "version": 1,
+      "confidence": 0.45,
+      "inferenceSource": "auto",
+      "resolvedBuildType": "auto",
+      "applicationSubtype": "auto",
+      "requestedBuildType": "auto",
+      "requirementSignals": []
+    },
+    "customBehavior": [
+      "custom_behavior:calculate-custom-spacing",
+      "custom_behavior:calculate-default-spacing",
+      "custom_behavior:calculate-in-feet",
+      "custom_behavior:show-validation"
+    ],
+    "registryVersions": {
+      "crud": "1.0.0",
+      "roles": "1.0.0",
+      "wizard": "1.0.0",
+      "booking": "1.0.0",
+      "contact": "1.0.0",
+      "session": "1.1.0",
+      "newsletter": "1.0.0",
+      "interaction-primitives": "1.0.0"
+    },
+    "operationResponsibilities": [
+      {
+        "entity": "calculation",
+        "journeyId": "calculate-custom-spacing",
+        "stepIndex": 3,
+        "operationId": "calculate-downlights",
+        "responsibilities": [
+          {
+            "id": "calculate-downlights:functional-1",
+            "type": "custom_functional",
+            "owner": "custom_behavior:calculate-custom-spacing",
+            "reads": [
+              "calculate-custom-spacing.draft.roomLength",
+              "calculate-custom-spacing.draft.roomWidth",
+              "calculate-custom-spacing.input.unit",
+              "calculate-custom-spacing.draft.preferredSpacing"
+            ],
+            "entity": "calculation",
+            "writes": [
+              "calculate-custom-spacing.custom.numberOfDownlights",
+              "calculate-custom-spacing.custom.gridRows",
+              "calculate-custom-spacing.custom.gridColumns",
+              "calculate-custom-spacing.custom.estimatedSpacing",
+              "calculate-custom-spacing.custom.spacingSource",
+              "calculate-custom-spacing.custom.disclaimer",
+              "calculate-custom-spacing.custom.validationMessage"
+            ],
+            "behavior": "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "operationId": "calculate-downlights",
+            "capabilityId": null,
+            "outputEffect": null,
+            "declaredReads": [
+              "roomLength",
+              "roomWidth",
+              "unit",
+              "preferredSpacing"
+            ],
+            "customBehavior": "custom_behavior:calculate-custom-spacing",
+            "declaredWrites": [
+              "numberOfDownlights",
+              "gridRows",
+              "gridColumns",
+              "estimatedSpacing",
+              "spacingSource",
+              "disclaimer",
+              "validationMessage"
+            ],
+            "interactionIds": [
+              "calculate-custom-spacing:4:action"
+            ],
+            "capabilityMethod": null,
+            "persistenceSource": null,
+            "semanticOperation": "read",
+            "persistenceHandoff": null,
+            "requestedCapability": null,
+            "downstreamDependencies": [],
+            "requiresTransformation": true,
+            "requestedCapabilityMethod": null
+          }
+        ]
+      },
+      {
+        "entity": "calculation",
+        "journeyId": "calculate-default-spacing",
+        "stepIndex": 2,
+        "operationId": "calculate-downlights",
+        "responsibilities": [
+          {
+            "id": "calculate-downlights:functional-1",
+            "type": "custom_functional",
+            "owner": "custom_behavior:calculate-default-spacing",
+            "reads": [
+              "calculate-default-spacing.draft.roomLength",
+              "calculate-default-spacing.draft.roomWidth",
+              "calculate-default-spacing.input.unit",
+              "calculate-default-spacing.input.preferredSpacing"
+            ],
+            "entity": "calculation",
+            "writes": [
+              "calculate-default-spacing.custom.numberOfDownlights",
+              "calculate-default-spacing.custom.gridRows",
+              "calculate-default-spacing.custom.gridColumns",
+              "calculate-default-spacing.custom.estimatedSpacing",
+              "calculate-default-spacing.custom.spacingSource",
+              "calculate-default-spacing.custom.disclaimer",
+              "calculate-default-spacing.custom.validationMessage"
+            ],
+            "behavior": "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "operationId": "calculate-downlights",
+            "capabilityId": null,
+            "outputEffect": null,
+            "declaredReads": [
+              "roomLength",
+              "roomWidth",
+              "unit",
+              "preferredSpacing"
+            ],
+            "customBehavior": "custom_behavior:calculate-default-spacing",
+            "declaredWrites": [
+              "numberOfDownlights",
+              "gridRows",
+              "gridColumns",
+              "estimatedSpacing",
+              "spacingSource",
+              "disclaimer",
+              "validationMessage"
+            ],
+            "interactionIds": [
+              "calculate-default-spacing:3:action"
+            ],
+            "capabilityMethod": null,
+            "persistenceSource": null,
+            "semanticOperation": "read",
+            "persistenceHandoff": null,
+            "requestedCapability": null,
+            "downstreamDependencies": [],
+            "requiresTransformation": true,
+            "requestedCapabilityMethod": null
+          }
+        ]
+      },
+      {
+        "entity": "calculation",
+        "journeyId": "calculate-in-feet",
+        "stepIndex": 4,
+        "operationId": "calculate-downlights",
+        "responsibilities": [
+          {
+            "id": "calculate-downlights:functional-1",
+            "type": "custom_functional",
+            "owner": "custom_behavior:calculate-in-feet",
+            "reads": [
+              "calculate-in-feet.draft.roomLength",
+              "calculate-in-feet.draft.roomWidth",
+              "calculate-in-feet.draft.unit",
+              "calculate-in-feet.draft.preferredSpacing"
+            ],
+            "entity": "calculation",
+            "writes": [
+              "calculate-in-feet.custom.numberOfDownlights",
+              "calculate-in-feet.custom.gridRows",
+              "calculate-in-feet.custom.gridColumns",
+              "calculate-in-feet.custom.estimatedSpacing",
+              "calculate-in-feet.custom.spacingSource",
+              "calculate-in-feet.custom.disclaimer",
+              "calculate-in-feet.custom.validationMessage"
+            ],
+            "behavior": "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "operationId": "calculate-downlights",
+            "capabilityId": null,
+            "outputEffect": null,
+            "declaredReads": [
+              "roomLength",
+              "roomWidth",
+              "unit",
+              "preferredSpacing"
+            ],
+            "customBehavior": "custom_behavior:calculate-in-feet",
+            "declaredWrites": [
+              "numberOfDownlights",
+              "gridRows",
+              "gridColumns",
+              "estimatedSpacing",
+              "spacingSource",
+              "disclaimer",
+              "validationMessage"
+            ],
+            "interactionIds": [
+              "calculate-in-feet:5:action"
+            ],
+            "capabilityMethod": null,
+            "persistenceSource": null,
+            "semanticOperation": "read",
+            "persistenceHandoff": null,
+            "requestedCapability": null,
+            "downstreamDependencies": [],
+            "requiresTransformation": true,
+            "requestedCapabilityMethod": null
+          }
+        ]
+      },
+      {
+        "entity": "calculation",
+        "journeyId": "show-validation",
+        "stepIndex": 2,
+        "operationId": "calculate-downlights",
+        "responsibilities": [
+          {
+            "id": "calculate-downlights:functional-1",
+            "type": "custom_functional",
+            "owner": "custom_behavior:show-validation",
+            "reads": [
+              "show-validation.draft.roomLength",
+              "show-validation.draft.roomWidth",
+              "show-validation.input.unit",
+              "show-validation.input.preferredSpacing"
+            ],
+            "entity": "calculation",
+            "writes": [
+              "show-validation.custom.numberOfDownlights",
+              "show-validation.custom.gridRows",
+              "show-validation.custom.gridColumns",
+              "show-validation.custom.estimatedSpacing",
+              "show-validation.custom.spacingSource",
+              "show-validation.custom.disclaimer",
+              "show-validation.custom.validationMessage"
+            ],
+            "behavior": "Validate that roomLength and roomWidth are greater than 0. If invalid, write validationMessage and do not show a downlight count. If valid, use preferredSpacing when provided and greater than 0, otherwise use the default spacing of 1.8 metres or 6 feet. Calculate gridColumns as ceil(roomLength / spacing), gridRows as ceil(roomWidth / spacing), numberOfDownlights as gridRows multiplied by gridColumns, estimatedSpacing as the room length divided by gridColumns and room width divided by gridRows rounded to two decimals with the selected unit label, spacingSource as either custom spacing or default spacing, and disclaimer as the guide-only lighting design notice.",
+            "operationId": "calculate-downlights",
+            "capabilityId": null,
+            "outputEffect": null,
+            "declaredReads": [
+              "roomLength",
+              "roomWidth",
+              "unit",
+              "preferredSpacing"
+            ],
+            "customBehavior": "custom_behavior:show-validation",
+            "declaredWrites": [
+              "numberOfDownlights",
+              "gridRows",
+              "gridColumns",
+              "estimatedSpacing",
+              "spacingSource",
+              "disclaimer",
+              "validationMessage"
+            ],
+            "interactionIds": [
+              "show-validation:3:action"
+            ],
+            "capabilityMethod": null,
+            "persistenceSource": null,
+            "semanticOperation": "read",
+            "persistenceHandoff": null,
+            "requestedCapability": null,
+            "downstreamDependencies": [],
+            "requiresTransformation": true,
+            "requestedCapabilityMethod": null
+          }
+        ]
+      }
+    ]
+  },
+  "interactionContract": {
+    "flows": [
+      {
+        "id": "calculate-custom-spacing:1:navigation",
+        "kind": "navigation",
+        "reads": [],
+        "action": "open the calculator",
+        "target": "/",
+        "writes": [],
+        "control": null,
+        "dependsOn": [],
+        "journeyId": "calculate-custom-spacing",
+        "stepIndex": 0,
+        "capability": null,
+        "observable": "the one-screen calculator is visible with labelled inputs and a calculate button",
+        "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+        "valueWritten": null,
+        "producedValues": [],
+        "semanticPurpose": "open the calculator",
+        "responsibleModules": [
+          "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx"
+        ],
+        "nextStateRequirement": "the one-screen calculator is visible with labelled inputs and a calculate button"
+      },
+      {
+        "id": "calculate-custom-spacing:2:input:roomlength",
+        "kind": "input",
+        "reads": [],
+        "action": "enter room length and width",
+        "target": null,
+        "writes": [
+          "calculate-custom-spacing.draft.roomLength"
+        ],
+        "control": {
+          "roles": [
+            "textbox",
+            "spinbutton",
+            "combobox"
+          ],
+          "purpose": "roomLength",
+          "editable": true,
+          "required": true,
+          "validity": "unspecified",
+          "machineId": "ctl_1231ba7e",
+          "statePath": "calculate-custom-spacing.draft.roomLength",
+          "valueType": "number",
+          "downstream": [
+            "calculate-custom-spacing:4:action"
+          ],
+          "inputTypes": [
+            "number"
+          ],
+          "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "logicalField": "roomLength",
+          "accessibleName": "room Length",
+          "accessibleNames": [
+            "room Length"
+          ],
+          "validationOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "verificationValue": "6"
+        },
+        "dependsOn": [],
+        "journeyId": "calculate-custom-spacing",
+        "stepIndex": 1,
+        "capability": null,
+        "observable": "the entered length and width remain visible in the inputs",
+        "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+        "valueWritten": "roomLength",
+        "producedValues": [],
+        "semanticPurpose": "enter room length and width",
+        "responsibleModules": [
+          "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx"
+        ],
+        "nextStateRequirement": "the entered length and width remain visible in the inputs"
+      },
+      {
+        "id": "calculate-custom-spacing:2:input:roomwidth",
+        "kind": "input",
+        "reads": [],
+        "action": "enter room length and width",
+        "target": null,
+        "writes": [
+          "calculate-custom-spacing.draft.roomWidth"
+        ],
+        "control": {
+          "roles": [
+            "textbox",
+            "spinbutton",
+            "combobox"
+          ],
+          "purpose": "roomWidth",
+          "editable": true,
+          "required": true,
+          "validity": "unspecified",
+          "machineId": "ctl_5b3deac6",
+          "statePath": "calculate-custom-spacing.draft.roomWidth",
+          "valueType": "number",
+          "downstream": [
+            "calculate-custom-spacing:4:action"
+          ],
+          "inputTypes": [
+            "number"
+          ],
+          "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "logicalField": "roomWidth",
+          "accessibleName": "room Width",
+          "accessibleNames": [
+            "room Width"
+          ],
+          "validationOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "verificationValue": "4"
+        },
+        "dependsOn": [],
+        "journeyId": "calculate-custom-spacing",
+        "stepIndex": 1,
+        "capability": null,
+        "observable": "the entered length and width remain visible in the inputs",
+        "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+        "valueWritten": "roomWidth",
+        "producedValues": [],
+        "semanticPurpose": "enter room length and width",
+        "responsibleModules": [
+          "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx"
+        ],
+        "nextStateRequirement": "the entered length and width remain visible in the inputs"
+      },
+      {
+        "id": "calculate-custom-spacing:3:input:preferredspacing",
+        "kind": "input",
+        "reads": [],
+        "action": "enter a preferred spacing",
+        "target": null,
+        "writes": [
+          "calculate-custom-spacing.draft.preferredSpacing"
+        ],
+        "control": {
+          "roles": [
+            "textbox",
+            "spinbutton",
+            "combobox"
+          ],
+          "purpose": "preferredSpacing",
+          "editable": true,
+          "required": false,
+          "validity": "unspecified",
+          "machineId": "ctl_7bc99263",
+          "statePath": "calculate-custom-spacing.draft.preferredSpacing",
+          "valueType": "number",
+          "downstream": [
+            "calculate-custom-spacing:4:action"
+          ],
+          "inputTypes": [
+            "number"
+          ],
+          "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "logicalField": "preferredSpacing",
+          "accessibleName": "preferred Spacing",
+          "accessibleNames": [
+            "preferred Spacing"
+          ],
+          "validationOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "verificationValue": "1.5"
+        },
+        "dependsOn": [],
+        "journeyId": "calculate-custom-spacing",
+        "stepIndex": 2,
+        "capability": null,
+        "observable": "the preferred spacing value remains visible in the input",
+        "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+        "valueWritten": "preferredSpacing",
+        "producedValues": [],
+        "semanticPurpose": "enter a preferred spacing",
+        "responsibleModules": [
+          "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx"
+        ],
+        "nextStateRequirement": "the preferred spacing value remains visible in the input"
+      },
+      {
+        "id": "calculate-custom-spacing:4:action",
+        "kind": "action",
+        "reads": [
+          "calculate-custom-spacing.draft.roomLength",
+          "calculate-custom-spacing.draft.roomWidth",
+          "calculate-custom-spacing.draft.unit",
+          "calculate-custom-spacing.draft.preferredSpacing",
+          "calculate-custom-spacing.input.unit"
+        ],
+        "action": "press calculate",
+        "entity": "calculation",
+        "target": null,
+        "writes": [
+          "calculate-custom-spacing.custom.numberOfDownlights",
+          "calculate-custom-spacing.custom.gridRows",
+          "calculate-custom-spacing.custom.gridColumns",
+          "calculate-custom-spacing.custom.estimatedSpacing",
+          "calculate-custom-spacing.custom.spacingSource",
+          "calculate-custom-spacing.custom.disclaimer",
+          "calculate-custom-spacing.custom.validationMessage"
+        ],
+        "control": {
+          "roles": [
+            "button"
+          ],
+          "purpose": "calculate button",
+          "machineId": "act_865859d3",
+          "statePath": "calculate-custom-spacing.custom.numberOfDownlights",
+          "downstream": [],
+          "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "accessibleName": "calculate button",
+          "validationOwner": null
+        },
+        "dependsOn": [
+          "calculate-custom-spacing.draft.roomLength",
+          "calculate-custom-spacing.draft.roomWidth",
+          "calculate-custom-spacing.draft.unit",
+          "calculate-custom-spacing.draft.preferredSpacing",
+          "calculate-custom-spacing.input.unit"
+        ],
+        "journeyId": "calculate-custom-spacing",
+        "stepIndex": 3,
+        "capability": null,
+        "observable": "a large result card shows the estimated downlight count, grid, spacing and disclaimer",
+        "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+        "operationId": "calculate-downlights",
+        "capabilityId": null,
+        "outputEffect": null,
+        "valueWritten": null,
+        "actionIdentity": {
+          "controlId": "act_865859d3",
+          "operationId": "calculate-downlights",
+          "interactionId": "calculate-custom-spacing:4:action"
+        },
+        "customBehavior": "custom_behavior:calculate-custom-spacing",
+        "producedValues": [
+          "numberOfDownlights",
+          "gridRows",
+          "gridColumns",
+          "estimatedSpacing",
+          "spacingSource",
+          "disclaimer"
+        ],
+        "semanticPurpose": "press calculate",
+        "capabilityMethod": null,
+        "durableOperation": null,
+        "declaredOperation": true,
+        "persistenceSource": null,
+        "responsibilityIds": [
+          "calculate-downlights:functional-1"
+        ],
+        "persistenceHandoff": null,
+        "responsibleModules": [
+          "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "src/extensions/custom/calculate-custom-spacing.js"
+        ],
+        "downstreamConsumers": [],
+        "customBehaviorModule": "src/extensions/custom/calculate-custom-spacing.js",
+        "nextStateRequirement": "a large result card shows the estimated downlight count, grid, spacing and disclaimer",
+        "customBehaviorExports": [
+          "runCalculateCustomSpacingCustomBehavior"
+        ],
+        "expectedStateTransition": {
+          "persists": [],
+          "produces": [
+            "calculate-custom-spacing.custom.numberOfDownlights",
+            "calculate-custom-spacing.custom.gridRows",
+            "calculate-custom-spacing.custom.gridColumns",
+            "calculate-custom-spacing.custom.estimatedSpacing",
+            "calculate-custom-spacing.custom.spacingSource",
+            "calculate-custom-spacing.custom.disclaimer",
+            "calculate-custom-spacing.custom.validationMessage"
+          ],
+          "requirement": "a large result card shows the estimated downlight count, grid, spacing and disclaimer",
+          "readsPersisted": []
+        },
+        "verificationObservation": "a large result card shows the estimated downlight count, grid, spacing and disclaimer",
+        "requiredProducerEntities": [],
+        "semanticResponsibilityTypes": [
+          "custom_functional"
+        ]
+      },
+      {
+        "id": "calculate-default-spacing:1:navigation",
+        "kind": "navigation",
+        "reads": [],
+        "action": "open the calculator",
+        "target": "/",
+        "writes": [],
+        "control": null,
+        "dependsOn": [],
+        "journeyId": "calculate-default-spacing",
+        "stepIndex": 0,
+        "capability": null,
+        "observable": "the calculator opens with preferred spacing empty and ready to use",
+        "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+        "valueWritten": null,
+        "producedValues": [],
+        "semanticPurpose": "open the calculator",
+        "responsibleModules": [
+          "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx"
+        ],
+        "nextStateRequirement": "the calculator opens with preferred spacing empty and ready to use"
+      },
+      {
+        "id": "calculate-default-spacing:2:input:roomlength",
+        "kind": "input",
+        "reads": [],
+        "action": "enter room length and width",
+        "target": null,
+        "writes": [
+          "calculate-default-spacing.draft.roomLength"
+        ],
+        "control": {
+          "roles": [
+            "textbox",
+            "spinbutton",
+            "combobox"
+          ],
+          "purpose": "roomLength",
+          "editable": true,
+          "required": true,
+          "validity": "unspecified",
+          "machineId": "ctl_1231ba7e",
+          "statePath": "calculate-default-spacing.draft.roomLength",
+          "valueType": "number",
+          "downstream": [
+            "calculate-default-spacing:3:action"
+          ],
+          "inputTypes": [
+            "number"
+          ],
+          "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "logicalField": "roomLength",
+          "accessibleName": "room Length",
+          "accessibleNames": [
+            "room Length"
+          ],
+          "validationOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "verificationValue": "5"
+        },
+        "dependsOn": [],
+        "journeyId": "calculate-default-spacing",
+        "stepIndex": 1,
+        "capability": null,
+        "observable": "the entered dimensions are visible and preferred spacing is still blank",
+        "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+        "valueWritten": "roomLength",
+        "producedValues": [],
+        "semanticPurpose": "enter room length and width",
+        "responsibleModules": [
+          "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx"
+        ],
+        "nextStateRequirement": "the entered dimensions are visible and preferred spacing is still blank"
+      },
+      {
+        "id": "calculate-default-spacing:2:input:roomwidth",
+        "kind": "input",
+        "reads": [],
+        "action": "enter room length and width",
+        "target": null,
+        "writes": [
+          "calculate-default-spacing.draft.roomWidth"
+        ],
+        "control": {
+          "roles": [
+            "textbox",
+            "spinbutton",
+            "combobox"
+          ],
+          "purpose": "roomWidth",
+          "editable": true,
+          "required": true,
+          "validity": "unspecified",
+          "machineId": "ctl_5b3deac6",
+          "statePath": "calculate-default-spacing.draft.roomWidth",
+          "valueType": "number",
+          "downstream": [
+            "calculate-default-spacing:3:action"
+          ],
+          "inputTypes": [
+            "number"
+          ],
+          "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "logicalField": "roomWidth",
+          "accessibleName": "room Width",
+          "accessibleNames": [
+            "room Width"
+          ],
+          "validationOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "verificationValue": "3"
+        },
+        "dependsOn": [],
+        "journeyId": "calculate-default-spacing",
+        "stepIndex": 1,
+        "capability": null,
+        "observable": "the entered dimensions are visible and preferred spacing is still blank",
+        "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+        "valueWritten": "roomWidth",
+        "producedValues": [],
+        "semanticPurpose": "enter room length and width",
+        "responsibleModules": [
+          "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx"
+        ],
+        "nextStateRequirement": "the entered dimensions are visible and preferred spacing is still blank"
+      },
+      {
+        "id": "calculate-default-spacing:3:action",
+        "kind": "action",
+        "reads": [
+          "calculate-default-spacing.draft.roomLength",
+          "calculate-default-spacing.draft.roomWidth",
+          "calculate-default-spacing.draft.unit",
+          "calculate-default-spacing.input.unit",
+          "calculate-default-spacing.input.preferredSpacing"
+        ],
+        "action": "press calculate while preferred spacing is blank",
+        "entity": "calculation",
+        "target": null,
+        "writes": [
+          "calculate-default-spacing.custom.numberOfDownlights",
+          "calculate-default-spacing.custom.gridRows",
+          "calculate-default-spacing.custom.gridColumns",
+          "calculate-default-spacing.custom.estimatedSpacing",
+          "calculate-default-spacing.custom.spacingSource",
+          "calculate-default-spacing.custom.disclaimer",
+          "calculate-default-spacing.custom.validationMessage"
+        ],
+        "control": {
+          "roles": [
+            "button"
+          ],
+          "purpose": "calculate button",
+          "machineId": "act_865859d3",
+          "statePath": "calculate-default-spacing.custom.numberOfDownlights",
+          "downstream": [],
+          "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "accessibleName": "calculate button",
+          "validationOwner": null
+        },
+        "dependsOn": [
+          "calculate-default-spacing.draft.roomLength",
+          "calculate-default-spacing.draft.roomWidth",
+          "calculate-default-spacing.draft.unit",
+          "calculate-default-spacing.input.unit",
+          "calculate-default-spacing.input.preferredSpacing"
+        ],
+        "journeyId": "calculate-default-spacing",
+        "stepIndex": 2,
+        "capability": null,
+        "observable": "the result uses the sensible default spacing and shows the estimate",
+        "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+        "operationId": "calculate-downlights",
+        "capabilityId": null,
+        "outputEffect": null,
+        "valueWritten": null,
+        "actionIdentity": {
+          "controlId": "act_865859d3",
+          "operationId": "calculate-downlights",
+          "interactionId": "calculate-default-spacing:3:action"
+        },
+        "customBehavior": "custom_behavior:calculate-default-spacing",
+        "producedValues": [
+          "numberOfDownlights",
+          "gridRows",
+          "gridColumns",
+          "estimatedSpacing",
+          "spacingSource",
+          "disclaimer"
+        ],
+        "semanticPurpose": "press calculate while preferred spacing is blank",
+        "capabilityMethod": null,
+        "durableOperation": null,
+        "declaredOperation": true,
+        "persistenceSource": null,
+        "responsibilityIds": [
+          "calculate-downlights:functional-1"
+        ],
+        "persistenceHandoff": null,
+        "responsibleModules": [
+          "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "src/extensions/custom/calculate-default-spacing.js"
+        ],
+        "downstreamConsumers": [],
+        "customBehaviorModule": "src/extensions/custom/calculate-default-spacing.js",
+        "nextStateRequirement": "the result uses the sensible default spacing and shows the estimate",
+        "customBehaviorExports": [
+          "runCalculateDefaultSpacingCustomBehavior"
+        ],
+        "expectedStateTransition": {
+          "persists": [],
+          "produces": [
+            "calculate-default-spacing.custom.numberOfDownlights",
+            "calculate-default-spacing.custom.gridRows",
+            "calculate-default-spacing.custom.gridColumns",
+            "calculate-default-spacing.custom.estimatedSpacing",
+            "calculate-default-spacing.custom.spacingSource",
+            "calculate-default-spacing.custom.disclaimer",
+            "calculate-default-spacing.custom.validationMessage"
+          ],
+          "requirement": "the result uses the sensible default spacing and shows the estimate",
+          "readsPersisted": []
+        },
+        "verificationObservation": "the result uses the sensible default spacing and shows the estimate",
+        "requiredProducerEntities": [],
+        "semanticResponsibilityTypes": [
+          "custom_functional"
+        ]
+      },
+      {
+        "id": "calculate-in-feet:1:navigation",
+        "kind": "navigation",
+        "reads": [],
+        "action": "open the calculator",
+        "target": "/",
+        "writes": [],
+        "control": null,
+        "dependsOn": [],
+        "journeyId": "calculate-in-feet",
+        "stepIndex": 0,
+        "capability": null,
+        "observable": "the calculator shows a units selector",
+        "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+        "valueWritten": null,
+        "producedValues": [],
+        "semanticPurpose": "open the calculator",
+        "responsibleModules": [
+          "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx"
+        ],
+        "nextStateRequirement": "the calculator shows a units selector"
+      },
+      {
+        "id": "calculate-in-feet:2:selection:unit",
+        "kind": "selection",
+        "reads": [],
+        "action": "select feet as the unit",
+        "target": null,
+        "writes": [
+          "calculate-in-feet.draft.unit"
+        ],
+        "control": {
+          "roles": [
+            "button",
+            "radio",
+            "option",
+            "combobox"
+          ],
+          "purpose": "unit",
+          "machineId": "ctl_e8b51a07",
+          "statePath": "calculate-in-feet.draft.unit",
+          "downstream": [
+            "calculate-in-feet:5:action"
+          ],
+          "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "logicalField": "unit",
+          "selectedState": true,
+          "accessibleName": "unit",
+          "accessibleNames": [
+            "unit"
+          ],
+          "validationOwner": null,
+          "verificationValue": "feet"
+        },
+        "dependsOn": [],
+        "journeyId": "calculate-in-feet",
+        "stepIndex": 1,
+        "capability": null,
+        "observable": "feet is visibly selected as the active unit",
+        "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+        "valueWritten": "unit",
+        "producedValues": [],
+        "semanticPurpose": "select feet as the unit",
+        "responsibleModules": [
+          "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx"
+        ],
+        "nextStateRequirement": "feet is visibly selected as the active unit"
+      },
+      {
+        "id": "calculate-in-feet:3:input:roomlength",
+        "kind": "input",
+        "reads": [],
+        "action": "enter room dimensions",
+        "target": null,
+        "writes": [
+          "calculate-in-feet.draft.roomLength"
+        ],
+        "control": {
+          "roles": [
+            "textbox",
+            "spinbutton",
+            "combobox"
+          ],
+          "purpose": "roomLength",
+          "editable": true,
+          "required": true,
+          "validity": "unspecified",
+          "machineId": "ctl_1231ba7e",
+          "statePath": "calculate-in-feet.draft.roomLength",
+          "valueType": "number",
+          "downstream": [
+            "calculate-in-feet:5:action"
+          ],
+          "inputTypes": [
+            "number"
+          ],
+          "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "logicalField": "roomLength",
+          "accessibleName": "room Length",
+          "accessibleNames": [
+            "room Length"
+          ],
+          "validationOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "verificationValue": "12"
+        },
+        "dependsOn": [],
+        "journeyId": "calculate-in-feet",
+        "stepIndex": 2,
+        "capability": null,
+        "observable": "the entered room dimensions are visible",
+        "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+        "valueWritten": "roomLength",
+        "producedValues": [],
+        "semanticPurpose": "enter room dimensions",
+        "responsibleModules": [
+          "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx"
+        ],
+        "nextStateRequirement": "the entered room dimensions are visible"
+      },
+      {
+        "id": "calculate-in-feet:3:input:roomwidth",
+        "kind": "input",
+        "reads": [],
+        "action": "enter room dimensions",
+        "target": null,
+        "writes": [
+          "calculate-in-feet.draft.roomWidth"
+        ],
+        "control": {
+          "roles": [
+            "textbox",
+            "spinbutton",
+            "combobox"
+          ],
+          "purpose": "roomWidth",
+          "editable": true,
+          "required": true,
+          "validity": "unspecified",
+          "machineId": "ctl_5b3deac6",
+          "statePath": "calculate-in-feet.draft.roomWidth",
+          "valueType": "number",
+          "downstream": [
+            "calculate-in-feet:5:action"
+          ],
+          "inputTypes": [
+            "number"
+          ],
+          "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "logicalField": "roomWidth",
+          "accessibleName": "room Width",
+          "accessibleNames": [
+            "room Width"
+          ],
+          "validationOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "verificationValue": "10"
+        },
+        "dependsOn": [],
+        "journeyId": "calculate-in-feet",
+        "stepIndex": 2,
+        "capability": null,
+        "observable": "the entered room dimensions are visible",
+        "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+        "valueWritten": "roomWidth",
+        "producedValues": [],
+        "semanticPurpose": "enter room dimensions",
+        "responsibleModules": [
+          "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx"
+        ],
+        "nextStateRequirement": "the entered room dimensions are visible"
+      },
+      {
+        "id": "calculate-in-feet:4:input:preferredspacing",
+        "kind": "input",
+        "reads": [],
+        "action": "enter preferred spacing in feet",
+        "target": null,
+        "writes": [
+          "calculate-in-feet.draft.preferredSpacing"
+        ],
+        "control": {
+          "roles": [
+            "textbox",
+            "spinbutton",
+            "combobox"
+          ],
+          "purpose": "preferredSpacing",
+          "editable": true,
+          "required": false,
+          "validity": "unspecified",
+          "machineId": "ctl_7bc99263",
+          "statePath": "calculate-in-feet.draft.preferredSpacing",
+          "valueType": "number",
+          "downstream": [
+            "calculate-in-feet:5:action"
+          ],
+          "inputTypes": [
+            "number"
+          ],
+          "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "logicalField": "preferredSpacing",
+          "accessibleName": "preferred Spacing",
+          "accessibleNames": [
+            "preferred Spacing"
+          ],
+          "validationOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "verificationValue": "4"
+        },
+        "dependsOn": [],
+        "journeyId": "calculate-in-feet",
+        "stepIndex": 3,
+        "capability": null,
+        "observable": "the preferred spacing in feet is visible",
+        "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+        "valueWritten": "preferredSpacing",
+        "producedValues": [],
+        "semanticPurpose": "enter preferred spacing in feet",
+        "responsibleModules": [
+          "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx"
+        ],
+        "nextStateRequirement": "the preferred spacing in feet is visible"
+      },
+      {
+        "id": "calculate-in-feet:5:action",
+        "kind": "action",
+        "reads": [
+          "calculate-in-feet.draft.roomLength",
+          "calculate-in-feet.draft.roomWidth",
+          "calculate-in-feet.draft.unit",
+          "calculate-in-feet.draft.preferredSpacing"
+        ],
+        "action": "press calculate",
+        "entity": "calculation",
+        "target": null,
+        "writes": [
+          "calculate-in-feet.custom.numberOfDownlights",
+          "calculate-in-feet.custom.gridRows",
+          "calculate-in-feet.custom.gridColumns",
+          "calculate-in-feet.custom.estimatedSpacing",
+          "calculate-in-feet.custom.spacingSource",
+          "calculate-in-feet.custom.disclaimer",
+          "calculate-in-feet.custom.validationMessage"
+        ],
+        "control": {
+          "roles": [
+            "button"
+          ],
+          "purpose": "calculate button",
+          "machineId": "act_865859d3",
+          "statePath": "calculate-in-feet.custom.numberOfDownlights",
+          "downstream": [],
+          "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "accessibleName": "calculate button",
+          "validationOwner": null
+        },
+        "dependsOn": [
+          "calculate-in-feet.draft.roomLength",
+          "calculate-in-feet.draft.roomWidth",
+          "calculate-in-feet.draft.unit",
+          "calculate-in-feet.draft.preferredSpacing"
+        ],
+        "journeyId": "calculate-in-feet",
+        "stepIndex": 4,
+        "capability": null,
+        "observable": "the result is shown using feet labels",
+        "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+        "operationId": "calculate-downlights",
+        "capabilityId": null,
+        "outputEffect": null,
+        "valueWritten": null,
+        "actionIdentity": {
+          "controlId": "act_865859d3",
+          "operationId": "calculate-downlights",
+          "interactionId": "calculate-in-feet:5:action"
+        },
+        "customBehavior": "custom_behavior:calculate-in-feet",
+        "producedValues": [
+          "numberOfDownlights",
+          "gridRows",
+          "gridColumns",
+          "estimatedSpacing",
+          "spacingSource",
+          "disclaimer"
+        ],
+        "semanticPurpose": "press calculate",
+        "capabilityMethod": null,
+        "durableOperation": null,
+        "declaredOperation": true,
+        "persistenceSource": null,
+        "responsibilityIds": [
+          "calculate-downlights:functional-1"
+        ],
+        "persistenceHandoff": null,
+        "responsibleModules": [
+          "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "src/extensions/custom/calculate-in-feet.js"
+        ],
+        "downstreamConsumers": [],
+        "customBehaviorModule": "src/extensions/custom/calculate-in-feet.js",
+        "nextStateRequirement": "the result is shown using feet labels",
+        "customBehaviorExports": [
+          "runCalculateInFeetCustomBehavior"
+        ],
+        "expectedStateTransition": {
+          "persists": [],
+          "produces": [
+            "calculate-in-feet.custom.numberOfDownlights",
+            "calculate-in-feet.custom.gridRows",
+            "calculate-in-feet.custom.gridColumns",
+            "calculate-in-feet.custom.estimatedSpacing",
+            "calculate-in-feet.custom.spacingSource",
+            "calculate-in-feet.custom.disclaimer",
+            "calculate-in-feet.custom.validationMessage"
+          ],
+          "requirement": "the result is shown using feet labels",
+          "readsPersisted": []
+        },
+        "verificationObservation": "the result is shown using feet labels",
+        "requiredProducerEntities": [],
+        "semanticResponsibilityTypes": [
+          "custom_functional"
+        ]
+      },
+      {
+        "id": "show-validation:1:navigation",
+        "kind": "navigation",
+        "reads": [],
+        "action": "open the calculator",
+        "target": "/",
+        "writes": [],
+        "control": null,
+        "dependsOn": [],
+        "journeyId": "show-validation",
+        "stepIndex": 0,
+        "capability": null,
+        "observable": "the calculator form is visible",
+        "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+        "valueWritten": null,
+        "producedValues": [],
+        "semanticPurpose": "open the calculator",
+        "responsibleModules": [
+          "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx"
+        ],
+        "nextStateRequirement": "the calculator form is visible"
+      },
+      {
+        "id": "show-validation:2:input:roomlength",
+        "kind": "input",
+        "reads": [],
+        "action": "enter an invalid room length and a valid width",
+        "target": null,
+        "writes": [
+          "show-validation.draft.roomLength"
+        ],
+        "control": {
+          "roles": [
+            "textbox",
+            "spinbutton",
+            "combobox"
+          ],
+          "purpose": "roomLength",
+          "editable": true,
+          "required": true,
+          "validity": "invalid",
+          "machineId": "ctl_1231ba7e",
+          "statePath": "show-validation.draft.roomLength",
+          "valueType": "number",
+          "downstream": [
+            "show-validation:3:action"
+          ],
+          "inputTypes": [
+            "number"
+          ],
+          "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "logicalField": "roomLength",
+          "accessibleName": "room Length",
+          "accessibleNames": [
+            "room Length"
+          ],
+          "validationOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "verificationValue": "0"
+        },
+        "dependsOn": [],
+        "journeyId": "show-validation",
+        "stepIndex": 1,
+        "capability": null,
+        "observable": "the entered values remain visible in the inputs",
+        "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+        "valueWritten": "roomLength",
+        "producedValues": [],
+        "semanticPurpose": "enter an invalid room length and a valid width",
+        "responsibleModules": [
+          "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx"
+        ],
+        "nextStateRequirement": "the entered values remain visible in the inputs"
+      },
+      {
+        "id": "show-validation:2:input:roomwidth",
+        "kind": "input",
+        "reads": [],
+        "action": "enter an invalid room length and a valid width",
+        "target": null,
+        "writes": [
+          "show-validation.draft.roomWidth"
+        ],
+        "control": {
+          "roles": [
+            "textbox",
+            "spinbutton",
+            "combobox"
+          ],
+          "purpose": "roomWidth",
+          "editable": true,
+          "required": true,
+          "validity": "unspecified",
+          "machineId": "ctl_5b3deac6",
+          "statePath": "show-validation.draft.roomWidth",
+          "valueType": "number",
+          "downstream": [
+            "show-validation:3:action"
+          ],
+          "inputTypes": [
+            "number"
+          ],
+          "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "logicalField": "roomWidth",
+          "accessibleName": "room Width",
+          "accessibleNames": [
+            "room Width"
+          ],
+          "validationOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "verificationValue": "4"
+        },
+        "dependsOn": [],
+        "journeyId": "show-validation",
+        "stepIndex": 1,
+        "capability": null,
+        "observable": "the entered values remain visible in the inputs",
+        "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+        "valueWritten": "roomWidth",
+        "producedValues": [],
+        "semanticPurpose": "enter an invalid room length and a valid width",
+        "responsibleModules": [
+          "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx"
+        ],
+        "nextStateRequirement": "the entered values remain visible in the inputs"
+      },
+      {
+        "id": "show-validation:3:action",
+        "kind": "action",
+        "reads": [
+          "show-validation.draft.roomLength",
+          "show-validation.draft.roomWidth",
+          "show-validation.input.unit",
+          "show-validation.input.preferredSpacing"
+        ],
+        "action": "press calculate",
+        "entity": "calculation",
+        "target": null,
+        "writes": [
+          "show-validation.custom.numberOfDownlights",
+          "show-validation.custom.gridRows",
+          "show-validation.custom.gridColumns",
+          "show-validation.custom.estimatedSpacing",
+          "show-validation.custom.spacingSource",
+          "show-validation.custom.disclaimer",
+          "show-validation.custom.validationMessage"
+        ],
+        "control": {
+          "roles": [
+            "button"
+          ],
+          "purpose": "calculate button",
+          "machineId": "act_865859d3",
+          "statePath": "show-validation.custom.numberOfDownlights",
+          "downstream": [],
+          "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "accessibleName": "calculate button",
+          "validationOwner": null
+        },
+        "dependsOn": [
+          "show-validation.draft.roomLength",
+          "show-validation.draft.roomWidth",
+          "show-validation.input.unit",
+          "show-validation.input.preferredSpacing"
+        ],
+        "journeyId": "show-validation",
+        "stepIndex": 2,
+        "capability": null,
+        "observable": "a visible validation message appears and no downlight count result is shown",
+        "stateOwner": "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+        "operationId": "calculate-downlights",
+        "capabilityId": null,
+        "outputEffect": null,
+        "valueWritten": null,
+        "actionIdentity": {
+          "controlId": "act_865859d3",
+          "operationId": "calculate-downlights",
+          "interactionId": "show-validation:3:action"
+        },
+        "customBehavior": "custom_behavior:show-validation",
+        "producedValues": [
+          "validationMessage"
+        ],
+        "semanticPurpose": "press calculate",
+        "capabilityMethod": null,
+        "durableOperation": null,
+        "declaredOperation": true,
+        "persistenceSource": null,
+        "responsibilityIds": [
+          "calculate-downlights:functional-1"
+        ],
+        "persistenceHandoff": null,
+        "responsibleModules": [
+          "src/components/calculate-custom-spacing/CalculateCustomSpacingFlow.jsx",
+          "src/extensions/custom/show-validation.js"
+        ],
+        "downstreamConsumers": [],
+        "customBehaviorModule": "src/extensions/custom/show-validation.js",
+        "nextStateRequirement": "a visible validation message appears and no downlight count result is shown",
+        "customBehaviorExports": [
+          "runShowValidationCustomBehavior"
+        ],
+        "expectedStateTransition": {
+          "persists": [],
+          "produces": [
+            "show-validation.custom.numberOfDownlights",
+            "show-validation.custom.gridRows",
+            "show-validation.custom.gridColumns",
+            "show-validation.custom.estimatedSpacing",
+            "show-validation.custom.spacingSource",
+            "show-validation.custom.disclaimer",
+            "show-validation.custom.validationMessage"
+          ],
+          "requirement": "a visible validation message appears and no downlight count result is shown",
+          "readsPersisted": []
+        },
+        "verificationObservation": "a visible validation message appears and no downlight count result is shown",
+        "requiredProducerEntities": [],
+        "semanticResponsibilityTypes": [
+          "custom_functional"
+        ]
+      }
+    ],
+    "valid": true,
+    "issues": [],
+    "version": 2,
+    "problems": [],
+    "scenarios": {
+      "show-validation": {
+        "role": "independent",
+        "basis": "data-flow",
+        "scenario": "independent:show-validation",
+        "lifecycle": null,
+        "startState": "fresh",
+        "durableState": [],
+        "initialState": {
+          "unit": "",
+          "preferredSpacing": null
+        },
+        "externalState": [],
+        "availableState": [],
+        "capabilityOutputs": []
+      },
+      "calculate-in-feet": {
+        "role": "independent",
+        "basis": "data-flow",
+        "scenario": "independent:calculate-in-feet",
+        "lifecycle": null,
+        "startState": "fresh",
+        "durableState": [],
+        "initialState": {
+          "preferredSpacing": null
+        },
+        "externalState": [],
+        "availableState": [],
+        "capabilityOutputs": []
+      },
+      "calculate-custom-spacing": {
+        "role": "independent",
+        "basis": "data-flow",
+        "scenario": "independent:calculate-custom-spacing",
+        "lifecycle": null,
+        "startState": "fresh",
+        "durableState": [],
+        "initialState": {
+          "unit": "",
+          "preferredSpacing": null
+        },
+        "externalState": [],
+        "availableState": [],
+        "capabilityOutputs": []
+      },
+      "calculate-default-spacing": {
+        "role": "independent",
+        "basis": "data-flow",
+        "scenario": "independent:calculate-default-spacing",
+        "lifecycle": null,
+        "startState": "fresh",
+        "durableState": [],
+        "initialState": {
+          "unit": "",
+          "preferredSpacing": null
+        },
+        "externalState": [],
+        "availableState": [],
+        "capabilityOutputs": []
+      }
+    },
+    "durableState": null,
+    "initialState": null,
+    "externalState": null,
+    "capabilityOutputs": null,
+    "operationCoverage": [
+      {
+        "journeyId": "calculate-custom-spacing",
+        "operationId": "calculate-downlights",
+        "interactionIds": [
+          "calculate-custom-spacing:4:action"
+        ],
+        "responsibilityIds": [
+          "calculate-downlights:functional-1"
+        ]
+      },
+      {
+        "journeyId": "calculate-default-spacing",
+        "operationId": "calculate-downlights",
+        "interactionIds": [
+          "calculate-default-spacing:3:action"
+        ],
+        "responsibilityIds": [
+          "calculate-downlights:functional-1"
+        ]
+      },
+      {
+        "journeyId": "calculate-in-feet",
+        "operationId": "calculate-downlights",
+        "interactionIds": [
+          "calculate-in-feet:5:action"
+        ],
+        "responsibilityIds": [
+          "calculate-downlights:functional-1"
+        ]
+      },
+      {
+        "journeyId": "show-validation",
+        "operationId": "calculate-downlights",
+        "interactionIds": [
+          "show-validation:3:action"
+        ],
+        "responsibilityIds": [
+          "calculate-downlights:functional-1"
+        ]
+      }
+    ],
+    "capabilityGraphVersion": 2,
+    "dependencyNormalization": {
+      "moves": [],
+      "changed": false,
+      "rebindings": []
+    }
+  }
+}

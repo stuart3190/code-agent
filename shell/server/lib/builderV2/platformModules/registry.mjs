@@ -436,6 +436,9 @@ const ROUTING_MODULE = platformModule({
   proof: "test/code-agent/builder-v2-routing-module.test.mjs",
 });
 
+const ROUTING_1_1 = defineModule({ ...ROUTING_MODULE, version: "1.1.0",
+  title: "Routing (route IDs and exact declared static paths)" });
+
 // WP7 — the query, form and async-state runtimes. Each replaces a category of repeated generated
 // controller work (audit §5) and is selected from the contract's structure, not from a capability.
 const QUERY_MODULE = platformModule({
@@ -634,6 +637,27 @@ const BOOKING_1_1 = (() => {
       browserEvidence: [...legacy.verification.browserEvidence],
     },
     proof: "test/code-agent/builder-v2-workflow-workspace-editor.test.mjs",
+  });
+})();
+
+// Shared reservations are opt-in. Legacy visitor-owned CRUD does not provide CAS.
+const BOOKING_1_2 = (() => {
+  const legacy = legacyCapabilityModule("booking");
+  return defineModule({
+    ...legacy,
+    version: "1.2.0",
+    title: "booking (opt-in atomic shared single-place reservations)",
+    compatibility: { ...legacy.compatibility, clientAbi: "booking@1" },
+    provides: { ...legacy.provides, operations: legacy.provides.operations.map(operation => ({ ...operation, concurrency: null })) },
+    requires: { ...legacy.requires, modules: [...legacy.requires.modules, { id: "thrallo.entities", range: "^1.1.0" }] },
+    configSchema: { ...legacy.configSchema, properties: { ...legacy.configSchema.properties, shared: { type: "boolean", default: false, description: "Atomic shared capacity-one reservations; requires a nonempty capacity-one slot catalogue." } } },
+    runtime: { ...legacy.runtime, serverHandlers: [{ handler: "postgres/rpc", actions: ["app_booking_reserve", "app_booking_remaining", "app_booking_cancel"] }] },
+    migrations: [{ id: "20261016232358_shared_single_slot_bookings", additive: true, destructive: false }],
+    verification: {
+      deterministicTests: [...legacy.verification.deterministicTests, "shared concurrent admission", "shared retry idempotency", "shared cancellation releases capacity", "cross-visitor contact privacy"],
+      browserEvidence: [...legacy.verification.browserEvidence],
+    },
+    proof: "test/code-agent/shared-booking-capability.test.mjs",
   });
 })();
 
@@ -1023,8 +1047,8 @@ const META_CONNECTOR_MODULE = providerFamily({
 
 const MODULES = [
   CORE_MODULE, ...LEGACY_WRAPPED.map(legacyCapabilityModule), IDENTITY_1_2, ACCOUNTS_MODULE, AUTHORIZATION_1_1,
-  ADMIN_MODULE, ENTITIES_1_1, ROUTING_MODULE, QUERY_MODULE, FORMS_1_1, ASYNC_MODULE, SETTINGS_MODULE, AUDIT_MODULE,
-  WORKFLOW_1_1, BOOKING_1_1, WORKSPACE_MODULE, EDITOR_MODULE,
+  ADMIN_MODULE, ENTITIES_1_1, ROUTING_MODULE, ROUTING_1_1, QUERY_MODULE, FORMS_1_1, ASYNC_MODULE, SETTINGS_MODULE, AUDIT_MODULE,
+  WORKFLOW_1_1, BOOKING_1_1, BOOKING_1_2, WORKSPACE_MODULE, EDITOR_MODULE,
   FILES_MODULE, NOTIFICATIONS_MODULE, REALTIME_MODULE,
   ANALYTICS_EVENTS_MODULE, ANALYTICS_QUERIES_MODULE, EXPORTS_MODULE, BILLING_MODULE,
   JOBS_MODULE, SCHEDULES_MODULE, CONNECTORS_MODULE,

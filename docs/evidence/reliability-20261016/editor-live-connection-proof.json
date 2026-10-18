@@ -1,0 +1,21 @@
+{
+  "at": "2026-10-17T17:19:55.877Z",
+  "scope": "own audit account, temporary token",
+  "checks": [
+    {
+      "name": "authenticated capabilities",
+      "pass": true
+    },
+    {
+      "name": "authenticated agent listing",
+      "pass": true,
+      "count": 2
+    },
+    {
+      "name": "revoked token rejected",
+      "pass": true
+    }
+  ],
+  "tokenRevoked": true,
+  "limitation": "Real HTTPS transport and own-token lifecycle, not native Windows UI execution or distribution."
+}

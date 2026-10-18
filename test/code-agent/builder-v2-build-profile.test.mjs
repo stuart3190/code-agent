@@ -725,3 +725,59 @@ test("the API intake persists one canonical DTO and supplies it to the Lead Agen
   assert.match(input.find((item) => item.role === "user")?.content || "", /AUTHORITATIVE BUILDER V2 PRODUCT PROFILE/);
   assert.equal(dispatches, 1, "only the injected zero-model fixture ran");
 });
+
+test("negative conjoined payment actions do not invent a payment journey", () => {
+  for (const prompt of [
+    "Build a portfolio. Save contact inquiries. Do not send email or take payments.",
+    "Do not require accounts or accept real payments. Save inquiries.",
+    "Never send notifications nor process billing. Save inquiries.",
+  ]) {
+    const signals = inferRequirementSignals(prompt);
+    assert.equal(signals.includes("payments"), false, prompt);
+    assert.equal(signals.includes("saved_data"), true, prompt);
+  }
+  for (const prompt of [
+    "Do not send email, but accept payments or subscriptions.",
+    "Do not send email. Accept payments or subscriptions.",
+    "Do not send email; accept payments or subscriptions.",
+    "Do not send email or take payments. On the separate store page enable checkout.",
+  ]) assert.equal(inferRequirementSignals(prompt).includes("payments"), true, prompt);
+});
+
+test("conjoined prohibitions remove the complete capability list while keeping affirmative clauses", () => {
+  const base="Do not rebuild unrelated features or add payments, authentication, or external services";
+  for (const suffix of [".", ", but save inquiries.", ", save inquiries."]) {
+    const signals=inferRequirementSignals(base+suffix);
+    assert.equal(signals.includes("payments"),false,base+suffix);
+    assert.equal(signals.includes("user_accounts"),false,base+suffix);
+    assert.equal(signals.includes("saved_data"),suffix!==".",base+suffix);
+  }
+  for(const prompt of [
+    "Do not rebuild unrelated features, but add payments and user accounts.",
+    "Do not disable billing or remove authentication.",
+    "Do not send email or take payments; include authentication.",
+  ]) {
+    const signals=inferRequirementSignals(prompt);
+    assert.equal(signals.includes("user_accounts"),true,prompt);
+  }
+});
+
+test('guest access does not invent accounts from negated sign-in obligations', () => {
+  for (const request of [
+    'The visitor should not have to sign up or sign in.',
+    'Visitors do not need to log in.',
+    'A visitor must not have to create an account or sign in.',
+    'Visitors shouldn’t need to sign in.',
+    "Users don't have to sign up or sign in.",
+  ]) {
+    const signals = inferRequirementSignals(`Save expense records. ${request}`);
+    assert.equal(signals.includes('user_accounts'), false, request);
+    assert.equal(signals.includes('saved_data'), true, request);
+  }
+  for (const request of [
+    'Visitors should not have to sign in, but admins must sign in.',
+    'Do not disable authentication or remove sign in.',
+    'Users should not sign in with passwords; use secure links.',
+    'Visitors should not have to sign in unless editing their profile.',
+  ]) assert.equal(inferRequirementSignals(request).includes('user_accounts'), true, request);
+});

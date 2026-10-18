@@ -1,0 +1,343 @@
+{
+  "sourceCommit": "283451f5c174ba13299330bbf7aceff9085427e2",
+  "before": {
+    "passed": 1,
+    "failed": 1
+  },
+  "hostSmoke": {
+    "passed": 35,
+    "failed": 0,
+    "skipped": 0
+  },
+  "hostCrashRepair": {
+    "passed": 30,
+    "failed": 0,
+    "skipped": 0
+  },
+  "exactImage": {
+    "passed": 65,
+    "failed": 0,
+    "skipped": 0
+  },
+  "publishedSmoke": {
+    "scope": "Render/crash/mobile smoke on own retained published apps; not functional or fresh build success",
+    "results": [
+      {
+        "name": "counter-20261016",
+        "url": "https://reliability-counter-20261016.app.thrallo.com/",
+        "pass": true,
+        "unavailable": false,
+        "error": null,
+        "verifierPolicy": "smoke_v1",
+        "journeys": [],
+        "fatalErrors": [],
+        "consoleErrors": [],
+        "failedRequests": [],
+        "advisories": [],
+        "verifierDefects": [],
+        "mechanics": null,
+        "smoke": {
+          "load": {
+            "ok": true,
+            "status": 200,
+            "detail": "https://reliability-counter-20261016.app.thrallo.com/"
+          },
+          "render": {
+            "rendered": true,
+            "text": 233,
+            "controls": 3,
+            "boundaryError": false
+          },
+          "responsive": {
+            "checked": true,
+            "width": 390,
+            "widths": [
+              390,
+              320
+            ],
+            "findings": [],
+            "unavailable": false,
+            "samples": [
+              {
+                "checked": true,
+                "width": 390,
+                "findings": []
+              },
+              {
+                "checked": true,
+                "width": 320,
+                "findings": []
+              }
+            ],
+            "entry": {
+              "checked": true,
+              "width": 390,
+              "widths": [
+                390,
+                320
+              ],
+              "findings": [],
+              "unavailable": false,
+              "samples": [
+                {
+                  "checked": true,
+                  "width": 390,
+                  "findings": []
+                },
+                {
+                  "checked": true,
+                  "width": 320,
+                  "findings": []
+                }
+              ]
+            },
+            "afterInteraction": {
+              "checked": true,
+              "width": 390,
+              "widths": [
+                390,
+                320
+              ],
+              "findings": [],
+              "unavailable": false,
+              "samples": [
+                {
+                  "checked": true,
+                  "width": 390,
+                  "findings": []
+                },
+                {
+                  "checked": true,
+                  "width": 320,
+                  "findings": []
+                }
+              ]
+            }
+          },
+          "controls": {
+            "discovered": 3,
+            "activated": 3,
+            "skipped": []
+          },
+          "crashes": [],
+          "durationMs": 5098
+        }
+      },
+      {
+        "name": "downlight-20261017",
+        "url": "https://reliability-downlight-20261017.app.thrallo.com/",
+        "pass": true,
+        "unavailable": false,
+        "error": null,
+        "verifierPolicy": "smoke_v1",
+        "journeys": [],
+        "fatalErrors": [],
+        "consoleErrors": [],
+        "failedRequests": [],
+        "advisories": [],
+        "verifierDefects": [],
+        "mechanics": null,
+        "smoke": {
+          "load": {
+            "ok": true,
+            "status": 200,
+            "detail": "https://reliability-downlight-20261017.app.thrallo.com/"
+          },
+          "render": {
+            "rendered": true,
+            "text": 468,
+            "controls": 2,
+            "boundaryError": false
+          },
+          "responsive": {
+            "checked": true,
+            "width": 390,
+            "widths": [
+              390,
+              320
+            ],
+            "findings": [],
+            "unavailable": false,
+            "samples": [
+              {
+                "checked": true,
+                "width": 390,
+                "findings": []
+              },
+              {
+                "checked": true,
+                "width": 320,
+                "findings": []
+              }
+            ],
+            "entry": {
+              "checked": true,
+              "width": 390,
+              "widths": [
+                390,
+                320
+              ],
+              "findings": [],
+              "unavailable": false,
+              "samples": [
+                {
+                  "checked": true,
+                  "width": 390,
+                  "findings": []
+                },
+                {
+                  "checked": true,
+                  "width": 320,
+                  "findings": []
+                }
+              ]
+            },
+            "afterInteraction": {
+              "checked": true,
+              "width": 390,
+              "widths": [
+                390,
+                320
+              ],
+              "findings": [],
+              "unavailable": false,
+              "samples": [
+                {
+                  "checked": true,
+                  "width": 390,
+                  "findings": []
+                },
+                {
+                  "checked": true,
+                  "width": 320,
+                  "findings": []
+                }
+              ]
+            }
+          },
+          "controls": {
+            "discovered": 6,
+            "activated": 6,
+            "skipped": []
+          },
+          "crashes": [],
+          "durationMs": 5910
+        }
+      },
+      {
+        "name": "recipe-fresh-20261017",
+        "url": "https://reliability-recipe-fresh-20261017.app.thrallo.com/",
+        "pass": true,
+        "unavailable": false,
+        "error": null,
+        "verifierPolicy": "smoke_v1",
+        "journeys": [],
+        "fatalErrors": [],
+        "consoleErrors": [],
+        "failedRequests": [],
+        "advisories": [],
+        "verifierDefects": [],
+        "mechanics": null,
+        "smoke": {
+          "load": {
+            "ok": true,
+            "status": 200,
+            "detail": "https://reliability-recipe-fresh-20261017.app.thrallo.com/"
+          },
+          "render": {
+            "rendered": true,
+            "text": 373,
+            "controls": 14,
+            "boundaryError": false
+          },
+          "responsive": {
+            "checked": true,
+            "width": 390,
+            "widths": [
+              390,
+              320
+            ],
+            "findings": [],
+            "unavailable": false,
+            "samples": [
+              {
+                "checked": true,
+                "width": 390,
+                "findings": []
+              },
+              {
+                "checked": true,
+                "width": 320,
+                "findings": []
+              }
+            ],
+            "entry": {
+              "checked": true,
+              "width": 390,
+              "widths": [
+                390,
+                320
+              ],
+              "findings": [],
+              "unavailable": false,
+              "samples": [
+                {
+                  "checked": true,
+                  "width": 390,
+                  "findings": []
+                },
+                {
+                  "checked": true,
+                  "width": 320,
+                  "findings": []
+                }
+              ]
+            },
+            "afterInteraction": {
+              "checked": true,
+              "width": 390,
+              "widths": [
+                390,
+                320
+              ],
+              "findings": [],
+              "unavailable": false,
+              "samples": [
+                {
+                  "checked": true,
+                  "width": 390,
+                  "findings": []
+                },
+                {
+                  "checked": true,
+                  "width": 320,
+                  "findings": []
+                }
+              ]
+            }
+          },
+          "controls": {
+            "discovered": 12,
+            "activated": 12,
+            "skipped": []
+          },
+          "crashes": [],
+          "durationMs": 9075
+        }
+      }
+    ]
+  },
+  "initialBuildImageReported": "sha256:bd851cc8bbc5ed98e050450ea86e964a55a795ca14ce9f26e10d55d296e3c6e7",
+  "releaseImage": "sha256:be49d4aac9186714b0318fc02ce65cfc80d084b46eb623a7f99d4ddc72573632",
+  "releaseExactImage": {
+    "passed": 65,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 201175.369963
+  },
+  "workerRecovery": {
+    "passed": 28,
+    "failed": 0,
+    "skipped": 0
+  }
+}

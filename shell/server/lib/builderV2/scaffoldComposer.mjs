@@ -214,7 +214,7 @@ export class ScaffoldErrorBoundary extends React.Component {
   static getDerivedStateFromError(error) { return { error }; }
   componentDidCatch(error) { console.error("scaffold screen render failed", error); }
   render() {
-    if (this.state.error) return <main role="alert" data-scaffold-boundary="error"><h1>This screen could not load</h1><p>Please try again.</p></main>;
+    if (this.state.error) return <main role="alert" data-scaffold-boundary="error"><h1>This screen could not load</h1><p>Please try again.</p><button type="button" onClick={() => this.setState({ error: null })}>Try again</button></main>;
     return this.props.children;
   }
 }
@@ -262,6 +262,10 @@ export function ScaffoldNavigation({ path, setPath }) {
 }
 
 export default function ScaffoldApp() {
+  return <ScaffoldErrorBoundary><ScaffoldRouteContent /></ScaffoldErrorBoundary>;
+}
+
+function ScaffoldRouteContent() {
   const [path, setPath] = useState(currentPath);
   useEffect(() => { const onPop = () => setPath(currentPath()); globalThis.addEventListener?.("popstate", onPop); return () => globalThis.removeEventListener?.("popstate", onPop); }, []);
   const route = SCAFFOLD_ROUTES.find((candidate) => routeMatches(candidate.path, path)) || SCAFFOLD_ROUTES[0];
@@ -269,13 +273,13 @@ export default function ScaffoldApp() {
   const params = useMemo(() => matchRouteParams(route?.path || "/", path) || {}, [route, path]);
   const navigate = useCallback((target, options) => go(target, setPath, options), []);
   const routeValue = useMemo(() => ({ path, pattern: route?.path || null, params, navigate }), [path, route, params, navigate]);
-  return <ScaffoldErrorBoundary><AppShell navigation={<ScaffoldNavigation path={path} setPath={setPath} />}>
+  return <AppShell navigation={<ScaffoldNavigation path={path} setPath={setPath} />}>
     <Suspense fallback={<ScaffoldLoadingBoundary />}><main data-scaffold-screen={route?.screenId || "missing"} data-scaffold-route={route?.path || path}>
       <ScaffoldRouteContext.Provider value={routeValue}>
         {Screen ? <Screen /> : <div role="alert">No mounted screen is available.</div>}
       </ScaffoldRouteContext.Provider>
     </main></Suspense>
-  </AppShell></ScaffoldErrorBoundary>;
+  </AppShell>;
 }
 `;
 }
@@ -362,17 +366,21 @@ ${screens.map((screen) => {
 });
 
 export default function ScaffoldApp() {
+  return <ScaffoldErrorBoundary><ScaffoldRouteContent /></ScaffoldErrorBoundary>;
+}
+
+function ScaffoldRouteContent() {
   const route = useRoute();
   const Screen = route.route ? ROUTE_SCREENS[route.route.id] : null;
   // Layout, navigation and every state's appearance are the application's; which route is active,
   // whether it is admitted and whether its record loaded are the platform's.
-  return <ScaffoldErrorBoundary><AppLayout route={route.route} params={route.params} state={route.state} navigate={route.navigate}>
+  return <AppLayout route={route.route} params={route.params} state={route.state} navigate={route.navigate}>
     <Suspense fallback={<ScaffoldLoadingBoundary />}><main data-scaffold-screen={route.route?.id || "missing"} data-scaffold-route={route.route?.path || route.path}>
       {route.state === "ready" && Screen
         ? <Screen route={route.route} params={route.params} data={route.data} />
-        : <RouteStates state={route.state} reason={route.reason} redirectTo={route.redirectTo} error={route.error} route={route.route} />}
+        : <RouteStates state={route.state} reason={route.reason} redirectTo={route.redirectTo} error={route.error} route={route.route} onRetry={route.reload} />}
     </main></Suspense>
-  </AppLayout></ScaffoldErrorBoundary>;
+  </AppLayout>;
 }
 `;
 }
@@ -392,13 +400,13 @@ function routeStatesSource() {
   return `// Model-owned presentation of the route states the platform decides: loading, not_found,
 // forbidden and error. The platform says WHICH state the route is in; how each one looks, reads
 // and recovers is yours. Replace this file's contents freely.
-export default function RouteStates({ state, reason, redirectTo }) {
+export default function RouteStates({ state, reason, redirectTo, onRetry }) {
   if (state === "loading") return <p role="status">Loading…</p>;
   if (state === "not_found") return <p role="alert">We could not find that.</p>;
   if (state === "forbidden") {
     return <p role="alert">You need to sign in to view this{redirectTo ? <> — <a href={redirectTo}>sign in</a></> : null}.</p>;
   }
-  if (state === "error") return <p role="alert">Something went wrong{reason ? \` (\${reason})\` : ""}.</p>;
+  if (state === "error") return <div role="alert"><p>{reason === "session_refresh_timeout" ? "Your session refresh timed out. Please try again in a minute." : "We could not load this page. Please try again."}</p>{onRetry ? <button type="button" onClick={onRetry}>Try again</button> : null}</div>;
   return null;
 }
 `;
@@ -414,8 +422,8 @@ export function renderScaffoldFoundation(graph, { routePlan = graph?.routePlan |
   };
   const screenFiles = Object.fromEntries((graph?.screens || []).map((screen) => [screen.module,
     screenSlotSource(screen, graph)]));
-  // The layout and the route-state presentation are model-owned slots, created once and never
-  // overwritten — exactly like a mounted screen.
+  // Layout and route-state presentation are model-owned. Recomposition preserves authored
+  // bytes; only the exact known, unmodified historical route default can be upgraded.
   if (routed) {
     screenFiles[APP_LAYOUT_PATH] = appLayoutSource();
     screenFiles[ROUTE_STATES_PATH] = routeStatesSource();
@@ -443,14 +451,25 @@ export function scaffoldCompositionPlan(graph, { routePlan = graph?.routePlan ||
   };
 }
 
-/** Apply/refresh deterministic files. Existing model-owned screens are never overwritten. */
+// Exact historical platform defaults. Never pattern-rewrite authored UI.
+const LEGACY_ROUTE_STATES_SHA256 = new Set([
+  "8c3cf2c3f117ed84fc273081f7ed318c709bb17781991e5f1790d59367c65ce4",
+  "a0713420a29422e19914df72c0cf5056c0d71f9a217e523eb991817ca596e44d",
+]);
+
+/** Refresh deterministic files and known untouched defaults; preserve authored presentation. */
 export function composeScaffoldFoundation(tree, graph, { routePlan = (routingInstalled(tree) ? graph?.routePlan || null : null) } = {}) {
   const rendered = renderScaffoldFoundation(graph, { routePlan });
   const next = { ...(tree || {}), ...rendered.protectedFiles };
+  const defaultSlotsUpgraded = [];
   for (const [path, source] of Object.entries(rendered.screenFiles)) {
     if (typeof next[path] !== "string") next[path] = source;
+    else if (path === ROUTE_STATES_PATH && LEGACY_ROUTE_STATES_SHA256.has(digest(next[path]))) {
+      next[path] = source;
+      defaultSlotsUpgraded.push(path);
+    }
   }
-  return { tree: next, plan: scaffoldCompositionPlan(graph, { routePlan }), deterministicFilesCreated: Object.keys(rendered.protectedFiles),
+  return { tree: next, plan: scaffoldCompositionPlan(graph, { routePlan }), defaultSlotsUpgraded, deterministicFilesCreated: Object.keys(rendered.protectedFiles),
     screenSlotsCreated: Object.keys(rendered.screenFiles).filter((path) => typeof tree?.[path] !== "string") };
 }
 

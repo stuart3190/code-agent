@@ -1,0 +1,70 @@
+{
+  "before": {
+    "reproduced": true,
+    "environment": "disposable PostgreSQL17, network none, no published ports, synthetic identities only",
+    "publicInsertCommitted": true,
+    "queuePayloadAbsent": true,
+    "nextRequestBlockedByActiveProjectIndex": true,
+    "normalCancelResult": {
+      "ok": false,
+      "error": "work unavailable"
+    },
+    "productionStaleOrphansObserved": 0,
+    "limitation": "Fault reproduction of a code-level crash window; no production occurrence observed"
+  },
+  "minimalSchema": {
+    "passed": 9,
+    "checks": [
+      "public build and execution payload commit together",
+      "retry after lost response returns original authority",
+      "queue constraint failure rolls back public build and payload",
+      "failed dispatch leaves project available for retry",
+      "foreign owner cannot dispatch another project",
+      "anon cannot call dispatch",
+      "authenticated cannot call dispatch",
+      "eight concurrent requests create exactly one build and queue payload",
+      "connection loss before commit leaves no stranded build or payload"
+    ],
+    "environment": "isolated PostgreSQL; synthetic identities; network none; no ports",
+    "productionMutation": false
+  },
+  "fullSchema": {
+    "passed": 9,
+    "checks": [
+      "public build and execution payload commit together",
+      "retry after lost response returns original authority",
+      "queue constraint failure rolls back public build and payload",
+      "failed dispatch leaves project available for retry",
+      "foreign owner cannot dispatch another project",
+      "anon cannot call dispatch",
+      "authenticated cannot call dispatch",
+      "eight concurrent requests create exactly one build and queue payload",
+      "connection loss before commit leaves no stranded build or payload"
+    ],
+    "environment": "isolated PostgreSQL; synthetic identities; network none; no ports",
+    "productionMutation": false
+  },
+  "schemaReplay": {
+    "storageMigrations": 60,
+    "publicMigrations": 98,
+    "allPassed": true,
+    "setupCorrections": [
+      "Bare database image needed inspected auth.jwt helper.",
+      "First storage bootstrap used incorrect search path; that synthetic fixture was stopped and replaced.",
+      "Corrected fixture needed migration-history metadata table before final two public migrations; failed migration transaction rolled back before retry."
+    ],
+    "notClaimed": "No uninterrupted first-attempt schema setup claim."
+  },
+  "nodeTests": {
+    "passed": 54,
+    "failed": 0,
+    "skipped": 0
+  },
+  "productionPreflight": {
+    "productionFunctionPreviouslyAbsent": true,
+    "productionMigrationCount": 97,
+    "productionStaleUnqueuedBuilds": 0,
+    "sourceSha256": "d8c2471af130581e8dbe0e9a3c06367216eb2ee26b07f42c4fe5c373ab35314f",
+    "rollback": "Restore previous caller; leave additive unused RPC. No customer or queue data removed."
+  }
+}

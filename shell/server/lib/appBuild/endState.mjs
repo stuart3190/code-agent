@@ -52,7 +52,7 @@ const STOP_REASON_STATES = Object.freeze({
 // Ordered most-specific first: a 429 that names a spent balance is exhaustion, not a rate
 // limit, and the two have completely different remedies.
 
-const QUOTA = /(insufficient[_ ]?quota|quota[_ ]?exceeded|exceeded your current quota|billing[_ ]?hard[_ ]?limit|credit balance is too low|insufficient (funds|credits|balance)|out of credits|payment required|no remaining (credit|quota))/i;
+const QUOTA = /(usage_limit_reached|usage limit has been reached|provider_quota_blocked|insufficient[_ ]?quota|quota[_ ]?exceeded|exceeded your current quota|billing[_ ]?hard[_ ]?limit|credit balance is too low|insufficient (funds|credits|balance)|out of credits|payment required|no remaining (credit|quota))/i;
 const RATE_LIMIT = /(rate[_ ]?limit|too many requests|requests per (minute|second)|tokens per minute|slow down|overloaded)/i;
 const UNAVAILABLE = /(service unavailable|temporarily unavailable|bad gateway|gateway timeout|upstream (error|connect)|internal server error|provider (is )?down|api (is )?unavailable)/i;
 // Genuine transient infrastructure: the work would plausibly succeed on an identical

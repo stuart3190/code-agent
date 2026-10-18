@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { optionalEnv } from "../env.mjs";
 import { serviceClient } from "../supabase.mjs";
 import { createArtifactManifest } from "../../../../shared/immutableRelease.mjs";
+import { provePublicRelease } from "./publicReleaseHealth.mjs";
 
 const workerId = `${os.hostname()}:${process.pid}:publisher`;
 let timer = null;
@@ -65,7 +66,7 @@ function rpcError(name, error) {
   if (out) throw out;
 }
 
-async function proveActivatedRelease(release) {
+async function proveActivatedRelease(release, { slug = null, publicHealth = provePublicRelease } = {}) {
   if (!release?.id) throw new Error("activated release identity is missing");
   try {
     const verified = await provisiond("/releases/verify", { body: {
@@ -74,6 +75,7 @@ async function proveActivatedRelease(release) {
     if (verified.artifactHash !== release.artifact_hash || verified.manifestHash !== release.manifest_hash) {
       throw new Error("activated release bytes do not match the database manifest");
     }
+    if (slug) await publicHealth(slug, verified.manifest);
     return verified;
   } catch (cause) {
     throw Object.assign(new Error(`post-activation health proof failed: ${cause.message}`), {
@@ -155,6 +157,7 @@ export async function assertNoBlockingDeploymentDiagnostics(owner, buildRunId, c
 export async function finalizeAndActivateRelease({
   owner, projectId, productId = null, buildId = null, snapshotId = null, deploymentId = null,
   slug, url, files, operation = "activate", metadata = {}, runtimeConfig = null, client = serviceClient(),
+  publicHealth = provePublicRelease,
 }) {
   if (!atomicPublishEnabled()) return null;
   assertPublishIntakeReady();
@@ -195,7 +198,7 @@ export async function finalizeAndActivateRelease({
     } });
     if (pointer.releaseId !== releaseId) throw new Error("provisiond did not observe the requested release");
     await proveActivatedRelease({ id: releaseId, owner, project_id: String(projectId),
-      artifact_hash: proof.artifactHash, manifest_hash: proof.manifestHash });
+      artifact_hash: proof.artifactHash, manifest_hash: proof.manifestHash }, { slug, publicHealth });
     const switched = await client.rpc("mark_publish_pointer_switched", {
       p_intent_id: intent.id, p_observed_release_id: releaseId,
     });
@@ -217,7 +220,7 @@ export async function finalizeAndActivateRelease({
 }
 
 export async function activateRetainedRelease({
-  owner, projectId, releaseId, activationDeploymentId = null, client = serviceClient(),
+  owner, projectId, releaseId, activationDeploymentId = null, client = serviceClient(), publicHealth = provePublicRelease,
 }) {
   if (!atomicPublishEnabled()) return null;
   const { data: release, error: releaseError } = await client.from("publish_releases")
@@ -247,7 +250,7 @@ export async function activateRetainedRelease({
       expectedPreviousReleaseId: intent.previous_release_id,
     } });
     if (pointer.releaseId !== releaseId) throw new Error("rollback pointer was not switched");
-    await proveActivatedRelease(release);
+    await proveActivatedRelease(release, { slug: site.slug, publicHealth });
     const marked = await client.rpc("mark_publish_pointer_switched", {
       p_intent_id: intent.id, p_observed_release_id: releaseId,
     });
@@ -312,7 +315,7 @@ export async function verifyRetainedRelease({ owner, releaseId, client = service
   return verified;
 }
 
-export async function reconcileActivation(intent, { client = serviceClient() } = {}) {
+export async function reconcileActivation(intent, { client = serviceClient(), publicHealth = provePublicRelease } = {}) {
   const desired = await releaseLocation(client, intent.desired_release_id);
   const current = await provisiond(`/releases/inspect?slug=${encodeURIComponent(intent.slug)}`, { method: "GET" });
   try {
@@ -326,7 +329,7 @@ export async function reconcileActivation(intent, { client = serviceClient() } =
         releaseId: desired.id, expectedPreviousReleaseId: intent.previous_release_id,
       } });
     }
-    if (desired) await proveActivatedRelease(desired);
+    if (desired) await proveActivatedRelease(desired, { slug: intent.slug, publicHealth });
     const marked = await client.rpc("mark_publish_pointer_switched", {
       p_intent_id: intent.id, p_observed_release_id: intent.desired_release_id,
     });

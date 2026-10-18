@@ -42,6 +42,9 @@ const GLOBALS = new Set([
   "undefined", "URIError", "URL", "URLSearchParams", "WeakMap", "WeakRef", "WeakSet", "WebSocket",
   "window", "WritableStream", "XMLHttpRequest", "setTimeout", "clearTimeout", "setInterval", "clearInterval",
   "requestAnimationFrame", "cancelAnimationFrame", "alert", "confirm", "prompt",
+  // Browser API existence is distinct from permission to own durable business records.
+  // persistenceLint independently enforces the latter and must retain its concrete finding.
+  "localStorage", "sessionStorage", "indexedDB",
 ]);
 
 function addPattern(pattern, bindings, declarations = null) {

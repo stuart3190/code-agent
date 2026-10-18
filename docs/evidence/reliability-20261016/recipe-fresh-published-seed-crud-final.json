@@ -1,0 +1,239 @@
+[
+  {
+    "width": 1440,
+    "name": "requested initial recipe",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "initial ingredients removable",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "remove seeded rice updates scaled list",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "remove seeded rice updates original list",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "reset restores removed seed",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "six-serving requested quantities",
+    "ok": true,
+    "detail": "KITCHEN NOTEBOOK\n\nRecipe scaler\nHow it works →\nA four-serving starting recipe\n\nAdjust the servings and every ingredient follows the same ratio.\n\nReset calculator\nOriginal servings\nDesired servings\nRecalculate quantities\nIngredients\nOriginal list\nScaled list\nrice\n450 g\nRemove\nwater\n900 ml\nRemove\nsalt\n3 tsp\nRemove\nAdd an ingredient\nIngredient name\nOriginal quantity\nUnit\nAdd ingredient row\n\nRecipe is ready."
+  },
+  {
+    "width": 1440,
+    "name": "invalid servings \"0\"",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "invalid servings \"-1\"",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "invalid servings \"\"",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "reset restores requested example",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "decimal ingredient scaling",
+    "ok": true,
+    "detail": "KITCHEN NOTEBOOK\n\nRecipe scaler\nHow it works →\nA four-serving starting recipe\n\nAdjust the servings and every ingredient follows the same ratio.\n\nReset calculator\nOriginal servings\nDesired servings\nRecalculate quantities\nIngredients\nOriginal list\nScaled list\nrice\n450 g\nRemove\nwater\n900 ml\nRemove\nsalt\n3 tsp\nRemove\nCumin\n0.75 tsp\nRemove\nAdd an ingredient\nIngredient name\nOriginal quantity\nUnit\nAdd ingredient row\n\nRecipe is ready."
+  },
+  {
+    "width": 1440,
+    "name": "remove ingredient",
+    "ok": true
+  },
+  {
+    "width": 1440,
+    "name": "mobile controls usable",
+    "ok": true,
+    "detail": []
+  },
+  {
+    "width": 1440,
+    "name": "guide provides usage instructions",
+    "ok": true,
+    "detail": "KITCHEN NOTEBOOK\n\nHow it works\nUsage instructions\nStart with the number of servings in the original recipe.\nEnter the number of servings you want to make.\nChoose the original or scaled list whenever you want to compare amounts.\nAdd a pantry item with decimal-friendly quantities, or remove it again.\n\nThis calculator is intentionally transient: it does not save recipes or use external conversion services.\n\nReturn to calculator\n\nGuide ready."
+  },
+  {
+    "width": 1440,
+    "name": "guide returns to calculator",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "requested initial recipe",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "initial ingredients removable",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "remove seeded rice updates scaled list",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "remove seeded rice updates original list",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "reset restores removed seed",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "six-serving requested quantities",
+    "ok": true,
+    "detail": "KITCHEN NOTEBOOK\n\nRecipe scaler\nHow it works →\nA four-serving starting recipe\n\nAdjust the servings and every ingredient follows the same ratio.\n\nReset calculator\nOriginal servings\nDesired servings\nRecalculate quantities\nIngredients\nOriginal list\nScaled list\nrice\n450 g\nRemove\nwater\n900 ml\nRemove\nsalt\n3 tsp\nRemove\nAdd an ingredient\nIngredient name\nOriginal quantity\nUnit\nAdd ingredient row\n\nRecipe is ready."
+  },
+  {
+    "width": 390,
+    "name": "invalid servings \"0\"",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "invalid servings \"-1\"",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "invalid servings \"\"",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "reset restores requested example",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "decimal ingredient scaling",
+    "ok": true,
+    "detail": "KITCHEN NOTEBOOK\n\nRecipe scaler\nHow it works →\nA four-serving starting recipe\n\nAdjust the servings and every ingredient follows the same ratio.\n\nReset calculator\nOriginal servings\nDesired servings\nRecalculate quantities\nIngredients\nOriginal list\nScaled list\nrice\n450 g\nRemove\nwater\n900 ml\nRemove\nsalt\n3 tsp\nRemove\nCumin\n0.75 tsp\nRemove\nAdd an ingredient\nIngredient name\nOriginal quantity\nUnit\nAdd ingredient row\n\nRecipe is ready."
+  },
+  {
+    "width": 390,
+    "name": "remove ingredient",
+    "ok": true
+  },
+  {
+    "width": 390,
+    "name": "mobile controls usable",
+    "ok": true,
+    "detail": []
+  },
+  {
+    "width": 390,
+    "name": "guide provides usage instructions",
+    "ok": true,
+    "detail": "KITCHEN NOTEBOOK\n\nHow it works\nUsage instructions\nStart with the number of servings in the original recipe.\nEnter the number of servings you want to make.\nChoose the original or scaled list whenever you want to compare amounts.\nAdd a pantry item with decimal-friendly quantities, or remove it again.\n\nThis calculator is intentionally transient: it does not save recipes or use external conversion services.\n\nReturn to calculator\n\nGuide ready."
+  },
+  {
+    "width": 390,
+    "name": "guide returns to calculator",
+    "ok": true
+  },
+  {
+    "width": 320,
+    "name": "requested initial recipe",
+    "ok": true
+  },
+  {
+    "width": 320,
+    "name": "initial ingredients removable",
+    "ok": true
+  },
+  {
+    "width": 320,
+    "name": "remove seeded rice updates scaled list",
+    "ok": true
+  },
+  {
+    "width": 320,
+    "name": "remove seeded rice updates original list",
+    "ok": true
+  },
+  {
+    "width": 320,
+    "name": "reset restores removed seed",
+    "ok": true
+  },
+  {
+    "width": 320,
+    "name": "six-serving requested quantities",
+    "ok": true,
+    "detail": "KITCHEN NOTEBOOK\n\nRecipe scaler\nHow it works →\nA four-serving starting recipe\n\nAdjust the servings and every ingredient follows the same ratio.\n\nReset calculator\nOriginal servings\nDesired servings\nRecalculate quantities\nIngredients\nOriginal list\nScaled list\nrice\n450 g\nRemove\nwater\n900 ml\nRemove\nsalt\n3 tsp\nRemove\nAdd an ingredient\nIngredient name\nOriginal quantity\nUnit\nAdd ingredient row\n\nRecipe is ready."
+  },
+  {
+    "width": 320,
+    "name": "invalid servings \"0\"",
+    "ok": true
+  },
+  {
+    "width": 320,
+    "name": "invalid servings \"-1\"",
+    "ok": true
+  },
+  {
+    "width": 320,
+    "name": "invalid servings \"\"",
+    "ok": true
+  },
+  {
+    "width": 320,
+    "name": "reset restores requested example",
+    "ok": true
+  },
+  {
+    "width": 320,
+    "name": "decimal ingredient scaling",
+    "ok": true,
+    "detail": "KITCHEN NOTEBOOK\n\nRecipe scaler\nHow it works →\nA four-serving starting recipe\n\nAdjust the servings and every ingredient follows the same ratio.\n\nReset calculator\nOriginal servings\nDesired servings\nRecalculate quantities\nIngredients\nOriginal list\nScaled list\nrice\n450 g\nRemove\nwater\n900 ml\nRemove\nsalt\n3 tsp\nRemove\nCumin\n0.75 tsp\nRemove\nAdd an ingredient\nIngredient name\nOriginal quantity\nUnit\nAdd ingredient row\n\nRecipe is ready."
+  },
+  {
+    "width": 320,
+    "name": "remove ingredient",
+    "ok": true
+  },
+  {
+    "width": 320,
+    "name": "mobile controls usable",
+    "ok": true,
+    "detail": []
+  },
+  {
+    "width": 320,
+    "name": "guide provides usage instructions",
+    "ok": true,
+    "detail": "KITCHEN NOTEBOOK\n\nHow it works\nUsage instructions\nStart with the number of servings in the original recipe.\nEnter the number of servings you want to make.\nChoose the original or scaled list whenever you want to compare amounts.\nAdd a pantry item with decimal-friendly quantities, or remove it again.\n\nThis calculator is intentionally transient: it does not save recipes or use external conversion services.\n\nReturn to calculator\n\nGuide ready."
+  },
+  {
+    "width": 320,
+    "name": "guide returns to calculator",
+    "ok": true
+  }
+]

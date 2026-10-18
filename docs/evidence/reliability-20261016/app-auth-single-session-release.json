@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-17T19:41:26.421Z",
+  "version": 10,
+  "verify_jwt": true,
+  "bundleSha256": "95e6947efb5eadc327bd83582f0766bb931ab3fab322a5ca053f0cba875c1f7b",
+  "exactCandidateReadback": true,
+  "backup": "/home/ubuntu/backups/reliability-app-auth-single-session-20261017",
+  "tests": {
+    "handler": 9,
+    "namespace": 2,
+    "activeLive": 2,
+    "disabledLive": 2
+  },
+  "limitation": "Single session issuance proved in actual-handler fixture; live responses and deployed bytes verified. No customer sessions used."
+}

@@ -3,10 +3,14 @@ import { readFile } from "node:fs/promises";
 import { gunzipSync } from "node:zlib";
 import path from "node:path";
 
+import { inspectBackupRelations, validateImmutableBackupContent, relationCatalogHash } from "../../ops/lib/backupRelations.mjs";
+
 export async function validateBackupDirectory(dir) {
   const manifest = JSON.parse(await readFile(path.join(dir, "manifest.json"), "utf8"));
   const tables = manifest?.tables || {};
   const checked = {};
+  const relationTables = new Map();
+  if (manifest.formatVersion >= 3 && !manifest.relations) throw new Error("backup relation evidence missing");
 
   for (const [filename, expected] of Object.entries(manifest.files || {})) {
     const full = safeBackupPath(dir, filename);
@@ -28,6 +32,25 @@ export async function validateBackupDirectory(dir) {
       throw new Error(`${filename}: manifest says ${expected} rows, decoded ${rows.length}`);
     }
     checked[table] = rows.length;
+    if (manifest.relations && (table === "auth_users" || manifest.catalogCoverage?.names?.includes(table))) relationTables.set(table, rows);
+  }
+
+  if(manifest.relations) {
+    const filename=manifest.relations.file;
+    if(!manifest.files?.[filename])throw new Error("backup relation catalog checksum entry missing");
+    const catalog=JSON.parse(gunzipSync(await readFile(safeBackupPath(dir,filename))).toString("utf8"));
+    if(relationCatalogHash(catalog)!==manifest.relations.catalogSha256)throw new Error("backup relation catalog hash mismatch");
+    const issues=inspectBackupRelations(relationTables,catalog);
+    if(issues.missing.length || issues.containers.length)throw new Error(`backup referential closure failed: ${issues.missing.length} missing parents, ${issues.containers.length} incomplete immutable containers`);
+    validateImmutableBackupContent(relationTables);
+    const storage=JSON.parse(gunzipSync(await readFile(safeBackupPath(dir,"storage_objects.json.gz"))).toString("utf8"));
+    const objects=new Map(storage.map(row=>[row.key,row]));
+    for(const blob of relationTables.get("bv2_blobs") || []) {
+      if(blob.content != null) continue;
+      const object=objects.get(blob.storage_path);
+      if(!object || object.sha256 !== blob.content_hash || object.bytes !== blob.size_bytes) throw new Error("backup external blob storage integrity mismatch");
+    }
+    relationTables.clear();
   }
 
   await validateObjectPayloads(dir, manifest, checked.storage_objects ? "storage_objects" : null);

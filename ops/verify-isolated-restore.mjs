@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { createHash, createHmac } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, readlink, realpath, stat } from "node:fs/promises";
+import { validatePublishPointer } from "./lib/filesystemBackup.mjs";
 import { gunzipSync } from "node:zlib";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
@@ -119,6 +120,17 @@ for (const directory of filesystemDirectories) {
   const metadata = await stat(target);
   if (!metadata.isDirectory() || (metadata.mode & 0o777) !== directory.mode) {
     throw new Error(`filesystem directory differs: ${directory.root}/${directory.relativePath}`);
+  }
+}
+
+const filesystemSymlinks = await loadOptionalRows("filesystem_symlinks");
+for (const link of filesystemSymlinks) {
+  if (link.root !== "publish") throw new Error("unexpected symlink logical root");
+  validatePublishPointer(link.relativePath, link.target);
+  const root = path.resolve(filesystemRoot, "publish");
+  const target = path.resolve(root, link.relativePath);
+  if (await readlink(target) !== link.target || !(await realpath(target)).startsWith(`${root}${path.sep}`)) {
+    throw new Error(`restored publish pointer differs: ${link.relativePath}`);
   }
 }
 

@@ -1,0 +1,18 @@
+{
+  "measuredAt": "2026-10-17T15:19:31.857Z",
+  "since": "2026-09-17T15:19:31.574Z",
+  "rows": 95,
+  "groups": {
+    "otherOwners": {},
+    "missionAccount": {
+      "failed": 37,
+      "complete": 58
+    }
+  },
+  "limits": [
+    "Status counts are platform outcomes, not independently verified functional success.",
+    "Other owners may include historical engineering work; this is not a representative customer build suite.",
+    "Read-only paginated observation is not a transaction snapshot.",
+    "The mission account also has builds predating this audit; account grouping does not label every build as an audit run."
+  ]
+}

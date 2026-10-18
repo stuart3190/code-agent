@@ -54,7 +54,9 @@ test("existing preview, export and publish lifecycle controls remain wired", asy
   const settings = await read("shell/web/src/publish/ProjectSettingsBody.jsx");
   const panel = await read("shell/web/src/publish/PublishedPanel.jsx");
   const deployments = await read("shell/web/src/publish/DeploymentsView.jsx");
-  assert.match(shell, /function PreviewPane/);
+  assert.match(shell, /import PreviewPane from ["']\.\/PreviewPane\.jsx["']/);
+  assert.match(shell, /<PreviewPane\b/);
+  assert.match(await read("shell/web/src/chat/PreviewPane.jsx"), /export default function PreviewPane/);
   assert.match(settings, /exportProjectZip/);
   assert.match(panel, /Publish Update/);
   assert.match(panel, /Unpublish/);

@@ -117,9 +117,10 @@ export function matchRoute(table, actualPath) {
   return null;
 }
 
-/** A concrete href for a route id. Every declared parameter must be supplied — never a literal ":projectId". */
+/** A concrete href for a route id or an exact declared static path. Parameters still require an id. */
 export function routeHref(table, id, params = {}) {
-  const route = table.byId[id];
+  const route = table.byId[id] || (typeof id === "string" && id.startsWith("/")
+    ? table.routes.find(candidate => candidate.path === id && !/[:*]/.test(candidate.path)) : null);
   if (!route) throw new RouteError("route_unknown", `no route ${id}`);
   const href = segmentsOf(route.path).map((segment) => {
     if (segment === "*") return "";
@@ -143,6 +144,8 @@ export function evaluateGuard(route, sessionState, { signInRoute = null } = {}) 
   const guard = route?.guard || "any";
   if (guard === "any") return Object.freeze({ state: "ready", reason: null, redirectTo: null });
   if (status === "initializing") return Object.freeze({ state: "loading", reason: "session_initializing", redirectTo: null });
+  if (status === "error") return Object.freeze({ state: "error",
+    reason: sessionState?.error?.code || "session_unavailable", redirectTo: null });
   if (guard === "visitor") {
     const allowed = status === "visitor" || status === "signed_in";
     return Object.freeze({ state: allowed ? "ready" : "forbidden", reason: allowed ? null : status, redirectTo: allowed ? null : signInRoute });

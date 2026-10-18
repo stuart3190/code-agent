@@ -1,0 +1,111 @@
+{
+  "policy": "minimal_contract_v1",
+  "productionGateUnchanged": true,
+  "results": [
+    {
+      "slug": "reliability-recipe-20261017",
+      "sourceHash": "7d63b0d3d55334dcebb3d169f79fd2aec0938d85f5b302d5b056b0c2a8240c82",
+      "contractProvenance": {
+        "via": "source_build",
+        "sourceSnapshotId": "ba53db96-3841-4397-8a56-ad0bdcce2f80",
+        "contractSnapshotId": "46c8cef1-fa1e-479a-86d4-44d17962c70c"
+      },
+      "pass": false,
+      "primaryStatus": "undriveable",
+      "journeys": [
+        {
+          "id": "scale-initial-recipe",
+          "status": "undriveable",
+          "classification": "CONTRACT_INCOMPLETE",
+          "steps": [
+            {
+              "action": "open the calculator",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted route / is open · the contract's declared visible text is present"
+            },
+            {
+              "action": "enter original and desired serving counts",
+              "status": "undriveable",
+              "classification": "CONTRACT_INCOMPLETE",
+              "detail": "unobserved numeric text needs structured output evidence: \"rice 450 g\", \"water 900 ml\", \"salt 3 tsp\""
+            },
+            {
+              "action": "switch to the scaled ingredient list",
+              "status": "not_reached",
+              "detail": "not reached because step 2 was undriveable"
+            },
+            {
+              "action": "enter zero as the desired serving count",
+              "status": "not_reached",
+              "detail": "not reached because step 2 was undriveable"
+            },
+            {
+              "action": "enter a negative desired serving count",
+              "status": "not_reached",
+              "detail": "not reached because step 2 was undriveable"
+            },
+            {
+              "action": "clear the desired serving count",
+              "status": "not_reached",
+              "detail": "not reached because step 2 was undriveable"
+            },
+            {
+              "action": "restore the six-serving desired count",
+              "status": "not_reached",
+              "detail": "not reached because step 2 was undriveable"
+            },
+            {
+              "action": "enter a decimal ingredient",
+              "status": "not_reached",
+              "detail": "not reached because step 2 was undriveable"
+            },
+            {
+              "action": "add the entered ingredient",
+              "status": "not_reached",
+              "detail": "not reached because step 2 was undriveable"
+            },
+            {
+              "action": "choose the added ingredient for removal",
+              "status": "not_reached",
+              "detail": "not reached because step 2 was undriveable"
+            },
+            {
+              "action": "remove the selected ingredient",
+              "status": "not_reached",
+              "detail": "not reached because step 2 was undriveable"
+            },
+            {
+              "action": "reset the example recipe",
+              "status": "not_reached",
+              "detail": "not reached because step 2 was undriveable"
+            }
+          ]
+        },
+        {
+          "id": "read-how-it-works",
+          "status": "pass",
+          "classification": "PASS",
+          "steps": [
+            {
+              "action": "open the instructions page",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted route /how-it-works is open · the contract's declared visible text is present"
+            },
+            {
+              "action": "return to the calculator using navigation",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted route / is open · the contract's declared visible text is present · the contracted outcome after the reset is present"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Shadow evaluation of one existing published app, not fresh-generation success.",
+    "Historical edit/verify runtime contracts were unrecorded; selected contracts follow source snapshot ancestry. Published captured source hashes are checked before execution."
+  ]
+}

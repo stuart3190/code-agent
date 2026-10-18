@@ -13,13 +13,17 @@
 // offline copy of shell/.env is part of the disaster-recovery kit.
 
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { gzipSync } from "node:zlib";
+import { gzipSync, gunzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import os from "node:os";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { loadEnv } from "../shell/server/lib/env.mjs";
 import { validateBackupDirectory } from "../scripts/lib/backupValidation.mjs";
+import { reconcileBackupRelations, relationCatalogHash } from "./lib/backupRelations.mjs";
+import { dumpTable } from "./lib/backupPagination.mjs";
 import { inventoryFilesystemRoot, readInventoriedFile } from "./lib/filesystemBackup.mjs";
 import {
   EPHEMERAL_RUNTIME_TABLES,
@@ -85,6 +89,8 @@ export const CA_TABLES = [
   "custom_domains",
   "ca_push_subscriptions",
   "entities",
+  "app_booking_reservations", // after projects/entities; records remain private
+  "app_booking_request_keys", // after reservations; preserve retry identities
   "app_users",
   "app_auth_events",
   "app_password_resets",
@@ -170,48 +176,6 @@ export const CA_TABLES = [
 
 export const ARTIFACT_BUCKET = process.env.CODE_AGENT_ARTIFACT_BUCKET || "thrallo-artifacts";
 const PAGE = 1000;
-// The floor for the adaptive page size. Below this a genuinely unservable row is the problem, not
-// the batch, and shrinking further would only turn one failure into a thousand.
-const MIN_PAGE = 10;
-
-/**
- * Every row of a table, in pages that shrink until the database can serve them.
- *
- * A fixed page size cannot work here, because row WEIGHT varies by three orders of magnitude
- * between tables: a subscription row is a few hundred bytes, an index chunk carries an embedding
- * and is ~40 KB. At PAGE=1000 that table asked for roughly 40 MB in one statement and Postgres
- * cancelled it — so the whole backup aborted, leaving 16 of 34 tables on disk and no manifest.
- *
- * It failed loudly in the service log and silently everywhere else, which is how Thrallo went from
- * a complete nightly backup on 3 August to a partial one on 4 August with nothing saying so.
- *
- * Halving on timeout self-tunes as tables grow, instead of needing a constant revisited whenever
- * one does.
- */
-async function dumpTable(svc, table) {
-  const rows = [];
-  let size = PAGE;
-  let from = 0;
-  for (;;) {
-    const { data, error } = await svc.from(table).select("*").range(from, from + size - 1);
-    if (error) {
-      // Only a timeout is worth retrying smaller; anything else is a real failure and must stop the
-      // backup rather than be quietly skipped, which would produce a plausible-looking short file.
-      const timedOut = /timeout|canceling statement/i.test(error.message || "");
-      if (timedOut && size > MIN_PAGE) {
-        size = Math.max(MIN_PAGE, Math.floor(size / 4));
-        console.log(`  ${table}: page too heavy, retrying at ${size} rows`);
-        continue;
-      }
-      throw new Error(`${table}: ${error.message}`);
-    }
-    rows.push(...(data || []));
-    if (!data || data.length < size) break;
-    from += data.length;
-  }
-  return rows;
-}
-
 async function dumpAuthUsers(svc) {
   const users = [];
   for (let page = 1; ; page += 1) {
@@ -250,6 +214,15 @@ export async function listBucketObjects(svc, bucket, prefix = "") {
   return keys;
 }
 
+export async function createPrivateBackupDirectory(dir) {
+  await mkdir(path.dirname(dir), { recursive: true, mode: 0o700 });
+  // Reserve this run exclusively: never merge with a simultaneous export, a retained
+  // incomplete run, or a pre-existing symlink. Keep exported secrets private even
+  // when an operator chooses a backup root with broader permissions.
+  await mkdir(dir, { mode: 0o700 });
+  await mkdir(path.join(dir, "storage"), { mode: 0o700 });
+}
+
 async function main() {
   loadEnv();
   const URL_ = process.env.SUPABASE_URL;
@@ -265,13 +238,13 @@ async function main() {
   const stamp = new Date().toISOString().replace(/:/g, "").slice(0, 17);
   const finalDir = path.join(backupRoot, `thrallo-${stamp}`);
   const dir = path.join(backupRoot, `.incomplete-thrallo-${stamp}`);
-  await mkdir(path.join(dir, "storage"), { recursive: true });
+  await createPrivateBackupDirectory(dir);
 
   const manifest = {
     product: "thrallo",
-    formatVersion: 2,
+    formatVersion: 3,
     url: new globalThis.URL(URL_).host,
-    sourceCommit: process.env.THRALLO_BACKUP_SOURCE_COMMIT || await currentGitCommit(),
+    sourceCommit: process.env.THRALLO_BACKUP_SOURCE_COMMIT || await backupSourceCommit(),
     backupToolSha256: sha256(await readFile(new URL(import.meta.url))),
     startedAt: new Date().toISOString(),
     tables: {},
@@ -284,6 +257,16 @@ async function main() {
   const ledger = await loadMigrationLedgerEvidence();
   const evidence = runtimeCatalogEvidence(ledger.migrations?.length);
   const catalog = await loadLiveCatalog(svc);
+  const readRelations = async () => {
+    const {data,error} = await svc.rpc("thrallo_backup_relation_catalog");
+    if(error || !data) throw new Error(`backup relation catalog unavailable: ${error?.message || "empty result"}`);
+    return data;
+  };
+  const relations = await readRelations();
+  const expectedVersions = ledger.migrations.map(row => row.appliedVersion || row.version).sort();
+  if(JSON.stringify(relations.migrationVersions) !== JSON.stringify(expectedVersions)) {
+    throw new Error("live migrations differ from the backup's authoritative ledger");
+  }
   const backupTables = CA_TABLES.filter((table) => catalog.includes(table));
   const coverage = findCatalogCoverageGaps(catalog, backupTables, EPHEMERAL_RUNTIME_TABLES);
   if (coverage.missingFromBackup.length || coverage.missingFromCatalog.length) {
@@ -322,7 +305,42 @@ async function main() {
   manifest.bytes += usersGz.length;
   console.log(`  auth_users: ${users.length} rows`);
 
+  // A live sequential export can observe a child after its parent's table was read.
+  // Add bounded referential closure and immutable container contents before storage inventory.
+  const relationTables = new Map();
+  for(const table of [...backupTables, "auth_users"]) relationTables.set(table,
+    JSON.parse(gunzipSync(await readFile(path.join(dir, `${table}.json.gz`))).toString("utf8")));
+  const closure = await reconcileBackupRelations(relationTables, relations, {fetchRows: async request => {
+    if(request.table === "auth_users") {
+      if(JSON.stringify(request.columns) !== '["id"]') throw new Error("unsupported auth parent identity");
+      const {data,error} = await svc.auth.admin.getUserById(request.values[0]);
+      if(error || !data?.user) throw new Error("backup referenced auth user unavailable");
+      return [data.user];
+    }
+    return dumpTable(svc, request.table, {filters: request.columns.map((column,i)=>[column,request.values[i]])});
+  }});
+  for(const table of closure.changedTables) {
+    const rows=relationTables.get(table), filename=`${table}.json.gz`, gz=gzipSync(JSON.stringify(rows));
+    manifest.bytes -= manifest.files[filename].bytes;
+    await writeFile(path.join(dir, filename),gz);
+    manifest.tables[table]=rows.length;
+    manifest.files[filename]={bytes:gz.length,sha256:sha256(gz)};
+    manifest.bytes += gz.length;
+  }
+  const requiredStorageKeys=new Set((relationTables.get("bv2_blobs") || [])
+    .filter(blob=>blob.content == null).map(blob=>blob.storage_path));
+  if(requiredStorageKeys.has(null) || requiredStorageKeys.has(undefined)) throw new Error("backup external blob has no storage path");
+  relationTables.clear();
+  const relationGz=gzipSync(JSON.stringify(relations));
+  await writeFile(path.join(dir,"backup_relations.json.gz"),relationGz);
+  manifest.files["backup_relations.json.gz"]={bytes:relationGz.length,sha256:sha256(relationGz)};
+  manifest.bytes += relationGz.length;
+  manifest.relations={...closure,file:"backup_relations.json.gz",source:"thrallo_backup_relation_catalog"};
+  console.log(`  referential closure: ${closure.addedRows} rows added across ${closure.changedTables.length} tables in ${closure.rounds} rounds`);
+
   const keys = await listBucketObjects(svc, ARTIFACT_BUCKET);
+  const availableStorageKeys=new Set(keys);
+  for(const key of requiredStorageKeys) if(!availableStorageKeys.has(key)) throw new Error("backup referenced blob storage object is missing");
   const objectIndex = [];
   for (const key of keys) {
     const { data, error } = await svc.storage.from(ARTIFACT_BUCKET).download(key);
@@ -344,6 +362,7 @@ async function main() {
 
   const filesystemIndex = [];
   const filesystemDirectories = [];
+  const filesystemSymlinks = [];
   const roots = [
     { name: "publish", source: process.env.PUBLISH_DIR || path.join(os.homedir(), "publish") },
     { name: "qa", source: process.env.QA_ARTIFACT_DIR || path.join(os.homedir(), "thrallo-qa") },
@@ -352,7 +371,8 @@ async function main() {
   for (const root of roots) {
     const rootStat = await stat(root.source).catch(() => null);
     if (!rootStat?.isDirectory()) throw new Error(`filesystem root missing or not a directory: ${root.source}`);
-    const inventory = await inventoryFilesystemRoot(root.source);
+    const inventory = await inventoryFilesystemRoot(root.source, { allowPublishPointers: root.name === "publish", omitSandboxDependencies: root.name === "build-worker" });
+    filesystemSymlinks.push(...inventory.symlinks.map(link => ({ root: root.name, relativePath: link.relative, target: link.target })));
     const files = inventory.files;
     filesystemDirectories.push(...inventory.directories.map((directory) => ({
       root: root.name,
@@ -373,6 +393,7 @@ async function main() {
     }
     manifest.filesystem.roots[root.name] = {
       source: root.source,
+      exclusions: inventory.exclusions,
       objects: files.length,
       directories: inventory.directories.length,
       bytes: rootBytes,
@@ -393,6 +414,13 @@ async function main() {
     sha256: sha256(filesystemDirectoriesGz),
   };
   manifest.bytes += filesystemDirectoriesGz.length;
+  const filesystemSymlinksGz = gzipSync(JSON.stringify(filesystemSymlinks));
+  await writeFile(path.join(dir, "filesystem_symlinks.json.gz"), filesystemSymlinksGz);
+  manifest.tables.filesystem_symlinks = filesystemSymlinks.length;
+  manifest.files["filesystem_symlinks.json.gz"] = {
+    bytes: filesystemSymlinksGz.length, sha256: sha256(filesystemSymlinksGz),
+  };
+  manifest.bytes += filesystemSymlinksGz.length;
 
   const ledgerGz = gzipSync(JSON.stringify(ledger));
   await writeFile(path.join(dir, "migration_ledger.json.gz"), ledgerGz);
@@ -411,6 +439,9 @@ async function main() {
   manifest.bytes += migrationStateGz.length;
   console.log(`  migration ledger: ${ledger.migrations.length} authoritative rows captured ${ledger.capturedAt}`);
 
+  if(relationCatalogHash(await readRelations()) !== relationCatalogHash(relations)) {
+    throw new Error("database schema or migration ledger changed during backup");
+  }
   manifest.finishedAt = new Date().toISOString();
   await writeFile(path.join(dir, "manifest.json"), JSON.stringify(manifest, null, 2));
 
@@ -518,13 +549,18 @@ async function buildMigrationState(ledger) {
   return state;
 }
 
-async function currentGitCommit() {
-  const head = (await readFile(path.resolve(".git", "HEAD"), "utf8").catch(() => "")).trim();
-  if (/^[0-9a-f]{40}$/i.test(head)) return head;
-  const ref = /^ref: (.+)$/.exec(head)?.[1];
-  if (!ref) return null;
-  const value = (await readFile(path.resolve(".git", ref), "utf8").catch(() => "")).trim();
-  return /^[0-9a-f]{40}$/i.test(value) ? value : null;
+export async function backupSourceCommit(root = process.cwd()) {
+  // Production is an immutable deployment copy, not a Git checkout. Worktrees also
+  // use .git files and shared/packed refs, so let Git resolve those when applicable.
+  const deployed = (await readFile(path.join(root, "DEPLOYED_COMMIT"), "utf8").catch(() => "")).trim();
+  if (/^[0-9a-f]{40}$/i.test(deployed)) return deployed;
+  try {
+    const { stdout } = await promisify(execFile)("git", ["rev-parse", "HEAD"], {
+      cwd: root, timeout: 5000, maxBuffer: 4096,
+    });
+    const value = stdout.trim();
+    return /^[0-9a-f]{40}$/i.test(value) ? value : null;
+  } catch { return null; }
 }
 
 export function canonicalSqlHash(bytes) {

@@ -1,0 +1,8 @@
+{
+  "syntheticFixture": true,
+  "initialStatus": "visitor",
+  "restoredStatus": "signed_in",
+  "initialMemberAdmission": false,
+  "restoredMemberAdmission": true,
+  "limitation": "Client routing identity semantic gap; no real backend authorization or customer access attempted."
+}

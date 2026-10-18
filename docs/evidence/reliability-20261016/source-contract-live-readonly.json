@@ -1,0 +1,84 @@
+{
+  "measuredAt": "2026-10-17T15:51:50.439Z",
+  "results": [
+    {
+      "slug": "reliability-counter-20261016",
+      "ok": true,
+      "via": "source_build",
+      "contractId": "7c6a12b3-f186-4554-a030-bb89de52d6c2",
+      "sourceSnapshotId": "42ed3bed-388c-4084-acd3-24c0459051f1",
+      "contractSnapshotId": "42ed3bed-388c-4084-acd3-24c0459051f1"
+    },
+    {
+      "slug": "reliability-bookshelf-20261017",
+      "ok": true,
+      "via": "source_build",
+      "contractId": "92f82ea6-e472-4b45-9011-141a329ab844",
+      "sourceSnapshotId": "9e460a88-3637-4356-a71c-8e79db6b0647",
+      "contractSnapshotId": "9e460a88-3637-4356-a71c-8e79db6b0647"
+    },
+    {
+      "slug": "reliability-quote-20261017",
+      "ok": true,
+      "via": "source_build",
+      "contractId": "9459dc61-7d04-496f-a696-f6e85517f86d",
+      "sourceSnapshotId": "c130dbea-188e-43ef-ac1f-d6b5fabac534",
+      "contractSnapshotId": "da33a1d3-89b2-4c2b-90e0-5fc23902b645"
+    },
+    {
+      "slug": "reliability-booking-20261017",
+      "ok": true,
+      "via": "source_build",
+      "contractId": "5e8b6298-d36e-4d55-8215-dff899f9ca4f",
+      "sourceSnapshotId": "707cd5d7-1862-4557-a642-9ba6693c2153",
+      "contractSnapshotId": "05bdd72e-adb6-438e-981b-f9aa1551a64d"
+    },
+    {
+      "slug": "reliability-recipe-20261017",
+      "ok": true,
+      "via": "source_build",
+      "contractId": "5b727cf7-d5f1-4b41-adc5-a90eef5e2255",
+      "sourceSnapshotId": "ba53db96-3841-4397-8a56-ad0bdcce2f80",
+      "contractSnapshotId": "46c8cef1-fa1e-479a-86d4-44d17962c70c"
+    },
+    {
+      "slug": "reliability-booking-fresh-20261017",
+      "ok": true,
+      "via": "unique_legacy_contract",
+      "contractId": "39ab2043-0a6f-42a8-8db2-08fa74868b5e",
+      "sourceSnapshotId": "f8770882-59ae-4891-b0e5-0726e592b92a"
+    },
+    {
+      "slug": "reliability-kanban-20261017",
+      "ok": true,
+      "via": "unique_legacy_contract",
+      "contractId": "fe1795f8-f285-4f74-96dd-7355a25ede19",
+      "sourceSnapshotId": "9d1971fa-2b24-4f4a-9429-b3824eac6351"
+    },
+    {
+      "slug": "reliability-portfolio-20261017",
+      "ok": true,
+      "via": "source_build",
+      "contractId": "fdb12a0f-bf22-4ee5-b4da-76fe160e2c1a",
+      "sourceSnapshotId": "c66dfda9-a0a2-47d8-b8f9-e8e725bb08c1",
+      "contractSnapshotId": "01e43903-c64f-40d1-b3d1-db0cdc963fb2"
+    },
+    {
+      "slug": "reliability-recipe-fresh-20261017",
+      "ok": true,
+      "via": "source_build",
+      "contractId": "4668f6d2-b76e-4250-98c2-29b8455b1e27",
+      "sourceSnapshotId": "cb1cec5e-c304-4eaf-8aa0-31f1cb579d34",
+      "contractSnapshotId": "a019b1aa-4cc7-40c1-ad0a-b80c7fb4b29f"
+    },
+    {
+      "slug": "reliability-downlight-20261017",
+      "ok": true,
+      "via": "source_build",
+      "contractId": "292162c6-5f7f-489c-ab81-625a065d74a5",
+      "sourceSnapshotId": "a0435f9c-c824-457f-924f-d925663f3ec4",
+      "contractSnapshotId": "1aec1e8b-da0d-4ea7-aaac-c44f01d5317c"
+    }
+  ],
+  "limitation": "Read-only resolution of current green sources; does not reconstruct unrecorded historical runtime inputs."
+}

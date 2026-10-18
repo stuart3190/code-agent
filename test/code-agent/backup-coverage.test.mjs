@@ -27,6 +27,7 @@ import {
   PRODUCTION_PUBLIC_TABLES_102,
   PRODUCTION_PUBLIC_TABLES_105,
   PRODUCTION_PUBLIC_TABLES_107,
+  PRODUCTION_PUBLIC_TABLES_109,
   PRODUCTION_PUBLIC_FK_PAIRS_99,
   CURRENT_CATALOG_MIGRATION_RANGE,
   sha256Lines,
@@ -320,21 +321,29 @@ test("authoritative migration identity is line-ending independent without changi
   assert.equal(canonicalSqlHash(lf), canonicalSqlHash(crlf));
 });
 
-test("backup migration evidence overlays the authoritative base through production ledger row 87", async () => {
+test("backup migration evidence overlays the authoritative base through production ledger row 97", async () => {
   const ledger = await loadMigrationLedgerEvidence();
   // Rows 85-87 are the WP4, WP8 and WP12 migrations, applied to production on 2026-09-20. Each
   // went in under its own authored version, so none of them adds to the versionDrift list below.
-  assert.equal(ledger.migrations.length, 87);
-  assert.deepEqual(ledger.migrations.slice(-2).map((migration) => migration.version), [
-    "20260918140000",
-    "20260919120000",
+  assert.equal(ledger.migrations.length, 97);
+  assert.deepEqual(ledger.migrations.slice(-10).map((migration) => migration.version), [
+    "20261006080000",
+    "20261016210929",
+    "20261016215408",
+    "20261016232358",
+    "20261016235852",
+    "20261017004248",
+    "20261017014446",
+    "20261017015857",
+    "20261017021631",
+    "20261017023404",
   ]);
-  assert.equal(ledger.migrations.at(-1).appliedOrder, 87);
-  assert.ok(ledger.migrations.slice(-2).every((migration) => migration.localCanonicalSqlSha256));
+  assert.equal(ledger.migrations.at(-1).appliedOrder, 97);
+  assert.ok(ledger.migrations.slice(-3).every((migration) => migration.localCanonicalSqlSha256));
   // appliedOrder must stay a gapless sequence, or the overlay has lost or double-counted a push.
   assert.deepEqual(
     ledger.migrations.map((migration) => migration.appliedOrder),
-    Array.from({ length: 87 }, (_, index) => index + 1),
+    Array.from({ length: 97 }, (_, index) => index + 1),
   );
 });
 
@@ -343,27 +352,19 @@ test("migration history validation reports the effective applied ledger, not the
     fileURLToPath(new URL("../../ops/validate-migration-history.mjs", import.meta.url)),
   ], { encoding: "utf8" }));
   assert.equal(result.authoritativeBase, 60);
-  assert.equal(result.appliedOverlay, 27);
-  assert.equal(result.effectiveApplied, 87);
-  assert.equal(result.active, 88);
-  // The overlay used to stop at 74 while production had gone on to 83, so this test asserted a
-  // pending list that its own comment admitted was already applied. Every entry was verified
-  // against supabase_migrations.schema_migrations on 2026-09-04 and recorded in the 2026-09-04
-  // overlay; row 84 was confirmed applied on 2026-09-19.
-  //
-  // WP4/WP8/WP12 were applied on 2026-09-20. The one pending row widens bv2_builds.verifier_policy
-  // and is deliberately not applied.
-  assert.deepEqual(result.pending, [
-    { version: "20261006080000", name: "bv2_widen_verifier_policy_smoke_bypassed" },
-  ]);
-  // Five were pushed under an apply-time version that differs from the authored filename. Their SQL
-  // is identical to the ledger; only the version differs, and it is reported rather than hidden.
+  assert.equal(result.appliedOverlay, 37);
+  assert.equal(result.effectiveApplied, 97);
+  assert.equal(result.active, 97);
+  // All October migrations are confirmed in the live ledger. Historical authored/applied
+  // version differences remain visible rather than rewriting production history.
+  assert.deepEqual(result.pending, []);
   assert.deepEqual(result.versionDrift, [
     { version: "20260822160000", appliedVersion: "20260822234502", name: "bv2_contract_envelopes_recovery_settlement" },
     { version: "20260822223523", appliedVersion: "20260822234552", name: "fix_bv2_pipeline_retry_durable_payload" },
     { version: "20260823101752", appliedVersion: "20260823110830", name: "bv2_owner_connected_recovery_transport" },
     { version: "20260825105631", appliedVersion: "20260825120326", name: "add_bv2_minimal_verifier_policy" },
     { version: "20260916120000", appliedVersion: "20260916123552", name: "bv2_terminal_platform_failure_pool" },
+    { version: "20261006080000", appliedVersion: "20261006183159", name: "bv2_widen_verifier_policy_smoke_bypassed" },
   ]);
 });
 
@@ -414,7 +415,7 @@ test("the current runtime catalog and backup manifest are exactly aligned", () =
   // Tables whose migration has not been applied are reported as pending, not as a manifest that
   // names something production lacks: they must be in the manifest BEFORE the migration lands, or
   // the first snapshot after it silently omits them.
-  const coverage = findCatalogCoverageGaps(PRODUCTION_PUBLIC_TABLES_107, CA_TABLES, EPHEMERAL_RUNTIME_TABLES, PENDING_MIGRATION_TABLES);
+  const coverage = findCatalogCoverageGaps(PRODUCTION_PUBLIC_TABLES_109, CA_TABLES, EPHEMERAL_RUNTIME_TABLES, PENDING_MIGRATION_TABLES);
   assert.deepEqual({ missingFromBackup: coverage.missingFromBackup, missingFromCatalog: coverage.missingFromCatalog }, {
     missingFromBackup: [], missingFromCatalog: [],
   });
@@ -423,7 +424,7 @@ test("the current runtime catalog and backup manifest are exactly aligned", () =
   assert.deepEqual(coverage.pendingMigration, []);
   assert.deepEqual(PENDING_MIGRATION_TABLES, []);
   // A table nobody migrated and nobody backed up is still a gap, pending list or not.
-  assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_107, "ghost_table"], CA_TABLES, EPHEMERAL_RUNTIME_TABLES, PENDING_MIGRATION_TABLES).missingFromBackup,
+  assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_109, "ghost_table"], CA_TABLES, EPHEMERAL_RUNTIME_TABLES, PENDING_MIGRATION_TABLES).missingFromBackup,
     ["ghost_table"]);
   assert.deepEqual(findCatalogCoverageGaps([...PRODUCTION_PUBLIC_TABLES_98, "forgotten_runtime_table"], CA_TABLES, EPHEMERAL_RUNTIME_TABLES).missingFromBackup,
     ["forgotten_runtime_table"]);
@@ -468,8 +469,8 @@ test("backup/restore recognizes historical ledgers and the current production ca
   // The accepted window keeps headroom past that so the next constraint migration does not
   // take backup down again.
   assert.ok(CURRENT_CATALOG_MIGRATION_RANGE.max >= 96);
-  assert.ok(CURRENT_CATALOG_MIGRATION_RANGE.max - CURRENT_CATALOG_MIGRATION_RANGE.min >= 8);
-  for (const count of [87, 88, CURRENT_CATALOG_MIGRATION_RANGE.max]) {
+  assert.equal(CURRENT_CATALOG_MIGRATION_RANGE.min, 91);
+  for (const count of [87, 88, 89, 90]) {
     const evidence = runtimeCatalogEvidence(count);
     assert.equal(evidence.tables.length, 107, `ledger ${count}`);
     assert.equal(evidence.tablesSha256, sha256Lines(PRODUCTION_PUBLIC_TABLES_107));
@@ -478,6 +479,18 @@ test("backup/restore recognizes historical ledgers and the current production ca
     assert.equal(evidence.fkPairsSha256, sha256Lines(evidence.fkPairs));
   }
   assert.equal(PRODUCTION_PUBLIC_TABLES_107.length, 107);
+  for (const count of [91, CURRENT_CATALOG_MIGRATION_RANGE.max]) {
+    const evidence = runtimeCatalogEvidence(count);
+    assert.equal(evidence.tables.length, 109);
+    assert.equal(evidence.tablesSha256, sha256Lines(PRODUCTION_PUBLIC_TABLES_109));
+    assert.equal(evidence.fkPairs.length, 103);
+    assert.equal(evidence.fkPairsSha256, sha256Lines(evidence.fkPairs));
+    assert.ok(evidence.tables.includes("app_booking_reservations"));
+    assert.ok(evidence.tables.includes("app_booking_request_keys"));
+    assert.deepEqual(validateRestoreOrder(RESTORE_ORDER, evidence.fkPairs), { missingTables: [], violations: [] });
+    assert.ok(validateRestoreOrder(RESTORE_ORDER.filter(t => t !== "app_booking_reservations"), evidence.fkPairs).missingTables.includes("app_booking_reservations"));
+  }
+
   assert.throws(() => runtimeCatalogEvidence(CURRENT_CATALOG_MIGRATION_RANGE.max + 1), /unsupported production migration count/);
   assert.throws(() => runtimeCatalogEvidence(67), /unsupported production migration count/);
   assert.throws(() => runtimeCatalogEvidence("87-migrations"), /unsupported production migration count/);
@@ -703,4 +716,20 @@ test("every table this session added to production is now migrated AND backed up
     assert.ok(CA_TABLES.includes(table), `${table} is not backed up`);
     assert.ok(RESTORE_ORDER.includes(table), `${table} cannot be restored`);
   }
+});
+
+ test("restore preserves build-scoped snapshot uniqueness while breaking its FK cycle", () => {
+  const source = [
+    { id: "s1", project_id: "p", tree_hash: "same", asset_manifest: [], build_id: "b1", parent_snapshot: null },
+    { id: "s2", project_id: "p", tree_hash: "same", asset_manifest: [], build_id: "b2", parent_snapshot: "s1" },
+  ];
+  const prepared = collectDeferredRestorePatches("bv2_snapshots", source);
+  assert.deepEqual(prepared.rows.map(row => row.build_id), ["b1", "b2"]);
+  assert.deepEqual(prepared.patches, [{ table: "bv2_snapshots", id: "s2", field: "parent_snapshot", value: "s1" }]);
+  const builds = collectDeferredRestorePatches("bv2_builds", [{ id: "b1", final_snapshot: "s1" }]);
+  assert.deepEqual(builds.rows, [{ id: "b1", final_snapshot: null }]);
+  assert.deepEqual(builds.patches, [{ table: "bv2_builds", id: "b1", field: "final_snapshot", value: "s1" }]);
+  assert.ok(RESTORE_ORDER.indexOf("bv2_contracts") < RESTORE_ORDER.indexOf("bv2_builds"));
+  assert.ok(RESTORE_ORDER.indexOf("bv2_builds") < RESTORE_ORDER.indexOf("bv2_snapshots"));
+  assert.deepEqual(source.map(row => row.build_id), ["b1", "b2"]);
 });

@@ -81,6 +81,13 @@ export function indexFile(path, source) {
   }
 
   let symbols = null;
+  let parseError = null;
+  const diagnostic = (error) => ({
+    message: String(error?.message || "JavaScript parse failed").slice(0, 500),
+    code: error?.reasonCode || error?.code || null,
+    line: error?.loc?.line ?? null,
+    column: error?.loc?.column ?? null,
+  });
   try {
     const typescript = /\.tsx?$/.test(path);
     const ast = parse(text, {
@@ -89,11 +96,13 @@ export function indexFile(path, source) {
       errorRecovery: true, // recover enough to REPORT errors; recovered files stay opaque
     });
     if (!ast.errors?.length) symbols = symbolsFromAst(ast, text);
-  } catch {
+    else parseError = diagnostic(ast.errors[0]);
+  } catch (error) {
+    parseError = diagnostic(error);
     symbols = null;
   }
   if (symbols === null) {
-    return { ...base, opaque: true, symbols: [], imports: extractImports(text), refs: [] };
+    return { ...base, opaque: true, symbols: [], imports: extractImports(text), refs: [], parseError };
   }
 
   return {

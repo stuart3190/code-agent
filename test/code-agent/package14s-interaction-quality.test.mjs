@@ -307,3 +307,16 @@ test("14S repair exhaustion remains metadata while contracted red journeys remai
   assert.ok(browserContract?.interactionContract?.flows?.length,
     "the machine-readable interaction contract reaches the browser verifier");
 });
+
+test("opaque input props do not invent a wrong native type", () => {
+  const emailFlow = plan().flows.find(flow => flow.kind === "input" && flow.valueWritten === "email");
+  const interactionContract = {version:1,flows:[emailFlow]};
+  for (const attrs of ['{...field.inputProps}', 'type="number" {...field.inputProps}', 'type={field.type}']) {
+    const tree = {"src/Contact.jsx":`export function Contact({field}) { return <label>Email<input ${attrs} name="email" /></label>; }`};
+    assert.equal(collectInteractionControls(tree)[0].inputType,null,attrs);
+    assert.equal(lintInteractiveWorkflow(tree,{interactionContract}).findings.some(f=>f.reason==='invalid_control_type'),false,attrs);
+  }
+  const tree={"src/Contact.jsx":'export function Contact({field}) { return <label>Email<input {...field.inputProps} type="number" name="email" /></label>; }'};
+  assert.equal(collectInteractionControls(tree)[0].inputType,'number');
+  assert.equal(lintInteractiveWorkflow(tree,{interactionContract}).findings.some(f=>f.reason==='invalid_control_type'),true);
+});

@@ -1,0 +1,27 @@
+{
+  "ok": true,
+  "tables": 108,
+  "tableRows": 359387,
+  "authUsers": 446,
+  "storageObjects": 23,
+  "filesystemObjects": 672,
+  "filesystemDirectories": 245,
+  "blobs": 4673,
+  "snapshots": 1795,
+  "verificationCacheRows": 2183,
+  "graphRevisions": 6261,
+  "shadowRuns": 0,
+  "modelReservations": 2245,
+  "generatedProjectIds": {
+    "bv2Builds": 326,
+    "diagnosticRuns": 370
+  },
+  "runtimeLinks": "valid",
+  "crossOwnerPrincipals": 2,
+  "backup": "thrallo-2026-10-17T023702",
+  "sourceCommit": "4f32cc0f2e93972ee0ac3e4db63af74288ff77b6",
+  "restoreImplementationCommit": "4a9a6d15dcd42486387385ad22e5517d0090f36b",
+  "migrations": 97,
+  "scope": "isolated full logical restore; not off-host DR or PITR",
+  "authLimitation": "password reset required; native auth password hashes were not exported"
+}

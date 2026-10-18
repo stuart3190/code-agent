@@ -261,3 +261,16 @@ test("G — diff between the two production eras tells the decomposition story",
   const roundTrip = await store.materialize("o", modular.id);
   assert.deepEqual(Object.keys(roundTrip).sort(), Object.keys(MODULAR_TREE).sort(), "materialise round-trips");
 });
+
+
+test("production-style GC cannot delete blobs using a truncated or racing reference inventory", async () => {
+  const storage = memorySnapshotStorage();
+  storage.supportsSafeBlobSweep = false;
+  const store = createSnapshotStore(storage);
+  const retained = await store.createSnapshot("owner", "other-project", { "src/a.js": "export const a=1;" });
+  storage.listOwnerSnapshots = async () => []; // reproduces an omitted page / concurrent snapshot
+  storage.deleteBlob = async () => { throw new Error("unsafe blob deletion attempted"); };
+  const result = await store.gc("owner", "empty-project");
+  assert.equal(result.blobSweepDeferred, true);
+  assert.equal((await store.materialize("owner", retained.id))["src/a.js"], "export const a=1;");
+});

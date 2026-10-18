@@ -107,6 +107,15 @@ export const BASELINE_PROMPT_MEASUREMENTS = Object.freeze({
   headroomFragmentSystemPrompt: 692,
 });
 
+// Current literal sizes, 2026-10-16. Keep the historical baseline immutable so later
+// audits can report the real delta instead of comparing current text to old sizes.
+export const CURRENT_PROMPT_MEASUREMENTS = Object.freeze({
+  contractSystemPrompt: 13088,
+  patchSystemPrompt: 4995,
+  compileCorrectionSystemPrompt: 627,
+  headroomFragmentSystemPrompt: 692,
+});
+
 /** Retained corpora the migration must keep replaying without provider calls. */
 export const BASELINE_RETAINED_FIXTURES = Object.freeze([
   "test/code-agent/fixtures/retained/advanced-20260916",

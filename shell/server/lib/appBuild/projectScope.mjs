@@ -13,6 +13,14 @@
 
 import { serviceClient } from "../supabase.mjs";
 
+async function checkedLookup(query) {
+  const response = await query;
+  if (response.error) throw Object.assign(new Error("Your project could not be checked. Please retry.", { cause: response.error }), {
+    code: "project_lookup_unavailable", classification: "platform", status: 503, retryable: true,
+  });
+  return response;
+}
+
 export const DEFAULT_COLUMNS = "id, name, tree, product_id, created_at, updated_at, builder_version, bv2_green_snapshot_id, budget_approval_id";
 
 /**
@@ -56,7 +64,7 @@ export async function resolveConversationProject(ctx, {
   if (projectId) {
     // Owner-scoped by the base query, so a projectId belonging to someone else resolves to null
     // rather than to their project.
-    const { data } = await select().eq("id", projectId);
+    const { data } = await checkedLookup(select().eq("id", projectId));
     return { project: data?.[0] || null, scope: "explicit", productId: data?.[0]?.product_id || null };
   }
 
@@ -64,8 +72,8 @@ export async function resolveConversationProject(ctx, {
   let scope = "conversation";
 
   if (productName) {
-    const { data: product } = await client.from("ca_products")
-      .select("id").eq("owner", owner).ilike("name", productName).maybeSingle();
+    const { data: product } = await checkedLookup(client.from("ca_products")
+      .select("id").eq("owner", owner).ilike("name", productName).maybeSingle());
     // A name that matches nothing must not silently widen the search to every project — that is
     // how "publish the CRM" published something else entirely.
     if (!product) return { project: null, scope: "unknown_product", productId: null };
@@ -76,7 +84,7 @@ export async function resolveConversationProject(ctx, {
   }
 
   if (productId) {
-    const { data } = await select().eq("product_id", productId);
+    const { data } = await checkedLookup(select().eq("product_id", productId));
     // Deliberately no fallback. A conversation about a product that has nothing built yet gets
     // null, and the capability tells the user that — it does not reach for another app.
     return { project: data?.[0] || null, scope, productId };
@@ -84,7 +92,7 @@ export async function resolveConversationProject(ctx, {
 
   // Only conversations with no product at all get here.
   if (!allowOwnerFallback) return { project: null, scope: "ambiguous", productId: null };
-  const { data } = await select();
+  const { data } = await checkedLookup(select());
   return { project: data?.[0] || null, scope: "owner_latest", productId: data?.[0]?.product_id || null };
 }
 
@@ -92,8 +100,8 @@ export async function resolveConversationProject(ctx, {
 // under the same product, so "the site for this product" spans several of them.
 export async function projectsForProduct(owner, productId, client = serviceClient()) {
   if (!productId) return [];
-  const { data } = await client.from("projects")
+  const { data } = await checkedLookup(client.from("projects")
     .select("id, updated_at").eq("owner", owner).eq("product_id", String(productId))
-    .order("updated_at", { ascending: false });
+    .order("updated_at", { ascending: false }));
   return data || [];
 }

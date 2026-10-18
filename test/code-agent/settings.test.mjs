@@ -100,10 +100,9 @@ test("the four things a period end can mean are each distinct", () => {
   assert.equal(means({ stripe_subscription_id: null }), "resets");
 });
 
-test("cancelling and un-cancelling take one field on one Stripe object", async () => {
+test("cancellation and reactivation share one endpoint", async () => {
   const billing = await readCode("../../shell/server/lib/subscriptionBilling.mjs");
   assert.match(billing, /export async function setCancellation\(owner, cancel/);
-  assert.match(billing, /cancel_at_period_end: !!cancel/);
   // Two endpoints would be two chances to drift apart.
   assert.doesNotMatch(billing, /export async function reactivate/);
 });

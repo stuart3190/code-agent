@@ -1,0 +1,126 @@
+{
+  "host390": {
+    "metrics": [
+      {
+        "tag": "INPUT",
+        "label": "Task search",
+        "left": 24,
+        "right": 244,
+        "width": 220,
+        "font": "16px / 24px system-ui, sans-serif",
+        "fontFamily": "system-ui, sans-serif"
+      },
+      {
+        "tag": "BUTTON",
+        "label": "task search",
+        "left": 250,
+        "right": 328.96875,
+        "width": 78.96875,
+        "font": "16px / 24px system-ui, sans-serif",
+        "fontFamily": "system-ui, sans-serif"
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Clear search button",
+        "left": 334.96875,
+        "right": 412.109375,
+        "width": 77.140625,
+        "font": "16px / 24px system-ui, sans-serif",
+        "fontFamily": "system-ui, sans-serif"
+      }
+    ],
+    "probe": {
+      "checked": true,
+      "width": 390,
+      "findings": [
+        {
+          "control": "Clear search button",
+          "controlId": "act_6aff3ab1",
+          "kind": "clipped_control",
+          "blocker": "non-scrollable horizontal clipping",
+          "width": 390
+        }
+      ]
+    }
+  },
+  "releasedSandbox390": {
+    "metrics": [
+      {
+        "tag": "INPUT",
+        "label": "Task search",
+        "left": 24,
+        "right": 196,
+        "width": 172,
+        "font": "16px / 24px system-ui, sans-serif",
+        "fontFamily": "system-ui, sans-serif"
+      },
+      {
+        "tag": "BUTTON",
+        "label": "task search",
+        "left": 202,
+        "right": 274.5625,
+        "width": 72.5625,
+        "font": "16px / 24px system-ui, sans-serif",
+        "fontFamily": "system-ui, sans-serif"
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Clear search button",
+        "left": 280.5625,
+        "right": 366,
+        "width": 85.4375,
+        "font": "16px / 24px system-ui, sans-serif",
+        "fontFamily": "system-ui, sans-serif"
+      }
+    ],
+    "probe": {
+      "checked": true,
+      "width": 390,
+      "findings": []
+    }
+  },
+  "stagedProbeSandbox320": {
+    "metrics": [
+      {
+        "tag": "INPUT",
+        "label": "Task search",
+        "left": 24,
+        "right": 196,
+        "width": 172,
+        "font": "16px / 24px system-ui, sans-serif",
+        "fontFamily": "system-ui, sans-serif"
+      },
+      {
+        "tag": "BUTTON",
+        "label": "task search",
+        "left": 202,
+        "right": 274.5625,
+        "width": 72.5625,
+        "font": "16px / 24px system-ui, sans-serif",
+        "fontFamily": "system-ui, sans-serif"
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Clear search button",
+        "left": 280.5625,
+        "right": 351.53125,
+        "width": 70.96875,
+        "font": "16px / 24px system-ui, sans-serif",
+        "fontFamily": "system-ui, sans-serif"
+      }
+    ],
+    "probe": {
+      "checked": true,
+      "width": 320,
+      "findings": [
+        {
+          "control": "Clear search button",
+          "controlId": "act_6aff3ab1",
+          "kind": "clipped_control",
+          "blocker": "non-scrollable horizontal clipping",
+          "width": 320
+        }
+      ]
+    }
+  }
+}

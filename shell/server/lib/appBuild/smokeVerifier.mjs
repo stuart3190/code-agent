@@ -5,7 +5,9 @@
 // renders without a fatal runtime error, and the visible interactive controls can be clicked or
 // activated without crashing the page. It reads no text, compares no numbers, checks no labels
 // and has no opinion about what a click should do. Anything it cannot activate is recorded as
-// skipped, never as a failure. Console errors and failed requests are advisory evidence only.
+// skipped, never as a failure. A separate read-only mobile check rejects persistent content-panel
+// obstruction or non-scrollable clipping of visible controls. Console errors and failed requests
+// are advisory evidence only.
 //
 // Verdict classes:
 //   pass        - loaded, rendered, controls activated, app still standing
@@ -15,6 +17,7 @@
 //
 // Runs INSIDE the sandbox image (build-worker/sandbox.mjs) so it is part of the sandbox identity.
 
+import { probeResponsiveControls } from "./responsiveProbe.mjs";
 import { SMOKE_VERIFIER_POLICY, VERIFICATION_RESULT_CLASS } from "./verifierPolicy.mjs";
 
 export const DEFAULT_CONTROL_LIMIT = 40;
@@ -36,9 +39,38 @@ function renderedState(page) {
   return page.evaluate(() => {
     const root = document.getElementById("root") || document.body;
     if (!root) return { rendered: false, text: 0, controls: 0 };
-    const text = String(root.innerText || "").trim().length;
-    const controls = root.querySelectorAll("button, input, select, textarea, a[href], canvas, svg, img, video, [role=button]").length;
-    return { rendered: text > 0 || controls > 0, text, controls };
+    // innerText falls back to textContent for a display:none root. Likewise, counting
+    // DOM controls certifies hidden templates as a rendered application. Require actual
+    // layout boxes and visible styles, including ancestor opacity. Text ranges preserve
+    // valid display:contents layouts whose parent has no box of its own.
+    const painted = (node, rects) => {
+      if (![...rects].some(rect => rect.width > 0 && rect.height > 0)) return false;
+      const style = getComputedStyle(node);
+      if (style.visibility === "hidden" || style.visibility === "collapse") return false;
+      for (let current = node; current; current = current.parentElement) {
+        const ancestorStyle = getComputedStyle(current);
+        if (ancestorStyle.display === "none" || ancestorStyle.contentVisibility === "hidden"
+          || Number(ancestorStyle.opacity) === 0) return false;
+      }
+      return true;
+    };
+    let text = 0;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const value = String(node.textContent || "").trim();
+      if (!value || node.parentElement?.closest("script, style, template, noscript")) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      if (node.parentElement && painted(node.parentElement, range.getClientRects())) text += value.length;
+    }
+    const controls = [...root.querySelectorAll("button, input, select, textarea, a[href], canvas, svg, img, video, [role=button]")]
+      .filter(node => painted(node, node.getClientRects())).length;
+    const boundaryError = [...root.querySelectorAll('[data-scaffold-boundary="error"]')].some((node) => {
+      const box = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      return box.width > 0 && box.height > 0 && style.visibility !== "hidden" && style.visibility !== "collapse";
+    });
+    return { rendered: text > 0 || controls > 0, text, controls, boundaryError };
   }).catch(() => null); // navigation in flight: not a verdict, poll again
 }
 
@@ -46,7 +78,7 @@ async function waitForRender(page, deadline) {
   let last = null;
   while (Date.now() < deadline) {
     last = await renderedState(page);
-    if (last?.rendered) return last;
+    if (last?.rendered || last?.boundaryError) return last;
     await page.waitForTimeout(250);
   }
   return last || { rendered: false, text: 0, controls: 0 };
@@ -133,6 +165,7 @@ export async function smokeVerifyJourneys({
   const deadline = startedAt + Math.max(10_000, Number(timeoutMs) || 120_000);
   const pageErrors = [];
   const pageErrorDetails = [];
+  const boundaryErrorDetails = [];
   const consoleErrors = [];
   const failedRequests = [];
   const crashes = [];
@@ -144,6 +177,26 @@ export async function smokeVerifyJourneys({
   let activated = 0;
   let unavailable = false;
   let error = null;
+  let responsive = null;
+  let initialResponsive = null;
+
+  const sampleMobileLayouts = async () => {
+    const samples = [];
+    for (const width of [390, 320]) {
+      if (Date.now() >= deadline - 2_000) {
+        samples.push({ checked:false, unavailable:true, width, findings:[], error:"mobile probe budget exhausted" });
+        break;
+      }
+      samples.push(await probeResponsiveControls({ browser, page, previewUrl, width, timeoutMs: Math.min(15_000, deadline - Date.now()) }));
+    }
+    const findings = new Map();
+    for (const sample of samples) for (const finding of sample.findings || []) {
+      const key = JSON.stringify([finding.controlId || finding.control, finding.kind || "obstruction", finding.blocker]);
+      if (!findings.has(key)) findings.set(key, finding);
+    }
+    return { checked:samples.every(s=>s.checked), width:390, widths:[390,320], findings:[...findings.values()],
+      unavailable:samples.some(s=>s.unavailable), error:samples.find(s=>s.error)?.error, samples };
+  };
 
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -154,7 +207,18 @@ export async function smokeVerifyJourneys({
     pageErrors.push(described.message);
     pageErrorDetails.push(described);
   });
-  page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text().slice(0, 200)); });
+  page.on("console", (m) => {
+    if (m.type() !== "error") return;
+    const text = m.text();
+    consoleErrors.push(text.slice(0, 200));
+    // React catches screen errors, so they may never emit pageerror. Only the protected
+    // boundary's diagnostic supplies this evidence; console output alone is never a failure.
+    const prefix = "scaffold screen render failed ";
+    if (text.startsWith(prefix)) {
+      const detail = text.slice(prefix.length);
+      boundaryErrorDetails.push(describePageError({ message: detail.split('\n')[0], stack: detail }));
+    }
+  });
   page.on("dialog", (d) => { d.dismiss().catch(() => {}); });
   page.on("crash", () => { crashed = true; });
   page.on("response", (r) => {
@@ -190,11 +254,27 @@ export async function smokeVerifyJourneys({
       render = await waitForRender(page, renderDeadline);
       if (crashed) {
         crashes.push({ phase: "load", control: null, error: "the page crashed while loading" });
+      } else if (render.boundaryError) {
+        const detail = boundaryErrorDetails.at(-1) || pageErrorDetails[0];
+        crashes.push({ phase: "load", control: null,
+          error: `application screen failed inside platform error boundary${detail?.message ? ': ' + detail.message : ''}`,
+          ...crashEvidence(detail) });
       } else if (!render.rendered) {
         crashes.push({ phase: "load", control: null,
           error: pageErrors[0] ? `fatal runtime error during load: ${pageErrors[0]}` : "nothing rendered in the preview",
           ...crashEvidence(pageErrorDetails[0]) });
       }
+    }
+
+    // Inspect the entry layout before activation can open a modal, navigate away, or hide
+    // broken controls. Keep the post-interaction sample too: results can introduce overlap.
+    if (load.ok && !crashes.length) {
+      const desktopViewport = page.viewportSize();
+      try {
+        initialResponsive = Date.now() < deadline - 2_000
+          ? await sampleMobileLayouts()
+          : { checked: false, unavailable: true, findings: [], error: "entry mobile probe budget exhausted" };
+      } finally { if (desktopViewport) await page.setViewportSize(desktopViewport); }
     }
 
     // 3. Visible controls can be activated without crashing the app.
@@ -221,6 +301,7 @@ export async function smokeVerifyJourneys({
         const reason = skipReason(info, origin);
         if (reason) { skipped.push({ control: describeControl(info), reason }); continue; }
         if (!(await el.isVisible().catch(() => false))) { skipped.push({ control: describeControl(info), reason: "not_visible" }); continue; }
+        const controlPageUrl = page.url();
         try {
           await activate(el, info);
           activated += 1;
@@ -244,42 +325,77 @@ export async function smokeVerifyJourneys({
           await page.waitForTimeout(SETTLE_MS);
         }
         const state = crashed ? { rendered: false } : await waitForRender(page, Date.now() + 3_000);
-        if (crashed || !state?.rendered) {
+        if (crashed || state?.boundaryError || !state?.rendered) {
+          const detail = state?.boundaryError ? boundaryErrorDetails.at(-1) || pageErrorDetails.at(-1) : pageErrorDetails.at(-1);
           crashes.push({ phase: "activate", control: describeControl(info),
-            error: crashed ? "the page crashed" : pageErrors.at(-1)
+            error: crashed ? "the page crashed" : state?.boundaryError ? `application screen failed inside platform error boundary after activation${detail?.message ? ': ' + detail.message : ''}` : pageErrors.at(-1)
               ? `fatal runtime error after activation: ${pageErrors.at(-1)}` : "the application went blank after activation",
-            ...(crashed ? {} : crashEvidence(pageErrorDetails.at(-1))) });
+            ...(crashed ? {} : crashEvidence(detail)) });
           break;
         }
+        // A top-of-page guide link must not replace the live locator with the guide's
+        // one control and silently skip the calculator/form we came to exercise. Inspect
+        // the destination above, then resume the source's remaining controls. Buttons
+        // that advance an application flow retain their normal navigation semantics.
+        if (info.tag === "a" && page.url() !== controlPageUrl) {
+          try {
+            await page.goBack({ waitUntil: "domcontentloaded", timeout: Math.min(5_000, Math.max(1, deadline - Date.now())) });
+            if (page.url() !== controlPageUrl) await page.goto(controlPageUrl, { waitUntil: "domcontentloaded", timeout: Math.min(5_000, Math.max(1, deadline - Date.now())) });
+            await waitForRender(page, Math.min(deadline, Date.now() + 3_000));
+          } catch (navigationError) {
+            unavailable = true;
+            error = `could not resume source page after link: ${String(navigationError.message || navigationError).slice(0,200)}`;
+            break;
+          }
+        }
       }
+    }
+    if (load.ok && !crashes.length) {
+      responsive = Date.now() < deadline - 2_000
+        ? await sampleMobileLayouts()
+        : { checked: false, unavailable: true, findings: [], error: "mobile probe budget exhausted" };
+      if (initialResponsive) {
+        const after = responsive;
+        responsive = { ...after, checked: initialResponsive.checked && after.checked,
+          unavailable: Boolean(initialResponsive.unavailable || after.unavailable),
+          error: initialResponsive.error || after.error,
+          findings: [...new Map([...(initialResponsive.findings || []), ...(after.findings || [])]
+            .map(finding => [JSON.stringify(finding), finding])).values()],
+          entry: initialResponsive, afterInteraction: after };
+      }
+      if (responsive.unavailable) { unavailable = true; error = `mobile probe unavailable: ${responsive.error}`; }
     }
   } finally {
     await context.close().catch(() => {});
   }
 
+  const obstructed = responsive?.findings?.length > 0;
   const fatal = crashes.length > 0;
-  const status = unavailable ? "undriveable" : fatal ? "fail" : "pass";
+  const status = unavailable ? "undriveable" : (fatal || obstructed) ? "fail" : "pass";
   const classification = unavailable ? VERIFICATION_RESULT_CLASS.PLATFORM_INCONCLUSIVE
-    : fatal ? VERIFICATION_RESULT_CLASS.FATAL_RUNTIME_FAILURE : VERIFICATION_RESULT_CLASS.PASS;
+    : fatal ? VERIFICATION_RESULT_CLASS.FATAL_RUNTIME_FAILURE
+      : obstructed ? VERIFICATION_RESULT_CLASS.APP_FUNCTIONAL_FAILURE : VERIFICATION_RESULT_CLASS.PASS;
   const detail = unavailable ? error
     : fatal ? crashes.map((row) => `${row.control ? `${row.control}: ` : ""}${row.error}`).join("; ")
-      : `smoke passed: rendered, ${activated} of ${discovered} visible controls activated without a crash`;
+      : obstructed ? responsive.findings.map(f => `Mobile ${f.width}px: control "${f.control}" is ${f.kind === 'clipped_control' ? 'cut off by' : 'covered by'} ${f.blocker}; reflow the layout so the control is usable`).join("; ")
+      : `smoke passed: rendered, ${activated} of ${discovered} discovered controls activated without a crash`;
   const fatalErrors = crashes.map((row) => `${row.control ? `${row.control}: ` : ""}${row.error}`);
   const journeys = (contract?.journeys || []).map((journey) => ({
     id: journey.id, title: journey.title, priority: journey.priority,
     status, classification, detail,
+    ...(obstructed ? { responsiveFindings: responsive.findings } : {}),
     // The first crash's message and stack travel with every journey verdict so the repair brief
     // can name the failing identifier and the files that contain it.
     ...(fatal && crashes[0]?.message ? { crash: {
       phase: crashes[0].phase, control: crashes[0].control,
       message: crashes[0].message, stack: crashes[0].stack || [], sourceFiles: crashes[0].sourceFiles || [] } } : {}),
     // The smoke drives no contracted steps; it has nothing to say about any of them.
-    steps: [], failedSteps: fatal ? 1 : 0, verifiedBy: SMOKE_VERIFIER_POLICY,
+    steps: [], failedSteps: (fatal || obstructed) ? 1 : 0, verifiedBy: SMOKE_VERIFIER_POLICY,
   }));
   const durationMs = Date.now() - startedAt;
   log(`[smoke] ${status} in ${durationMs}ms: ${detail}`);
   return {
-    pass: unavailable ? null : !fatal,
+    pass: unavailable ? null : !(fatal || obstructed),
     unavailable,
     error,
     verifierPolicy: SMOKE_VERIFIER_POLICY,
@@ -294,6 +410,6 @@ export async function smokeVerifyJourneys({
     ].slice(0, 20),
     verifierDefects: [],
     mechanics: null,
-    smoke: { load, render, controls: { discovered, activated, skipped }, crashes, durationMs },
+    smoke: { load, render, responsive, controls: { discovered, activated, skipped }, crashes, durationMs },
   };
 }

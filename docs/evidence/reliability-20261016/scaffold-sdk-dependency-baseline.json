@@ -1,0 +1,11 @@
+{
+  "at": "2026-10-17T20:14:57.521295+00:00",
+  "platformSdk": "2.111.0",
+  "scaffoldSdk": "2.118.0",
+  "liveImage": "1fca790d280f64011e89e434c94391469831246bc02f67331e90fcdbc20f9afb",
+  "scaffoldManifestRange": "^2.45.4",
+  "browserDeadlineChecksUsingScaffoldSdk": 5,
+  "checksPassed": 5,
+  "dependencyUpgradePerformed": false,
+  "limitation": "Observed installed versions; floating scaffold dependencies still require a separate lock/pin audit."
+}

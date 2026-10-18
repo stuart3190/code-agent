@@ -241,3 +241,11 @@ test("publish, V2 edit/repair, preview, QA, export and domains all use the scope
   // publish, connectDomain
   assert.equal((publish.match(/resolveConversationProject\(ctx/g) || []).length, 2);
 });
+
+test('database lookup errors cannot masquerade as missing projects in any scope', async () => {
+  const client={from(){const query={};for(const method of ['select','eq','or','order','limit','ilike','maybeSingle'])query[method]=()=>query;query.then=resolve=>Promise.resolve({data:null,error:{message:'private database detail'}}).then(resolve);return query;}};
+  const check=error=>error.code==='project_lookup_unavailable'&&error.retryable===true&&error.classification==='platform'&&!error.message.includes('private');
+  for(const options of [{projectId:'p1'},{productName:'App A'},{},])await assert.rejects(resolveConversationProject({owner:OWNER}, {...options,client}),check);
+  await assert.rejects(resolveConversationProject(conversation(PRODUCT_A),{client}),check);
+  await assert.rejects(projectsForProduct(OWNER,PRODUCT_A,client),check);
+});

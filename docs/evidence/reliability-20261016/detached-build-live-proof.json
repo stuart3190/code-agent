@@ -1,0 +1,32 @@
+{
+  "deployedCommit": "e6683272307bd286d5a4b115e1b52fe8478530aa",
+  "sameProcess": true,
+  "noSseSubscriber": true,
+  "results": [
+    {
+      "publicBuildId": "22c9b3c4-2a60-4c87-b58c-749bd9740f3e",
+      "workJobId": "dc474808-e720-45bc-bb96-c7d7f4eaebd2",
+      "internalBuildId": "9992accf-dd96-4a41-b2bc-60f875a618f7",
+      "snapshotId": "c9859ca4-8081-4e7b-b616-6a1e7ed2f582",
+      "durationMs": 69720,
+      "report": "/home/ubuntu/thrallo-deploy-evidence/advanced-run/counter-detached-e668327-1-1792263259913.json",
+      "completedReattachment": true,
+      "dashboardHasNoActiveBuild": true,
+      "modelReservations": 0,
+      "credits": 0
+    },
+    {
+      "publicBuildId": "aa3ecc02-dd92-4fe4-9bb1-60bca57f0324",
+      "workJobId": "9b6ed6cd-9512-4a2a-a4c0-e8ca0708f8cd",
+      "internalBuildId": "e071e782-3029-4a88-8464-9d9df13b2d9e",
+      "snapshotId": "80ab70a5-3015-47a2-a823-4dcbe4ff08d3",
+      "durationMs": 53610,
+      "report": "/home/ubuntu/thrallo-deploy-evidence/advanced-run/counter-detached-e668327-2-1792263316917.json",
+      "completedReattachment": true,
+      "dashboardHasNoActiveBuild": true,
+      "modelReservations": 0,
+      "credits": 0
+    }
+  ],
+  "limitation": "Two retained verification runs, not fresh generation."
+}

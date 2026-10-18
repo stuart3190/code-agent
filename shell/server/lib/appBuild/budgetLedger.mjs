@@ -35,17 +35,18 @@ export function createBudgetLedger({
     let protectedCredits = 0;
     try {
       const db = client || serviceClient();
-      const { data, error } = await db.from("credit_ledger").select("delta,bucket,kind")
-        .eq("owner", owner);
+      // One database aggregate avoids the REST row ceiling and page-boundary races while
+      // concurrent purchases/refunds append to the ledger. The RPC is service-role only.
+      const { data, error } = await db.rpc("credit_balance_totals", { p_owner: owner });
       if (error) throw error;
-      topup = r4(Math.max(0, (data || []).filter((row) => row.bucket === "topup")
-        .reduce((sum, row) => sum + Number(row.delta || 0), 0)));
-      // Included-usage rows remain immutable billing evidence. A failed Builder V2 build restores
-      // that allowance through an idempotent bundle refund/service-credit entry, so both the
-      // original provider telemetry and the customer protection remain auditable.
-      protectedCredits = r4(Math.max(0, (data || [])
-        .filter((row) => row.bucket === "bundle" && ["refund", "service_credit"].includes(row.kind))
-        .reduce((sum, row) => sum + Number(row.delta || 0), 0)));
+      const totals = Array.isArray(data) ? data[0] : data;
+      if (!totals || totals.topup == null || totals.protected_credits == null
+        || !Number.isFinite(Number(totals.topup)) || !Number.isFinite(Number(totals.protected_credits))) {
+        throw new Error("Credit balance totals unavailable");
+      }
+      topup = r4(Math.max(0, Number(totals.topup)));
+      // Included usage remains immutable; bundle refunds/service credits restore allowance.
+      protectedCredits = r4(Math.max(0, Number(totals.protected_credits)));
     } catch (error) {
       // A configured Supabase runtime must fail closed: treating an unreadable purchased balance
       // as zero would strand paid credits and make the pre-dispatch contract disagree with SQL.

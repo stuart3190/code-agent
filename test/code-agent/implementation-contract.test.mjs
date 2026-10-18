@@ -375,6 +375,22 @@ test("expectedOutputs names a reached functional result and requires fixtures fo
   assert.ok(validateContract(shaped).problems.some((problem) => /expectedOutputs\.area must be a non-empty JSON primitive/.test(problem)));
 });
 
+test("explicit blank input fixtures can exercise optional defaults without accepting invisible outputs", () => {
+  const contract = areaContract();
+  contract.entities[0].fields.find(field => field.name === "width").required = false;
+  contract.journeys[0].steps[1].verificationValues.width = "";
+  const verdict = validateContract(contract);
+  assert.equal(verdict.ok, true, JSON.stringify(verdict.problems));
+  const blankOutput = structuredClone(contract);
+  blankOutput.journeys[0].steps[2].expectedOutputs.area = "";
+  assert.ok(validateContract(blankOutput).problems.some(problem => /expectedOutputs.area/.test(problem)));
+  for (const invalid of [null, [], {}, "   "]) {
+    const malformed = structuredClone(contract);
+    malformed.journeys[0].steps[1].verificationValues.width = invalid;
+    assert.ok(validateContract(malformed).problems.some(problem => /verificationValues.width/.test(problem)));
+  }
+});
+
 test("genuinely observable statements are not rejected for using unlisted verbs", () => {
   // Every one of these was rejected by the first version of isVague, in production, on a real
   // contract — which was then discarded whole, dropping the build back to uncontracted one-shot
@@ -405,4 +421,27 @@ test("the per-job recorder forwards the contract to the run", async () => {
   const nulled = nullDiagSession();
   assert.equal(typeof nulled.setContract, "function", "the no-op session must implement it too");
   assert.doesNotThrow(() => nulled.setContract({ journeys: [] }));
+});
+
+function seededAreaContract() {
+ const c=areaContract();c.entities[0].storage='transient';
+ c.sampleData={[c.entities[0].name]:[{length:30,width:40}]};
+ c.journeys[0].steps.splice(1,1);
+ return c;
+}
+test('a single declared transient seed supplies untouched computed input fixtures',()=>{
+ const c=seededAreaContract();assert.equal(validateContract(c).ok,true,JSON.stringify(validateContract(c).problems));
+});
+for(const [name,mutate] of [
+ ['persisted records',c=>c.entities[0].storage='persistent'],
+ ['ambiguous rows',c=>c.sampleData[c.entities[0].name].push({length:2,width:3})],
+ ['wrong value types',c=>c.sampleData[c.entities[0].name][0].width='forty'],
+ ['missing values',c=>delete c.sampleData[c.entities[0].name][0].width],
+ ['non-entry journey',c=>c.journeys[0].steps[0].target='existing workspace'],
+ ['unfixtureed edits',c=>c.journeys[0].steps.splice(1,0,{action:'change the width',operates:['width'],expect:'width changes'})],
+ ['prior computed mutation',c=>{c.operations.push({id:'change-width',responsibilities:[{type:'functional',writes:['width']}]});c.journeys[0].steps.splice(1,0,{action:'change width',operates:['change-width'],expect:'width changes'});}]
+])test(`seed cannot invent known inputs from ${name}`,()=>{const c=seededAreaContract();mutate(c);assert.ok(validateContract(c).problems.some(p=>/requires verificationValues\.(length|width).*computed/.test(p)));});
+test('JSON initial collection fixture is not demanded as an impossible primitive textbox value',()=>{
+ const c=seededAreaContract();c.entities[0].fields.push({name:'ingredients',type:'json'});c.sampleData[c.entities[0].name][0].ingredients=[{quantity:300}];c.operations[0].responsibilities[0].reads.push('ingredients');assert.equal(validateContract(c).ok,true,JSON.stringify(validateContract(c).problems));
+ delete c.sampleData[c.entities[0].name][0].ingredients;assert.ok(validateContract(c).problems.some(p=>/requires verificationValues.ingredients/.test(p)));
 });

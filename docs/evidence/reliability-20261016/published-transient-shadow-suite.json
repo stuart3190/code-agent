@@ -1,0 +1,544 @@
+{
+  "policy": "minimal_contract_v1",
+  "productionGateUnchanged": true,
+  "results": [
+    {
+      "slug": "reliability-counter-20261016",
+      "sourceHash": "b39ce41b0f27040c0578274491c2697175331fe278e1692150f12fd0ed071606",
+      "contractProvenance": {
+        "via": "source_build",
+        "sourceSnapshotId": "42ed3bed-388c-4084-acd3-24c0459051f1",
+        "contractSnapshotId": "42ed3bed-388c-4084-acd3-24c0459051f1"
+      },
+      "pass": false,
+      "primaryStatus": "fail",
+      "journeys": [
+        {
+          "id": "use-counter",
+          "status": "fail",
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "steps": [
+            {
+              "action": "open the counter page",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted route / is open · the contract's declared visible text is present"
+            },
+            {
+              "action": "increase the counter",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "1 computed output(s) match · the contracted action fired through its control and changed the surface"
+            },
+            {
+              "action": "decrease the counter twice",
+              "status": "fail",
+              "classification": "APP_FUNCTIONAL_FAILURE",
+              "detail": "computed output wrong or missing: count expected -1"
+            },
+            {
+              "action": "reset the counter",
+              "status": "not_reached",
+              "detail": "not reached because step 3 was fail"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "reliability-quote-20261017",
+      "sourceHash": "37f86e35c395a952e44a6277b6ca9f72f41b36d5b896eaa149c2c18dc9af4b38",
+      "contractProvenance": {
+        "via": "source_build",
+        "sourceSnapshotId": "c130dbea-188e-43ef-ac1f-d6b5fabac534",
+        "contractSnapshotId": "da33a1d3-89b2-4c2b-90e0-5fc23902b645"
+      },
+      "pass": false,
+      "primaryStatus": "fail",
+      "journeys": [
+        {
+          "id": "calculate-metre-quote",
+          "status": "fail",
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "steps": [
+            {
+              "action": "open the Calculator page",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted route / is open"
+            },
+            {
+              "action": "select metres as the measurement unit",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "contracted selection \"Metres\" and its expected outcome were already established"
+            },
+            {
+              "action": "enter valid room dimensions",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "5/5 fields hold values"
+            },
+            {
+              "action": "enter the door and window counts",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "5/5 fields hold values"
+            },
+            {
+              "action": "select two paint coats",
+              "status": "fail",
+              "classification": "APP_FUNCTIONAL_FAILURE",
+              "detail": "clicked the already-selected option — no transition to observe"
+            },
+            {
+              "action": "calculate the quote",
+              "status": "not_reached",
+              "detail": "not reached because step 5 was fail"
+            }
+          ]
+        },
+        {
+          "id": "calculate-feet-quote",
+          "status": "fail",
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "steps": [
+            {
+              "action": "open the Calculator page",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted route / is open"
+            },
+            {
+              "action": "select feet as the measurement unit",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "selection moved from \"Metres\" to \"Feet\""
+            },
+            {
+              "action": "enter room dimensions in feet",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "5/5 fields hold values"
+            },
+            {
+              "action": "enter zero doors and zero windows",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "5/5 fields hold values"
+            },
+            {
+              "action": "select one paint coat",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "selection moved from \"2 coats\" to \"1 coat\""
+            },
+            {
+              "action": "calculate the feet-based quote",
+              "status": "fail",
+              "classification": "APP_FUNCTIONAL_FAILURE",
+              "detail": "computed output wrong or missing: wallArea expected 37.161216, resultsVisible expected true"
+            }
+          ]
+        },
+        {
+          "id": "reject-invalid-and-reset",
+          "status": "fail",
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "steps": [
+            {
+              "action": "open the Calculator page",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted route / is open"
+            },
+            {
+              "action": "select metres as the measurement unit",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "contracted selection \"Metres\" and its expected outcome were already established"
+            },
+            {
+              "action": "enter valid room dimensions",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "5/5 fields hold values"
+            },
+            {
+              "action": "enter valid opening counts",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "5/5 fields hold values"
+            },
+            {
+              "action": "select two paint coats",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "contracted selection \"2 coats\" and its expected outcome were already established"
+            },
+            {
+              "action": "calculate a valid quote",
+              "status": "fail",
+              "classification": "APP_FUNCTIONAL_FAILURE",
+              "detail": "computed output wrong or missing: resultsVisible expected true"
+            },
+            {
+              "action": "replace the length with zero",
+              "status": "not_reached",
+              "detail": "not reached because step 6 was fail"
+            },
+            {
+              "action": "attempt to calculate with the invalid dimension",
+              "status": "not_reached",
+              "detail": "not reached because step 6 was fail"
+            },
+            {
+              "action": "reset the calculator",
+              "status": "not_reached",
+              "detail": "not reached because step 6 was fail"
+            }
+          ]
+        },
+        {
+          "id": "navigate-between-pages",
+          "status": "undriveable",
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "steps": [
+            {
+              "action": "open the Calculator page",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted route / is open"
+            },
+            {
+              "action": "use the About navigation link",
+              "status": "undriveable",
+              "classification": "APP_FUNCTIONAL_FAILURE",
+              "detail": "the contracted action control was not offered (use the About navigation link)"
+            },
+            {
+              "action": "use the Calculator navigation link",
+              "status": "not_reached",
+              "detail": "not reached because step 2 was undriveable"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "reliability-recipe-20261017",
+      "sourceHash": "7d63b0d3d55334dcebb3d169f79fd2aec0938d85f5b302d5b056b0c2a8240c82",
+      "contractProvenance": {
+        "via": "source_build",
+        "sourceSnapshotId": "ba53db96-3841-4397-8a56-ad0bdcce2f80",
+        "contractSnapshotId": "46c8cef1-fa1e-479a-86d4-44d17962c70c"
+      },
+      "pass": false,
+      "primaryStatus": "fail",
+      "journeys": [
+        {
+          "id": "scale-initial-recipe",
+          "status": "fail",
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "steps": [
+            {
+              "action": "open the calculator",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted route / is open · the contract's declared visible text is present"
+            },
+            {
+              "action": "enter original and desired serving counts",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "2 contracted value(s) visible · declared visible text missing: \"rice 450 g\", \"water 900 ml\", \"salt 3 tsp\" · the contracted input accepted its value"
+            },
+            {
+              "action": "switch to the scaled ingredient list",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "selection moved from \"Original recipe\" to \"Scaled recipe\""
+            },
+            {
+              "action": "enter zero as the desired serving count",
+              "status": "fail",
+              "classification": "APP_FUNCTIONAL_FAILURE",
+              "detail": "computed output wrong or missing: scaledListVisible expected false"
+            },
+            {
+              "action": "enter a negative desired serving count",
+              "status": "not_reached",
+              "detail": "not reached because step 4 was fail"
+            },
+            {
+              "action": "clear the desired serving count",
+              "status": "not_reached",
+              "detail": "not reached because step 4 was fail"
+            },
+            {
+              "action": "restore the six-serving desired count",
+              "status": "not_reached",
+              "detail": "not reached because step 4 was fail"
+            },
+            {
+              "action": "enter a decimal ingredient",
+              "status": "not_reached",
+              "detail": "not reached because step 4 was fail"
+            },
+            {
+              "action": "add the entered ingredient",
+              "status": "not_reached",
+              "detail": "not reached because step 4 was fail"
+            },
+            {
+              "action": "choose the added ingredient for removal",
+              "status": "not_reached",
+              "detail": "not reached because step 4 was fail"
+            },
+            {
+              "action": "remove the selected ingredient",
+              "status": "not_reached",
+              "detail": "not reached because step 4 was fail"
+            },
+            {
+              "action": "reset the example recipe",
+              "status": "not_reached",
+              "detail": "not reached because step 4 was fail"
+            }
+          ]
+        },
+        {
+          "id": "read-how-it-works",
+          "status": "pass",
+          "classification": "PASS",
+          "steps": [
+            {
+              "action": "open the instructions page",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted route /how-it-works is open · the contract's declared visible text is present"
+            },
+            {
+              "action": "return to the calculator using navigation",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted route / is open · the contract's declared visible text is present · the contracted outcome after the reset is present"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "reliability-recipe-fresh-20261017",
+      "sourceHash": "684546088cbe15e7efe7e8e919cd7bc2bb81df752578decb50b4ab325bf6fed2",
+      "contractProvenance": {
+        "via": "source_build",
+        "sourceSnapshotId": "cb1cec5e-c304-4eaf-8aa0-31f1cb579d34",
+        "contractSnapshotId": "a019b1aa-4cc7-40c1-ad0a-b80c7fb4b29f"
+      },
+      "pass": false,
+      "primaryStatus": "fail",
+      "journeys": [
+        {
+          "id": "scale-recipe",
+          "status": "fail",
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "steps": [
+            {
+              "action": "open the calculator",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted route / is open · the contract's declared visible text is present"
+            },
+            {
+              "action": "enter the original serving count",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "1 contracted value(s) visible · the contracted action fired through its control and changed the surface · the contracted input accepted its value"
+            },
+            {
+              "action": "enter six desired servings",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "1 contracted value(s) visible · the contract's declared visible text is present · 1 computed output(s) match · the contracted action fired through its control and changed the surface · the contracted input accepted its value"
+            },
+            {
+              "action": "switch to the original ingredient list",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "selection moved from \"Scaled list\" to \"Original list\""
+            },
+            {
+              "action": "switch back to the scaled ingredient list",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "selection moved from \"Original list\" to \"Scaled list\""
+            },
+            {
+              "action": "add an ingredient with a decimal quantity",
+              "status": "fail",
+              "classification": "APP_FUNCTIONAL_FAILURE",
+              "detail": "contracted values not visible: 12.5; the contracted action ran, but the named collection does not contain every required member"
+            },
+            {
+              "action": "remove the added ingredient",
+              "status": "not_reached",
+              "detail": "not reached because step 6 was fail"
+            },
+            {
+              "action": "clear the desired servings input",
+              "status": "not_reached",
+              "detail": "not reached because step 6 was fail"
+            },
+            {
+              "action": "enter zero desired servings",
+              "status": "not_reached",
+              "detail": "not reached because step 6 was fail"
+            },
+            {
+              "action": "enter a negative desired serving count",
+              "status": "not_reached",
+              "detail": "not reached because step 6 was fail"
+            },
+            {
+              "action": "reset the calculator",
+              "status": "not_reached",
+              "detail": "not reached because step 6 was fail"
+            }
+          ]
+        },
+        {
+          "id": "read-how-it-works",
+          "status": "pass",
+          "classification": "PASS",
+          "steps": [
+            {
+              "action": "open the How it works page",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted route /how-it-works is open · declared visible text missing: \"Enter your original and desired servings\", \"Add ingredients and decimal quantities\", \"Back to calculator\""
+            },
+            {
+              "action": "return to the calculator",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "the contracted route / is open · the contract's declared visible text is present · the contracted outcome after the reset is present"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "reliability-downlight-20261017",
+      "sourceHash": "061ebb40665d00ff42e44f901027e300debef11650f01ebe6ad4bb0e670600ab",
+      "contractProvenance": {
+        "via": "source_build",
+        "sourceSnapshotId": "a0435f9c-c824-457f-924f-d925663f3ec4",
+        "contractSnapshotId": "1aec1e8b-da0d-4ea7-aaac-c44f01d5317c"
+      },
+      "pass": false,
+      "primaryStatus": "fail",
+      "journeys": [
+        {
+          "id": "calculate-feet-layout",
+          "status": "fail",
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "steps": [
+            {
+              "action": "select feet as the measurement unit",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "selection created on \"Feet\""
+            },
+            {
+              "action": "enter the room dimensions and preferred spacing",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "3/3 fields hold values"
+            },
+            {
+              "action": "calculate the downlight layout",
+              "status": "fail",
+              "classification": "APP_FUNCTIONAL_FAILURE",
+              "detail": "computed output wrong or missing: resultVisible expected true"
+            }
+          ]
+        },
+        {
+          "id": "calculate-metre-layouts",
+          "status": "fail",
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "steps": [
+            {
+              "action": "select metres as the measurement unit",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "selection created on \"Metres\""
+            },
+            {
+              "action": "enter metric room dimensions and a preferred spacing",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "3/3 fields hold values"
+            },
+            {
+              "action": "calculate the custom metric layout",
+              "status": "fail",
+              "classification": "APP_FUNCTIONAL_FAILURE",
+              "detail": "computed output wrong or missing: resultVisible expected true"
+            },
+            {
+              "action": "replace the dimensions and clear the optional preferred spacing",
+              "status": "not_reached",
+              "detail": "not reached because step 3 was fail"
+            },
+            {
+              "action": "calculate the layout using the metric default spacing",
+              "status": "not_reached",
+              "detail": "not reached because step 3 was fail"
+            }
+          ]
+        },
+        {
+          "id": "reject-invalid-dimensions",
+          "status": "fail",
+          "classification": "APP_FUNCTIONAL_FAILURE",
+          "steps": [
+            {
+              "action": "select metres and enter valid values for an initial calculation",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "selection created on \"Metres\""
+            },
+            {
+              "action": "enter valid room dimensions and spacing",
+              "status": "pass",
+              "classification": "PASS",
+              "detail": "3/3 fields hold values"
+            },
+            {
+              "action": "calculate an initial valid result",
+              "status": "fail",
+              "classification": "APP_FUNCTIONAL_FAILURE",
+              "detail": "computed output wrong or missing: resultVisible expected true"
+            },
+            {
+              "action": "replace the room length with a negative value",
+              "status": "not_reached",
+              "detail": "not reached because step 3 was fail"
+            },
+            {
+              "action": "attempt to calculate with the invalid dimension",
+              "status": "not_reached",
+              "detail": "not reached because step 3 was fail"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Shadow evaluation of five existing published apps, not fresh-generation success.",
+    "Historical edit/verify runtime contracts were unrecorded; selected contracts follow source snapshot ancestry. Published captured source hashes are checked before execution."
+  ]
+}

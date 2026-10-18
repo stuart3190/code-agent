@@ -1,0 +1,7 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {handleBillingWebhook} from '../../shell/server/routes/subscription.mjs';
+async function request(options={}){let status,body;const res={writeHead(code){status=code;},end(value){body=JSON.parse(value);}};await handleBillingWebhook({headers:{'stripe-signature':'signature'}},res,'raw-body',options);return{status,body};}
+test('webhook passes exact raw payload and signature to the verifier',async()=>{const r=await request({configured:()=>true,handleEvent:async(raw,sig)=>{assert.equal(raw,'raw-body');assert.equal(sig,'signature');return{received:true};}});assert.equal(r.status,200);assert.deepEqual(r.body,{received:true});});
+test('invalid signature is sanitized without treating it as a service outage',async()=>{const r=await request({configured:()=>true,handleEvent:async()=>{throw Object.assign(Error('private signature payload'),{type:'StripeSignatureVerificationError'});}});assert.equal(r.status,400);assert.doesNotMatch(JSON.stringify(r.body),/private|payload/);});
+test('database or provider failure is sanitized and retryable',async()=>{const r=await request({configured:()=>true,handleEvent:async()=>{throw Error('private database credentials');}});assert.equal(r.status,503);assert.doesNotMatch(JSON.stringify(r.body),/private|credentials/);});
+test('unconfigured webhook does not invoke event processing',async()=>{let calls=0;const r=await request({configured:()=>false,handleEvent:async()=>{calls++;}});assert.equal(r.status,503);assert.equal(calls,0);});
