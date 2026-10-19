@@ -145,9 +145,52 @@ function setInput(window, act, document, name, value) {
   });
 }
 
+/** Pull the numbers a display actually rendered. Trailing zeros and unit words are not part of the value. */
+export function numbersInText(text) {
+  const found = [];
+  for (const match of String(text || "").matchAll(/-?\d+(?:\.\d+)?/g)) {
+    const value = Number(match[0]);
+    if (Number.isFinite(value)) found.push(value);
+  }
+  return found;
+}
+
+/** True when every expected value appears, within `tolerance`, regardless of formatting. */
+export function textHasNumbersNear(text, expected, tolerance = 0.01) {
+  const found = numbersInText(text);
+  const slack = Math.abs(Number(tolerance) || 0);
+  return expected.every((target) => found.some((value) => Math.abs(value - Number(target)) <= slack + 1e-9));
+}
+
+// 400×300 cm on a 2×3 grid. Feet use the fixture's 3.28084 factor, shown to 2dp as 4.37 and 4.92.
+export const BEAMPLAN_EXPECTED_SPACING = Object.freeze({
+  cm: [133.33, 150],
+  metres: [1.33, 1.5],
+  feet: [4.37, 4.92],
+});
+
+/** Compare rendered spacing numerically. "150.00 cm" and "150 cm" are the same value. */
+export function beamPlanObservationProblems(observed = {}) {
+  const problems = [];
+  if (!textHasNumbersNear(observed.cm, BEAMPLAN_EXPECTED_SPACING.cm)) {
+    problems.push(`cm spacing was ${observed.cm}`);
+  }
+  if (!textHasNumbersNear(observed.metres, BEAMPLAN_EXPECTED_SPACING.metres)) {
+    problems.push(`metre spacing was ${observed.metres}`);
+  }
+  if (!textHasNumbersNear(observed.feet, BEAMPLAN_EXPECTED_SPACING.feet)) {
+    problems.push(`feet spacing was ${observed.feet}`);
+  }
+  if (!/met(?:re|er)s?/i.test(String(observed.reset || ""))) {
+    problems.push(`reset unit was ${observed.reset}`);
+  }
+  return problems;
+}
+
 /**
  * BeamPlan centimetre proof. 400×300 cm on a 2×3 grid spaces lights at 133.33 cm by 150 cm.
- * Switching to metres shows 1.33 m and 1.50 m. Reset returns the selector to Metres (m).
+ * Switching to metres shows 1.33 m and 1.50 m; feet shows 4.37 ft and 4.92 ft.
+ * Reset returns the selector to metres. Values are compared numerically, not as source text.
  */
 export async function smokeBeamPlan(tree, { entry } = {}) {
   const compiled = await compileDirectEditTree(tree, { entry });
@@ -174,11 +217,7 @@ export async function smokeBeamPlan(tree, { entry } = {}) {
     click("Reset");
     const reset = document.querySelector(".bp-unit button[aria-pressed=true]")?.textContent || "";
     const observed = { cm, metres, feet, reset };
-    const problems = [];
-    if (!cm.includes("133.33 cm") || !cm.includes("150 cm")) problems.push(`cm spacing was ${cm}`);
-    if (!metres.includes("1.33 m") || !metres.includes("1.50 m")) problems.push(`metre spacing was ${metres}`);
-    if (!feet.includes("ft")) problems.push(`feet spacing was ${feet}`);
-    if (!reset.includes("Metres (m)")) problems.push(`reset unit was ${reset}`);
+    const problems = beamPlanObservationProblems(observed);
     return { pass: problems.length === 0, error: problems.join("; "), observed };
   } catch (error) {
     return { pass: false, error: String(error?.message || error).slice(0, 2_000) };

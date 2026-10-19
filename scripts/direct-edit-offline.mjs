@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { createSnapshotStore } from "../shell/server/lib/builderV2/snapshotStore.mjs";
 import { classifyEditRequest, runDirectEdit } from "../shell/server/lib/builderV2/directEdit.mjs";
-import { compileDirectEditTree, smokeBeamPlan } from "../shell/server/lib/builderV2/directEditRuntime.mjs";
+import { beamPlanObservationProblems, compileDirectEditTree, smokeBeamPlan } from "../shell/server/lib/builderV2/directEditRuntime.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const FIXTURE_DIR = path.join(root, "test/code-agent/fixtures/beamplan");
@@ -88,11 +88,10 @@ export async function runOfflineHarness({ live = false } = {}) {
     });
     const pointer = await snapshotStore.pointer("owner", "beamplan", "green");
     const observed = outcome.smoke?.observed || {};
+    const spacingProblems = beamPlanObservationProblems(observed);
     const ok = outcome.outcome === "applied" && outcome.promoted && pointer !== greenId
       && model.prompts.length === 1
-      && String(observed.cm).includes("133.33 cm") && String(observed.cm).includes("150 cm")
-      && String(observed.metres).includes("1.33 m") && String(observed.metres).includes("1.50 m")
-      && String(observed.reset).includes("Metres (m)");
+      && spacingProblems.length === 0;
     results.replayApply = { ok, outcome: outcome.outcome, spentCredits: outcome.spentCredits, observed, error: outcome.smoke?.error || outcome.errors };
     say(`(a) recorded BeamPlan cm patch ${ok ? "PASS" : "FAIL"} outcome=${outcome.outcome} promoted=${outcome.promoted} cm=${JSON.stringify(observed.cm || outcome.errors)} m=${JSON.stringify(observed.metres || "")} reset=${JSON.stringify(observed.reset || "")}`);
   }
@@ -194,7 +193,7 @@ export async function runOfflineHarness({ live = false } = {}) {
     const pointer = await snapshotStore.pointer("owner", "beamplan", "green");
     const ok = outcome.modelCalls === 1 && smokes === 2 && outcome.outcome === "applied"
       && outcome.promoted === true && pointer !== greenId
-      && String(outcome.smoke?.observed?.cm || "").includes("133.33 cm");
+      && beamPlanObservationProblems(outcome.smoke?.observed || {}).length === 0;
     results.infraRecovered = { ok, calls: outcome.modelCalls, smokes, outcome: outcome.outcome, promoted: outcome.promoted };
     say(`(f) free compile/smoke re-run can pass the same candidate ${ok ? "PASS" : "FAIL"} calls=${outcome.modelCalls} smokes=${smokes} outcome=${outcome.outcome} promoted=${outcome.promoted}`);
   }
@@ -220,6 +219,30 @@ export async function runOfflineHarness({ live = false } = {}) {
       && !/protected/i.test(outcome.message || "");
     results.smokeWithoutError = { ok, calls: outcome.modelCalls, outcome: outcome.outcome, spentCredits: outcome.spentCredits };
     say(`(g) smoke failure without a concrete error does not retry ${ok ? "PASS" : "FAIL"} calls=${outcome.modelCalls} outcome=${outcome.outcome} spent=${outcome.spentCredits}`);
+  }
+
+  {
+    const { snapshotStore, greenId } = await greenProject(tree);
+    const model = scriptedModel([
+      { patches: recorded, credits: 0.5 },
+      { patches: [], credits: 0.25 },
+    ]);
+    const outcome = await runDirectEdit({
+      owner: "owner", projectId: "beamplan", request: CM_REQUEST, tree,
+      snapshotStore, greenSnapshotId: greenId,
+      modelFn: model.modelFn,
+      compileFn: async () => ({ ok: true }),
+      smokeFn: async () => ({ pass: false, error: "TypeError: spacing is not a function" }),
+    });
+    const pointer = await snapshotStore.pointer("owner", "beamplan", "green");
+    const ok = outcome.modelCalls === 2 && outcome.outcome === "unchanged"
+      && outcome.route === "direct_edit" && outcome.fallbackRequest == null
+      && outcome.promoted === false && pointer === greenId
+      && outcome.spentCredits === 0.75
+      && /0\.75/.test(outcome.message || "")
+      && !/protected/i.test(outcome.message || "");
+    results.emptyRetry = { ok, calls: outcome.modelCalls, outcome: outcome.outcome, route: outcome.route, spentCredits: outcome.spentCredits, message: outcome.message };
+    say(`(h) empty retry stops without the full pipeline ${ok ? "PASS" : "FAIL"} calls=${outcome.modelCalls} outcome=${outcome.outcome} route=${outcome.route} spent=${outcome.spentCredits} message=${JSON.stringify(outcome.message)}`);
   }
 
   {

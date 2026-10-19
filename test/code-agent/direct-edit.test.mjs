@@ -2,15 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
+import { readFileSync } from "node:fs";
 import { applyPatches } from "../../shell/server/lib/builderV2/patchEngine.mjs";
 import { createModelLanes, renderBoundedEditPrompt, renderPatchPrompt } from "../../shell/server/lib/builderV2/modelLanes.mjs";
 import { memoryModelReservations } from "../../shell/server/lib/builderV2/modelReservations.mjs";
 import { headroomRetryConsumesAttempt } from "../../shell/server/lib/builderV2/orchestrator.mjs";
 import {
   classifyEditRequest, directEditCeilings, directEditEnabled, directEditFailureMessage,
-  renderDirectEditPrompt, runDirectEdit, settleDirectEdit,
+  directEditScopeBreach, renderDirectEditPrompt, runDirectEdit, settleDirectEdit,
 } from "../../shell/server/lib/builderV2/directEdit.mjs";
+import { beamPlanObservationProblems, textHasNumbersNear } from "../../shell/server/lib/builderV2/directEditRuntime.mjs";
 import { customerFailureMessage } from "../../shell/server/lib/builderV2/buildFailure.mjs";
+import { createSnapshotStore } from "../../shell/server/lib/builderV2/snapshotStore.mjs";
 import {
   FIXTURE_DIR, FLOW, loadFixtureTree, recordedCentimetrePatches, runOfflineHarness,
 } from "../../scripts/direct-edit-offline.mjs";
@@ -246,6 +249,134 @@ test("a fitting direct edit reserves at most the 1.5 credit call ceiling", async
   assert.equal(settled[0].metadata.budgetPlan.callCeilingCredits, 1.5);
   assert.ok(settled[0].reservedCredits <= 1.5);
   assert.ok(settled[0].reservedCredits > 0);
+});
+
+test("spacing checks accept two-decimal formatting and reject a different value", () => {
+  const formatted = {
+    cm: "6 lights arranged in 2 rows by 3 columnsLength spacing133.33 cmWidth spacing150.00 cm",
+    metres: "Length spacing1.33 mWidth spacing1.50 m",
+    feet: "Length spacing4.37 ftWidth spacing4.92 ft",
+    reset: "Metres (m)",
+  };
+  assert.deepEqual(beamPlanObservationProblems(formatted), []);
+  assert.equal(textHasNumbersNear("Width spacing150 cm", [150]), true);
+  assert.equal(textHasNumbersNear("Width spacing150.00 cm", [150]), true);
+  assert.equal(textHasNumbersNear("Width spacing150.009 cm", [150]), true);
+  assert.equal(textHasNumbersNear("Width spacing150.02 cm", [150]), false);
+  const wrong = beamPlanObservationProblems({ ...formatted, cm: "Length spacing133.33 cmWidth spacing140 cm" });
+  assert.equal(wrong.length, 1);
+  assert.match(wrong[0], /cm spacing/);
+});
+
+test("an empty retry leaves the green snapshot unchanged and does not escalate", async () => {
+  const tree = await loadFixtureTree();
+  const patches = recordedCentimetrePatches(await readFile(`${FIXTURE_DIR}/patches.txt`, "utf8"));
+  const snapshotStore = createSnapshotStore();
+  const green = await snapshotStore.createSnapshot("owner", "beamplan", tree, { reason: "working:green" });
+  await snapshotStore.promote("owner", "beamplan", "green", green.id);
+  let calls = 0;
+  const outcome = await runDirectEdit({
+    owner: "owner", projectId: "beamplan", request: "Add centimeters (cm) as an option",
+    tree, snapshotStore, greenSnapshotId: green.id,
+    modelFn: async () => {
+      calls += 1;
+      return calls === 1
+        ? { patches, credits: 0.5 }
+        : { patches: [], credits: 0.25 };
+    },
+    compileFn: async () => ({ ok: true }),
+    smokeFn: async () => ({ pass: false, error: "TypeError: spacing is not a function" }),
+  });
+  assert.equal(calls, 2);
+  assert.equal(outcome.modelCalls, 2);
+  assert.equal(outcome.outcome, "unchanged");
+  assert.equal(outcome.route, "direct_edit");
+  assert.equal(outcome.fallbackRequest, null);
+  assert.equal(outcome.promoted, false);
+  assert.equal(await snapshotStore.pointer("owner", "beamplan", "green"), green.id);
+  assert.equal(outcome.spentCredits, 0.75);
+  assert.match(outcome.message, /0\.75/);
+  assert.match(outcome.message, /unchanged/);
+  assert.doesNotMatch(outcome.message, /protected/i);
+  assert.equal(directEditScopeBreach(outcome.patchAssessment), false);
+});
+
+test("a genuine scope breach still escalates, and a classifier-large request still does", async () => {
+  const wide = await runDirectEdit({
+    request: "Add centimeters (cm) as an option",
+    tree: { "src/App.jsx": "export default function App(){return null}\n" },
+    modelFn: async () => ({
+      patches: ["a", "b", "c", "d"].map((name) => ({
+        file: `src/${name}.jsx`,
+        ops: [{ op: "replace_exact", symbol: "return null", content: "return null" }],
+      })),
+      credits: 0.2,
+    }),
+    compileFn: async () => ({ ok: true }),
+    smokeFn: async () => ({ pass: true }),
+  });
+  assert.equal(wide.modelCalls, 1);
+  assert.equal(wide.outcome, "escalate");
+  assert.equal(wide.route, "full_pipeline");
+  assert.equal(directEditScopeBreach(wide.patchAssessment), true);
+  assert.match(wide.fallbackRequest, /too_many_files/);
+
+  const emptyFirst = await runDirectEdit({
+    request: "Add centimeters (cm) as an option",
+    tree: { "src/App.jsx": "export default function App(){return null}\n" },
+    modelFn: async () => ({ patches: [], credits: 0.2 }),
+  });
+  assert.equal(emptyFirst.outcome, "unchanged");
+  assert.equal(emptyFirst.route, "direct_edit");
+  assert.equal(emptyFirst.fallbackRequest, null);
+  assert.equal(emptyFirst.spentCredits, 0.2);
+});
+
+test("the production direct-edit lane reserves at most 1.5 even when the caller omits the ceiling", async () => {
+  const worker = readFileSync(new URL("../../shell/server/lib/builderV2/runtimeComposition.mjs", import.meta.url), "utf8");
+  assert.match(worker, /callCeilingCredits:\s*directCeilings\.callCeilingCredits/);
+  assert.match(worker, /lanes\.directEditFn\(\{\s*owner,\s*projectId,\s*buildId,\s*\.\.\.call\s*\}\)/);
+  const provider = {
+    calls: [],
+    model: "gpt-5.6-terra",
+    providerId: "codex",
+    runTurn: async (args) => {
+      provider.calls.push(args);
+      return {
+        text: "",
+        toolCalls: [{
+          name: "emit_patches",
+          arguments: { patches: [] },
+        }],
+        usage: { input: 200, output: 80, total: 280, providerRequestId: "codex:response:prod-cap" },
+      };
+    },
+  };
+  const reservations = memoryModelReservations();
+  const lanes = createModelLanes({
+    provider,
+    ceilingCredits: 40,
+    reservations,
+    providerForStep: async () => ({
+      provider,
+      decision: {
+        provider: "codex", model: "gpt-5.6-terra", billingLane: "connected_allowance",
+        estimatedCredits: 0.5, callCeilingCredits: 4, maxOutputTokens: 8_000,
+      },
+    }),
+  });
+  await lanes.directEditFn({
+    owner: "owner", projectId: "project", buildId: "direct-edit-prod-cap",
+    prompt: "Add centimeters (cm) as an option",
+    systemPrompt: "edit",
+    attempt: 1,
+  });
+  const settled = reservations.rows().filter((row) => row.state === "settled");
+  assert.equal(settled.length, 1);
+  assert.equal(settled[0].metadata.budgetPlan.callCeilingCredits, 1.5);
+  assert.ok(settled[0].reservedCredits <= 1.5);
+  assert.ok(settled[0].reservedCredits > 0);
+  assert.equal(provider.calls.length, 1);
 });
 
 test("the second call is capped by whatever job budget remains", async () => {

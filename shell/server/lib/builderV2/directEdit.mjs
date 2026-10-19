@@ -102,6 +102,15 @@ export function assessDirectEditPatch(patches, tree = {}) {
   return { ok: reasons.length === 0 && files.size > 0, reasons, files: [...files].sort(), diffLines };
 }
 
+const SCOPE_BREACH_REASONS = new Set([
+  "package", "protected_path", "new_file", "new_route", "too_many_files", "diff_too_large",
+]);
+
+/** A real size or scope breach. An empty patch list is not one: it stops, it does not escalate. */
+export function directEditScopeBreach(assessment) {
+  return (assessment?.reasons || []).some((reason) => SCOPE_BREACH_REASONS.has(reason));
+}
+
 function capUtf8(text, maxTokens) {
   const maxBytes = Math.max(1, Math.floor(Number(maxTokens) || 0)) * ESTIMATED_BYTES_PER_TOKEN;
   const bytes = Buffer.from(String(text || ""), "utf8");
@@ -364,8 +373,12 @@ export async function runDirectEdit({
   for (;;) {
     const assessment = assessDirectEditPatch(patches, tree);
     if (!assessment.ok) {
-      errors.push(`direct edit patch is outside the small-edit boundary: ${assessment.reasons.join(", ") || "empty"}`);
-      return finish(retried ? "fallback" : "escalate", { patchAssessment: assessment });
+      if (!directEditScopeBreach(assessment)) {
+        errors.push("direct edit returned no patch");
+        return finish("unchanged", { patchAssessment: assessment });
+      }
+      errors.push(`direct edit patch is outside the small-edit boundary: ${assessment.reasons.join(", ")}`);
+      return finish("escalate", { patchAssessment: assessment });
     }
     const applied = applyPatches(tree, patches);
     if (applied.rejected?.length) {

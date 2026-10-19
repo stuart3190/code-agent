@@ -2256,6 +2256,13 @@ export function createModelLanes({
       callCeilingCredits = null,
     }) => {
       const startedAt = Date.now();
+      // The edit step's 4-credit ceiling belongs to the full pipeline. This lane always
+      // reserves against the direct-edit ceiling (1.5 unless the caller passes the remaining
+      // job budget or THRALLO_DIRECT_EDIT_CALL_CEILING). A prompt that cannot fit fails
+      // before dispatch; the caller escalates instead of fragmenting or raising the cap.
+      const { directEditCeilings } = await import("./directEdit.mjs");
+      const configuredCeiling = directEditCeilings().callCeilingCredits;
+      const ceiling = Number(callCeilingCredits) > 0 ? Number(callCeilingCredits) : configuredCeiling;
       const selected = await reservedProvider("edit", {
         owner, projectId, buildId, signal,
         taskClass: "edit",
@@ -2264,10 +2271,7 @@ export function createModelLanes({
         scopedDispatch: true,
         logicalDispatchId: `${buildId}:direct_edit:${attempt}`,
         headroomBatchIndex: Math.max(0, Number(attempt) - 1),
-        // The edit step's 4-credit ceiling belongs to the full pipeline. A direct edit that
-        // cannot fit this lower ceiling fails before dispatch; the caller escalates instead
-        // of fragmenting the full-context prompt or raising the cap.
-        callCeilingCredits,
+        callCeilingCredits: ceiling,
       });
       const turn = await selected.provider.runTurn({
         systemPrompt,
