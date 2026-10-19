@@ -66,6 +66,24 @@ export const EMIT_PATCHES_SCHEMA = Object.freeze({
   },
 });
 
+/**
+ * Symbol-anchored ops name an indexed declaration (`presets`), not a copied source line.
+ * When the model sends a unique exact excerpt of one top-level declaration instead, resolve
+ * that declaration. A short or ambiguous excerpt still rejects, and the rejection lists the
+ * names that are actually declared.
+ */
+export function resolveSymbolAnchor(index, source, symbolName) {
+  const name = String(symbolName || "");
+  const named = (index?.symbols || []).find((symbol) => symbol.name === name);
+  if (named) return named;
+  if (name.length < 16) return null;
+  const text = String(source || "");
+  const matches = (index?.symbols || []).filter((symbol) => (
+    text.slice(symbol.start, symbol.end).includes(name)
+  ));
+  return matches.length === 1 ? matches[0] : null;
+}
+
 export const isProtectedPath = (path, { tree = null, contract = null } = {}) => {
   if (PROTECTED_PATHS.some((re) => re.test(path))) return true;
   // App.jsx becomes a protected one-line mount authority only on a composed tree. Legacy trees
@@ -431,7 +449,7 @@ export function applyPatches(tree, patches, { contract = null } = {}) {
         continue;
       }
 
-      const symbol = index.symbols.find((s) => s.name === op.symbol);
+      const symbol = resolveSymbolAnchor(index, current, op.symbol);
       if (!symbol) {
         const known = index.symbols.map((s) => s.name).join(", ");
         const importHint = /^\s*import\b/.test(String(op.symbol || ""))

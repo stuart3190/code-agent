@@ -111,10 +111,26 @@ export function registerCoreCapabilities() {
         throw error;
       }
       const request = await applyStoredReferenceBrief(ctx, String(input.request));
+      const { classifyEditRequest, directEditAck, directEditEnabled } = await import("../builderV2/directEdit.mjs");
+      const proposal = input.editSize === "large" || input.editSize === "small" ? input.editSize : null;
+      const smallEnough = directEditEnabled() && project.bv2_green_snapshot_id
+        && classifyEditRequest(request, { proposal }).size === "small";
+      if (smallEnough) {
+        const ack = directEditAck(request);
+        await ctx.emit?.("message", { role: "lead", text: ack, directEdit: true });
+        await ctx.conversations?.appendTurn?.(ctx.conversation, {
+          role: "lead", content: ack, payload: { directEdit: true, progress: true },
+        });
+      }
       const accepted = await startExistingAppWorkV2(ctx, {
         project, request, kind: "edit", trigger: "user", taskHint: String(input.request),
+        pipelineMode: smallEnough ? "direct_edit" : null,
+        v2Input: {
+          turns: Array.isArray(ctx.recentTurns) ? ctx.recentTurns.slice(-6) : [],
+          editProposal: proposal,
+        },
       });
-      return accepted.result;
+      return { ...accepted.result, directEdit: smallEnough };
     },
   });
 
