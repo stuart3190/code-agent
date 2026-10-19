@@ -14,7 +14,12 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-import { resolveConversationProject, projectsForProduct } from "../../shell/server/lib/appBuild/projectScope.mjs";
+import {
+  resolveConversationProject, resolveEditRepairProject, projectsForProduct, unrequestedProductMessage,
+  userNamedProduct,
+} from "../../shell/server/lib/appBuild/projectScope.mjs";
+import { invokeCapability, resetCapabilityRegistryForTests } from "../../shell/server/lib/capabilityRegistry.mjs";
+import { ensureCoreCapabilities } from "../../shell/server/lib/leadAgentService.mjs";
 
 const OWNER = "88888888-8888-4888-8888-888888888888";
 const PRODUCT_A = "prod-a";
@@ -42,8 +47,12 @@ function fakeDb({ projects = [], products = [] } = {}) {
         limit(n) { f.limit = n; return api; },
         maybeSingle: async () => {
           seen.push(f);
-          const match = products.find((p) => p.owner === f.owner
-            && String(p.name).toLowerCase() === String(f.ilike_name || "").toLowerCase());
+          const match = products.find((p) => {
+            if (p.owner !== f.owner) return false;
+            if (f.id && String(p.id) !== String(f.id)) return false;
+            if (f.ilike_name && String(p.name).toLowerCase() !== String(f.ilike_name).toLowerCase()) return false;
+            return Boolean(f.id || f.ilike_name);
+          });
           return { data: match || null, error: null };
         },
         then(resolve) {
@@ -235,11 +244,84 @@ test("publish, V2 edit/repair, preview, QA, export and domains all use the scope
   const publish = await readFile(fileURLToPath(new URL("../../shell/server/lib/appBuild/appPublishService.mjs", import.meta.url)), "utf8");
   const core = await readFile(fileURLToPath(new URL("../../shell/server/lib/capabilities/coreCapabilities.mjs", import.meta.url)), "utf8");
   assert.equal((delivery.match(/resolveConversationProject\(ctx/g) || []).length, 3);
-  assert.equal((core.match(/resolveConversationProject\(ctx/g) || []).length, 2);
+  assert.equal((core.match(/resolveEditRepairProject\(ctx/g) || []).length, 2);
+  assert.equal((core.match(/resolveConversationProject\(ctx/g) || []).length, 0,
+    "edit and repair use the stricter gate; other capabilities keep the named-product override");
   assert.equal((core.match(/includeUnverified: true/g) || []).length, 1,
     "only repair opts into unfinished projects; edit and delivery remain green-only");
   // publish, connectDomain
   assert.equal((publish.match(/resolveConversationProject\(ctx/g) || []).length, 2);
+});
+
+test("an edit names a different app only when the current message names it", async () => {
+  const products = [
+    { id: PRODUCT_A, owner: OWNER, name: "BeamPlan" },
+    { id: PRODUCT_B, owner: OWNER, name: "Downlight Calculator" },
+  ];
+  const projects = [
+    project({ id: "beam", name: "BeamPlan", product_id: PRODUCT_A }),
+    project({ id: "down", name: "Downlight Calculator", product_id: PRODUCT_B }),
+  ];
+  const ctx = conversation(PRODUCT_A);
+  const blocked = await resolveEditRepairProject(ctx, {
+    client: fakeDb({ projects, products }),
+    productName: "Downlight Calculator",
+    userText: "Can we add (cm) as a unit too",
+  });
+  assert.equal(blocked.project, null);
+  assert.equal(blocked.scope, "unrequested_product");
+  assert.equal(blocked.blocked, true);
+  assert.equal(blocked.currentName, "BeamPlan");
+  assert.match(unrequestedProductMessage(blocked), /didn't change "Downlight Calculator"/);
+  assert.match(unrequestedProductMessage(blocked), /BeamPlan/);
+  assert.equal(userNamedProduct("add a calculator unit", "Downlight Calculator"), false);
+  assert.equal(userNamedProduct("please update the downlight", "Downlight Calculator"), false);
+
+  const named = await resolveEditRepairProject(ctx, {
+    client: fakeDb({ projects, products }),
+    productName: "downlight calculator",
+    userText: "Please update Downlight Calculator to add cm",
+  });
+  assert.equal(named.project.id, "down");
+  assert.equal(named.scope, "named_product");
+
+  const echoed = await resolveEditRepairProject(ctx, {
+    client: fakeDb({ projects, products }),
+    productName: "BeamPlan",
+    userText: "Can we add (cm) as a unit too",
+  });
+  assert.equal(echoed.project.id, "beam");
+  assert.equal(echoed.scope, "named_product");
+
+  const implicit = await resolveEditRepairProject(ctx, {
+    client: fakeDb({ projects, products }),
+    userText: "Can we add (cm) as a unit too",
+  });
+  assert.equal(implicit.project.id, "beam");
+  assert.equal(implicit.scope, "conversation");
+});
+
+test("edit_app and repair_app refuse an inferred product before any dispatch", async () => {
+  resetCapabilityRegistryForTests();
+  ensureCoreCapabilities();
+  const products = [
+    { id: PRODUCT_A, owner: OWNER, name: "BeamPlan" },
+    { id: PRODUCT_B, owner: OWNER, name: "Downlight Calculator" },
+  ];
+  const projects = [
+    project({ id: "beam", name: "BeamPlan", product_id: PRODUCT_A }),
+    project({ id: "down", name: "Downlight Calculator", product_id: PRODUCT_B }),
+  ];
+  const ctx = {
+    ...conversation(PRODUCT_A),
+    latestUserText: "Can we add (cm) as a unit too",
+    client: fakeDb({ projects, products }),
+  };
+  for (const id of ["edit_app", "repair_app"]) {
+    await assert.rejects(invokeCapability(id, ctx, {
+      request: "add cm", issue: "add cm", productName: "Downlight Calculator",
+    }), (error) => error.code === "unrequested_product" && /BeamPlan/.test(error.message));
+  }
 });
 
 test('database lookup errors cannot masquerade as missing projects in any scope', async () => {

@@ -35,6 +35,10 @@ function safeTerminalError(job, customer) {
   if (customer?.actionRequired === true) {
     return "The validated scope needs your approval or clarification before generation can continue.";
   }
+  if (customer?.creditsProtected === false) {
+    const text = String(job.result?.finalText || "").trim();
+    if (text) return text;
+  }
   return "Thrallo could not produce a verified preview. Your credits remain protected.";
 }
 

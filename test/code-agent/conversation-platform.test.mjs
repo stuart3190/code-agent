@@ -11,8 +11,9 @@ const { MemoryConversationStore } = await import("../../shell/server/lib/convers
 const { MemoryCodeAgentStore, codeAgentStore, resetCodeAgentStoreForTests } =
   await import("../../shell/server/lib/codeAgentStore.mjs");
 const {
-  buildDispatchConfirmation, ensureCoreCapabilities, postUserMessage, preservedBuildRetryTarget,
-  processConversation, recoverStaleConversations, resetLeadAgentForTests,
+  buildDispatchConfirmation, dispatchPreservedBuildRetry, ensureCoreCapabilities, postUserMessage,
+  preservedBuildRetryTarget, processConversation, recoverStaleConversations, resetLeadAgentForTests,
+  retryProjectMatchesConversation,
 } = await import("../../shell/server/lib/leadAgentService.mjs");
 
 const OWNER = "77777777-7777-4777-8777-777777777777";
@@ -345,6 +346,129 @@ test("retry targeting requires a bare retry and a durable V2 terminal identity",
   assert.equal(preservedBuildRetryTarget([{ role: "user", content: "Try again" }]), null);
 });
 
+function retryLookup({ job, project }) {
+  return {
+    from(table) {
+      const filters = {};
+      const api = {
+        select() { return api; },
+        eq(column, value) { filters[column] = value; return api; },
+        maybeSingle: async () => {
+          const row = table === "build_jobs" ? job : table === "projects" ? project : null;
+          if (!row) return { data: null, error: null };
+          if (filters.id && String(row.id) !== String(filters.id)) return { data: null, error: null };
+          if (filters.owner && String(row.owner) !== String(filters.owner)) return { data: null, error: null };
+          return { data: row, error: null };
+        },
+      };
+      return api;
+    },
+  };
+}
+
+test("a bare retry cannot resume a project from a different product", async () => {
+  assert.equal(retryProjectMatchesConversation({ product_id: "beam" }, { product_id: "beam" }), true);
+  assert.equal(retryProjectMatchesConversation({ product_id: null }, { product_id: "other" }), true);
+  assert.equal(retryProjectMatchesConversation({ product_id: "beam" }, { product_id: "down" }), false);
+  assert.equal(retryProjectMatchesConversation({ product_id: "beam" }, {}), false);
+
+  const job = {
+    id: "job-1", owner: OWNER, project_id: "down", status: "failed", pipeline_version: "v2",
+  };
+  const foreign = {
+    id: "down", owner: OWNER, product_id: "down-product", name: "Downlight Calculator",
+  };
+  let started = 0;
+  await assert.rejects(dispatchPreservedBuildRetry({
+    ctx: { owner: OWNER, conversation: { id: "c1", product_id: "beam-product" } },
+    target: { jobId: "job-1", projectId: "down", failure: "headroom" },
+    client: retryLookup({ job, project: foreign }),
+    startExisting: async () => { started += 1; },
+  }), (error) => error.code === "retry_project_mismatch");
+  assert.equal(started, 0);
+
+  resetLeadAgentForTests();
+  resetCapabilityRegistryForTests();
+  ensureCoreCapabilities();
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation(OWNER, { product_id: "beam-product" });
+  await store.appendTurn(conversation, {
+    role: "lead", content: "failed on the other app",
+    payload: { pipelineVersion: "v2", projectId: "down", jobId: "job-1" },
+  });
+  await store.appendTurn(conversation, { role: "user", content: "Try again" });
+  await store.claimConversationThinking(conversation);
+  await processConversation(conversation, {
+    store,
+    runStore: new MemoryCodeAgentStore(),
+    retryDispatcher: (args) => dispatchPreservedBuildRetry({
+      ...args,
+      client: retryLookup({ job, project: foreign }),
+      startExisting: async () => { started += 1; throw new Error("mismatched project must not dispatch"); },
+    }),
+  });
+  assert.equal(started, 0);
+  const turns = await store.listTurns(OWNER, conversation.id);
+  assert.match(turns.at(-1).content, /different app/);
+  assert.equal(turns.at(-1).payload.projectId, undefined);
+  assert.equal(turns.at(-1).payload.retryProjectMismatch, true);
+  assert.equal(preservedBuildRetryTarget([
+    ...turns, { role: "user", content: "Try again" },
+  ]), null);
+
+  const same = { ...foreign, id: "beam", product_id: "beam-product" };
+  const sameJob = { ...job, project_id: "beam" };
+  let resumed = null;
+  const matching = await store.createConversation(OWNER, { product_id: "beam-product" });
+  await store.appendTurn(matching, {
+    role: "lead", content: "failed",
+    payload: { pipelineVersion: "v2", projectId: "beam", jobId: "job-1" },
+  });
+  await store.appendTurn(matching, { role: "user", content: "Retry again" });
+  await store.claimConversationThinking(matching);
+  await processConversation(matching, {
+    store,
+    runStore: new MemoryCodeAgentStore(),
+    retryDispatcher: (args) => dispatchPreservedBuildRetry({
+      ...args,
+      client: retryLookup({ job: sameJob, project: same }),
+      startExisting: async (_ctx, input) => {
+        resumed = input.project.id;
+        return { handled: true, result: {
+          jobId: "job-2", projectId: "beam", buildId: "diag-2", pipelineVersion: "v2",
+        } };
+      },
+    }),
+  });
+  assert.equal(resumed, "beam");
+  const matchedTurns = await store.listTurns(OWNER, matching.id);
+  assert.equal(matchedTurns.at(-1).content, buildDispatchConfirmation("resume"));
+
+  const legacy = await store.createConversation(OWNER, {});
+  await store.appendTurn(legacy, {
+    role: "lead", content: "failed",
+    payload: { pipelineVersion: "v2", projectId: "down", jobId: "job-1" },
+  });
+  await store.appendTurn(legacy, { role: "user", content: "Continue" });
+  await store.claimConversationThinking(legacy);
+  let legacyProject = null;
+  await processConversation(legacy, {
+    store,
+    runStore: new MemoryCodeAgentStore(),
+    retryDispatcher: (args) => dispatchPreservedBuildRetry({
+      ...args,
+      client: retryLookup({ job, project: foreign }),
+      startExisting: async (_ctx, input) => {
+        legacyProject = input.project.id;
+        return { handled: true, result: {
+          jobId: "job-3", projectId: "down", buildId: "diag-3", pipelineVersion: "v2",
+        } };
+      },
+    }),
+  });
+  assert.equal(legacyProject, "down");
+});
+
 test("a pre-dispatch resume failure preserves the exact retry identity", async () => {
   resetLeadAgentForTests();
   resetCapabilityRegistryForTests();
@@ -417,6 +541,43 @@ test("successful build capability output closes with canonical copy instead of a
     projectId: "project", jobId: "job", buildId: "7b93a4b7-0d95-4320-9e8f-514a0745e124",
     pipelineVersion: "v2", dispatch: "build",
   });
+});
+
+test("an unrequested product edit stops the turn instead of letting the model dispatch again", async () => {
+  resetLeadAgentForTests();
+  resetCapabilityRegistryForTests();
+  ensureCoreCapabilities();
+  resetCapabilityRegistryForTests();
+  registerCapability({
+    id: "edit_app", specialist: "Builder", description: "test edit",
+    inputSchema: { type: "object", properties: {}, required: [], additionalProperties: false },
+    invoke: async () => {
+      const error = new Error("I didn't change \"Downlight Calculator\". This conversation is for BeamPlan, and you didn't name the other app.");
+      error.code = "unrequested_product";
+      throw error;
+    },
+  });
+  const store = new MemoryConversationStore();
+  const conversation = await store.createConversation(OWNER, { product_id: "beam" });
+  await store.appendTurn(conversation, { role: "user", content: "Can we add (cm) as a unit too" });
+  await store.claimConversationThinking(conversation);
+  let modelTurns = 0;
+  await processConversation(conversation, {
+    store, runStore: new MemoryCodeAgentStore(),
+    credentialResolver: async () => ({ provider: "managed", routing: {} }),
+    modelFactory: async () => ({
+      turn: async () => {
+        modelTurns += 1;
+        if (modelTurns > 1) throw new Error("the model must not get another chance to pick a product");
+        return toolCall("edit_app", { productName: "Downlight Calculator", request: "add cm" });
+      },
+    }),
+  });
+  assert.equal(modelTurns, 1);
+  const turns = await store.listTurns(OWNER, conversation.id);
+  assert.match(turns.at(-1).content, /BeamPlan/);
+  assert.match(turns.at(-1).content, /Downlight Calculator/);
+  assert.equal(turns.at(-1).payload.projectId, undefined);
 });
 
 test("stale thinking conversations recover so the Lead Agent never visibly dies", async () => {

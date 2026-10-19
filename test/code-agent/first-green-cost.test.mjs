@@ -189,8 +189,10 @@ test("R3 — Builder V2 keeps its shared system prefix separate from stage-varyi
   // The point is not how many prefixes there are - a compile correction has since earned its
   // own - but that every one of them is a static constant. Pinning the exact ternary made
   // adding a third static prefix look like a violation, which is the opposite of the rule.
-  const assignment = source.match(/systemPrompt = headroomScope\?\.fragmented[\s\S]*?;/)?.[0];
+  const assignment = source.match(/systemPrompt = \(step === "edit" && headroomScope\?\.allowedFiles\?\.length\)[\s\S]*?;/)?.[0];
   assert.ok(assignment, "bounded headroom turns still select their prefix explicitly");
+  assert.match(assignment, /SCOPED_EDIT_SYSTEM_PROMPT/,
+    "a narrowed edit uses its own static prefix");
   assert.match(assignment, /HEADROOM_FRAGMENT_SYSTEM_PROMPT/,
     "a fragmented headroom turn uses its own static prefix");
   assert.match(assignment, /fullSystemPrompt/, "every other turn reuses the canonical prefix");

@@ -139,6 +139,17 @@ and do not emit prose outside emit_patches.`;
 // excerpts and an exact-replacement primitive. This deliberately excludes broad architecture and
 // capability prose: the retained tree supplies exact current bytes, the write boundary is
 // machine-enforced, and deterministic compile/browser verification remains mandatory.
+// A one-file edit of an existing app. The full generation prompt (contract, capability graph,
+// every journey, the rest of the tree) is what made a scoped edit exceed the fixed per-call
+// credit ceiling before a single output token could fit. This prompt carries only the change
+// and the allowed source.
+export const SCOPED_EDIT_SYSTEM_PROMPT = `You edit an existing React+Vite app. Respond only by calling emit_patches.
+Change only the allowed file or files. Prefer replace_exact: put the exact old excerpt in symbol and its complete replacement in content. The old excerpt must occur exactly once in that file.
+Use replace_symbol only when you are replacing a whole indexed component. Do not replace the whole file when an excerpt is shown.
+Apply the requested change and nothing else. Preserve every behavior, label, and export the request does not name. Do not edit protected platform files.`;
+
+export const SCOPED_EDIT_SOURCE_TOKEN_BUDGET = 6_000;
+
 export const HEADROOM_FRAGMENT_SYSTEM_PROMPT = `You repair one bounded defect in an existing
 React+Vite app. Respond only by calling emit_patches. Modify only the allowed file. Prefer
 replace_exact: put the exact old excerpt in symbol and its complete replacement in content. The
@@ -403,7 +414,7 @@ const wholeFileRepairRequired = (scope) => scope?.kind === "structural_modularit
 export function editTargets(tree, request, { limit = 3 } = {}) {
   const words = [...new Set(String(request).toLowerCase().match(/[a-z]{4,}/g) || [])];
   return Object.entries(tree)
-    .filter(([path]) => /^src\/(routes|components|data)\/.*\.(jsx?|tsx?)$/.test(path))
+    .filter(([path]) => /^src\/(?:routes|components|screens|data)\/.*\.(jsx?|tsx?)$/.test(path))
     .map(([path, source]) => {
       const body = String(source).toLowerCase();
       return { path, hits: words.filter((w) => body.includes(w)).length };
@@ -699,6 +710,56 @@ export function renderPatchPrompt(options) {
   ].join("\n");
 }
 
+function capUtf8(text, maxTokens) {
+  const maxBytes = Math.max(1, Math.floor(Number(maxTokens) || 0)) * ESTIMATED_BYTES_PER_TOKEN;
+  const bytes = Buffer.from(String(text || ""), "utf8");
+  if (bytes.length <= maxBytes) return String(text || "");
+  return bytes.subarray(0, maxBytes).toString("utf8");
+}
+
+/** One-file (or few-file) edit prompt that stays inside the fixed per-call credit ceiling. */
+export function renderBoundedEditPrompt({
+  editRequest = "", tree = {}, headroomScope = null, onRetrieval = null,
+} = {}) {
+  const files = [...new Set(headroomScope?.allowedFiles || [])];
+  const request = String(editRequest || headroomScope?.instruction || "").trim();
+  const included = files.map((path) => {
+    const source = String(tree?.[path] || "");
+    const fullTokens = Math.ceil(Buffer.byteLength(source, "utf8") / ESTIMATED_BYTES_PER_TOKEN);
+    if (source && fullTokens <= SCOPED_EDIT_SOURCE_TOKEN_BUDGET) {
+      return { path, form: "full", reason: "scoped edit target", tokens: fullTokens, body: source };
+    }
+    const fragments = headroomSourceFragments(source, [request], { maxFragments: 3, radius: 8 });
+    const pieces = (fragments.length ? fragments : [{
+      startLine: 1, endLine: 1, content: source.split("\n")[0] || "",
+    }]).map((fragment) => ({ ...fragment, content: capUtf8(fragment.content, 1_500) }));
+    const body = pieces.map((fragment) => `lines ${fragment.startLine}-${fragment.endLine}:\n${fragment.content}`).join("\n\n");
+    const tokens = Math.ceil(Buffer.byteLength(body, "utf8") / ESTIMATED_BYTES_PER_TOKEN);
+    return { path, form: source ? "excerpt" : "missing", reason: "scoped edit target", tokens, body };
+  });
+  onRetrieval?.({
+    query: { step: "edit", kind: "scoped_edit", files },
+    included: included.map(({ path, form, reason, tokens }) => ({ path, form, reason, tokens })),
+    omittedCount: Math.max(0, Object.keys(tree || {}).length - included.length),
+    tokens: included.reduce((sum, row) => sum + row.tokens, 0),
+  });
+  return [
+    "STEP: edit",
+    "SCOPED EDIT: apply exactly this change and nothing else:",
+    request || "Make the requested change.",
+    `Allowed files: [${files.join(", ")}]`,
+    "The rest of the application is retained and is not included here. Do not invent changes outside this request.",
+    "Every existing journey must keep working.",
+    "",
+    ...included.flatMap((row) => [
+      `--- ${row.path}${row.form === "full" ? "" : " (excerpt; copy replace_exact from the text below)"} ---`,
+      row.body || "// file is empty",
+      "",
+    ]),
+    "Call emit_patches now.",
+  ].join("\n");
+}
+
 function renderScopedPatchPrompt({
   step, originalStep = step, contract, tiers, tree, journey, rejections = [], problems = [], editRequest = null,
   projectKnowledge = null, onRetrieval = null, modulePlan = [], moduleContracts = null,
@@ -708,6 +769,11 @@ function renderScopedPatchPrompt({
   scaffoldGraph = contract?.scaffoldGraph || null, scaffoldPlan = null,
   moduleLock = contract?.moduleLock || null,
 }) {
+  // A headroom-narrowed edit must not re-render the contract, journeys, or the rest of the
+  // tree. That full brief is what made a one-file edit exceed the fixed per-call ceiling.
+  if (step === "edit" && headroomScope?.allowedFiles?.length) {
+    return renderBoundedEditPrompt({ editRequest, tree, headroomScope, onRetrieval });
+  }
   if (repairScope?.kind === "structural_modularity") {
     return renderStructuralModularityPrompt({ tree, repairScope, onRetrieval });
   }
@@ -1226,7 +1292,7 @@ export function headroomSourceFragments(source, problems = [], { maxFragments = 
 export function headroomDispatchScope({
   tree = {}, modulePlan = [], moduleContracts = null, repairScope = null,
   moduleCorrectionScope = null, problems = [], rejections = [], previousScope = null,
-  logicalStep = null, semanticFiles = [],
+  logicalStep = null, semanticFiles = [], evidenceText = "",
 } = {}) {
   const active = previousScope || repairScope || moduleCorrectionScope;
   const activeFiles = [...new Set([...(active?.allowedFiles || []), ...(active?.files || [])])]
@@ -1253,7 +1319,7 @@ export function headroomDispatchScope({
   // A browser/pre-compile repair already names its owning modules. Queuing every other missing
   // planned module turned a one-file repair into unrelated continuations and exhausted the
   // retained build's headroom. Planned modules remain the fallback for unscoped generation.
-  const unscopedGeneration = !active && !["repair", "correction"].includes(logicalStep);
+  const unscopedGeneration = !active && !["repair", "correction", "edit"].includes(logicalStep);
   const candidates = targeted.length
     ? [...new Set([...targeted, ...(unscopedGeneration ? unfinished : [])])]
     : [...new Set([
@@ -1279,7 +1345,9 @@ export function headroomDispatchScope({
   if (previousScope && previousScope.allowedFiles?.length === 1 && files.length === 1) {
     if (previousScope.wholeFileRequired) return null;
     if (previousScope.fragmented) return null;
-    const fragments = headroomSourceFragments(tree?.[files[0]], problems);
+    const fragmentEvidence = (problems || []).filter(Boolean);
+    if (!fragmentEvidence.length && evidenceText) fragmentEvidence.push(evidenceText);
+    const fragments = headroomSourceFragments(tree?.[files[0]], fragmentEvidence);
     if (!fragments.length) return null;
     const fragmentTokens = fragments.reduce((sum, fragment) => (
       sum + Math.ceil(Buffer.byteLength(fragment.content, "utf8") / 4)
@@ -1967,6 +2035,8 @@ export function createModelLanes({
       const dispatchProblems = step === "repair" ? causalRepairProblems(contract, problems) : problems;
       const semanticRepairFiles = step === "repair" && !repairScope && !moduleCorrectionScope
         ? repairFailureOwnedPaths(contract, dispatchProblems) : [];
+      const editSemanticFiles = step === "edit"
+        ? editTargets(tree, String(editRequest || ""), { limit: 4 }) : [];
       let prompt = null;
       let selected = null;
       let turn = null;
@@ -1988,9 +2058,11 @@ export function createModelLanes({
           let retrievalTrace = null;
           const compileScoped = [headroomScope, repairScope, moduleCorrectionScope]
             .some((scope) => scope?.kind === "compile" || scope?.sourceKind === "compile");
-          systemPrompt = headroomScope?.fragmented
-            ? HEADROOM_FRAGMENT_SYSTEM_PROMPT
-            : compileScoped ? COMPILE_CORRECTION_SYSTEM_PROMPT : fullSystemPrompt;
+          systemPrompt = (step === "edit" && headroomScope?.allowedFiles?.length)
+            ? SCOPED_EDIT_SYSTEM_PROMPT
+            : headroomScope?.fragmented
+              ? HEADROOM_FRAGMENT_SYSTEM_PROMPT
+              : compileScoped ? COMPILE_CORRECTION_SYSTEM_PROMPT : fullSystemPrompt;
           prompt = renderPatchPrompt({
             step, originalStep, contract, tiers, tree, journey, rejections, problems: dispatchProblems, editRequest, originalRequest,
             projectKnowledge: headroomScope ? null : projectKnowledge, modulePlan, moduleContracts,
@@ -2034,7 +2106,10 @@ export function createModelLanes({
             const nextScope = headroomDispatchScope({
               tree, modulePlan, moduleContracts, repairScope, moduleCorrectionScope,
               problems: dispatchProblems, rejections, previousScope: headroomScope, logicalStep: step,
-              semanticFiles: repairBoundary?.allowedFiles?.length ? repairBoundary.allowedFiles : semanticRepairFiles,
+              semanticFiles: repairBoundary?.allowedFiles?.length
+                ? repairBoundary.allowedFiles
+                : (semanticRepairFiles.length ? semanticRepairFiles : editSemanticFiles),
+              evidenceText: step === "edit" ? String(editRequest || "") : "",
             });
             if (!nextScope) {
               // A raw call with no model/module boundary is not safely splittable. Preserve its

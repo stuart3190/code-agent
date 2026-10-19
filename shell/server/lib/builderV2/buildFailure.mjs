@@ -77,6 +77,15 @@ export function customerBuildStatus({ internalState, previewUrl = null, failure 
 }
 
 export function customerFailureMessage(failure) {
+  // This refusal happens before a builder reservation. Lead-message credits have already
+  // settled and are not refunded, so the generic "credits remain protected" sentence is false.
+  if (failure?.code === "smallest_scoped_call_exceeds_headroom") {
+    const spent = Number(failure.consumedCredits);
+    if (Number.isFinite(spent) && spent > 0) {
+      return `Thrallo stopped before changing the app. This attempt used ${spent.toFixed(2)} credits.`;
+    }
+    return "Thrallo stopped before changing the app. Credits already used to handle this message are not refunded.";
+  }
   if (failure?.customerActionRequired && failure?.classification === "provider_customer") {
     return "Your selected provider needs attention before this build can continue.";
   }

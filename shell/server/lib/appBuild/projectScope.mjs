@@ -96,6 +96,76 @@ export async function resolveConversationProject(ctx, {
   return { project: data?.[0] || null, scope: "owner_latest", productId: data?.[0]?.product_id || null };
 }
 
+/**
+ * The user's latest message names this product when the full product name appears as its own
+ * phrase. A shorter shared word ("calculator", "plan") is not a name, and neither is a name the
+ * model inferred from the owner's other products.
+ */
+export function userNamedProduct(userText, productName) {
+  const name = String(productName || "").trim().replace(/\s+/g, " ");
+  if (!name) return false;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s+");
+  return new RegExp(`(?:^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, "iu").test(String(userText || ""));
+}
+
+export async function latestUserText(ctx) {
+  if (typeof ctx?.latestUserText === "string") return ctx.latestUserText;
+  const list = ctx?.conversations?.listTurns;
+  if (typeof list !== "function" || !ctx?.conversation?.id || !ctx?.owner) return "";
+  try {
+    const turns = await list.call(ctx.conversations, ctx.owner, ctx.conversation.id, { limit: 30 });
+    const latest = [...(turns || [])].reverse().find((turn) => turn?.role === "user");
+    return String(latest?.content || "");
+  } catch (error) {
+    console.warn(`[project-scope] user text unavailable: ${error.message}`);
+    return "";
+  }
+}
+
+/**
+ * Edit and repair target the conversation's own app. A model-supplied product name may select a
+ * different app only when the user's current message actually names that app. Echoing the
+ * conversation's own product is allowed. Anything else is refused before a job is created.
+ */
+export async function resolveEditRepairProject(ctx, {
+  productName = null, userText = "", columns = DEFAULT_COLUMNS, client = serviceClient(),
+  includeUnverified = false,
+} = {}) {
+  const requested = String(productName || "").trim();
+  if (!requested) {
+    return resolveConversationProject(ctx, { columns, client, includeUnverified });
+  }
+  const owner = ctx?.owner;
+  if (!owner) return { project: null, scope: "no_owner", productId: null };
+  const { data: product } = await checkedLookup(client.from("ca_products")
+    .select("id, name").eq("owner", owner).ilike("name", requested).maybeSingle());
+  if (!product) return { project: null, scope: "unknown_product", productId: null };
+  const namedId = String(product.id);
+  const conversationProductId = ctx?.conversation?.product_id ? String(ctx.conversation.product_id) : null;
+  const sameProduct = conversationProductId != null && namedId === conversationProductId;
+  if (!sameProduct && !userNamedProduct(userText, product.name || requested)) {
+    let currentName = null;
+    if (conversationProductId) {
+      const { data: current } = await checkedLookup(client.from("ca_products")
+        .select("name").eq("owner", owner).eq("id", conversationProductId).maybeSingle());
+      currentName = current?.name || null;
+    }
+    return {
+      project: null, scope: "unrequested_product", productId: namedId, blocked: true,
+      requestedName: product.name || requested, currentName,
+    };
+  }
+  return resolveConversationProject(ctx, { productName: requested, columns, client, includeUnverified });
+}
+
+export function unrequestedProductMessage(resolved) {
+  const requested = String(resolved?.requestedName || "that app");
+  if (resolved?.currentName) {
+    return `I didn't change "${requested}". This conversation is for ${resolved.currentName}, and you didn't name the other app.`;
+  }
+  return `I didn't change "${requested}" because you didn't name it in this message. This conversation stays on its own app.`;
+}
+
 // Every project row belonging to a product, newest first. A rebuild creates a NEW project row
 // under the same product, so "the site for this product" spans several of them.
 export async function projectsForProduct(owner, productId, client = serviceClient()) {
