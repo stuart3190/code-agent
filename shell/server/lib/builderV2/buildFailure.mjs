@@ -108,11 +108,19 @@ export function customerFailureMessage(failure) {
   if (failure?.customerActionRequired && failure?.classification === "contract") {
     return "The validated scope needs your approval or clarification before generation can continue.";
   }
-  if (failure?.classification === "platform") {
+  if (failure?.code === "direct_edit_unchanged" || failure?.code === "direct_edit_fallback") {
+    const spent = Number(failure.consumedCredits);
+    const spend = Number.isFinite(spent) && spent > 0 ? ` This attempt used ${spent.toFixed(2)} credits.` : "";
+    return `I couldn't apply that, your app is unchanged.${spend}`;
+  }
+  if (failure?.classification === "platform" && !(Number(failure?.consumedCredits) > 0)) {
     return "Thrallo could not finish checking this build. Your credits remain protected.";
   }
   if (failure?.classification === "accounting") {
     return "Thrallo paused this build while protecting and reconciling its credits.";
+  }
+  if (Number(failure?.consumedCredits) > 0) {
+    return `Thrallo could not produce a verified preview. This attempt used ${Number(failure.consumedCredits).toFixed(2)} credits.`;
   }
   return "Thrallo could not produce a verified preview. Your credits remain protected.";
 }

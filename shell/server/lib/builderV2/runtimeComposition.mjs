@@ -38,6 +38,10 @@ import { contractWorkflowRecoveryAuthority } from "./contractStageBudget.mjs";
 import { compareGraphIndexes, manifestOf } from "./graphParity.mjs";
 import { indexTree, INDEXER_VERSION } from "./indexer.mjs";
 import { createModelLanes } from "./modelLanes.mjs";
+import {
+  DIRECT_EDIT_JOB_CEILING_CREDITS, composeFallbackRequest, directEditEnabled, directEditSuccessMessage,
+  runDirectEdit,
+} from "./directEdit.mjs";
 import { generationPolicyFor } from "./generationPolicy.mjs";
 import { MAX_REPAIR_DISPATCHES, supabaseModelReservations } from "./modelReservations.mjs";
 import { createOrchestrator, supabaseBuildStore } from "./orchestrator.mjs";
@@ -461,14 +465,15 @@ export function createBuilderV2Runtime({
       let terminalSettled = false;
       const recoveryStrategyCosts = new Map();
 
-      const settleTerminal = async ({ state, failure = null, greenPreview = false }) => {
+      const settleTerminal = async ({ state, failure = null, greenPreview = false, compensationEligible = null }) => {
         if (!activeBuildId || terminalSettled) return null;
         const customerOwnedProviderFailure = failure?.classification === "provider_customer";
         const cancelled = state === "cancelled" || failure?.code === "cancelled";
         const settlement = await settlementStore.settle({
           owner, buildId: activeBuildId, terminalState: state,
           failureClassification: failure?.classification || null, greenPreview,
-          compensationEligible: !cancelled && !customerOwnedProviderFailure,
+          compensationEligible: compensationEligible == null
+            ? (!cancelled && !customerOwnedProviderFailure) : compensationEligible,
         });
         terminalSettled = true;
         return settlement;
@@ -905,19 +910,119 @@ export function createBuilderV2Runtime({
         log: (line) => emit("stdout", line),
       });
 
-      const retainedContract = mode === "build" ? null : await loadSourceContract({
+      const runMode = mode === "direct_edit" && !directEditEnabled() ? "iterate" : mode;
+      let directResult = null;
+      if (runMode === "direct_edit") {
+        const greenSnapshotId = await snapshotStore.pointer(owner, projectId, "green");
+        if (!greenSnapshotId) {
+          throw Object.assign(new Error("This project has no verified Builder V2 green snapshot."), {
+            code: "no_green_snapshot",
+          });
+        }
+        const greenTree = await snapshotStore.materialize(owner, greenSnapshotId);
+        const buildStore = supabaseBuildStore(client);
+        const buildId = await buildStore.create({
+          owner, project_id: projectId, profile: "direct_edit", request, state: "editing",
+          verifier_policy: verification.verifierPolicy,
+          max_repair_dispatches: 0, started_at: new Date().toISOString(),
+        });
+        await events.buildCreated?.({ owner, projectId, buildId, mode: "direct_edit" });
+        let previewTouched = false;
+        let direct;
+        try {
+          direct = await runDirectEdit({
+          owner, projectId, buildId, request, tree: greenTree,
+          turns: Array.isArray(input.turns) ? input.turns : [],
+          proposal: input.editProposal || input.editSize || null,
+          jobCeilingCredits: Math.min(ceilingCredits, DIRECT_EDIT_JOB_CEILING_CREDITS),
+          snapshotStore, greenSnapshotId, promoteGreen: false,
+          modelFn: (call) => lanes.directEditFn({ owner, projectId, buildId, ...call }),
+          compileFn: async (tree) => {
+            const built = await compile(tree, { step: "direct_edit", attempt: 1 });
+            return { ok: built?.ok === true, error: built?.stderr || built?.error || "" };
+          },
+          smokeFn: async (tree) => {
+            previewTouched = true;
+            const verdict = await smokeJourneysFn({ tree, journeys: [], contract: { journeys: [] }, signal });
+            return {
+              pass: verdict?.pass === true,
+              error: verdict?.error || (verdict?.fatalErrors || []).join("; ") || "",
+              fatalErrors: verdict?.fatalErrors || [],
+            };
+          },
+        });
+        } catch (error) {
+          if (previewTouched) {
+            await preview.update(projectId, withRuntimeEnv(greenTree, projectId)).catch((restoreError) => {
+              log(`direct edit preview restore failed: ${restoreError.message}`);
+            });
+          }
+          throw error;
+        }
+        if (direct.outcome !== "applied" && previewTouched) {
+          await preview.update(projectId, withRuntimeEnv(greenTree, projectId)).catch((error) => {
+            log(`direct edit preview restore failed: ${error.message}`);
+          });
+        }
+        if (direct.outcome === "applied") {
+          const validated = await snapshotStore.markCandidateValidated(owner, projectId, direct.candidateSnapshotId, {
+            reason: "working:direct-edit",
+          });
+          directResult = {
+            state: "green", snapshotId: validated.id, directEdit: true,
+            finalText: directEditSuccessMessage(request),
+            spentCredits: direct.spentCredits, directEditSettlement: direct.settlement,
+          };
+        } else if (direct.outcome === "escalate" || direct.outcome === "fallback") {
+          const retainedForFallback = await loadSourceContract({
+            client, snapshotStore, owner, projectId, sourceBuildId: null,
+          });
+          if (!retainedForFallback?.contract) {
+            directResult = {
+              state: "blocked",
+              error: direct.message,
+              failureClassification: "direct_edit_unchanged",
+              consumedCredits: direct.spentCredits,
+              directEdit: true,
+              directEditSettlement: direct.settlement,
+            };
+          } else {
+            tierContract(retainedForFallback.contract);
+            log(`direct edit ${direct.outcome}; continuing from the green snapshot through the full edit pipeline`);
+            directResult = await orchestrator.runEdit({
+              owner, projectId, request: composeFallbackRequest({
+                request, attemptedPatches: direct.attemptedPatches, errors: direct.errors,
+              }),
+              contract: retainedForFallback.contract, maxRepairs,
+              sourceSnapshotId: retainedForFallback.sourceSnapshotId || greenSnapshotId,
+              signal, existingBuildId: buildId,
+            });
+            directResult.spentCredits = direct.spentCredits;
+          }
+        } else {
+          directResult = {
+            state: "blocked",
+            error: direct.message,
+            failureClassification: "direct_edit_unchanged",
+            consumedCredits: direct.spentCredits,
+            directEdit: true,
+            directEditSettlement: direct.settlement,
+          };
+        }
+      }
+      const retainedContract = (runMode === "build" || directResult) ? null : await loadSourceContract({
         client, snapshotStore, owner, projectId,
         sourceBuildId: ["resume_repair", "resume_verify"].includes(mode) ? String(input.sourceBuildId || "") : null,
       });
       const contract = retainedContract?.contract || null;
       if (retainedContract) log(`source contract ${retainedContract.id} selected through ${retainedContract.via}`);
-      if (mode !== "build" && !contract) {
+      if (runMode !== "build" && !directResult && !contract) {
         throw Object.assign(new Error("This Builder V2 project has no durable implementation contract."), {
           code: "v2_contract_missing",
         });
       }
       if (contract) tierContract(contract); // reject malformed durable contracts before spend
-      const result = mode === "build"
+      const result = directResult ? directResult : runMode === "build"
         ? await orchestrator.runBuild({ owner, projectId, request, profile: input.profile || complexity,
           buildProfile: input.buildProfile || null,
           budgetCredits: ceilingCredits, maxRepairs, signal })
@@ -948,12 +1053,16 @@ export function createBuilderV2Runtime({
           customerActionRequired: result.actionRequired === true || explicitClassification === "provider_customer",
           checkpointId: result.workingSnapshotId || result.snapshotId || null,
         });
-        const settlement = await settleTerminal({ state: result.state, failure, greenPreview: false });
+        const settlement = await settleTerminal({ state: result.state, failure, greenPreview: false,
+          compensationEligible: result.directEditSettlement?.compensationEligible });
         const spent = settlementSpentCredits(settlement);
-        if (failureShowsSettledCredits(failure) && !(Number(failure.consumedCredits) > 0) && spent > 0) {
+        if (!(Number(failure.consumedCredits) > 0) && spent > 0) {
           failure.consumedCredits = spent;
         }
-        const creditsProtected = !failureShowsSettledCredits(failure);
+        if (!(Number(failure.consumedCredits) > 0) && Number(result.consumedCredits) > 0) {
+          failure.consumedCredits = result.consumedCredits;
+        }
+        const creditsProtected = !failureShowsSettledCredits(failure) && !(Number(failure.consumedCredits) > 0);
         const customerStatus = customerBuildStatus({ internalState: result.state, failure,
           creditsProtected });
         if (activeBuildId) {
@@ -966,7 +1075,8 @@ export function createBuilderV2Runtime({
         return { status: result.state === "cancelled" ? "failed" : "failed", stopReason: result.state,
           result: { buildOk: false, finalText: customerFailureMessage(failure),
             customerStatus, creditsProtected },
-          failure, settlement,
+          failure,
+          settlement: result.directEditSettlement ? { ...(settlement || {}), ...result.directEditSettlement } : settlement,
           contract, bv2: result };
       }
       await events.state({ owner, projectId, buildId: activeBuildId, state: "promotion_projection" });
@@ -994,7 +1104,9 @@ export function createBuilderV2Runtime({
       return {
         status: "complete", stopReason: null,
         result: {
-          finalText: !verification.useVerifier
+          finalText: result.directEdit && result.finalText
+            ? result.finalText
+            : !verification.useVerifier
             ? "Builder V2 created the application. The verifier was bypassed, so this preview is not verified."
             : mode === "build"
               ? "Builder V2 created the application and its browser smoke test passed."
@@ -1009,7 +1121,9 @@ export function createBuilderV2Runtime({
           pipelineVersion: "v2", qualityWarnings: result.pendingIncrements || [],
           customerStatus, creditsProtected: true,
         },
-        settlement,
+        settlement: result.directEditSettlement
+          ? { ...(settlement || {}), ...result.directEditSettlement }
+          : settlement,
         contract: contract || diag.contract || null,
         bv2: result,
       };

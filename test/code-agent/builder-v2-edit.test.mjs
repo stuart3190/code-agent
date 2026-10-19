@@ -317,3 +317,44 @@ test("WP10 — editTargets ranks generated files by request keywords, determinis
   assert.match(prompt, /NewsletterPanel\.jsx — will be modified by this step/, "the targeted file rides along in full via retrieval");
   assert.match(prompt, /smallest correct patch wins/);
 });
+
+test("an identical headroom rejection the model never saw does not consume a generation attempt", async () => {
+  const h = editHarness();
+  const build = await h.orchestrator.runBuild({ owner: "o", projectId: "unbriefed", request: "booking site" });
+  assert.equal(build.state, "green", build.error || build.state);
+  const screen = "src/screens/scaffold/NewsletterScreen.jsx";
+  const calls = [];
+  const badSymbol = "const this entire source line is not the declaration name";
+  const orchestrator = createOrchestrator({
+    maxCoreAttempts: 2,
+    contractFn: async () => CONTRACT,
+    patchesFn: async ({ step }) => {
+      if (step !== "edit") return [];
+      calls.push(step);
+      const patches = calls.length < 3 ? [{
+        file: screen,
+        ops: [{ op: "insert_after_symbol", symbol: badSymbol, content: "const extra = 1;\n" }],
+      }] : EDIT_PATCH.map((patch) => ({ ...patch, ops: patch.ops.map((op) => ({ ...op })) }));
+      if (calls.length < 3) {
+        Object.defineProperty(patches, "dispatchScope", { value: {
+          kind: "headroom_continuation", logicalStep: "edit", batchWidth: 1,
+          files: [screen], allowedFiles: [screen], remainingFiles: [],
+        } });
+        Object.defineProperty(patches, "briefedRejections", { value: [], enumerable: false });
+      }
+      return patches;
+    },
+    assetService: h.assetService, snapshotStore: h.snapshotStore, buildStore: memoryBuildStore(),
+    verificationCache: memoryVerificationCache(),
+    journeysFn: async ({ journeys }) => ({ journeys: journeys.map((journey) => ({
+      id: journey.id, title: journey.title, priority: journey.priority, status: "pass",
+    })) }),
+    baseTree: () => clone(fromScaffold(REACT_VITE)),
+    baseline: REACT_VITE,
+  });
+  const edit = await orchestrator.runEdit({
+    owner: "o", projectId: "unbriefed", request: "Add a line", contract: CONTRACT,
+  });
+  assert.equal(calls.length, 3, `one counted failure, one free identical retry, then success; got ${calls.length}. ${edit.error || ""}`);
+  assert.equal(edit.state, "green", edit.error || edit.state);
+});

@@ -252,8 +252,11 @@ test("a headroom refusal does not claim that credits were protected", async () =
   assert.match(blockedUnknown, /not refunded/);
   assert.doesNotMatch(blockedUnknown, /credits remain protected/i);
   const runtime = await readFile(new URL("../../shell/server/lib/builderV2/runtimeComposition.mjs", import.meta.url), "utf8");
-  assert.match(runtime, /const creditsProtected = !failureShowsSettledCredits\(failure\)/);
+  assert.match(runtime, /const creditsProtected = !failureShowsSettledCredits\(failure\) && !\(Number\(failure\.consumedCredits\) > 0\)/);
   assert.match(runtime, /failure\.consumedCredits = spent/);
+  const blockedSpend = customerFailureMessage({ code: "blocked", consumedCredits: 2.13 });
+  assert.match(blockedSpend, /2\.13/);
+  assert.doesNotMatch(blockedSpend, /credits remain protected/i);
 });
 
 test("customer status and messages never expose internal Builder evidence", () => {

@@ -145,6 +145,7 @@ and do not emit prose outside emit_patches.`;
 // and the allowed source.
 export const SCOPED_EDIT_SYSTEM_PROMPT = `You edit an existing React+Vite app. Respond only by calling emit_patches.
 Change only the allowed file or files. Prefer replace_exact: put the exact old excerpt in symbol and its complete replacement in content. The old excerpt must occur exactly once in that file.
+insert_after_symbol, insert_before_symbol, replace_symbol and delete_symbol take the indexed declaration name (for example presets), never a copied source line.
 Use replace_symbol only when you are replacing a whole indexed component. Do not replace the whole file when an excerpt is shown.
 Apply the requested change and nothing else. Preserve every behavior, label, and export the request does not name. Do not edit protected platform files.`;
 
@@ -720,16 +721,25 @@ function capUtf8(text, maxTokens) {
 /** One-file (or few-file) edit prompt that stays inside the fixed per-call credit ceiling. */
 export function renderBoundedEditPrompt({
   editRequest = "", tree = {}, headroomScope = null, onRetrieval = null,
+  rejections = [], problems = [],
 } = {}) {
   const files = [...new Set(headroomScope?.allowedFiles || [])];
-  const request = String(editRequest || headroomScope?.instruction || "").trim();
+  const request = String(editRequest || "").trim();
+  const instruction = String(headroomScope?.instruction || "").trim();
+  const requestLines = [];
+  if (request) requestLines.push(request);
+  if (instruction && instruction !== request) requestLines.push(instruction);
+  if (!requestLines.length) requestLines.push("Make the requested change.");
+  const rejected = [...new Set((rejections || []).map((rejection) => String(rejection?.reason || rejection))
+    .filter(Boolean))].slice(0, 8);
+  const failureLines = [...new Set((problems || []).map((problem) => String(problem)).filter(Boolean))].slice(0, 4);
   const included = files.map((path) => {
     const source = String(tree?.[path] || "");
     const fullTokens = Math.ceil(Buffer.byteLength(source, "utf8") / ESTIMATED_BYTES_PER_TOKEN);
     if (source && fullTokens <= SCOPED_EDIT_SOURCE_TOKEN_BUDGET) {
       return { path, form: "full", reason: "scoped edit target", tokens: fullTokens, body: source };
     }
-    const fragments = headroomSourceFragments(source, [request], { maxFragments: 3, radius: 8 });
+    const fragments = headroomSourceFragments(source, requestLines, { maxFragments: 3, radius: 8 });
     const pieces = (fragments.length ? fragments : [{
       startLine: 1, endLine: 1, content: source.split("\n")[0] || "",
     }]).map((fragment) => ({ ...fragment, content: capUtf8(fragment.content, 1_500) }));
@@ -746,10 +756,22 @@ export function renderBoundedEditPrompt({
   return [
     "STEP: edit",
     "SCOPED EDIT: apply exactly this change and nothing else:",
-    request || "Make the requested change.",
+    ...requestLines,
     `Allowed files: [${files.join(", ")}]`,
     "The rest of the application is retained and is not included here. Do not invent changes outside this request.",
     "Every existing journey must keep working.",
+    ...(rejected.length ? [
+      "",
+      "PREVIOUS EXACT-SOURCE PATCH REJECTIONS (authoritative):",
+      ...rejected.map((rejection) => `- ${rejection}`),
+      "Emit a substantively corrected replacement. Do not repeat the rejected operation.",
+      "insert_after_symbol, insert_before_symbol, replace_symbol and delete_symbol take the indexed declaration name (for example presets), never a copied source line.",
+    ] : []),
+    ...(failureLines.length ? [
+      "",
+      "PREVIOUS FAILURES (authoritative):",
+      ...failureLines.map((line) => `- ${line}`),
+    ] : []),
     "",
     ...included.flatMap((row) => [
       `--- ${row.path}${row.form === "full" ? "" : " (excerpt; copy replace_exact from the text below)"} ---`,
@@ -772,7 +794,9 @@ function renderScopedPatchPrompt({
   // A headroom-narrowed edit must not re-render the contract, journeys, or the rest of the
   // tree. That full brief is what made a one-file edit exceed the fixed per-call ceiling.
   if (step === "edit" && headroomScope?.allowedFiles?.length) {
-    return renderBoundedEditPrompt({ editRequest, tree, headroomScope, onRetrieval });
+    return renderBoundedEditPrompt({
+      editRequest, tree, headroomScope, onRetrieval, rejections, problems,
+    });
   }
   if (repairScope?.kind === "structural_modularity") {
     return renderStructuralModularityPrompt({ tree, repairScope, onRetrieval });
@@ -2205,12 +2229,57 @@ export function createModelLanes({
       if (!call || !Array.isArray(call.arguments?.patches)) {
         throw new Error(`the model did not call emit_patches at step ${step}: ${String(turn.text).slice(0, 300)}`);
       }
+      const patches = call.arguments.patches;
       if (headroomScope) {
-        Object.defineProperty(call.arguments.patches, "dispatchScope", {
+        Object.defineProperty(patches, "dispatchScope", {
           value: headroomScope, enumerable: false, configurable: false,
         });
       }
-      return call.arguments.patches;
+      const briefedRejections = [...new Set((rejections || [])
+        .map((rejection) => String(rejection?.reason || rejection)).filter(Boolean))]
+        .filter((reason) => String(prompt || "").includes(reason));
+      Object.defineProperty(patches, "briefedRejections", {
+        value: briefedRejections, enumerable: false, configurable: true,
+      });
+      return patches;
+    },
+
+    /**
+     * One full-context edit call. The prompt is already rendered; this lane only reserves,
+     * dispatches emit_patches, and reports the credits that call actually settled.
+     */
+    directEditFn: async ({ owner, projectId, buildId, prompt, systemPrompt, signal = null, attempt = 1 }) => {
+      const startedAt = Date.now();
+      const selected = await reservedProvider("edit", {
+        owner, projectId, buildId, signal,
+        taskClass: "edit",
+        retrievalTokens: Math.ceil(Buffer.byteLength(String(prompt || ""), "utf8") / ESTIMATED_BYTES_PER_TOKEN),
+        affectedModules: 1,
+        scopedDispatch: true,
+        logicalDispatchId: `${buildId}:direct_edit:${attempt}`,
+        headroomBatchIndex: Math.max(0, Number(attempt) - 1),
+      });
+      const turn = await selected.provider.runTurn({
+        systemPrompt,
+        messages: [{ role: "user", content: prompt }],
+        tools: [EMIT_PATCHES_SCHEMA],
+        toolChoice: { type: "function", name: EMIT_PATCHES_SCHEMA.name },
+        reasoningEffort: routeForStep("edit", {}).reasoningEffort,
+        signal,
+      });
+      const call = (turn.toolCalls || []).find((item) => item.name === EMIT_PATCHES_SCHEMA.name);
+      await record("direct_edit", {
+        label: `direct edit (${call?.arguments?.patches?.length ?? 0})`,
+        prompt, output: call ? JSON.stringify(call.arguments) : turn.text,
+        usage: { ...turn.usage, turns: 1 }, durationMs: Date.now() - startedAt,
+        providerUsed: selected.provider, decision: selected.decision,
+      });
+      await accountUsage(turn.usage || {});
+      if (!call || !Array.isArray(call.arguments?.patches)) {
+        throw new Error(`the model did not call emit_patches for direct edit: ${String(turn.text || "").slice(0, 300)}`);
+      }
+      const credits = creditsForUsage({ usage: turn.usage || {}, model: selected.provider.model });
+      return { patches: call.arguments.patches, credits, prompt, usage: turn.usage || {} };
     },
   };
 }

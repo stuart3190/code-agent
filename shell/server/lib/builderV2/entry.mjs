@@ -167,10 +167,12 @@ function relay(ctx, job) {
             : "Builder V2 built the app with the verifier bypassed. Preview ready - not verified.",
         });
       }
-      const text = data.status === "complete"
-        ? (verified ? "Builder V2 finished the build; the browser smoke test passed."
-          : "Builder V2 finished the build with the verifier bypassed. This preview is not verified.")
-        : (data.error || "Builder V2 stopped without producing a preview.");
+      const reported = typeof data.result?.finalText === "string" ? data.result.finalText.trim() : "";
+      const text = reported
+        || (data.status === "complete"
+          ? (verified ? "Builder V2 finished the build; the browser smoke test passed."
+            : "Builder V2 finished the build with the verifier bypassed. This preview is not verified.")
+          : (data.error || "Builder V2 stopped without producing a preview."));
       await ctx.conversations.appendTurn(ctx.conversation, {
         role: "lead", content: text,
         payload: {
@@ -249,7 +251,9 @@ async function dispatch(ctx, {
   relay(ctx, job);
   await ctx.emit("build_started", {
     jobId: job.id, projectId: project.id, buildId: job.diagSessionId || diag.id, pipelineVersion: "v2",
-    message: mode === "build" ? "Builder V2 is assembling the app." : "Builder V2 is applying a verified change.",
+    message: mode === "build" ? "Builder V2 is assembling the app."
+      : mode === "direct_edit" ? "Applying a small change."
+        : "Builder V2 is applying a verified change.",
   });
   return { jobId: job.id, projectId: project.id, buildId: job.diagSessionId || diag.id, pipelineVersion: "v2" };
 }
@@ -394,6 +398,7 @@ export async function startAppBuildV2(ctx, input, options = {}) {
 /** Edit/repair an existing project through V2. The compatibility snapshot is adopted in-worker. */
 export async function startExistingAppWorkV2(ctx, {
   project, request, kind = "edit", trigger = "user", taskHint = null,
+  pipelineMode = null, v2Input: callerInput = null,
 }, options = {}) {
   requireV2CutoverAvailable(options.env || process.env);
   if (!project?.id) throw new Error("Builder V2 needs an owner-scoped project");
@@ -405,8 +410,8 @@ export async function startExistingAppWorkV2(ctx, {
   }
   const deps = productionDeps(options.deps);
   const workerAdmission = await deps.requireWorkerAdmission({ client: deps.client, jobType: "builder_pipeline" });
-  let mode = "iterate";
-  let v2Input = null;
+  let mode = kind !== "repair" && pipelineMode === "direct_edit" ? "direct_edit" : "iterate";
+  let v2Input = callerInput && typeof callerInput === "object" ? { ...callerInput } : null;
   let resumable = null;
   if (kind !== "repair" && !project.bv2_green_snapshot_id) {
     throw Object.assign(new Error("This project has no verified Builder V2 green snapshot."), {
@@ -421,12 +426,13 @@ export async function startExistingAppWorkV2(ctx, {
       });
     }
     mode = "resume_repair";
-    v2Input = { sourceBuildId: resumable.buildId, problems: resumable.problems };
+    v2Input = { ...(v2Input || {}), sourceBuildId: resumable.buildId, problems: resumable.problems };
   }
   const repairAuthorization = mode === "resume_repair"
     ? await retainedBuildRepairHeadroom(deps.client, ctx.owner, project, resumable) : null;
+  const ceilingMode = mode === "direct_edit" ? "iterate" : mode;
   const preflight = {
-    ...(await buildCeiling(ctx.owner, mode, deps,
+    ...(await buildCeiling(ctx.owner, ceilingMode, deps,
       repairAuthorization ? { maxCredits: repairAuthorization.remaining } : {})),
     workerAdmission,
   };

@@ -1,0 +1,125 @@
+===== 2026-10-19 20:44:20.358521+00 edit:1 None
+{
+ "ops": [
+  {
+   "op": "insert_after_symbol",
+   "symbol": "const presets = [{ rows: 2, columns: 2, label: \"4 lights\" }, { rows: 2, columns: 3, label: \"6 lights\" }, { rows: 3, columns: 3, label: \"9 lights\" }, { rows: 3, columns: 4, label: \"12 lights\" }];",
+   "content": "\nconst displayCentimetres = (metres) => `${Number((metres * 100).toFixed(2))} cm`;\nconst withCentimetreDisplays = (result, rows, columns) => ({ ...result, roomLengthDisplay: displayCentimetres(result.lengthMetres), roomWidthDisplay: displayCentimetres(result.widthMetres), lengthSpacingDisplay: displayCentimetres(result.lengthMetres / columns), widthSpacingDisplay: displayCentimetres(result.widthMetres / rows), lengthWallOffsetDisplay: displayCentimetres(result.lengthMetres / columns / 2), widthWallOffsetDisplay: displayCentimetres(result.widthMetres / rows / 2) });\nconst unitToMetres = { metres: 1, feet: 0.3048, centimetres: 0.01 };"
+  }
+ ],
+ "file": "src/components/calculate-recessed-lighting-plan/CalculateRecessedLightingPlanFlow.jsx",
+ "content": null,
+ "newFile": null,
+ "deleteFile": null,
+ "replaceFile": null
+}
+===== 2026-10-19 20:44:20.358521+00 edit:2 None
+{
+ "ops": [
+  {
+   "op": "replace_exact",
+   "symbol": "  const calculate = () => { const result = runCalculateRecessedLightingPlanCustomBehavior({ unit: draft.unit, roomLength: draft.roomLength, roomWidth: draft.roomWidth, rows: Number(draft.rows), columns: Number(draft.columns) }, { operation: \"calculate-lighting-plan\" }); setPlan(result); };",
+   "content": "  const calculate = () => { const isCentimetres = draft.unit === \"centimetres\"; const result = runCalculateRecessedLightingPlanCustomBehavior({ unit: isCentimetres ? \"metres\" : draft.unit, roomLength: isCentimetres && draft.roomLength !== \"\" ? String(Number(draft.roomLength) / 100) : draft.roomLength, roomWidth: isCentimetres && draft.roomWidth !== \"\" ? String(Number(draft.roomWidth) / 100) : draft.roomWidth, rows: Number(draft.rows), columns: Number(draft.columns) }, { operation: \"calculate-lighting-plan\" }); setPlan(isCentimetres && result.lengthMetres ? withCentimetreDisplays(result, Number(draft.rows), Number(draft.columns)) : result); };"
+  },
+  {
+   "op": "replace_exact",
+   "symbol": "  const setUnit = (unit) => { if (plan.lengthMetres) { const result = runConvertUnitsWithoutChangingRoomCustomBehavior({ unit, roomLength: draft.roomLength, roomWidth: draft.roomWidth, lengthMetres: plan.lengthMetres, widthMetres: plan.widthMetres, rows: Number(draft.rows), columns: Number(draft.columns), totalLights: plan.totalLights, diagramMarkerCount: plan.diagramMarkerCount }, { operation: \"convert-measurement-unit\" }); setPlan(result); setDraft(current => ({ ...current, unit, roomLength: result.roomLengthDisplay.replace(/ (m|ft)$/, \"\"), roomWidth: result.roomWidthDisplay.replace(/ (m|ft)$/, \"\") })); } else setDraft(current => ({ ...current, unit })); };\n  const suffix = draft.unit === \"feet\" ? \"ft\" : \"m\";",
+   "content": "  const setUnit = (unit) => { if (plan.lengthMetres) { const convertedUnit = unit === \"centimetres\" ? \"metres\" : unit; const result = runConvertUnitsWithoutChangingRoomCustomBehavior({ unit: convertedUnit, roomLength: draft.roomLength, roomWidth: draft.roomWidth, lengthMetres: plan.lengthMetres, widthMetres: plan.widthMetres, rows: Number(draft.rows), columns: Number(draft.columns), totalLights: plan.totalLights, diagramMarkerCount: plan.diagramMarkerCount }, { operation: \"convert-measurement-unit\" }); const displayedResult = unit === \"centimetres\" ? withCentimetreDisplays(result, Number(draft.rows), Number(draft.columns)) : result; setPlan(displayedResult); setDraft(current => ({ ...current, unit, roomLength: unit === \"centimetres\" ? String(Number((plan.lengthMetres * 100).toFixed(2))) : result.roomLengthDisplay.replace(/ (m|ft)$/, \"\"), roomWidth: unit === \"centimetres\" ? String(Number((plan.widthMetres * 100).toFixed(2))) : result.roomWidthDisplay.replace(/ (m|ft)$/, \"\") })); } else setDraft(current => { const convert = (value) => value === \"\" || Number.isNaN(Number(value)) ? value : String(Number((Number(value) * unitToMetres[current.unit] / unitToMetres[unit]).toFixed(6))); return { ...current, unit, roomLength: convert(current.roomLength), roomWidth: convert(current.roomWidth) }; }); };\n  const suffix = draft.unit === \"feet\" ? \"ft\" : draft.unit === \"centimetres\" ? \"cm\" : \"m\";"
+  },
+  {
+   "op": "replace_exact",
+   "symbol": "<div className=\"bp-unit\" role=\"group\" aria-label=\"measurement unit selector\"><span>Measurement unit</span>{[\"metres\", \"feet\"].map(unit => <button type=\"button\" key={unit} value={unit} data-thrallo-control=\"ctl_e8b51a07\" aria-pressed={draft.unit === unit} className={draft.unit === unit ? \"selected\" : \"\"} onClick={() => setUnit(unit)}>{unit === \"metres\" ? \"Metres (m)\" : \"Feet (ft)\"}</button>)}</div>",
+   "content": "<div className=\"bp-unit\" role=\"group\" aria-label=\"measurement unit selector\"><span>Measurement unit</span>{[\"metres\", \"feet\", \"centimetres\"].map(unit => <button type=\"button\" key={unit} value={unit} data-thrallo-control=\"ctl_e8b51a07\" aria-pressed={draft.unit === unit} className={draft.unit === unit ? \"selected\" : \"\"} onClick={() => setUnit(unit)}>{unit === \"metres\" ? \"Metres (m)\" : unit === \"feet\" ? \"Feet (ft)\" : \"Centimetres (cm)\"}</button>)}</div>"
+  }
+ ],
+ "file": "src/components/calculate-recessed-lighting-plan/CalculateRecessedLightingPlanFlow.jsx",
+ "content": null,
+ "newFile": null,
+ "deleteFile": null,
+ "replaceFile": null
+}
+===== 2026-10-19 20:45:31.471407+00 edit:1 None
+{
+ "ops": [
+  {
+   "op": "insert_after_symbol",
+   "symbol": "const presets = [{ rows: 2, columns: 2, label: \"4 lights\" }, { rows: 2, columns: 3, label: \"6 lights\" }, { rows: 3, columns: 3, label: \"9 lights\" }, { rows: 3, columns: 4, label: \"12 lights\" }];",
+   "content": "\n\nconst metresPerUnit = { metres: 1, feet: 0.3048, centimetres: 0.01 };\nconst displayPlanInCentimetres = (plan) => {\n  const centimetres = (display) => {\n    const value = Number.parseFloat(display);\n    return Number.isFinite(value) ? `${Number((value * 100).toFixed(6))} cm` : display;\n  };\n  return { ...plan, roomLengthDisplay: centimetres(plan.roomLengthDisplay), roomWidthDisplay: centimetres(plan.roomWidthDisplay), lengthSpacingDisplay: centimetres(plan.lengthSpacingDisplay), widthSpacingDisplay: centimetres(plan.widthSpacingDisplay), lengthWallOffsetDisplay: centimetres(plan.lengthWallOffsetDisplay), widthWallOffsetDisplay: centimetres(plan.widthWallOffsetDisplay) };\n};\nconst convertDraftMeasurement = (value, fromUnit, toUnit) => {\n  const measurement = Number(value);\n  return value === \"\" || !Number.isFinite(measurement) ? value : String(Number(((measurement * metresPerUnit[fromUnit]) / metresPerUnit[toUnit]).toFixed(6)));\n};"
+  },
+  {
+   "op": "replace_exact",
+   "symbol": "  const calculate = () => { const result = runCalculateRecessedLightingPlanCustomBehavior({ unit: draft.unit, roomLength: draft.roomLength, roomWidth: draft.roomWidth, rows: Number(draft.rows), columns: Number(draft.columns) }, { operation: \"calculate-lighting-plan\" }); setPlan(result); };",
+   "content": "  const calculate = () => { const isCentimetres = draft.unit === \"centimetres\"; const result = runCalculateRecessedLightingPlanCustomBehavior({ unit: isCentimetres ? \"metres\" : draft.unit, roomLength: isCentimetres ? convertDraftMeasurement(draft.roomLength, \"centimetres\", \"metres\") : draft.roomLength, roomWidth: isCentimetres ? convertDraftMeasurement(draft.roomWidth, \"centimetres\", \"metres\") : draft.roomWidth, rows: Number(draft.rows), columns: Number(draft.columns) }, { operation: \"calculate-lighting-plan\" }); setPlan(isCentimetres ? displayPlanInCentimetres(result) : result); };"
+  },
+  {
+   "op": "replace_exact",
+   "symbol": "  const setUnit = (unit) => { if (plan.lengthMetres) { const result = runConvertUnitsWithoutChangingRoomCustomBehavior({ unit, roomLength: draft.roomLength, roomWidth: draft.roomWidth, lengthMetres: plan.lengthMetres, widthMetres: plan.widthMetres, rows: Number(draft.rows), columns: Number(draft.columns), totalLights: plan.totalLights, diagramMarkerCount: plan.diagramMarkerCount }, { operation: \"convert-measurement-unit\" }); setPlan(result); setDraft(current => ({ ...current, unit, roomLength: result.roomLengthDisplay.replace(/ (m|ft)$/, \"\"), roomWidth: result.roomWidthDisplay.replace(/ (m|ft)$/, \"\") })); } else setDraft(current => ({ ...current, unit })); };\n  const suffix = draft.unit === \"feet\" ? \"ft\" : \"m\";",
+   "content": "  const setUnit = (unit) => { if (plan.lengthMetres) { const isCentimetres = unit === \"centimetres\"; const result = runConvertUnitsWithoutChangingRoomCustomBehavior({ unit: isCentimetres ? \"metres\" : unit, roomLength: draft.roomLength, roomWidth: draft.roomWidth, lengthMetres: plan.lengthMetres, widthMetres: plan.widthMetres, rows: Number(draft.rows), columns: Number(draft.columns), totalLights: plan.totalLights, diagramMarkerCount: plan.diagramMarkerCount }, { operation: \"convert-measurement-unit\" }); const displayedResult = isCentimetres ? displayPlanInCentimetres(result) : result; setPlan(displayedResult); setDraft(current => ({ ...current, unit, roomLength: isCentimetres ? String(Number((plan.lengthMetres * 100).toFixed(6))) : result.roomLengthDisplay.replace(/ (m|ft)$/, \"\"), roomWidth: isCentimetres ? String(Number((plan.widthMetres * 100).toFixed(6))) : result.roomWidthDisplay.replace(/ (m|ft)$/, \"\") })); } else setDraft(current => ({ ...current, unit, roomLength: convertDraftMeasurement(current.roomLength, current.unit, unit), roomWidth: convertDraftMeasurement(current.roomWidth, current.unit, unit) })); };\n  const suffix = draft.unit === \"feet\" ? \"ft\" : draft.unit === \"centimetres\" ? \"cm\" : \"m\";"
+  }
+ ],
+ "file": "src/components/calculate-recessed-lighting-plan/CalculateRecessedLightingPlanFlow.jsx",
+ "content": null,
+ "newFile": null,
+ "deleteFile": null,
+ "replaceFile": null
+}
+===== 2026-10-19 20:45:43.488264+00 edit:1 None
+{
+ "ops": [
+  {
+   "op": "insert_after_symbol",
+   "symbol": "const presets = [{ rows: 2, columns: 2, label: \"4 lights\" }, { rows: 2, columns: 3, label: \"6 lights\" }, { rows: 3, columns: 3, label: \"9 lights\" }, { rows: 3, columns: 4, label: \"12 lights\" }];",
+   "content": "\nconst centimetreDisplay = (metres) => `${Number((metres * 100).toFixed(2))} cm`;\nconst withCentimetreDisplays = (plan, rows, columns) => ({ ...plan, roomLengthDisplay: centimetreDisplay(plan.lengthMetres), roomWidthDisplay: centimetreDisplay(plan.widthMetres), lengthSpacingDisplay: centimetreDisplay(plan.lengthMetres / columns), widthSpacingDisplay: centimetreDisplay(plan.widthMetres / rows), lengthWallOffsetDisplay: centimetreDisplay(plan.lengthMetres / columns / 2), widthWallOffsetDisplay: centimetreDisplay(plan.widthMetres / rows / 2) });"
+  },
+  {
+   "op": "replace_exact",
+   "symbol": "  const calculate = () => { const result = runCalculateRecessedLightingPlanCustomBehavior({ unit: draft.unit, roomLength: draft.roomLength, roomWidth: draft.roomWidth, rows: Number(draft.rows), columns: Number(draft.columns) }, { operation: \"calculate-lighting-plan\" }); setPlan(result); };",
+   "content": "  const calculate = () => { const isCentimetres = draft.unit === \"centimetres\"; const result = runCalculateRecessedLightingPlanCustomBehavior({ unit: isCentimetres ? \"metres\" : draft.unit, roomLength: isCentimetres ? Number(draft.roomLength) / 100 : draft.roomLength, roomWidth: isCentimetres ? Number(draft.roomWidth) / 100 : draft.roomWidth, rows: Number(draft.rows), columns: Number(draft.columns) }, { operation: \"calculate-lighting-plan\" }); setPlan(isCentimetres && result.lengthMetres ? withCentimetreDisplays(result, Number(draft.rows), Number(draft.columns)) : result); };"
+  },
+  {
+   "op": "replace_exact",
+   "symbol": "  const setUnit = (unit) => { if (plan.lengthMetres) { const result = runConvertUnitsWithoutChangingRoomCustomBehavior({ unit, roomLength: draft.roomLength, roomWidth: draft.roomWidth, lengthMetres: plan.lengthMetres, widthMetres: plan.widthMetres, rows: Number(draft.rows), columns: Number(draft.columns), totalLights: plan.totalLights, diagramMarkerCount: plan.diagramMarkerCount }, { operation: \"convert-measurement-unit\" }); setPlan(result); setDraft(current => ({ ...current, unit, roomLength: result.roomLengthDisplay.replace(/ (m|ft)$/, \"\"), roomWidth: result.roomWidthDisplay.replace(/ (m|ft)$/, \"\") })); } else setDraft(current => ({ ...current, unit })); };\n  const suffix = draft.unit === \"feet\" ? \"ft\" : \"m\";",
+   "content": "  const setUnit = (unit) => { if (plan.lengthMetres) { if (unit === \"centimetres\") { const result = withCentimetreDisplays(plan, Number(draft.rows), Number(draft.columns)); setPlan(result); setDraft(current => ({ ...current, unit, roomLength: result.roomLengthDisplay.replace(/ (m|ft|cm)$/, \"\"), roomWidth: result.roomWidthDisplay.replace(/ (m|ft|cm)$/, \"\") })); } else { const result = runConvertUnitsWithoutChangingRoomCustomBehavior({ unit, roomLength: draft.roomLength, roomWidth: draft.roomWidth, lengthMetres: plan.lengthMetres, widthMetres: plan.widthMetres, rows: Number(draft.rows), columns: Number(draft.columns), totalLights: plan.totalLights, diagramMarkerCount: plan.diagramMarkerCount }, { operation: \"convert-measurement-unit\" }); setPlan(result); setDraft(current => ({ ...current, unit, roomLength: result.roomLengthDisplay.replace(/ (m|ft|cm)$/, \"\"), roomWidth: result.roomWidthDisplay.replace(/ (m|ft|cm)$/, \"\") })); } } else setDraft(current => ({ ...current, unit })); };\n  const suffix = draft.unit === \"feet\" ? \"ft\" : draft.unit === \"centimetres\" ? \"cm\" : \"m\";"
+  }
+ ],
+ "file": "src/components/calculate-recessed-lighting-plan/CalculateRecessedLightingPlanFlow.jsx",
+ "content": null,
+ "newFile": null,
+ "deleteFile": null,
+ "replaceFile": null
+}
+===== 2026-10-19 20:46:05.721493+00 edit:1 None
+{
+ "ops": [
+  {
+   "op": "insert_after_symbol",
+   "symbol": "const presets = [{ rows: 2, columns: 2, label: \"4 lights\" }, { rows: 2, columns: 3, label: \"6 lights\" }, { rows: 3, columns: 3, label: \"9 lights\" }, { rows: 3, columns: 4, label: \"12 lights\" }];",
+   "content": "\n\nconst metresPerUnit = { metres: 1, feet: 0.3048, centimetres: 0.01 };\nconst formatMeasurement = (metres, unit) => `${Number((metres / metresPerUnit[unit]).toFixed(2))} ${unit === \"feet\" ? \"ft\" : unit === \"centimetres\" ? \"cm\" : \"m\"}`;\nconst convertDraftMeasurement = (value, fromUnit, toUnit) => value === \"\" || !Number.isFinite(Number(value)) ? value : String(Number(((Number(value) * metresPerUnit[fromUnit]) / metresPerUnit[toUnit]).toFixed(2)));\nconst withCentimetreDisplays = (result, rows, columns) => ({ ...result, roomLengthDisplay: formatMeasurement(result.lengthMetres, \"centimetres\"), roomWidthDisplay: formatMeasurement(result.widthMetres, \"centimetres\"), lengthSpacingDisplay: formatMeasurement(result.lengthMetres / rows, \"centimetres\"), widthSpacingDisplay: formatMeasurement(result.widthMetres / columns, \"centimetres\"), lengthWallOffsetDisplay: formatMeasurement(result.lengthMetres / rows / 2, \"centimetres\"), widthWallOffsetDisplay: formatMeasurement(result.widthMetres / columns / 2, \"centimetres\") });"
+  }
+ ],
+ "file": "src/components/calculate-recessed-lighting-plan/CalculateRecessedLightingPlanFlow.jsx",
+ "content": null,
+ "newFile": null,
+ "deleteFile": null,
+ "replaceFile": null
+}
+===== 2026-10-19 20:46:05.721493+00 edit:2 None
+{
+ "ops": [
+  {
+   "op": "replace_exact",
+   "symbol": "  const calculate = () => { const result = runCalculateRecessedLightingPlanCustomBehavior({ unit: draft.unit, roomLength: draft.roomLength, roomWidth: draft.roomWidth, rows: Number(draft.rows), columns: Number(draft.columns) }, { operation: \"calculate-lighting-plan\" }); setPlan(result); };",
+   "content": "  const calculate = () => { const rows = Number(draft.rows); const columns = Number(draft.columns); const result = runCalculateRecessedLightingPlanCustomBehavior({ unit: draft.unit === \"centimetres\" ? \"metres\" : draft.unit, roomLength: draft.unit === \"centimetres\" ? String(Number(draft.roomLength) / 100) : draft.roomLength, roomWidth: draft.unit === \"centimetres\" ? String(Number(draft.roomWidth) / 100) : draft.roomWidth, rows, columns }, { operation: \"calculate-lighting-plan\" }); setPlan(draft.unit === \"centimetres\" && result.totalLights > 0 ? withCentimetreDisplays(result, rows, columns) : result); };"
+  },
+  {
+   "op": "replace_exact",
+   "symbol": "  const setUnit = (unit) => { if (plan.lengthMetres) { const result = runConvertUnitsWithoutChangingRoomCustomBehavior({ unit, roomLength: draft.roomLength, roomWidth: draft.roomWidth, lengthMetres: plan.lengthMetres, widthMetres: plan.widthMetres, rows: Number(draft.rows), columns: Number(draft.columns), totalLights: plan.totalLights, diagramMarkerCount: plan.diagramMarkerCount }, { operation: \"convert-measurement-unit\" }); setPlan(result); setDraft(current => ({ ...current, unit, roomLength: result.roomLengthDisplay.replace(/ (m|ft)$/, \"\"), roomWidth: result.roomWidthDisplay.replace(/ (m|ft)$/, \"\") })); } else setDraft(current => ({ ...current, unit })); };\n  const suffix = draft.unit === \"feet\" ? \"ft\" : \"m\";",
+   "content": "  const setUnit = (unit) => { if (plan.lengthMetres) { const rows = Number(draft.rows); const columns = Number(draft.columns); const result = runConvertUnitsWithoutChangingRoomCustomBehavior({ unit: unit === \"centimetres\" ? \"metres\" : unit, roomLength: draft.roomLength, roomWidth: draft.roomWidth, lengthMetres: plan.lengthMetres, widthMetres: plan.widthMetres, rows, columns, totalLights: plan.totalLights, diagramMarkerCount: plan.diagramMarkerCount }, { operation: \"convert-measurement-unit\" }); const displayedResult = unit === \"centimetres\" ? withCentimetreDisplays(result, rows, columns) : result; setPlan(displayedResult); setDraft(current => ({ ...current, unit, roomLength: displayedResult.roomLengthDisplay.replace(/ (m|ft|cm)$/, \"\"), roomWidth: displayedResult.roomWidthDisplay.replace(/ (m|ft|cm)$/, \"\") })); } else setDraft(current => ({ ...current, unit, roomLength: convertDraftMeasurement(current.roomLength, current.unit, unit), roomWidth: convertDraftMeasurement(current.roomWidth, current.unit, unit) })); };\n  const suffix = draft.unit === \"feet\" ? \"ft\" : draft.unit === \"centimetres\" ? \"cm\" : \"m\";"
+  }
+ ],
+ "file": "src/components/calculate-recessed-lighting-plan/CalculateRecessedLightingPlanFlow.jsx",
+ "content": null,
+ "newFile": null,
+ "deleteFile": null,
+ "replaceFile": null
+}

@@ -389,6 +389,7 @@ export async function processConversation(conversation, {
       emit,
       relayRun: (runId) => relayRunEvents({ store, runStore, conversation, runId }),
       referenceBrief: "",
+      recentTurns: (turns || []).filter((turn) => ["user", "lead"].includes(turn.role) && turn.content).slice(-6),
       ...(typeof startAppBuild === "function" ? { startAppBuild } : {}),
     };
 
@@ -659,6 +660,11 @@ export async function processConversation(conversation, {
         if (output?.code === "unrequested_product") {
           await emit("agent_done", { agent: "Lead Agent" });
           await finishWithMessage(store, conversation, output.error || "I didn't change a different app.");
+          return;
+        }
+        if (output?.directEdit && output?.jobId && output?.buildId && output?.projectId) {
+          await emit("agent_done", { agent: "Lead Agent" });
+          await store.updateConversation(conversation, { state: "idle", last_activity_at: nowIso() });
           return;
         }
         if (["app_build", "edit_app", "repair_app"].includes(call.name)

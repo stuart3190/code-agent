@@ -335,6 +335,31 @@ function nextHeadroomContinuation(scope, moduleContracts, tree) {
   };
 }
 
+const rejectionTexts = (rows) => [...new Set((rows || [])
+  .map((row) => String(row?.reason || row || "")).filter(Boolean))].sort();
+
+/**
+ * A headroom retry counts as a generation attempt unless it repeats a rejection the model
+ * was never shown. One unbriefed identical retry is free; a later repeat, a different
+ * rejection, or a prompt that already contained the reason consumes the attempt.
+ * Callers that do not attach `briefedRejections` keep the historical accounting.
+ */
+export function headroomRetryConsumesAttempt({
+  fedRejections = [], producedRejections = [], briefedRejections = undefined,
+  unbriefedHeadroomRetries = 0,
+} = {}) {
+  const fed = rejectionTexts(fedRejections);
+  if (!fed.length) return true;
+  if (!Array.isArray(briefedRejections)) return true;
+  if (unbriefedHeadroomRetries >= 1) return true;
+  const produced = rejectionTexts(producedRejections);
+  const identical = fed.length === produced.length && fed.every((reason, index) => reason === produced[index]);
+  if (!identical) return true;
+  const briefed = briefedRejections.map((reason) => String(reason));
+  const saw = fed.every((reason) => briefed.some((item) => item.includes(reason) || reason.includes(item)));
+  return saw;
+}
+
 export function rejectedHeadroomContinuation(scope, moduleContracts, tree, rejected = []) {
   const boundary = new Set(scope?.allowedFiles || []);
   const files = [...new Set(rejected.map((row) => row?.file)
@@ -599,6 +624,7 @@ export function createOrchestrator({
     // Protocol rounds: dispatches that changed nothing at all. Counted, reported and bounded, but
     // never charged against the substantive generation attempts.
     let noOps = 0;
+    let unbriefedHeadroomRetries = 0;
     const attemptLedger = [];
     const spend = () => attempts + corrections;
     const policy = attemptPolicy || generationPolicyFor("simple", {
@@ -657,6 +683,7 @@ export function createOrchestrator({
         ...(protocolCorrectionDispatch ? protocolRegenerateFiles : []),
       ])];
       if (protocolCorrectionDispatch) protocolRegenerateFiles.clear();
+      const fedRejections = Array.isArray(rejections) ? rejections.slice() : [];
       const emittedPatches = await patchesFn({ step: dispatchStep, originalStep: step, owner, projectId, buildId, attempt,
         contract, tiers, tree: working, assets, rejections, problems, journey: journeys?.[0] || null,
         originalRequest,
@@ -843,6 +870,20 @@ export function createOrchestrator({
                 });
               }
             } else {
+              const consumesAttempt = headroomRetryConsumesAttempt({
+                fedRejections, producedRejections: applied.rejected,
+                briefedRejections: emittedPatches?.briefedRejections,
+                unbriefedHeadroomRetries,
+              });
+              if (!consumesAttempt) {
+                unbriefedHeadroomRetries += 1;
+                attemptLedger.push({ attempt, dispatch: dispatchStep,
+                  class: "identical_unbriefed_headroom_retry", substantive: false,
+                  rejected: applied.rejected.length, retainedFiles: [] });
+                log(`${step}: identical headroom rejection was not in the model prompt; `
+                  + "retrying without consuming a generation attempt");
+                continue;
+              }
               attempts += 1;
             }
             attemptLedger.push({ attempt, dispatch: dispatchStep,
@@ -2618,13 +2659,13 @@ export function createOrchestrator({
      * contract call, no asset search: everything persistent is simply resumed.
      */
     async runEdit({ owner, projectId, request, contract, maxRepairs = maxJourneyRepairs,
-      userCritical = [], sourceSnapshotId = null, signal = null }) {
-      const buildId = await buildStore.create({
+      userCritical = [], sourceSnapshotId = null, signal = null, existingBuildId = null }) {
+      const buildId = existingBuildId || await buildStore.create({
         owner, project_id: projectId, profile: "edit", request, state: "created",
         verifier_policy: verifierPolicy,
         max_repair_dispatches: maxRepairs, started_at: new Date().toISOString(),
       });
-      await events.buildCreated?.({ owner, projectId, buildId, mode: "edit" });
+      if (!existingBuildId) await events.buildCreated?.({ owner, projectId, buildId, mode: "edit" });
       const finish = async (state, extra = {}) => {
         const patch = { state, finished_at: new Date().toISOString() };
         for (const key of ["error", "final_snapshot"]) if (key in extra) patch[key] = extra[key];
