@@ -108,9 +108,13 @@ export function customerFailureMessage(failure) {
   if (failure?.customerActionRequired && failure?.classification === "contract") {
     return "The validated scope needs your approval or clarification before generation can continue.";
   }
-  if (failure?.code === "direct_edit_unchanged" || failure?.code === "direct_edit_fallback") {
+  if (failure?.code === "direct_edit_unchanged" || failure?.code === "direct_edit_fallback"
+    || failure?.code === "direct_edit_infra") {
     const spent = Number(failure.consumedCredits);
     const spend = Number.isFinite(spent) && spent > 0 ? ` This attempt used ${spent.toFixed(2)} credits.` : "";
+    if (failure.code === "direct_edit_infra") {
+      return `The preview check didn't finish, so your app is unchanged.${spend}`;
+    }
     return `I couldn't apply that, your app is unchanged.${spend}`;
   }
   if (failure?.classification === "platform" && !(Number(failure?.consumedCredits) > 0)) {

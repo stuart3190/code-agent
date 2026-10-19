@@ -1,15 +1,18 @@
 // Direct edit: the built ⇄ iterating loop for a small change to a green app.
 //
-// One full-context model call, applyPatches, compile, smoke. Exactly one retry, with the
-// real errors in the prompt. No contract, journey, headroom or repair machinery. A large
-// request, or a patch that outgrows the small-edit boundary, returns to the full pipeline
-// with the attempted patch as a hint. Two failures stop and leave the green snapshot alone.
+// One full-context model call, applyPatches, compile, smoke. A second model call happens
+// only for a patch rejection, a compile error, or a smoke crash with a concrete error to
+// feed back. A preview that comes back pass:null / unavailable is infrastructure, not an
+// app failure: compile and smoke run once more on the same candidate, for free, and the
+// green snapshot stays put when that re-run also fails. No contract, journey, headroom or
+// repair machinery. A prompt that cannot fit the per-call ceiling, a large request, or a
+// patch that outgrows the small-edit boundary returns to the full pipeline.
 
 import { applyPatches, isProtectedPath } from "./patchEngine.mjs";
-import { ESTIMATED_BYTES_PER_TOKEN, editTargets } from "./modelLanes.mjs";
+import { ESTIMATED_BYTES_PER_TOKEN, editTargets, isHeadroomFitError } from "./modelLanes.mjs";
 
-export const DIRECT_EDIT_CALL_CEILING_CREDITS = 4;
-export const DIRECT_EDIT_JOB_CEILING_CREDITS = 8;
+export const DIRECT_EDIT_CALL_CEILING_CREDITS = 1.5;
+export const DIRECT_EDIT_JOB_CEILING_CREDITS = 3;
 export const DIRECT_EDIT_SOURCE_TOKEN_BUDGET = 12_000;
 export const DIRECT_EDIT_MAX_FILES = 3;
 export const DIRECT_EDIT_MAX_DIFF_LINES = 150;
@@ -32,6 +35,25 @@ export function directEditEnabled(env = process.env) {
   const raw = env?.THRALLO_DIRECT_EDIT;
   if (raw == null || String(raw).trim() === "") return true;
   return !/^(0|false|off|no)$/i.test(String(raw).trim());
+}
+
+function readCreditCeiling(raw, fallback) {
+  if (raw == null || String(raw).trim() === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return fallback;
+  return Math.round(value * 100) / 100;
+}
+
+/**
+ * Per-call and whole-direct-edit ceilings, read at request time.
+ * `THRALLO_DIRECT_EDIT_CALL_CEILING` defaults to 1.5. `THRALLO_DIRECT_EDIT_JOB_CEILING` defaults to 3.
+ * A non-numeric or non-positive value keeps the default.
+ */
+export function directEditCeilings(env = process.env) {
+  return {
+    callCeilingCredits: readCreditCeiling(env?.THRALLO_DIRECT_EDIT_CALL_CEILING, DIRECT_EDIT_CALL_CEILING_CREDITS),
+    jobCeilingCredits: readCreditCeiling(env?.THRALLO_DIRECT_EDIT_JOB_CEILING, DIRECT_EDIT_JOB_CEILING_CREDITS),
+  };
 }
 
 /** Stage 1. A lead proposal of "large" is accepted. A "small" proposal cannot hide a hard large signal. */
@@ -165,9 +187,10 @@ export function directEditSuccessMessage(request) {
   return "Done. Preview updated.";
 }
 
-export function directEditFailureMessage(spentCredits) {
+export function directEditFailureMessage(spentCredits, { infra = false } = {}) {
   const spent = Number(spentCredits) || 0;
   const spend = spent > 0 ? ` This attempt used ${spent.toFixed(2)} credits.` : "";
+  if (infra) return `The preview check didn't finish, so your app is unchanged.${spend}`;
   return `I couldn't apply that, your app is unchanged.${spend}`;
 }
 
@@ -201,6 +224,23 @@ function roundCredits(value) {
   return Math.round(number * 100) / 100;
 }
 
+function smokeDetail(smoke) {
+  const fatal = (Array.isArray(smoke?.fatalErrors) ? smoke.fatalErrors : [])
+    .map((item) => String(item || "").trim()).filter(Boolean);
+  const error = String(smoke?.error || "").trim();
+  return [error, ...fatal.filter((item) => item !== error)].filter(Boolean).join("; ");
+}
+
+/** pass:null or unavailable is a preview/infrastructure miss, not evidence the app crashed. */
+function isInfraSmoke(smoke) {
+  return smoke?.unavailable === true || smoke?.pass == null;
+}
+
+/** A crash the model can correct: the smoke failed and named an error. */
+function isConcreteSmokeCrash(smoke) {
+  return smoke?.pass === false && !isInfraSmoke(smoke) && Boolean(smokeDetail(smoke));
+}
+
 /**
  * Real direct-edit path. `modelFn`, `compileFn` and `smokeFn` are the only seams.
  * When `snapshotStore` is set, a candidate stays non-promotable until smoke passes,
@@ -211,9 +251,12 @@ export async function runDirectEdit({
   request, tree, turns = [], proposal = null,
   modelFn, compileFn, smokeFn,
   snapshotStore = null, greenSnapshotId = null, promoteGreen = true,
-  jobCeilingCredits = DIRECT_EDIT_JOB_CEILING_CREDITS,
+  callCeilingCredits = null, jobCeilingCredits = null,
 } = {}) {
   if (typeof modelFn !== "function") throw new Error("direct edit needs a modelFn");
+  const ceilings = directEditCeilings();
+  const callCeiling = Number(callCeilingCredits) > 0 ? Number(callCeilingCredits) : ceilings.callCeilingCredits;
+  const jobCeiling = Number(jobCeilingCredits) > 0 ? Number(jobCeilingCredits) : ceilings.jobCeilingCredits;
   const classification = classifyEditRequest(request, { proposal });
   const prompts = [];
   const errors = [];
@@ -226,15 +269,17 @@ export async function runDirectEdit({
 
   const finish = (outcome, extra = {}) => {
     const settlement = settleDirectEdit({ spentCredits, outcome });
+    const infra = extra.infra === true;
     const message = outcome === "applied"
       ? directEditSuccessMessage(request)
       : outcome === "escalate"
         ? null
-        : directEditFailureMessage(spentCredits);
+        : directEditFailureMessage(spentCredits, { infra });
     return {
       outcome, route: outcome === "applied" || outcome === "unchanged" ? "direct_edit" : "full_pipeline",
       classification, prompts, errors, attemptedPatches, modelCalls,
       spentCredits: roundCredits(spentCredits), settlement, message,
+      infra,
       greenSnapshotId: extra.greenSnapshotId || greenBefore || null,
       candidateSnapshotId: extra.candidateSnapshotId || null,
       promoted: extra.promoted === true,
@@ -250,67 +295,39 @@ export async function runDirectEdit({
 
   const callModel = async (prompt) => {
     if (modelCalls >= 2) throw new Error("direct edit already used its one retry");
-    if (spentCredits >= jobCeilingCredits) {
-      throw Object.assign(new Error("direct edit credit ceiling is exhausted"), { code: "budget_exceeded" });
+    const remaining = roundCredits(jobCeiling - spentCredits);
+    const handoff = attemptedPatches.length ? "fallback" : "escalate";
+    if (!(remaining > 0)) {
+      errors.push("direct edit credit ceiling is exhausted");
+      return { stop: true, outcome: handoff };
+    }
+    prompts.push(prompt);
+    let result;
+    try {
+      result = await modelFn({
+        prompt, systemPrompt: DIRECT_EDIT_SYSTEM_PROMPT, attempt: modelCalls + 1,
+        callCeilingCredits: roundCredits(Math.min(callCeiling, remaining)),
+      });
+    } catch (error) {
+      if (isHeadroomFitError(error)) {
+        errors.push(String(error.message || "direct edit prompt does not fit the call ceiling"));
+        return { stop: true, outcome: handoff };
+      }
+      throw error;
     }
     modelCalls += 1;
-    prompts.push(prompt);
-    const result = await modelFn({ prompt, systemPrompt: DIRECT_EDIT_SYSTEM_PROMPT, attempt: modelCalls });
     const credits = roundCredits(result?.credits);
     spentCredits = roundCredits(spentCredits + credits);
     const patches = Array.isArray(result?.patches) ? result.patches : [];
     attemptedPatches.push(...patches);
-    return patches;
+    return { patches };
   };
 
-  let retried = false;
-  let patches = await callModel(renderDirectEditPrompt({ request, tree, turns }));
-  for (;;) {
-    const assessment = assessDirectEditPatch(patches, tree);
-    if (!assessment.ok) {
-      errors.push(`direct edit patch is outside the small-edit boundary: ${assessment.reasons.join(", ") || "empty"}`);
-      return finish(retried ? "fallback" : "escalate", { patchAssessment: assessment });
-    }
-    const applied = applyPatches(tree, patches);
-    if (applied.rejected?.length) {
-      const reasons = applied.rejected.map((row) => row.reason);
-      errors.push(...reasons);
-      if (retried) return finish("fallback", { patchAssessment: assessment });
-      retried = true;
-      patches = await callModel(renderDirectEditPrompt({
-        request, tree, turns, rejections: applied.rejected, errors: reasons,
-      }));
-      continue;
-    }
-    const compiled = compileFn ? await compileFn(applied.tree) : { ok: true };
-    if (!compiled?.ok) {
-      const reason = compiled?.error || compiled?.stderr || "compile failed";
-      errors.push(String(reason));
-      if (retried) return finish("fallback", { patchAssessment: assessment });
-      retried = true;
-      patches = await callModel(renderDirectEditPrompt({
-        request, tree, turns, errors: [String(reason)],
-      }));
-      continue;
-    }
-    let candidate = null;
-    if (snapshotStore) {
-      candidate = await snapshotStore.createSnapshot(owner, projectId, applied.tree, {
-        buildId, parent: greenBefore, reason: "candidate:direct-edit",
-      });
-    }
-    const smoke = smokeFn ? await smokeFn(applied.tree) : { pass: true };
-    if (smoke?.pass !== true) {
-      const reason = smoke?.error || (smoke?.fatalErrors || []).join("; ") || "smoke failed";
-      errors.push(String(reason));
-      if (retried) return finish("fallback", { patchAssessment: assessment, candidateSnapshotId: candidate?.id || null, smoke });
-      retried = true;
-      patches = await callModel(renderDirectEditPrompt({
-        request, tree: applied.tree, turns, errors: [String(reason)],
-      }));
-      tree = applied.tree;
-      continue;
-    }
+  const held = (candidate, smoke) => ({
+    candidateSnapshotId: candidate?.id || null, smoke,
+  });
+
+  const promoteApplied = async (assessment, applied, candidate, smoke) => {
     let promotedId = candidate?.id || null;
     if (snapshotStore && candidate && promoteGreen) {
       const validated = await snapshotStore.markCandidateValidated(owner, projectId, candidate.id, {
@@ -324,6 +341,95 @@ export async function runDirectEdit({
       candidateSnapshotId: candidate?.id || null,
       greenSnapshotId: promotedId || greenBefore,
       promoted: Boolean(snapshotStore && candidate && promoteGreen),
+    });
+  };
+
+  // One paid retry, against the tree the caller names. A ceiling or fit failure does not spend.
+  const retryModel = async (prompt, { assessment, candidate = null, smoke = null, baseTree = null }) => {
+    if (retried) return finish("fallback", { patchAssessment: assessment, ...held(candidate, smoke) });
+    retried = true;
+    const next = await callModel(prompt);
+    if (next.stop) return finish(next.outcome, { patchAssessment: assessment, ...held(candidate, smoke) });
+    if (baseTree) tree = baseTree;
+    patches = next.patches;
+    return null;
+  };
+
+  let retried = false;
+  let infraRerunUsed = false;
+  let patches;
+  const first = await callModel(renderDirectEditPrompt({ request, tree, turns }));
+  if (first.stop) return finish(first.outcome);
+  patches = first.patches;
+  for (;;) {
+    const assessment = assessDirectEditPatch(patches, tree);
+    if (!assessment.ok) {
+      errors.push(`direct edit patch is outside the small-edit boundary: ${assessment.reasons.join(", ") || "empty"}`);
+      return finish(retried ? "fallback" : "escalate", { patchAssessment: assessment });
+    }
+    const applied = applyPatches(tree, patches);
+    if (applied.rejected?.length) {
+      const reasons = applied.rejected.map((row) => row.reason);
+      errors.push(...reasons);
+      const stopped = await retryModel(renderDirectEditPrompt({
+        request, tree, turns, rejections: applied.rejected, errors: reasons,
+      }), { assessment });
+      if (stopped) return stopped;
+      continue;
+    }
+    const compiled = compileFn ? await compileFn(applied.tree) : { ok: true };
+    if (!compiled?.ok) {
+      const reason = String(compiled?.error || compiled?.stderr || "compile failed");
+      errors.push(reason);
+      const stopped = await retryModel(renderDirectEditPrompt({
+        request, tree, turns, errors: [reason],
+      }), { assessment });
+      if (stopped) return stopped;
+      continue;
+    }
+    let candidate = null;
+    if (snapshotStore) {
+      candidate = await snapshotStore.createSnapshot(owner, projectId, applied.tree, {
+        buildId, parent: greenBefore, reason: "candidate:direct-edit",
+      });
+    }
+    let smoke = smokeFn ? await smokeFn(applied.tree) : { pass: true };
+    if (isInfraSmoke(smoke) && !infraRerunUsed) {
+      infraRerunUsed = true;
+      errors.push(smokeDetail(smoke) || "smoke unavailable");
+      const againCompiled = compileFn ? await compileFn(applied.tree) : { ok: true };
+      if (!againCompiled?.ok) {
+        const reason = String(againCompiled?.error || againCompiled?.stderr || "compile failed");
+        errors.push(reason);
+        const stopped = await retryModel(renderDirectEditPrompt({
+          request, tree, turns, errors: [reason],
+        }), { assessment, candidate, smoke });
+        if (stopped) return stopped;
+        continue;
+      }
+      smoke = smokeFn ? await smokeFn(applied.tree) : { pass: true };
+      if (smoke?.pass === true) return promoteApplied(assessment, applied, candidate, smoke);
+      if (isInfraSmoke(smoke)) {
+        errors.push(smokeDetail(smoke) || "smoke unavailable");
+        return finish("unchanged", { patchAssessment: assessment, infra: true, ...held(candidate, smoke) });
+      }
+    }
+    if (smoke?.pass === true) return promoteApplied(assessment, applied, candidate, smoke);
+    if (isInfraSmoke(smoke)) {
+      errors.push(smokeDetail(smoke) || "smoke unavailable");
+      return finish("unchanged", { patchAssessment: assessment, infra: true, ...held(candidate, smoke) });
+    }
+    if (isConcreteSmokeCrash(smoke)) {
+      const reason = smokeDetail(smoke);
+      errors.push(reason);
+      const stopped = await retryModel(renderDirectEditPrompt({
+        request, tree: applied.tree, turns, errors: [reason],
+      }), { assessment, candidate, smoke, baseTree: applied.tree });
+      if (stopped) return stopped;
+      continue;
+    }
+    return finish(retried ? "fallback" : "unchanged", {
+      patchAssessment: assessment, ...held(candidate, smoke),
     });
   }
 }

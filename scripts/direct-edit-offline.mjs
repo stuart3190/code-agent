@@ -133,12 +133,93 @@ export async function runOfflineHarness({ live = false } = {}) {
     });
     const pointer = await snapshotStore.pointer("owner", "beamplan", "green");
     const honest = outcome.spentCredits === 2.13
+      && outcome.modelCalls === 2
+      && outcome.outcome === "fallback"
       && /2\.13/.test(outcome.message || "")
       && !/credits remain protected/i.test(outcome.message || "")
       && outcome.settlement.creditsProtected === false;
     const ok = pointer === greenId && outcome.promoted === false && honest;
-    results.smokeFailure = { ok, pointerUnchanged: pointer === greenId, spentCredits: outcome.spentCredits, message: outcome.message, outcome: outcome.outcome };
-    say(`(c) smoke failure keeps green ${ok ? "PASS" : "FAIL"} outcome=${outcome.outcome} spent=${outcome.spentCredits} message=${JSON.stringify(outcome.message)}`);
+    results.smokeFailure = { ok, pointerUnchanged: pointer === greenId, spentCredits: outcome.spentCredits, message: outcome.message, outcome: outcome.outcome, calls: outcome.modelCalls };
+    say(`(c) concrete smoke crash retries once ${ok ? "PASS" : "FAIL"} outcome=${outcome.outcome} calls=${outcome.modelCalls} spent=${outcome.spentCredits} message=${JSON.stringify(outcome.message)}`);
+  }
+
+  {
+    const { snapshotStore, greenId } = await greenProject(tree);
+    const model = scriptedModel([{ patches: recorded, credits: 1.06 }]);
+    let compiles = 0;
+    let smokes = 0;
+    const outcome = await runDirectEdit({
+      owner: "owner", projectId: "beamplan", request: CM_REQUEST, tree,
+      snapshotStore, greenSnapshotId: greenId,
+      modelFn: model.modelFn,
+      compileFn: async () => { compiles += 1; return { ok: true }; },
+      smokeFn: async () => {
+        smokes += 1;
+        return { pass: null, unavailable: true, error: "preview unavailable" };
+      },
+    });
+    const pointer = await snapshotStore.pointer("owner", "beamplan", "green");
+    const honest = outcome.spentCredits === 1.06
+      && /1\.06/.test(outcome.message || "")
+      && !/credits remain protected/i.test(outcome.message || "")
+      && outcome.settlement.creditsProtected === false
+      && outcome.fallbackRequest == null
+      && outcome.route === "direct_edit";
+    const ok = outcome.modelCalls === 1 && model.prompts.length === 1
+      && compiles === 2 && smokes === 2
+      && pointer === greenId && outcome.promoted === false
+      && outcome.outcome === "unchanged" && outcome.infra === true && honest;
+    results.infraSmoke = {
+      ok, calls: outcome.modelCalls, compiles, smokes, outcome: outcome.outcome,
+      spentCredits: outcome.spentCredits, message: outcome.message,
+    };
+    say(`(e) unavailable smoke does not pay for a second model call ${ok ? "PASS" : "FAIL"} calls=${outcome.modelCalls} compiles=${compiles} smokes=${smokes} outcome=${outcome.outcome} spent=${outcome.spentCredits} message=${JSON.stringify(outcome.message)}`);
+  }
+
+  {
+    const { snapshotStore, greenId } = await greenProject(tree);
+    const model = scriptedModel([{ patches: recorded, credits: 0.42 }]);
+    let smokes = 0;
+    const outcome = await runDirectEdit({
+      owner: "owner", projectId: "beamplan", request: CM_REQUEST, tree,
+      snapshotStore, greenSnapshotId: greenId,
+      modelFn: model.modelFn,
+      compileFn: (next) => compileDirectEditTree(next, { entry: FLOW }),
+      smokeFn: async (next) => {
+        smokes += 1;
+        if (smokes === 1) return { pass: null, unavailable: true, error: "preview unavailable" };
+        return smokeBeamPlan(next, { entry: FLOW });
+      },
+    });
+    const pointer = await snapshotStore.pointer("owner", "beamplan", "green");
+    const ok = outcome.modelCalls === 1 && smokes === 2 && outcome.outcome === "applied"
+      && outcome.promoted === true && pointer !== greenId
+      && String(outcome.smoke?.observed?.cm || "").includes("133.33 cm");
+    results.infraRecovered = { ok, calls: outcome.modelCalls, smokes, outcome: outcome.outcome, promoted: outcome.promoted };
+    say(`(f) free compile/smoke re-run can pass the same candidate ${ok ? "PASS" : "FAIL"} calls=${outcome.modelCalls} smokes=${smokes} outcome=${outcome.outcome} promoted=${outcome.promoted}`);
+  }
+
+  {
+    const { snapshotStore, greenId } = await greenProject(tree);
+    const model = scriptedModel([
+      { patches: recorded, credits: 0.4 },
+      { patches: recorded, credits: 9 },
+    ]);
+    const outcome = await runDirectEdit({
+      owner: "owner", projectId: "beamplan", request: CM_REQUEST, tree,
+      snapshotStore, greenSnapshotId: greenId,
+      modelFn: model.modelFn,
+      compileFn: async () => ({ ok: true }),
+      smokeFn: async () => ({ pass: false }),
+    });
+    const pointer = await snapshotStore.pointer("owner", "beamplan", "green");
+    const ok = outcome.modelCalls === 1 && model.prompts.length === 1
+      && outcome.outcome === "unchanged" && outcome.infra === false
+      && outcome.route === "direct_edit" && outcome.fallbackRequest == null
+      && pointer === greenId && outcome.spentCredits === 0.4
+      && !/protected/i.test(outcome.message || "");
+    results.smokeWithoutError = { ok, calls: outcome.modelCalls, outcome: outcome.outcome, spentCredits: outcome.spentCredits };
+    say(`(g) smoke failure without a concrete error does not retry ${ok ? "PASS" : "FAIL"} calls=${outcome.modelCalls} outcome=${outcome.outcome} spent=${outcome.spentCredits}`);
   }
 
   {

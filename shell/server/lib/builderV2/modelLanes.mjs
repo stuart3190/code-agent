@@ -1954,7 +1954,10 @@ export function createModelLanes({
               + `${context.attempt || context.correction || context.round || sequence}`,
             continuationIndex: Number(context.headroomBatchIndex || 0), provider: selected.provider,
             decision: { ...(selected.decision || {}),
-              billingLane: selected.decision?.billingLane || billingLane },
+              billingLane: selected.decision?.billingLane || billingLane,
+              ...(Number(context.callCeilingCredits) > 0
+                ? { callCeilingCredits: Number(context.callCeilingCredits) }
+                : {}) },
             options, ceilingCredits: poolCeiling, fundingPool, usageResponsibility,
             accountBalanceResolver: accountCreditResolver, maxRepairs, maxCorrections,
             scopedDispatch, affectedModules: context.affectedModules,
@@ -2248,7 +2251,10 @@ export function createModelLanes({
      * One full-context edit call. The prompt is already rendered; this lane only reserves,
      * dispatches emit_patches, and reports the credits that call actually settled.
      */
-    directEditFn: async ({ owner, projectId, buildId, prompt, systemPrompt, signal = null, attempt = 1 }) => {
+    directEditFn: async ({
+      owner, projectId, buildId, prompt, systemPrompt, signal = null, attempt = 1,
+      callCeilingCredits = null,
+    }) => {
       const startedAt = Date.now();
       const selected = await reservedProvider("edit", {
         owner, projectId, buildId, signal,
@@ -2258,6 +2264,10 @@ export function createModelLanes({
         scopedDispatch: true,
         logicalDispatchId: `${buildId}:direct_edit:${attempt}`,
         headroomBatchIndex: Math.max(0, Number(attempt) - 1),
+        // The edit step's 4-credit ceiling belongs to the full pipeline. A direct edit that
+        // cannot fit this lower ceiling fails before dispatch; the caller escalates instead
+        // of fragmenting the full-context prompt or raising the cap.
+        callCeilingCredits,
       });
       const turn = await selected.provider.runTurn({
         systemPrompt,

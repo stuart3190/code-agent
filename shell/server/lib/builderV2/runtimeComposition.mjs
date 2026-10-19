@@ -39,7 +39,7 @@ import { compareGraphIndexes, manifestOf } from "./graphParity.mjs";
 import { indexTree, INDEXER_VERSION } from "./indexer.mjs";
 import { createModelLanes } from "./modelLanes.mjs";
 import {
-  DIRECT_EDIT_JOB_CEILING_CREDITS, composeFallbackRequest, directEditEnabled, directEditSuccessMessage,
+  composeFallbackRequest, directEditCeilings, directEditEnabled, directEditSuccessMessage,
   runDirectEdit,
 } from "./directEdit.mjs";
 import { generationPolicyFor } from "./generationPolicy.mjs";
@@ -929,12 +929,14 @@ export function createBuilderV2Runtime({
         await events.buildCreated?.({ owner, projectId, buildId, mode: "direct_edit" });
         let previewTouched = false;
         let direct;
+        const directCeilings = directEditCeilings();
         try {
           direct = await runDirectEdit({
           owner, projectId, buildId, request, tree: greenTree,
           turns: Array.isArray(input.turns) ? input.turns : [],
           proposal: input.editProposal || input.editSize || null,
-          jobCeilingCredits: Math.min(ceilingCredits, DIRECT_EDIT_JOB_CEILING_CREDITS),
+          jobCeilingCredits: Math.min(ceilingCredits, directCeilings.jobCeilingCredits),
+          callCeilingCredits: directCeilings.callCeilingCredits,
           snapshotStore, greenSnapshotId, promoteGreen: false,
           modelFn: (call) => lanes.directEditFn({ owner, projectId, buildId, ...call }),
           compileFn: async (tree) => {
@@ -944,10 +946,16 @@ export function createBuilderV2Runtime({
           smokeFn: async (tree) => {
             previewTouched = true;
             const verdict = await smokeJourneysFn({ tree, journeys: [], contract: { journeys: [] }, signal });
+            const fatalErrors = [...(verdict?.fatalErrors || [])];
+            const error = verdict?.error || fatalErrors.join("; ") || "";
+            // pass:null / unavailable is an infrastructure miss. Coercing it to false makes the
+            // direct-edit loop spend a model retry on a preview that never answered.
+            const unavailable = verdict?.unavailable === true || verdict?.pass == null;
             return {
-              pass: verdict?.pass === true,
-              error: verdict?.error || (verdict?.fatalErrors || []).join("; ") || "",
-              fatalErrors: verdict?.fatalErrors || [],
+              pass: verdict?.pass === true ? true : unavailable ? null : false,
+              unavailable,
+              error,
+              fatalErrors,
             };
           },
         });
@@ -1003,7 +1011,7 @@ export function createBuilderV2Runtime({
           directResult = {
             state: "blocked",
             error: direct.message,
-            failureClassification: "direct_edit_unchanged",
+            failureClassification: direct.infra ? "direct_edit_infra" : "direct_edit_unchanged",
             consumedCredits: direct.spentCredits,
             directEdit: true,
             directEditSettlement: direct.settlement,
