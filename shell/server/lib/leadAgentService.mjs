@@ -204,16 +204,23 @@ export function buildDispatchConfirmation(kind = "build") {
     : "Builder V2 has started the build. The team will verify it before the preview appears here.";
 }
 
-async function dispatchPreservedBuildRetry({ ctx, target }) {
+/** A bare retry may resume a failed build only when that project is this conversation's app. */
+export function retryProjectMatchesConversation(conversation, project) {
+  const bound = conversation?.product_id;
+  if (bound == null || bound === "") return true;
+  return String(project?.product_id || "") === String(bound);
+}
+
+export async function dispatchPreservedBuildRetry({ ctx, target, client = null, startExisting = null }) {
   const [{ serviceClient }, { startExistingAppWorkV2 }] = await Promise.all([
     import("./supabase.mjs"),
     import("./builderV2/entry.mjs"),
   ]);
-  const client = serviceClient();
+  const db = client || serviceClient();
   const [{ data: job, error: jobError }, { data: project, error: projectError }] = await Promise.all([
-    client.from("build_jobs").select("id,owner,project_id,status,pipeline_version")
+    db.from("build_jobs").select("id,owner,project_id,status,pipeline_version")
       .eq("id", target.jobId).eq("owner", ctx.owner).maybeSingle(),
-    client.from("projects")
+    db.from("projects")
       .select("id,owner,name,product_id,tree,created_at,updated_at,builder_version,bv2_green_snapshot_id,budget_approval_id")
       .eq("id", target.projectId).eq("owner", ctx.owner).maybeSingle(),
   ]);
@@ -225,7 +232,15 @@ async function dispatchPreservedBuildRetry({ ctx, target }) {
       code: "build_not_retryable",
     });
   }
-  return startExistingAppWorkV2(ctx, {
+  if (!retryProjectMatchesConversation(ctx?.conversation, project)) {
+    console.warn(`[bv2 retry] refused mismatched project ${project?.id} product=${project?.product_id || "none"} conversation=${ctx?.conversation?.id || "none"} product=${ctx?.conversation?.product_id || "none"}`);
+    throw Object.assign(new Error("Preserved retry target belongs to a different product."), {
+      code: "retry_project_mismatch",
+      publicMessage: "I didn't resume that attempt because it belongs to a different app. Tell me what to change and I'll do it on this conversation's app.",
+    });
+  }
+  const start = startExisting || startExistingAppWorkV2;
+  return start(ctx, {
     project,
     request: [
       "Continue this failed Builder V2 build from its retained immutable checkpoint.",
@@ -288,9 +303,17 @@ export async function processConversation(conversation, {
       } catch (error) {
         console.error(`[bv2 retry ${retryTarget.jobId.slice(0, 8)}] ${error.code || "error"}: ${error.message}`);
         await emit("agent_done", { agent: "Builder", ok: false });
+        // A mismatched project must not be written back as the next retry identity. The original
+        // terminal stays in history, and this intervening refusal stops a later bare retry from
+        // selecting it again.
+        const mismatched = error.code === "retry_project_mismatch";
         await finishWithMessage(store, conversation,
           error.publicMessage || "The retained build could not resume yet. Its checkpoint is preserved and no replacement project was created.",
-          {
+          mismatched ? {
+            pipelineVersion: "v2",
+            retryProjectMismatch: true,
+            errorCode: error.code,
+          } : {
             projectId: retryTarget.projectId,
             jobId: retryTarget.jobId,
             pipelineVersion: "v2",
@@ -633,6 +656,11 @@ export async function processConversation(conversation, {
         if (specialist !== "Lead Agent") {
           await emit("agent_done", { agent: specialist, ok: output?.ok !== false });
         }
+        if (output?.code === "unrequested_product") {
+          await emit("agent_done", { agent: "Lead Agent" });
+          await finishWithMessage(store, conversation, output.error || "I didn't change a different app.");
+          return;
+        }
         if (["app_build", "edit_app", "repair_app"].includes(call.name)
           && output?.jobId && output?.buildId && output?.projectId) {
           await emit("agent_done", { agent: "Lead Agent" });
@@ -787,8 +815,17 @@ async function leadInstructions(store, conversation) {
     sections.push(`MEMORY — owner profile:\n${JSON.stringify(profile)}`);
   }
   if (products.length) {
-    sections.push(`MEMORY — the user's products:\n${products.map((product) =>
-      `- ${product.name}${product.summary ? `: ${product.summary}` : ""}`).join("\n")}`);
+    const current = conversation.product_id ? String(conversation.product_id) : null;
+    sections.push([
+      "MEMORY — the user's products:",
+      ...products.map((product) => {
+        const here = current && String(product.id) === current ? " [this conversation's app]" : "";
+        return `- ${product.name}${here}${product.summary ? `: ${product.summary}` : ""}`;
+      }),
+      current
+        ? "Edit and repair this conversation's app. Pass another product name only when the user's latest message names that other app."
+        : "This conversation is not attached to a product. Pass a product name only when the user's latest message names that app.",
+    ].join("\n"));
   }
   if (memories.length) {
     sections.push(`MEMORY — remembered facts and preferences:\n${memories.map((memory) =>

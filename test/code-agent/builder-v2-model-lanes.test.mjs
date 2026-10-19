@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { createCodexProvider } from "../../src/providers/codexProvider.mjs";
 import {
   causalRepairProblems, COMPILE_CORRECTION_SYSTEM_PROMPT, createModelLanes, estimatePromptTokens,
-  HEADROOM_FRAGMENT_SYSTEM_PROMPT, headroomDispatchScope,
+  HEADROOM_FRAGMENT_SYSTEM_PROMPT, headroomDispatchScope, SCOPED_EDIT_SYSTEM_PROMPT,
   headroomSourceFragments, jobUsageBucket, planCallReservation, renderPatchPrompt,
   repairFailureOwnedPaths, repairFailureReferences, runReservedDispatch, isTransportInterruption,
 } from "../../shell/server/lib/builderV2/modelLanes.mjs";
@@ -1048,6 +1048,87 @@ test("a single irreducible source fails closed after bounded zero-dispatch compa
   }), (error) => error.code === "smallest_scoped_call_exceeds_headroom" && error.headroomResizes === 1);
   assert.equal(providerCalls, 0, "neither oversized preflight is allowed onto the provider wire");
   assert.equal(reservations.rows().length, 0, "no unusable call acquires or consumes a reservation");
+});
+
+test("a scoped edit of a large app fits the fixed per-call ceiling with output headroom", async () => {
+  const target = "src/screens/calculator/Units.jsx";
+  const unitsLine = 'const units = ["mm"];';
+  const hugeSource = `${unitsLine}\n${"const unused = 1;\n".repeat(8_000)}`;
+  const noise = `export const pad = "${"NOISE_PADDING_BEAMPLAN ".repeat(2_000)}";`;
+  const hugeTree = { [target]: hugeSource, "src/App.jsx": "export default function App(){return null}" };
+  for (let index = 0; index < 12; index += 1) hugeTree[`src/screens/noise/Pad${index}.jsx`] = noise;
+  const fat = "CONTRACT_FAT_PADDING ".repeat(12_000);
+  const contract = {
+    ...CONTRACT,
+    journeys: [{ id: "send-message", title: "Send a message", priority: "primary",
+      steps: [{ action: "fill the form", expect: fat }] }],
+  };
+  const headroomScope = {
+    kind: "headroom_continuation", allowedFiles: [target], files: [target],
+    instruction: "edit the units", expectedPatchTokens: 1_200,
+  };
+  const fit = (tree) => planCallReservation({
+    systemPrompt: SCOPED_EDIT_SYSTEM_PROMPT,
+    messages: [{ role: "user", content: renderPatchPrompt({
+      step: "edit", contract, tiers: TIERS, tree, editRequest: "Can we add (cm) as a unit too",
+      headroomScope,
+    }) }],
+    tools: [EMIT_PATCHES_SCHEMA],
+  }, "gpt-5.5", {
+    requestedMaxOutputTokens: 8_000, callCeilingCredits: 4, minimumUsefulOutputTokens: 1_200,
+    budget: { remainingCredits: 40 },
+  });
+  const scoped = renderPatchPrompt({
+    step: "edit", contract, tiers: TIERS, tree: hugeTree, editRequest: "Can we add (cm) as a unit too",
+    headroomScope,
+  });
+  assert.match(scoped, /SCOPED EDIT/);
+  assert.match(scoped, /Allowed files: \[src\/screens\/calculator\/Units\.jsx\]/);
+  assert.match(scoped, /const units = \["mm"\]/);
+  assert.doesNotMatch(scoped, /NOISE_PADDING_BEAMPLAN|CONTRACT_FAT_PADDING|CAPABILITY GRAPH/);
+  const scopedPlan = fit(hugeTree);
+  assert.ok(scopedPlan.maxOutputTokens >= 1_200, `output ${scopedPlan.maxOutputTokens}`);
+  assert.ok(scopedPlan.estimatedInputTokens + 1_200 <= 40_000);
+
+  // Retrieval can carry a normal screen. The contract and the rest of the tree are what blow
+  // the unscoped edit past the 4-credit ceiling; the narrowed dispatch must still fit.
+  const tree = {
+    [target]: `export function Units(){ ${unitsLine} return units; }`,
+    "src/App.jsx": "export default function App(){return null}",
+  };
+  for (let index = 0; index < 12; index += 1) tree[`src/screens/noise/Pad${index}.jsx`] = noise;
+  const unscoped = renderPatchPrompt({
+    step: "edit", contract, tiers: TIERS, tree, editRequest: "Can we add (cm) as a unit too",
+  });
+  assert.throws(() => planCallReservation({
+    systemPrompt: "full", messages: [{ role: "user", content: unscoped }], tools: [EMIT_PATCHES_SCHEMA],
+  }, "gpt-5.5", {
+    requestedMaxOutputTokens: 8_000, callCeilingCredits: 4, minimumUsefulOutputTokens: 1_200,
+    budget: { remainingCredits: 40 },
+  }), (error) => error.dispatchState === "before_dispatch" && error.maximumFittingOutputTokens < 1_200);
+
+  const provider = fakePatchProvider({ patches: [{
+    file: target, ops: [{ op: "replace_exact", symbol: unitsLine, content: 'const units = ["mm", "cm"];' }],
+  }] });
+  const reservations = memoryModelReservations();
+  const lanes = createModelLanes({
+    providerForStep: async () => ({ provider, decision: {
+      provider: "openai", model: "gpt-5.5", billingLane: "connected_allowance",
+      estimatedCredits: 0.5, callCeilingCredits: 4, maxOutputTokens: 8_000,
+    } }),
+    ceilingCredits: 40, reservations, knowledgeStore: memoryKnowledgeStore(),
+  });
+  await lanes.patchesFn({
+    owner: "owner", projectId: "project", buildId: "beam", step: "edit",
+    contract, tiers: TIERS, tree, rejections: [], problems: [],
+    editRequest: "Can we add (cm) as a unit too",
+  });
+  assert.equal(provider.calls.length, 1);
+  assert.equal(reservations.rows().length, 1);
+  assert.equal(provider.calls[0].systemPrompt, SCOPED_EDIT_SYSTEM_PROMPT);
+  assert.match(provider.calls[0].messages[0].content, /SCOPED EDIT/);
+  assert.match(provider.calls[0].messages[0].content, /const units = \["mm"\]/);
+  assert.doesNotMatch(provider.calls[0].messages[0].content, /NOISE_PADDING_BEAMPLAN|CONTRACT_FAT_PADDING/);
 });
 
 test("later headroom batches keep repair funding without consuming another logical repair slot", async () => {

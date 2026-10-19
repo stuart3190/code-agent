@@ -91,11 +91,20 @@ export function registerCoreCapabilities() {
     }),
     requirements: () => ({ ok: true }),
     async invoke(ctx, input) {
-      const { resolveConversationProject } = await import("../appBuild/projectScope.mjs");
-      const { project } = await resolveConversationProject(ctx, {
+      const { resolveEditRepairProject, latestUserText, unrequestedProductMessage } = await import("../appBuild/projectScope.mjs");
+      const resolved = await resolveEditRepairProject(ctx, {
         productName: input.productName || null,
+        userText: await latestUserText(ctx),
         columns: "id,name,tree,product_id,created_at,updated_at,builder_version,bv2_green_snapshot_id",
+        client: ctx.client,
       });
+      if (resolved.blocked) {
+        console.warn(`[edit_app] blocked unrequested product "${resolved.requestedName}" conversation=${ctx.conversation?.id || "none"} product=${ctx.conversation?.product_id || "none"}`);
+        const error = new Error(unrequestedProductMessage(resolved));
+        error.code = "unrequested_product";
+        throw error;
+      }
+      const { project } = resolved;
       if (!project) {
         const error = new Error("There's no existing app to edit — describe what you want built first.");
         error.code = "nothing_to_edit";
@@ -121,15 +130,24 @@ export function registerCoreCapabilities() {
     }),
     requirements: () => ({ ok: true }),
     async invoke(ctx, input) {
-      const { resolveConversationProject } = await import("../appBuild/projectScope.mjs");
-      const { project } = await resolveConversationProject(ctx, {
+      const { resolveEditRepairProject, latestUserText, unrequestedProductMessage } = await import("../appBuild/projectScope.mjs");
+      const resolved = await resolveEditRepairProject(ctx, {
         productName: input.productName || null,
+        userText: await latestUserText(ctx),
         columns: "id,name,tree,product_id,created_at,updated_at,builder_version,bv2_green_snapshot_id,budget_approval_id",
         // A failed first-green build has no green pointer yet. Repair must select that newest
         // product-scoped project so Builder V2 can resume its retained checkpoint instead of
         // silently falling back to an older green project for the same product.
         includeUnverified: true,
+        client: ctx.client,
       });
+      if (resolved.blocked) {
+        console.warn(`[repair_app] blocked unrequested product "${resolved.requestedName}" conversation=${ctx.conversation?.id || "none"} product=${ctx.conversation?.product_id || "none"}`);
+        const error = new Error(unrequestedProductMessage(resolved));
+        error.code = "unrequested_product";
+        throw error;
+      }
+      const { project } = resolved;
       if (!project) {
         const error = new Error("There's no existing app to repair — describe what you want built instead.");
         error.code = "nothing_to_repair";

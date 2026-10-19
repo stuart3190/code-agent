@@ -946,8 +946,9 @@ export function createBuilderV2Runtime({
           checkpointId: result.workingSnapshotId || result.snapshotId || null,
         });
         const settlement = await settleTerminal({ state: result.state, failure, greenPreview: false });
+        const creditsProtected = failure.code !== "smallest_scoped_call_exceeds_headroom";
         const customerStatus = customerBuildStatus({ internalState: result.state, failure,
-          creditsProtected: true });
+          creditsProtected });
         if (activeBuildId) {
           const { error: failureProjectionError } = await client.from("bv2_builds").update({
             failure, customer_state: customerStatus.state,
@@ -957,7 +958,7 @@ export function createBuilderV2Runtime({
         await diag.finish?.(result.state === "cancelled" ? "cancelled" : "failed");
         return { status: result.state === "cancelled" ? "failed" : "failed", stopReason: result.state,
           result: { buildOk: false, finalText: customerFailureMessage(failure),
-            customerStatus, creditsProtected: true },
+            customerStatus, creditsProtected },
           failure, settlement,
           contract, bv2: result };
       }

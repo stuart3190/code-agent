@@ -28,6 +28,24 @@ test("the public V2 job facade reconstructs action-required state without leakin
   assert.doesNotMatch(JSON.stringify(job), /\/srv\/jobs|req_123|checkpointId|customer_envelope_exhausted/);
 });
 
+test("a headroom failure shows the honest credit message instead of claiming protection", () => {
+  const finalText = "Thrallo stopped before changing the app. Credits already used to handle this message are not refunded.";
+  const job = publicJob({
+    id: "job", projectId: "project", mode: "edit", status: "failed",
+    phase: "editing", error: "smallest_scoped_call_exceeds_headroom",
+    stopReason: "failed", result: {
+      finalText, buildOk: false,
+      customerStatus: { state: "failed", progressLabel: "Needs attention",
+        retrying: false, actionRequired: false, creditsProtected: false,
+        previewUrl: null, messageKey: "build_failed" },
+      creditsProtected: false,
+    },
+  });
+  assert.equal(job.creditsProtected, false);
+  assert.equal(job.error, finalText);
+  assert.doesNotMatch(job.error, /credits remain protected/i);
+});
+
 test("accepted Builder V2 dispatch is durable-worker-only and returns handled:true", async () => {
   const calls = [];
   const project = { id: "project-1", name: "Test" };

@@ -224,6 +224,29 @@ test("durable defects retain structural identity, failure refs, and redacted sta
   assert.equal(records[0].requestFingerprint.length, 64);
 });
 
+test("a headroom refusal does not claim that credits were protected", async () => {
+  const unnamed = customerFailureMessage({ code: "smallest_scoped_call_exceeds_headroom" });
+  assert.match(unnamed, /not refunded/);
+  assert.doesNotMatch(unnamed, /credits remain protected/i);
+  const named = customerFailureMessage({
+    code: "smallest_scoped_call_exceeds_headroom", consumedCredits: 2.95,
+  });
+  assert.match(named, /2\.95/);
+  assert.doesNotMatch(named, /credits remain protected/i);
+  const platform = customerFailureMessage(structuredBuildFailure(Object.assign(
+    new Error("worker down"), { code: "verification_platform_defect", classification: "platform" },
+  )));
+  assert.match(platform, /credits remain protected/i);
+  const status = customerBuildStatus({
+    internalState: "failed",
+    failure: { code: "smallest_scoped_call_exceeds_headroom", customerMessageKey: "build_failed" },
+    creditsProtected: false,
+  });
+  assert.equal(status.creditsProtected, false);
+  const runtime = await readFile(new URL("../../shell/server/lib/builderV2/runtimeComposition.mjs", import.meta.url), "utf8");
+  assert.match(runtime, /const creditsProtected = failure\.code !== "smallest_scoped_call_exceeds_headroom"/);
+});
+
 test("customer status and messages never expose internal Builder evidence", () => {
   const failure = structuredBuildFailure(Object.assign(new Error("src/App.jsx provider request req_123"), {
     code: "verification_platform_defect", classification: "platform",
