@@ -934,7 +934,41 @@ export function createOrchestrator({
       // the first live run's model "replaced" a stub with its own identical content, twice.
       const changed = Object.keys(applied.tree).some((p) => applied.tree[p] !== working[p])
         || Object.keys(working).some((p) => !(p in applied.tree));
+      let acceptRetainedEdit = false;
       if (!changed) {
+        // A headroom edit batch that returns no patches owns nothing in this slice. Consume it
+        // and advance. Retrying that empty envelope as a protocol failure is what blocked a
+        // retained BeamPlan edit on generic UI primitives before verification.
+        const emptyBoundedEdit = internalHeadroomSplit && patches.length === 0
+          && (step === "edit" || activeScope?.logicalStep === "edit");
+        if (emptyBoundedEdit) {
+          const next = nextHeadroomContinuation(activeScope, moduleContracts, working);
+          attemptLedger.push({ attempt, dispatch: dispatchStep, class: "headroom_edit_unchanged",
+            substantive: false });
+          if (next) {
+            headroomScope = next;
+            repairScope = null;
+            contractCorrectionScope = null;
+            rejections = [];
+            log(`${step}: bounded edit batch [${(activeScope.allowedFiles || []).join(", ")}] needed no change; `
+              + `continuing with [${next.allowedFiles.join(", ")}]`);
+            continue;
+          }
+          if (latestCandidate) {
+            headroomScope = null;
+            rejections = [];
+            acceptRetainedEdit = true;
+            log(`${step}: bounded edit queue finished without further changes; `
+              + `verifying retained candidate ${latestCandidate.id}`);
+          } else {
+            headroomScope = null;
+            noOps = protocolRetryLimit + 1;
+            log(`${step}: bounded edit changed nothing in any batch`);
+            continue;
+          }
+        }
+      }
+      if (!changed && !acceptRetainedEdit) {
         // A PROTOCOL round, not a generation attempt. It cost provider tokens and credits — both
         // still counted — but it produced no code, so charging it against the substantive attempts
         // punishes the build for a round in which nothing was written.
@@ -2625,7 +2659,8 @@ export function createOrchestrator({
           parentSnapshotId: ctx.snapshotId, signal, spec,
         });
         if (!edit.ok) return finish("blocked", { error: edit.reason, problems: edit.problems,
-          advisoryFindings: edit.advisory || [] });
+          advisoryFindings: edit.advisory || [],
+          ...(edit.code ? { failureClassification: edit.code } : {}) });
 
         let workingSnapshot = edit.snapshot;
 

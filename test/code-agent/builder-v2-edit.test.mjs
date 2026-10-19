@@ -222,6 +222,81 @@ test("WP10 — a failed edit promotes NOTHING: the prior green keeps serving", a
   assert.equal(h.knowledgeFacts.length, 0, "a failed edit must not become project knowledge");
 });
 
+test("a retained headroom edit skips an empty UI batch once and still verifies", async () => {
+  const h = editHarness();
+  const build = await h.orchestrator.runBuild({ owner: "o", projectId: "beam", request: "booking site" });
+  assert.equal(build.state, "green");
+  const button = "src/components/ui/button.jsx";
+  const checkbox = "src/components/ui/checkbox.jsx";
+  const screen = "src/screens/scaffold/NewsletterScreen.jsx";
+  const calls = [];
+  const buildStore = memoryBuildStore();
+  const orchestrator = createOrchestrator({
+    contractFn: async () => CONTRACT,
+    patchesFn: async ({ step, headroomScope }) => {
+      if (step !== "edit") return {
+        core: () => CORE_PATCH,
+        "increment:newsletter-signup": () => NEWSLETTER_PATCH,
+        "increment:browse-info": () => BROWSE_PATCH,
+      }[step]?.() || [];
+      calls.push(headroomScope?.allowedFiles || []);
+      const allowed = headroomScope?.allowedFiles || [];
+      if (allowed.some((file) => file === button || file === checkbox)) return [];
+      const patches = EDIT_PATCH.map((patch) => ({ ...patch, ops: patch.ops.map((op) => ({ ...op })) }));
+      Object.defineProperty(patches, "dispatchScope", { value: {
+        kind: "headroom_continuation", logicalStep: "edit", batchWidth: 2,
+        files: [screen], allowedFiles: [screen],
+        remainingFiles: [button, checkbox],
+      } });
+      return patches;
+    },
+    assetService: h.assetService, snapshotStore: h.snapshotStore, buildStore,
+    verificationCache: memoryVerificationCache(),
+    journeysFn: async ({ journeys }) => ({ journeys: journeys.map((journey) => ({
+      id: journey.id, title: journey.title, priority: journey.priority, status: "pass",
+    })) }),
+    baseTree: () => clone(fromScaffold(REACT_VITE)),
+    baseline: REACT_VITE,
+  });
+  const edit = await orchestrator.runEdit({
+    owner: "o", projectId: "beam", request: "Add (cm) to the units", contract: CONTRACT,
+  });
+  assert.equal(edit.state, "green", edit.error || edit.state);
+  const uiCalls = calls.filter((files) => files.includes(button) || files.includes(checkbox));
+  assert.equal(uiCalls.length, 1, `the UI batch is one dispatch, not three retries: ${JSON.stringify(calls)}`);
+  assert.equal(calls.length, 2);
+  const row = await buildStore.get(edit.buildId);
+  assert.ok(row.states.includes("verify_edit"), row.states.join(","));
+  const tree = await h.snapshotStore.materialize("o", edit.snapshotId);
+  assert.match(tree[screen], /welcome aboard/);
+
+  let emptyCalls = 0;
+  const emptyStore = memoryBuildStore();
+  const emptyEdit = createOrchestrator({
+    contractFn: async () => CONTRACT,
+    patchesFn: async ({ step }) => {
+      if (step === "edit") { emptyCalls += 1; return []; }
+      return [];
+    },
+    assetService: h.assetService, snapshotStore: h.snapshotStore, buildStore: emptyStore,
+    verificationCache: memoryVerificationCache(),
+    journeysFn: async ({ journeys }) => ({ journeys: journeys.map((journey) => ({
+      id: journey.id, status: "pass", title: journey.title, priority: journey.priority,
+    })) }),
+    baseTree: () => clone(fromScaffold(REACT_VITE)),
+    baseline: REACT_VITE,
+  });
+  const blocked = await emptyEdit.runEdit({
+    owner: "o", projectId: "beam", request: "Add (cm) to the units", contract: CONTRACT,
+  });
+  assert.equal(blocked.state, "blocked");
+  assert.equal(blocked.failureClassification, "no_substantive_generation");
+  assert.match(blocked.error, /no substantive generation/);
+  const blockedRow = await emptyStore.get(blocked.buildId);
+  assert.equal(blockedRow.states.includes("verify_edit"), false, blockedRow.states.join(","));
+  assert.ok(emptyCalls >= 1 && emptyCalls <= 3);
+});
+
 test("WP10 — editTargets ranks generated files by request keywords, deterministically", () => {
   const tree = {
     "src/routes/BookPage.jsx": "export function BookPage() { return 'hero headline booking'; }",
