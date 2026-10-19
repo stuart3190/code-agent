@@ -60,7 +60,10 @@ import {
   supabaseBuildEnvelopes, createEnvelopeProgressGuard,
 } from "./buildEnvelope.mjs";
 import { supabaseBuildSettlements } from "./buildSettlement.mjs";
-import { structuredBuildFailure, customerBuildStatus, customerFailureMessage } from "./buildFailure.mjs";
+import {
+  structuredBuildFailure, customerBuildStatus, customerFailureMessage,
+  failureShowsSettledCredits, settlementSpentCredits,
+} from "./buildFailure.mjs";
 import { supabaseVerificationEvidenceStore } from "./verificationEvidenceStore.mjs";
 import {
   browserVerificationBudget, browserVerificationUsesBackend,
@@ -946,7 +949,11 @@ export function createBuilderV2Runtime({
           checkpointId: result.workingSnapshotId || result.snapshotId || null,
         });
         const settlement = await settleTerminal({ state: result.state, failure, greenPreview: false });
-        const creditsProtected = failure.code !== "smallest_scoped_call_exceeds_headroom";
+        const spent = settlementSpentCredits(settlement);
+        if (failureShowsSettledCredits(failure) && !(Number(failure.consumedCredits) > 0) && spent > 0) {
+          failure.consumedCredits = spent;
+        }
+        const creditsProtected = !failureShowsSettledCredits(failure);
         const customerStatus = customerBuildStatus({ internalState: result.state, failure,
           creditsProtected });
         if (activeBuildId) {

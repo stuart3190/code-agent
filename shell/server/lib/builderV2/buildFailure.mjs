@@ -76,10 +76,26 @@ export function customerBuildStatus({ internalState, previewUrl = null, failure 
   };
 }
 
+// These stops happen after a model call has already settled, or before a builder reservation
+// while the lead turn has settled. Either way "credits remain protected" is false.
+export const SPEND_VISIBLE_FAILURES = new Set([
+  "smallest_scoped_call_exceeds_headroom",
+  "no_substantive_generation",
+]);
+
+export function failureShowsSettledCredits(failure) {
+  return SPEND_VISIBLE_FAILURES.has(String(failure?.code || ""));
+}
+
+export function settlementSpentCredits(settlement) {
+  const breakdown = settlement?.spentBreakdown || settlement?.spent_breakdown;
+  if (!breakdown || typeof breakdown !== "object") return 0;
+  const total = Object.values(breakdown).reduce((sum, value) => sum + Number(value || 0), 0);
+  return Number.isFinite(total) && total > 0 ? Math.round(total * 100) / 100 : 0;
+}
+
 export function customerFailureMessage(failure) {
-  // This refusal happens before a builder reservation. Lead-message credits have already
-  // settled and are not refunded, so the generic "credits remain protected" sentence is false.
-  if (failure?.code === "smallest_scoped_call_exceeds_headroom") {
+  if (failureShowsSettledCredits(failure)) {
     const spent = Number(failure.consumedCredits);
     if (Number.isFinite(spent) && spent > 0) {
       return `Thrallo stopped before changing the app. This attempt used ${spent.toFixed(2)} credits.`;

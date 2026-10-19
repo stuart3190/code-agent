@@ -243,8 +243,17 @@ test("a headroom refusal does not claim that credits were protected", async () =
     creditsProtected: false,
   });
   assert.equal(status.creditsProtected, false);
+  const blocked = customerFailureMessage({
+    code: "no_substantive_generation", consumedCredits: 0.8638,
+  });
+  assert.match(blocked, /0\.86/);
+  assert.doesNotMatch(blocked, /credits remain protected/i);
+  const blockedUnknown = customerFailureMessage({ code: "no_substantive_generation" });
+  assert.match(blockedUnknown, /not refunded/);
+  assert.doesNotMatch(blockedUnknown, /credits remain protected/i);
   const runtime = await readFile(new URL("../../shell/server/lib/builderV2/runtimeComposition.mjs", import.meta.url), "utf8");
-  assert.match(runtime, /const creditsProtected = failure\.code !== "smallest_scoped_call_exceeds_headroom"/);
+  assert.match(runtime, /const creditsProtected = !failureShowsSettledCredits\(failure\)/);
+  assert.match(runtime, /failure\.consumedCredits = spent/);
 });
 
 test("customer status and messages never expose internal Builder evidence", () => {

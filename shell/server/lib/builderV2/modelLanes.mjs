@@ -1283,6 +1283,37 @@ export function headroomSourceFragments(source, problems = [], { maxFragments = 
   }));
 }
 
+/** Shared shadcn-style primitives. They match edit keywords often and own no product behaviour. */
+export const GENERIC_UI_PRIMITIVE = /^src\/components\/ui\/[^/]+\.(?:jsx?|tsx?)$/;
+
+/**
+ * Keep an edit continuation on files that can own the change. A generic UI primitive stays only
+ * when some other file imports it, or the evidence/request names that file.
+ */
+export function filterEditContinuationFiles(files, {
+  tree = {}, evidenceText = "", namedPaths = [],
+} = {}) {
+  const list = [...new Set((files || []).filter(Boolean))];
+  const named = new Set((namedPaths || []).filter((path) => GENERIC_UI_PRIMITIVE.test(path)));
+  const evidence = String(evidenceText || "");
+  const imported = new Set();
+  for (const [path, source] of Object.entries(tree || {})) {
+    if (GENERIC_UI_PRIMITIVE.test(path)) continue;
+    const text = String(source || "");
+    for (const file of list) {
+      if (!GENERIC_UI_PRIMITIVE.test(file) || imported.has(file)) continue;
+      const stem = file.slice("src/".length).replace(/\.(jsx?|tsx?)$/, "");
+      if (text.includes(file) || text.includes(stem)) imported.add(file);
+    }
+  }
+  return list.filter((file) => {
+    if (!GENERIC_UI_PRIMITIVE.test(file)) return true;
+    if (named.has(file) || imported.has(file)) return true;
+    const base = file.split("/").pop();
+    return evidence.includes(file) || evidence.includes(base);
+  });
+}
+
 /**
  * Turn one oversized, not-yet-dispatched request into a machine-bounded semantic continuation.
  * This never retries a provider-completed call. The first split prefers validator/evidence files,
@@ -1331,14 +1362,31 @@ export function headroomDispatchScope({
         : ["src/App.jsx", "src/routes/HomePage.jsx"]
           .filter((path) => typeof tree?.[path] === "string")),
     ])];
-  if (!candidates.length) return null;
-  const priorFiles = previousScope?.allowedFiles || activeFiles;
+  const editContinuation = logicalStep === "edit" || previousScope?.logicalStep === "edit";
+  const keepEditFile = (list) => {
+    if (!editContinuation) return list;
+    const filtered = filterEditContinuationFiles(list, { tree, evidenceText, namedPaths: evidence });
+    return filtered.length ? filtered : list;
+  };
+  const editCandidates = keepEditFile(candidates);
+  if (!editCandidates.length) return null;
+  const priorFiles = keepEditFile(previousScope?.allowedFiles || activeFiles);
   const width = priorFiles.length
     ? Math.max(1, Math.floor(priorFiles.length / 2))
-    : Math.min(3, Math.max(1, Math.ceil(candidates.length / 2)));
-  const source = priorFiles.length ? priorFiles : candidates;
+    : Math.min(3, Math.max(1, Math.ceil(editCandidates.length / 2)));
+  const source = priorFiles.length ? priorFiles : editCandidates;
   const files = source.slice(0, width);
-  const remainingFiles = [...source.slice(width), ...(previousScope?.remainingFiles || [])];
+  // Queued files are not the current batch. Dropping every unimported primitive here is safe:
+  // the current batch is unchanged, and an empty filtered queue simply ends the continuation.
+  const carried = editContinuation
+    ? filterEditContinuationFiles(previousScope?.remainingFiles || [], {
+      tree, evidenceText, namedPaths: evidence,
+    })
+    : [...(previousScope?.remainingFiles || [])];
+  const remainingTail = editContinuation
+    ? filterEditContinuationFiles(source.slice(width), { tree, evidenceText, namedPaths: evidence })
+    : source.slice(width);
+  const remainingFiles = [...remainingTail, ...carried];
   // A large top-level component may contain one tiny nested handler/branch. If the full one-file
   // prompt still cannot fit, expose only exact verifier-relevant excerpts and require a unique
   // exact-source replacement. This is a real semantic resize, not a retry of identical bytes.

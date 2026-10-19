@@ -9,7 +9,8 @@ import { readFileSync } from "node:fs";
 import { createCodexProvider } from "../../src/providers/codexProvider.mjs";
 import {
   causalRepairProblems, COMPILE_CORRECTION_SYSTEM_PROMPT, createModelLanes, estimatePromptTokens,
-  HEADROOM_FRAGMENT_SYSTEM_PROMPT, headroomDispatchScope, SCOPED_EDIT_SYSTEM_PROMPT,
+  HEADROOM_FRAGMENT_SYSTEM_PROMPT, headroomDispatchScope, filterEditContinuationFiles,
+  SCOPED_EDIT_SYSTEM_PROMPT,
   headroomSourceFragments, jobUsageBucket, planCallReservation, renderPatchPrompt,
   repairFailureOwnedPaths, repairFailureReferences, runReservedDispatch, isTransportInterruption,
 } from "../../shell/server/lib/builderV2/modelLanes.mjs";
@@ -1129,6 +1130,41 @@ test("a scoped edit of a large app fits the fixed per-call ceiling with output h
   assert.match(provider.calls[0].messages[0].content, /SCOPED EDIT/);
   assert.match(provider.calls[0].messages[0].content, /const units = \["mm"\]/);
   assert.doesNotMatch(provider.calls[0].messages[0].content, /NOISE_PADDING_BEAMPLAN|CONTRACT_FAT_PADDING/);
+});
+
+test("an edit headroom split does not queue generic UI primitives the request did not name", () => {
+  const flow = "src/components/CalculateRecessedLightingPlanFlow.jsx";
+  const screen = "src/components/BeamplanCalculatorScreen.jsx";
+  const button = "src/components/ui/button.jsx";
+  const checkbox = "src/components/ui/checkbox.jsx";
+  const tree = {
+    [flow]: 'export function CalculateRecessedLightingPlanFlow(){ const units = ["mm"]; return units; }',
+    [screen]: 'export function BeamplanCalculatorScreen(){ const units = ["mm"]; return units; }',
+    [button]: 'export function Button(){ return <button>units</button>; }',
+    [checkbox]: 'export function Checkbox(){ return <input aria-label="units" />; }',
+  };
+  const semanticFiles = [flow, screen, button, checkbox];
+  const scope = headroomDispatchScope({
+    tree, semanticFiles, logicalStep: "edit", evidenceText: "Add (cm) to the units",
+  });
+  const queued = [...scope.allowedFiles, ...scope.remainingFiles];
+  assert.ok(queued.includes(flow));
+  assert.ok(queued.includes(screen));
+  assert.equal(queued.includes(button), false);
+  assert.equal(queued.includes(checkbox), false);
+  const imported = {
+    ...tree,
+    [flow]: `import { Button } from "../components/ui/button.jsx";\n${tree[flow]}`,
+  };
+  const kept = headroomDispatchScope({
+    tree: imported, semanticFiles, logicalStep: "edit", evidenceText: "Add (cm) to the units",
+  });
+  const keptFiles = [...kept.allowedFiles, ...kept.remainingFiles];
+  assert.ok(keptFiles.includes(button), "an imported primitive stays on the continuation");
+  assert.equal(keptFiles.includes(checkbox), false);
+  assert.deepEqual(filterEditContinuationFiles([button, checkbox], {
+    tree, evidenceText: "Add (cm) to the units", namedPaths: [checkbox],
+  }), [checkbox]);
 });
 
 test("later headroom batches keep repair funding without consuming another logical repair slot", async () => {
